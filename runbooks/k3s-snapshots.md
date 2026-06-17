@@ -33,3 +33,8 @@ valid if it appears in `k3s etcd-snapshot list` and exists under:
 ## Future Work
 
 Add S3/offsite snapshot upload after object storage is available.
+
+Related runbooks:
+
+- `runbooks/offsite-backups.md`
+- `runbooks/restore-drill.md`

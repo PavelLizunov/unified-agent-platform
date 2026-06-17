@@ -105,6 +105,11 @@ Last updated: 2026-06-17
 - Future 3-server template inventory: `infra/ansible/inventories/prod.example.yml`.
 - Parameterized smoke-test config: `tests/smoke/uap-smoke-config.ps1`.
 - Static IaC validation: `tests/static/validate-iac.ps1`.
+- Unified local gate: `tests/verify-local.ps1`.
+- Secret scan: `tests/static/secret-scan.ps1`.
+- Validation matrix: `runbooks/validation-matrix.md`.
+- Restore drill runbook: `runbooks/restore-drill.md`.
+- Offsite backup runbook: `runbooks/offsite-backups.md`.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
@@ -114,3 +119,4 @@ Last updated: 2026-06-17
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
 4. Install OpenTofu and Ansible on the operator machine or CI runner before using the new bootstrap layer end to end.
+5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.

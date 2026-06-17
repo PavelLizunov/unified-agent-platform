@@ -34,6 +34,16 @@
 4. **[BUILD-PLAN.md](BUILD-PLAN.md)** — поэтапный план сборки с проверяемыми вехами.
 5. **[RISKS.md](RISKS.md)** — подводные камни и их смягчение.
 
+## Основная проверка
+
+Перед завершением инфраструктурных изменений запускать:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1
+```
+
+Матрица проверок: [runbooks/validation-matrix.md](runbooks/validation-matrix.md).
+
 ## Целевой стек (кратко)
 
 | Слой | Технология | Зачем |

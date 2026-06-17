@@ -17,6 +17,10 @@ REQUIRED_PATHS = [
     "infra/ansible/playbooks/site.yml",
     "tests/smoke/uap-smoke-config.ps1",
     "tests/smoke/run-all.ps1",
+    "tests/static/secret-scan.ps1",
+    "tests/verify-local.ps1",
+    "runbooks/validation-matrix.md",
+    "runbooks/restore-drill.md",
 ]
 
 SECRET_PATTERNS = [
@@ -37,7 +41,7 @@ def fail(message: str) -> None:
 
 def git_files(root: Path) -> list[Path]:
     result = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         cwd=root,
         check=True,
         text=True,
@@ -48,8 +52,8 @@ def git_files(root: Path) -> list[Path]:
 
 def validate_required_paths(root: Path) -> None:
     for path in REQUIRED_PATHS:
-      if not (root / path).exists():
-          fail(f"required path is missing: {path}")
+        if not (root / path).exists():
+            fail(f"required path is missing: {path}")
 
 
 def validate_yaml(root: Path) -> None:
@@ -67,7 +71,10 @@ def validate_yaml(root: Path) -> None:
 
 def validate_no_plaintext_secrets(root: Path) -> None:
     for path in git_files(root):
-        if path.relative_to(root).as_posix() == "tests/static/validate_iac.py":
+        if path.relative_to(root).as_posix() in {
+            "tests/static/validate_iac.py",
+            "tests/static/secret_scan.py",
+        }:
             continue
         try:
             text = path.read_text(encoding="utf-8")
