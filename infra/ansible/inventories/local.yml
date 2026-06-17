@@ -13,6 +13,8 @@ all:
         uap-ops-1:
           ansible_host: 192.168.0.203
           lan_ip: 192.168.0.203
+          tailnet_ip: 100.82.241.121
+          tailnet_name: uap-ops-1.tail9fd337.ts.net
           min_memory_mb: 2048
           min_cpu_count: 2
     k3s_servers:

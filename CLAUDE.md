@@ -34,9 +34,11 @@ Use tailnet IPs for SSH and smoke tests.
 |---|---|---|---|---|
 | `uap-home-1` | k3s server, embedded etcd | `192.168.0.201` | `100.106.223.120` | control-plane/etcd |
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
-| `uap-ops-1` | operator VM | `192.168.0.203` | not assigned yet | not a k3s node; Tailscale logged out |
+| `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; LAN SSH verified, tailnet SSH intermittent |
 
 Do not rely on LAN SSH as the default path. LAN SSH has shown intermittent resets; tailnet SSH is the stable path.
+Exception: `uap-ops-1` was just enrolled in Tailscale and tailnet SSH intermittently timed out from Windows, so ops
+checks currently default to LAN until that is resolved.
 
 ## Git Remote Readiness
 
@@ -123,14 +125,13 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. Authenticate `uap-ops-1` into Tailscale.
-2. Run `tests/ops/check-ops-node.ps1 -Require` after any ops-node changes.
-3. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-4. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
+1. Run `tests/ops/check-ops-node.ps1 -Require` after any ops-node changes.
+2. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
+3. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
    `gotk-sync.https-token.example.yaml`.
-5. Configure S3-compatible offsite snapshot storage with SOPS-encrypted credentials.
-6. Create a disposable VM and execute `runbooks/restore-drill.md`.
-7. Add third independent k3s server, then run a real failover drill.
+4. Configure S3-compatible offsite snapshot storage with SOPS-encrypted credentials.
+5. Create a disposable VM and execute `runbooks/restore-drill.md`.
+6. Add third independent k3s server, then run a real failover drill.
 
 ## Things That Need Owner Input
 

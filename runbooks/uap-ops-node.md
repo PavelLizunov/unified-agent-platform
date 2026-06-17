@@ -19,6 +19,7 @@ It is not a k3s node, not an etcd member, and not part of the HA claim.
 | VMID | `203` |
 | Proxmox node | `pve-ninitux` |
 | LAN IP | `192.168.0.203/24` |
+| Tailnet IP | `100.82.241.121` |
 | Gateway | `192.168.0.1` |
 | vCPU | `2` |
 | RAM | `2048 MB` |
@@ -106,6 +107,8 @@ Then authenticate Tailscale without putting auth keys in chat:
 ```powershell
 ssh uap@192.168.0.203 "sudo tailscale up --hostname=uap-ops-1 --ssh=false"
 ```
+
+Current verified tailnet address after authentication: `100.82.241.121`.
 
 ## Verify
 

@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 ## Phase
 
@@ -36,7 +36,7 @@ Last updated: 2026-06-17
 |---|---|---|
 | `uap-home-1` | `uap-home-1.tail9fd337.ts.net` | `100.106.223.120` |
 | `uap-home-2` | `uap-home-2.tail9fd337.ts.net` | `100.94.228.67` |
-| `uap-ops-1` | not authenticated yet | not assigned yet |
+| `uap-ops-1` | `uap-ops-1.tail9fd337.ts.net` | `100.82.241.121` |
 | Windows | `desktop-m922ij2.tail9fd337.ts.net` | `100.114.172.40` |
 | Mac | `pavels-mac-mini.tail9fd337.ts.net` | `100.116.97.112` |
 
@@ -132,6 +132,9 @@ Last updated: 2026-06-17
   - `jq`
 - `uap-ops-1` SSH key generated on the VM and authorized on `uap-home-1` and `uap-home-2`.
   - public key fingerprint: `SHA256:fJ6yGmMjF6Mk7NC3OXqmcRu5u5h0Tp88DhglVqLJmDU`
+- `uap-ops-1` is authenticated in Tailscale as `100.82.241.121`.
+- LAN SSH to `uap-ops-1` is verified. Tailnet SSH to `uap-ops-1` was intermittently timing out immediately after
+  enrollment, so `tests/ops/check-ops-node.ps1` still defaults to LAN until tailnet SSH is stable.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
@@ -150,5 +153,5 @@ Last updated: 2026-06-17
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
-4. Authenticate `uap-ops-1` into Tailscale.
+4. Investigate intermittent tailnet SSH to `uap-ops-1`; LAN SSH is currently the verified ops path.
 5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.

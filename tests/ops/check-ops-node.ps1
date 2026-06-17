@@ -12,7 +12,7 @@ $checkCommand = "hostname; for c in git ansible-playbook tofu kubectl flux sops 
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-  $output = ssh -o BatchMode=yes -o ConnectTimeout=5 $target $checkCommand 2>&1
+  $output = ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new $target $checkCommand 2>&1
   $exitCode = $LASTEXITCODE
 }
 finally {
