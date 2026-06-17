@@ -64,10 +64,32 @@ Last updated: 2026-06-17
   - `metrics-server`
 - Smoke deployment verified with `registry.k8s.io/pause:3.10`.
 - `uap-home-2` can reach `uap-home-1:6443` over tailnet.
+- Reboot test: passed. `uap-home-1` rebooted and k3s returned Ready.
+- Manual etcd snapshot created and listed:
+  - `uap-local-20260617T134555Z-uap-home-1-1781703956`
+  - size: `1646624` bytes
+
+## GitOps
+
+- Flux installed: `v2.8.8`.
+- Runtime controllers installed:
+  - `source-controller`
+  - `kustomize-controller`
+  - `helm-controller`
+  - `notification-controller`
+- Image automation controllers are intentionally not installed.
+- Flux manifests are pinned in `clusters/prod/flux-system/gotk-components.yaml`.
+- SOPS/age configured:
+  - public recipient stored in `.sops.yaml`;
+  - private age key stored outside git on `uap-home-1`;
+  - Kubernetes Secret: `flux-system/sops-age`.
+- Namespace applied from skeleton:
+  - `uap-system`
+- Remote Git sync is not enabled yet because no remote repository URL is configured.
 
 ## Pending
 
 1. Keep `uap-home-2` prepared for future join; do not run a 2-member etcd quorum as HA.
 2. Add a third server node before claiming k3s HA.
 3. Decide whether the third node is a remote VPS or another independent failure domain.
-4. Later: install Flux/SOPS skeleton after local k3s bootstrap is stable.
+4. Configure remote Git sync for Flux after a remote repository is available.
