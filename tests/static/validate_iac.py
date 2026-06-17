@@ -19,8 +19,12 @@ REQUIRED_PATHS = [
     "tests/smoke/run-all.ps1",
     "tests/static/secret-scan.ps1",
     "tests/verify-local.ps1",
+    "tests/git/check-git-remote.ps1",
+    "tests/s3/check-s3-env.ps1",
     "runbooks/validation-matrix.md",
     "runbooks/restore-drill.md",
+    "runbooks/flux-remote-git.md",
+    "runbooks/cloudflare-r2-k3s-snapshots.md",
 ]
 
 SECRET_PATTERNS = [
@@ -132,6 +136,42 @@ def validate_smoke_scripts(root: Path) -> None:
             fail(f"{path.relative_to(root)} must import uap-smoke-config.ps1")
 
 
+def validate_flux_examples_not_enabled(root: Path) -> None:
+    kustomization_path = root / "clusters" / "prod" / "flux-system" / "kustomization.yaml"
+    text = kustomization_path.read_text(encoding="utf-8")
+    forbidden = [
+        "gotk-sync.example.yaml",
+        "gotk-sync.ssh.example.yaml",
+        "gotk-sync.https-token.example.yaml",
+    ]
+    for name in forbidden:
+        if name in text:
+            fail(f"{name} must not be referenced until a real remote Git URL exists")
+
+
+def validate_k3s_s3_template(root: Path) -> None:
+    template_path = root / "infra" / "sops" / "templates" / "k3s-etcd-snapshot-s3-config.plaintext.template.yaml"
+    with template_path.open("r", encoding="utf-8") as handle:
+        docs = list(yaml.safe_load_all(handle))
+    secret = docs[0]
+    if secret.get("type") != "etcd.k3s.cattle.io/s3-config-secret":
+        fail("k3s S3 config template must use type etcd.k3s.cattle.io/s3-config-secret")
+    string_data = secret.get("stringData") or {}
+    required_keys = {
+        "etcd-s3-endpoint",
+        "etcd-s3-access-key",
+        "etcd-s3-secret-key",
+        "etcd-s3-bucket",
+        "etcd-s3-folder",
+        "etcd-s3-region",
+        "etcd-s3-insecure",
+        "etcd-s3-timeout",
+    }
+    missing = sorted(required_keys - set(string_data))
+    if missing:
+        fail(f"k3s S3 config template missing keys: {missing}")
+
+
 def main() -> None:
     root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd()
     validate_required_paths(root)
@@ -140,6 +180,8 @@ def main() -> None:
     validate_tofu(root)
     validate_ansible_inventory(root)
     validate_smoke_scripts(root)
+    validate_flux_examples_not_enabled(root)
+    validate_k3s_s3_template(root)
     print("iac-static-ok")
 
 

@@ -10,4 +10,5 @@
 Git sync is not enabled yet because this repository does not have a remote URL configured. When a remote is
 available, add a `GitRepository` and a root `Kustomization` here.
 
-`gotk-sync.example.yaml` is a placeholder for that future step. It is not referenced by `kustomization.yaml`.
+`gotk-sync.example.yaml`, `gotk-sync.ssh.example.yaml`, and `gotk-sync.https-token.example.yaml` are placeholders
+for that future step. They are not referenced by `kustomization.yaml`.

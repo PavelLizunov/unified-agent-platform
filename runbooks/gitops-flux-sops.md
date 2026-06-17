@@ -33,10 +33,14 @@ Expected: `sops-age`.
 
 When a remote Git URL exists:
 
-1. Copy `clusters/prod/flux-system/gotk-sync.example.yaml` to a real manifest name.
-2. Replace `https://github.com/OWNER/unified-agent-platform.git` with the real remote URL.
-3. Add the real sync manifest to `clusters/prod/flux-system/kustomization.yaml`.
-4. Configure SOPS decryption with:
+1. Choose the matching example:
+   - `clusters/prod/flux-system/gotk-sync.ssh.example.yaml`
+   - `clusters/prod/flux-system/gotk-sync.https-token.example.yaml`
+2. Copy it to a real manifest name.
+3. Replace URL placeholders with the real remote URL.
+4. Create `flux-system/uap-platform-git-auth` if the repository is private.
+5. Add the real sync manifest to `clusters/prod/flux-system/kustomization.yaml`.
+6. Configure SOPS decryption with:
 
 ```yaml
 decryption:
@@ -47,6 +51,8 @@ decryption:
 
 Do not add `gotk-sync.example.yaml` directly. It contains placeholders and is intentionally not referenced by
 `kustomization.yaml`.
+
+Detailed handoff: `runbooks/flux-remote-git.md`.
 
 ## Verify SOPS Decrypt
 

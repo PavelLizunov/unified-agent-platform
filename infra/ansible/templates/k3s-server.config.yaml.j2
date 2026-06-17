@@ -20,3 +20,7 @@ disable:
 secrets-encryption: true
 write-kubeconfig-mode: "0644"
 etcd-snapshot-retention: {{ k3s_snapshot_retention }}
+{% if k3s_etcd_s3_enabled | default(false) %}
+etcd-s3: true
+etcd-s3-config-secret: {{ k3s_etcd_s3_config_secret }}
+{% endif %}

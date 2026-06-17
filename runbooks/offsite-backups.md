@@ -23,9 +23,14 @@ Example Secret shape:
 
 ```text
 infra/k3s/examples/k3s-etcd-snapshot-s3-config.example.yaml
+infra/sops/templates/k3s-etcd-snapshot-s3-config.plaintext.template.yaml
 ```
 
 Do not commit real S3 credentials.
+
+Provider-specific setup:
+
+- `runbooks/cloudflare-r2-k3s-snapshots.md`
 
 ## Proxmox VM Backups
 

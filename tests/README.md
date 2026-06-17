@@ -21,6 +21,16 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeTofuPl
 
 # Run Ansible twice against real hosts and require the second run to report changed=0.
 powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeAnsibleIdempotency
+
+# Also check whether Git remote and S3 environment are ready.
+powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadiness -GitUrl "ssh://git@example.com/owner/repo.git"
 ```
 
 `-IncludeAnsibleIdempotency` mutates real hosts on the first run. Use it only when you intend to reconcile the hosts.
+
+Readiness helpers:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\git\check-git-remote.ps1 -GitUrl "ssh://git@example.com/owner/repo.git"
+powershell -ExecutionPolicy Bypass -File .\tests\s3\check-s3-env.ps1
+```

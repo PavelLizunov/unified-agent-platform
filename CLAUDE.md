@@ -21,6 +21,7 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
 - Reason: only two local VMs exist; a third independent k3s server is still required.
 - Git branch: `master`.
 - Latest known commits:
+  - `e900c2f Add Claude Code handoff`
   - `eaffba8 Add validation matrix and recovery drills`
   - `753b68a Add repeatable OpenTofu and Ansible bootstrap`
   - `88e5a27 Join local k3s agent and add SOPS smoke`
@@ -35,6 +36,14 @@ Use tailnet IPs for SSH and smoke tests.
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
 
 Do not rely on LAN SSH as the default path. LAN SSH has shown intermittent resets; tailnet SSH is the stable path.
+
+## Git Remote Readiness
+
+- No `origin` remote is configured.
+- Local Windows SSH key fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`; comment: `windows`.
+- GitHub and Bitbucket did not accept that key during the last SSH probe.
+- Windows tailnet IP `100.114.172.40` responded to ping, but TCP `22` was not listening during the last check.
+- `tests/verify-local.ps1 -SkipSmoke -IncludeReadiness` currently reports `git-remote-missing` and `s3-env-missing`.
 
 ## Important Boundaries
 
@@ -101,6 +110,8 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `runbooks/validation-matrix.md`: what to check and when.
 - `runbooks/restore-drill.md`: disposable k3s restore drill.
 - `runbooks/offsite-backups.md`: future S3/Proxmox backup plan.
+- `runbooks/flux-remote-git.md`: how to enable Flux Git sync after a real remote exists.
+- `runbooks/cloudflare-r2-k3s-snapshots.md`: Cloudflare R2 setup flow for k3s snapshots.
 - `clusters/prod/flux-system/gotk-components.yaml`: pinned Flux runtime.
 - `clusters/prod/infra/sops-smoke.sops.yaml`: encrypted SOPS smoke fixture.
 
@@ -111,7 +122,8 @@ Good next tasks that do not require redesign:
 1. Install OpenTofu and Ansible on the operator machine or CI runner, then enable real CLI checks.
 2. Run Ansible `--syntax-check` and inventory graph once Ansible is installed.
 3. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-4. Configure remote Git URL and enable Flux Git sync from `gotk-sync.example.yaml`.
+4. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
+   `gotk-sync.https-token.example.yaml`.
 5. Configure S3-compatible offsite snapshot storage with SOPS-encrypted credentials.
 6. Create a disposable VM and execute `runbooks/restore-drill.md`.
 7. Add third independent k3s server, then run a real failover drill.

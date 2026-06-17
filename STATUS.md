@@ -110,8 +110,22 @@ Last updated: 2026-06-17
 - Validation matrix: `runbooks/validation-matrix.md`.
 - Restore drill runbook: `runbooks/restore-drill.md`.
 - Offsite backup runbook: `runbooks/offsite-backups.md`.
+- Flux remote Git runbook: `runbooks/flux-remote-git.md`.
+- Cloudflare R2 setup runbook: `runbooks/cloudflare-r2-k3s-snapshots.md`.
+- Git remote readiness helper: `tests/git/check-git-remote.ps1`.
+- S3 env readiness helper: `tests/s3/check-s3-env.ps1`.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
+
+## Git Remote Readiness
+
+- Current repository has no `origin` remote configured.
+- Local Windows SSH public key exists:
+  - fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`
+  - comment: `windows`
+- GitHub and Bitbucket did not accept that key during the last SSH probe.
+- Windows tailnet IP `100.114.172.40` responded to ping, but TCP `22` was not listening during the last check.
+- Flux Git sync remains disabled until a reachable remote URL and credentials exist.
 
 ## Pending
 
