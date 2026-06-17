@@ -1,0 +1,14 @@
+cluster-init: true
+node-name: uap-home-1
+node-ip: 100.106.223.120
+advertise-address: 100.106.223.120
+flannel-iface: tailscale0
+tls-san:
+  - 100.106.223.120
+  - uap-home-1.tail9fd337.ts.net
+disable:
+  - traefik
+  - servicelb
+secrets-encryption: true
+write-kubeconfig-mode: "0644"
+etcd-snapshot-retention: 7

@@ -1,0 +1,20 @@
+# Local secrets and generated credentials
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.kubeconfig
+kubeconfig*
+
+# SOPS/age private keys must stay outside the repo
+age-key.txt
+keys.txt
+
+# Local tooling noise
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+.tmp/
