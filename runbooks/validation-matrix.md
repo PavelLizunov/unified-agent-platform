@@ -28,6 +28,7 @@ Pass criteria:
 | OpenTofu | Real plan | `tests/tofu/validate-plan.ps1 -RunPlan` | Before applying infra changes | reviewed plan; no surprise destroy/recreate |
 | Git remote | Read remote branch | `tests/git/check-git-remote.ps1 -GitUrl <url>` | Before enabling Flux sync | `git-remote-ok` |
 | S3 env | Required offsite variables exist | `tests/s3/check-s3-env.ps1` | Before creating S3 Secret | `s3-env-ok` |
+| Ops node | Deploy tools installed | `tests/ops/check-ops-node.ps1 -Require` | After creating `uap-ops-1` | `ops-node-ok` |
 | Ansible | Syntax and inventory | included in `validate-iac.ps1` when Ansible is installed | Every Ansible change | syntax check passes |
 | Ansible | Idempotency | `tests/ansible/idempotency-check.ps1 -ConfirmRun` | Before relying on playbooks for repeatable bootstrap | second run reports `changed=0` |
 | SSH baseline | Debian, sudo, SSH hardening | `tests/smoke/ssh-baseline.ps1` | After VM/OS changes | Debian 12+, sudo OK, password/root SSH disabled |

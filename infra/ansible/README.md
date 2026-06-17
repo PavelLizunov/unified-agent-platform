@@ -14,6 +14,9 @@ Ansible configures Linux nodes after they exist. OpenTofu can create VMs/VPS, bu
 - `inventories/local.yml`: current local Proxmox nodes.
 - `inventories/prod.example.yml`: template for future 3-server topology.
 
+`local.yml` also declares `uap-ops-1` under `ops_nodes`. It is intentionally not part of `linux_nodes`, `k3s_servers`,
+or `k3s_agents`; it is an operator machine, not a cluster node.
+
 Copy the example inventory before editing real hosts:
 
 ```powershell

@@ -21,6 +21,9 @@ to Ansible and Flux.
 - `environments/local-proxmox`: current local Proxmox topology.
 - `environments/prod-vps`: placeholder for future VPS provider modules.
 
+The local Proxmox topology includes `uap-ops-1`, an optional operator/deploy VM for running OpenTofu, Ansible, Flux,
+SOPS, and GitHub/Cloudflare setup without depending on the Windows workstation.
+
 ## Secrets
 
 Do not commit `.tfvars`, state files, API tokens, or Proxmox passwords.

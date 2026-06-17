@@ -37,6 +37,23 @@ locals {
       tailnet_ip        = "100.94.228.67"
       tailnet_name      = "uap-home-2.tail9fd337.ts.net"
     }
+
+    uap-ops-1 = {
+      vm_id             = 203
+      proxmox_node      = "pve-ninitux"
+      cpu_cores         = 2
+      memory_mb         = 2048
+      disk_gb           = 30
+      disk_datastore_id = "nfs-share"
+      bridge            = "vmbr0"
+      ipv4_address      = "192.168.0.203"
+      ipv4_prefix       = 24
+      ipv4_gateway      = "192.168.0.1"
+      k3s_role          = "ops"
+      tailnet_ip        = null
+      tailnet_name      = null
+      tags              = ["deploy"]
+    }
   }
 }
 

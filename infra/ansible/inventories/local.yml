@@ -8,6 +8,13 @@ all:
       children:
         k3s_servers:
         k3s_agents:
+    ops_nodes:
+      hosts:
+        uap-ops-1:
+          ansible_host: 192.168.0.203
+          lan_ip: 192.168.0.203
+          min_memory_mb: 2048
+          min_cpu_count: 2
     k3s_servers:
       hosts:
         uap-home-1:

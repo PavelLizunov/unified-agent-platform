@@ -4,6 +4,7 @@ param(
   [switch]$IncludeTofuPlan,
   [switch]$IncludeAnsibleIdempotency,
   [switch]$IncludeReadiness,
+  [switch]$IncludeOps,
   [string]$GitUrl = "",
   [string]$Inventory = ".\infra\ansible\inventories\local.yml"
 )
@@ -49,6 +50,10 @@ try {
       Invoke-Checked { powershell -ExecutionPolicy Bypass -File .\tests\git\check-git-remote.ps1 -GitUrl $GitUrl }
     }
     Invoke-Checked { powershell -ExecutionPolicy Bypass -File .\tests\s3\check-s3-env.ps1 }
+  }
+
+  if ($IncludeOps) {
+    Invoke-Checked { powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-node.ps1 }
   }
 
   if (-not $SkipSmoke) {

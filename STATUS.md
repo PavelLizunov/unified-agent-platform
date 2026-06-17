@@ -22,12 +22,13 @@ Last updated: 2026-06-17
 - Bridge used: `vmbr0`.
 - Storage change made: `nfs-share` content types now include `import` so cloud images can be imported.
 
-## Created VMs
+## Local VMs
 
 | VMID | Name | Proxmox node | IP | Resources | Status |
 |---|---|---|---|---|---|
 | 201 | `uap-home-1` | `pve-ninitux` | `192.168.0.201` | 4 vCPU, 8 GB RAM, 80 GB disk | running |
 | 202 | `uap-home-2` | `pve-ninitux3` | `192.168.0.202` | 2 vCPU, 4 GB RAM, 32 GB disk | running |
+| 203 | `uap-ops-1` | `pve-ninitux` | `192.168.0.203` | 2 vCPU, 2 GB RAM, 30 GB disk | planned |
 
 ## Tailnet
 
@@ -114,6 +115,9 @@ Last updated: 2026-06-17
 - Cloudflare R2 setup runbook: `runbooks/cloudflare-r2-k3s-snapshots.md`.
 - Git remote readiness helper: `tests/git/check-git-remote.ps1`.
 - S3 env readiness helper: `tests/s3/check-s3-env.ps1`.
+- Operator node runbook: `runbooks/uap-ops-node.md`.
+- Operator node bootstrap script: `infra/ops/bootstrap-ops-node.sh`.
+- Operator node readiness helper: `tests/ops/check-ops-node.ps1`.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
@@ -132,5 +136,5 @@ Last updated: 2026-06-17
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
-4. Install OpenTofu and Ansible on the operator machine or CI runner before using the new bootstrap layer end to end.
+4. Create and bootstrap `uap-ops-1`, then use it as the operator machine for OpenTofu and Ansible.
 5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.

@@ -20,11 +20,14 @@ REQUIRED_PATHS = [
     "tests/static/secret-scan.ps1",
     "tests/verify-local.ps1",
     "tests/git/check-git-remote.ps1",
+    "tests/ops/check-ops-node.ps1",
     "tests/s3/check-s3-env.ps1",
+    "infra/ops/bootstrap-ops-node.sh",
     "runbooks/validation-matrix.md",
     "runbooks/restore-drill.md",
     "runbooks/flux-remote-git.md",
     "runbooks/cloudflare-r2-k3s-snapshots.md",
+    "runbooks/uap-ops-node.md",
 ]
 
 SECRET_PATTERNS = [
