@@ -28,7 +28,7 @@ Last updated: 2026-06-17
 |---|---|---|---|---|---|
 | 201 | `uap-home-1` | `pve-ninitux` | `192.168.0.201` | 4 vCPU, 8 GB RAM, 80 GB disk | running |
 | 202 | `uap-home-2` | `pve-ninitux3` | `192.168.0.202` | 2 vCPU, 4 GB RAM, 32 GB disk | running |
-| 203 | `uap-ops-1` | `pve-ninitux` | `192.168.0.203` | 2 vCPU, 2 GB RAM, 30 GB disk | planned |
+| 203 | `uap-ops-1` | `pve-ninitux` | `192.168.0.203` | 2 vCPU, 2 GB RAM, 30 GB disk | running |
 
 ## Tailnet
 
@@ -36,6 +36,7 @@ Last updated: 2026-06-17
 |---|---|---|
 | `uap-home-1` | `uap-home-1.tail9fd337.ts.net` | `100.106.223.120` |
 | `uap-home-2` | `uap-home-2.tail9fd337.ts.net` | `100.94.228.67` |
+| `uap-ops-1` | not authenticated yet | not assigned yet |
 | Windows | `desktop-m922ij2.tail9fd337.ts.net` | `100.114.172.40` |
 | Mac | `pavels-mac-mini.tail9fd337.ts.net` | `100.116.97.112` |
 
@@ -118,6 +119,19 @@ Last updated: 2026-06-17
 - Operator node runbook: `runbooks/uap-ops-node.md`.
 - Operator node bootstrap script: `infra/ops/bootstrap-ops-node.sh`.
 - Operator node readiness helper: `tests/ops/check-ops-node.ps1`.
+- `uap-ops-1` deploy tools installed and verified:
+  - `git`
+  - `ansible-playbook`
+  - `tofu`
+  - `kubectl`
+  - `flux`
+  - `sops`
+  - `age`
+  - `gh`
+  - `tailscale`
+  - `jq`
+- `uap-ops-1` SSH key generated on the VM and authorized on `uap-home-1` and `uap-home-2`.
+  - public key fingerprint: `SHA256:fJ6yGmMjF6Mk7NC3OXqmcRu5u5h0Tp88DhglVqLJmDU`
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
@@ -136,5 +150,5 @@ Last updated: 2026-06-17
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
-4. Create and bootstrap `uap-ops-1`, then use it as the operator machine for OpenTofu and Ansible.
+4. Authenticate `uap-ops-1` into Tailscale.
 5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.

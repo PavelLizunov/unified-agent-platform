@@ -7,6 +7,16 @@ if [[ "$(id -u)" -ne 0 ]]; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+KUBECTL_VERSION="${KUBECTL_VERSION:-v1.35.6}"
+TOFU_VERSION="${TOFU_VERSION:-1.12.2}"
+FLUX_VERSION="${FLUX_VERSION:-2.8.8}"
+SOPS_VERSION="${SOPS_VERSION:-3.13.1}"
+
+cat >/etc/apt/apt.conf.d/80uap-retries <<'EOF'
+Acquire::Retries "5";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+EOF
 
 apt-get update
 apt-get install -y \
@@ -65,7 +75,33 @@ if [[ ! -f /etc/apt/sources.list.d/github-cli.list ]]; then
 fi
 
 apt-get update
-apt-get install -y tailscale tofu kubectl gh
+apt-get install -y tailscale gh
+
+if ! command -v kubectl >/dev/null 2>&1; then
+  if ! apt-get install -y kubectl; then
+    tmp="$(mktemp)"
+    curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 \
+      "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+      -o "$tmp"
+    install -m 0755 "$tmp" /usr/local/bin/kubectl
+    rm -f "$tmp"
+  fi
+fi
+
+if ! command -v tofu >/dev/null 2>&1; then
+  if ! apt-get install -y tofu; then
+    tmpdir="$(mktemp -d)"
+    artifact="/tmp/tofu_${TOFU_VERSION}_linux_amd64.zip"
+    if [[ ! -f "$artifact" ]]; then
+      curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 \
+        "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" \
+        -o "$artifact"
+    fi
+    unzip -q "$artifact" -d "$tmpdir"
+    install -m 0755 "$tmpdir/tofu" /usr/local/bin/tofu
+    rm -rf "$tmpdir"
+  fi
+fi
 
 systemctl enable --now qemu-guest-agent
 systemctl enable --now tailscaled
@@ -81,13 +117,26 @@ if [[ -f /etc/ssh/sshd_config ]]; then
 fi
 
 if ! command -v flux >/dev/null 2>&1; then
-  curl -s https://fluxcd.io/install.sh | bash
+  tmpdir="$(mktemp -d)"
+  artifact="/tmp/flux_${FLUX_VERSION}_linux_amd64.tar.gz"
+  if [[ ! -f "$artifact" ]]; then
+    curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 \
+      "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz" \
+      -o "$artifact"
+  fi
+  tar -xzf "$artifact" -C "$tmpdir"
+  install -m 0755 "$tmpdir/flux" /usr/local/bin/flux
+  rm -rf "$tmpdir"
 fi
 
 if ! command -v sops >/dev/null 2>&1; then
-  curl -fsSL https://github.com/getsops/sops/releases/download/v3.13.1/sops-v3.13.1.linux.amd64 \
-    -o /usr/local/bin/sops
-  chmod 0755 /usr/local/bin/sops
+  artifact="/tmp/sops-v${SOPS_VERSION}.linux.amd64"
+  if [[ ! -f "$artifact" ]]; then
+    curl -fL --retry 5 --retry-delay 3 --connect-timeout 20 \
+      "https://github.com/getsops/sops/releases/download/v${SOPS_VERSION}/sops-v${SOPS_VERSION}.linux.amd64" \
+      -o "$artifact"
+  fi
+  install -m 0755 "$artifact" /usr/local/bin/sops
 fi
 
 for command_name in git ansible-playbook tofu kubectl flux sops age gh tailscale jq; do

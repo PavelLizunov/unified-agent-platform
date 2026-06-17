@@ -14,7 +14,7 @@ remote quorum member is available.
 - Created VMs:
   - `uap-home-1` / VMID `201` / `192.168.0.201`
   - `uap-home-2` / VMID `202` / `192.168.0.202`
-- Planned operator VM:
+- Created operator VM:
   - `uap-ops-1` / VMID `203` / `192.168.0.203`
 
 Do not store Proxmox passwords or API tokens in this repository.

@@ -6,10 +6,8 @@ This environment describes the current local Proxmox bootstrap target:
 - `uap-home-2` on `pve-ninitux3`.
 - `uap-ops-1` on `pve-ninitux` as the optional operator/deploy node.
 
-`uap-home-1` and `uap-home-2` already exist at the moment. `uap-ops-1` is declared as desired local infrastructure
-and can be created from `runbooks/uap-ops-node.md` or by a reviewed OpenTofu apply. Import existing VMs into state
-before allowing OpenTofu to manage them, or use this environment as the repeatable template for recreating the same
-topology.
+`uap-home-1`, `uap-home-2`, and `uap-ops-1` already exist at the moment. Import existing VMs into state before
+allowing OpenTofu to manage them, or use this environment as the repeatable template for recreating the same topology.
 
 ## Import Existing VMs Later
 
@@ -19,7 +17,6 @@ Do this only after credentials are moved to a local ignored `terraform.tfvars` o
 tofu init
 tofu import 'module.nodes.proxmox_virtual_environment_vm.this["uap-home-1"]' pve-ninitux/201
 tofu import 'module.nodes.proxmox_virtual_environment_vm.this["uap-home-2"]' pve-ninitux3/202
-# Only after uap-ops-1 exists:
 tofu import 'module.nodes.proxmox_virtual_environment_vm.this["uap-ops-1"]' pve-ninitux/203
 tofu plan
 ```

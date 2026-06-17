@@ -34,7 +34,7 @@ Use tailnet IPs for SSH and smoke tests.
 |---|---|---|---|---|
 | `uap-home-1` | k3s server, embedded etcd | `192.168.0.201` | `100.106.223.120` | control-plane/etcd |
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
-| `uap-ops-1` | planned operator VM | `192.168.0.203` | not assigned yet | not a k3s node |
+| `uap-ops-1` | operator VM | `192.168.0.203` | not assigned yet | not a k3s node; Tailscale logged out |
 
 Do not rely on LAN SSH as the default path. LAN SSH has shown intermittent resets; tailnet SSH is the stable path.
 
@@ -115,6 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `runbooks/cloudflare-r2-k3s-snapshots.md`: Cloudflare R2 setup flow for k3s snapshots.
 - `runbooks/uap-ops-node.md`: create and bootstrap the optional operator VM.
 - `infra/ops/bootstrap-ops-node.sh`: installs deploy tools on `uap-ops-1`.
+- `tests/ops/check-ops-node.ps1`: verifies deploy tools on `uap-ops-1`.
 - `clusters/prod/flux-system/gotk-components.yaml`: pinned Flux runtime.
 - `clusters/prod/infra/sops-smoke.sops.yaml`: encrypted SOPS smoke fixture.
 
@@ -122,8 +123,8 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. Create `uap-ops-1` using `runbooks/uap-ops-node.md`, then run `infra/ops/bootstrap-ops-node.sh`.
-2. Run `tests/ops/check-ops-node.ps1 -Require` after the VM is bootstrapped.
+1. Authenticate `uap-ops-1` into Tailscale.
+2. Run `tests/ops/check-ops-node.ps1 -Require` after any ops-node changes.
 3. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 4. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
    `gotk-sync.https-token.example.yaml`.

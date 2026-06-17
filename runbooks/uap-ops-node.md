@@ -92,6 +92,15 @@ scp .\infra\ops\bootstrap-ops-node.sh uap@192.168.0.203:/tmp/bootstrap-ops-node.
 ssh uap@192.168.0.203 "sudo bash /tmp/bootstrap-ops-node.sh"
 ```
 
+If the VM cannot download a release artifact from GitHub/CDN, copy the artifact to `/tmp` and rerun the same script.
+The script checks these optional local files before downloading:
+
+```text
+/tmp/tofu_1.12.2_linux_amd64.zip
+/tmp/flux_2.8.8_linux_amd64.tar.gz
+/tmp/sops-v3.13.1.linux.amd64
+```
+
 Then authenticate Tailscale without putting auth keys in chat:
 
 ```powershell
