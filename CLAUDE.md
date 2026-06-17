@@ -20,11 +20,8 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
 - HA status: not HA ready.
 - Reason: only two local VMs exist; a third independent k3s server is still required.
 - Git branch: `master`.
-- Latest known commits:
-  - `e900c2f Add Claude Code handoff`
-  - `eaffba8 Add validation matrix and recovery drills`
-  - `753b68a Add repeatable OpenTofu and Ansible bootstrap`
-  - `88e5a27 Join local k3s agent and add SOPS smoke`
+- For exact history, run `git log --oneline --decorate -5`; this file should not be treated as the source of truth for
+  commit hashes after another agent has committed.
 
 ## Live Nodes
 
@@ -34,11 +31,12 @@ Use tailnet IPs for SSH and smoke tests.
 |---|---|---|---|---|
 | `uap-home-1` | k3s server, embedded etcd | `192.168.0.201` | `100.106.223.120` | control-plane/etcd |
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
-| `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; LAN SSH verified, tailnet SSH intermittent |
+| `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; deploy path verified from ops |
 
 Do not rely on LAN SSH as the default path. LAN SSH has shown intermittent resets; tailnet SSH is the stable path.
-Exception: `uap-ops-1` was just enrolled in Tailscale and tailnet SSH intermittently timed out from Windows, so ops
-checks currently default to LAN until that is resolved.
+Exception: Windows-to-`uap-ops-1` tailnet SSH intermittently timed out after enrollment, so workstation-to-ops checks
+currently default to LAN until that is resolved. `uap-ops-1` itself can SSH to `uap-home-1` and `uap-home-2` over
+tailnet and can run `kubectl` against the cluster.
 
 ## Git Remote Readiness
 
@@ -69,6 +67,7 @@ Current expected result:
 
 - `secret-scan-ok`
 - `iac-static-ok`
+- optional `-IncludeOps` also runs `tests/ops/check-ops-deploy-path.ps1`
 - smoke tests pass against `100.106.223.120` and `100.94.228.67`
 - `verify-local-ok`
 
@@ -89,6 +88,7 @@ Check cluster:
 ```powershell
 ssh uap@100.106.223.120 "sudo k3s kubectl get nodes -o wide"
 ssh uap@100.106.223.120 "sudo k3s kubectl -n flux-system get deploy"
+ssh uap@192.168.0.203 "kubectl get nodes -o wide"
 ```
 
 Run only static checks:
@@ -117,7 +117,10 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `runbooks/cloudflare-r2-k3s-snapshots.md`: Cloudflare R2 setup flow for k3s snapshots.
 - `runbooks/uap-ops-node.md`: create and bootstrap the optional operator VM.
 - `infra/ops/bootstrap-ops-node.sh`: installs deploy tools on `uap-ops-1`.
+- `infra/ops/configure-github-flux.sh`: after `gh auth login` on `uap-ops-1`, creates/reuses the GitHub repo,
+  pushes `master`, creates a read-only Flux deploy key, and prepares the Flux sync manifest.
 - `tests/ops/check-ops-node.ps1`: verifies deploy tools on `uap-ops-1`.
+- `tests/ops/check-ops-deploy-path.ps1`: verifies `uap-ops-1` can reach the cluster with kubectl and SSH.
 - `clusters/prod/flux-system/gotk-components.yaml`: pinned Flux runtime.
 - `clusters/prod/infra/sops-smoke.sops.yaml`: encrypted SOPS smoke fixture.
 
@@ -125,7 +128,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. Run `tests/ops/check-ops-node.ps1 -Require` after any ops-node changes.
+1. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 2. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 3. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
    `gotk-sync.https-token.example.yaml`.

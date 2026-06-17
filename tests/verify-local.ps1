@@ -54,6 +54,7 @@ try {
 
   if ($IncludeOps) {
     Invoke-Checked { powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-node.ps1 }
+    Invoke-Checked { powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-deploy-path.ps1 }
   }
 
   if (-not $SkipSmoke) {

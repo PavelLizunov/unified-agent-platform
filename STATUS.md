@@ -118,7 +118,9 @@ Last updated: 2026-06-18
 - S3 env readiness helper: `tests/s3/check-s3-env.ps1`.
 - Operator node runbook: `runbooks/uap-ops-node.md`.
 - Operator node bootstrap script: `infra/ops/bootstrap-ops-node.sh`.
+- GitHub + Flux sync helper for the operator node: `infra/ops/configure-github-flux.sh`.
 - Operator node readiness helper: `tests/ops/check-ops-node.ps1`.
+- Operator deploy-path helper: `tests/ops/check-ops-deploy-path.ps1`.
 - `uap-ops-1` deploy tools installed and verified:
   - `git`
   - `ansible-playbook`
@@ -135,12 +137,17 @@ Last updated: 2026-06-18
 - `uap-ops-1` is authenticated in Tailscale as `100.82.241.121`.
 - LAN SSH to `uap-ops-1` is verified. Tailnet SSH to `uap-ops-1` was intermittently timing out immediately after
   enrollment, so `tests/ops/check-ops-node.ps1` still defaults to LAN until tailnet SSH is stable.
+- `uap-ops-1` has a node-local kubeconfig at `~/.kube/config` with mode `0600`. The kubeconfig is not stored in git.
+- `kubectl` from `uap-ops-1` can read k3s nodes and Flux deployments through the tailnet API endpoint.
+- `uap-ops-1` can SSH to `uap-home-1` and `uap-home-2` over tailnet, so it is usable as the deploy/control machine.
+- The ops-node git copy has no `origin` remote configured; it is waiting for a real Git remote, not the temporary bundle.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
 ## Git Remote Readiness
 
 - Current repository has no `origin` remote configured.
+- `infra/ops/configure-github-flux.sh` is prepared for the moment a GitHub token/auth session exists on `uap-ops-1`.
 - Local Windows SSH public key exists:
   - fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`
   - comment: `windows`
@@ -153,5 +160,5 @@ Last updated: 2026-06-18
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
-4. Investigate intermittent tailnet SSH to `uap-ops-1`; LAN SSH is currently the verified ops path.
+4. Investigate intermittent Windows-to-`uap-ops-1` tailnet SSH; LAN SSH is currently the verified workstation-to-ops path.
 5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.

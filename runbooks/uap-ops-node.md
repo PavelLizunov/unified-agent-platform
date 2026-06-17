@@ -110,17 +110,39 @@ ssh uap@192.168.0.203 "sudo tailscale up --hostname=uap-ops-1 --ssh=false"
 
 Current verified tailnet address after authentication: `100.82.241.121`.
 
+## Install Cluster Kubeconfig
+
+The kubeconfig is a secret. Keep it only on the ops node or another trusted workstation, never in git.
+
+Copy the server kubeconfig to the ops node and rewrite the API endpoint to the tailnet address:
+
+```powershell
+ssh uap@100.106.223.120 "sudo sed 's#https://127.0.0.1:6443#https://100.106.223.120:6443#' /etc/rancher/k3s/k3s.yaml" |
+  ssh uap@192.168.0.203 "mkdir -p ~/.kube && umask 077 && cat > ~/.kube/config && chmod 600 ~/.kube/config"
+```
+
+Verify from the ops node:
+
+```powershell
+ssh uap@192.168.0.203 "kubectl get nodes -o wide; kubectl -n flux-system get deploy"
+```
+
 ## Verify
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-node.ps1 -Require
+powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-deploy-path.ps1 -Require
 ```
 
 Expected:
 
 - SSH works as `uap`;
 - deploy tools exist: `git`, `ansible-playbook`, `tofu`, `kubectl`, `flux`, `sops`, `age`, `gh`, `tailscale`, `jq`;
+- `~/.kube/config` exists on `uap-ops-1` with mode `0600`;
+- `kubectl` from `uap-ops-1` can read cluster nodes and Flux deployments;
+- `uap-ops-1` can SSH to `uap-home-1` and `uap-home-2` over tailnet;
 - output contains `ops-node-ok`.
+- output contains `ops-deploy-path-ok`.
 
 ## Secrets
 

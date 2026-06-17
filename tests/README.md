@@ -25,7 +25,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeAnsibl
 # Also check whether Git remote and S3 environment are ready.
 powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadiness -GitUrl "ssh://git@example.com/owner/repo.git"
 
-# Also check whether the optional ops node is reachable and has deploy tools.
+# Also check whether the optional ops node is reachable, has deploy tools, and can reach the cluster.
 powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -SkipSmoke -IncludeOps
 ```
 
@@ -37,4 +37,5 @@ Readiness helpers:
 powershell -ExecutionPolicy Bypass -File .\tests\git\check-git-remote.ps1 -GitUrl "ssh://git@example.com/owner/repo.git"
 powershell -ExecutionPolicy Bypass -File .\tests\s3\check-s3-env.ps1
 powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-node.ps1 -Require
+powershell -ExecutionPolicy Bypass -File .\tests\ops\check-ops-deploy-path.ps1 -Require
 ```
