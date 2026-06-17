@@ -7,7 +7,7 @@ Last updated: 2026-06-17
 - Current phase: **Stage 0P - Proxmox local bootstrap**.
 - HA status: **not HA ready**. There are two local VMs; a third remote quorum member is still required for
   real 3-node k3s HA.
-- k3s status: **single-node local bootstrap is running on `uap-home-1`**.
+- k3s status: **local bootstrap is running on `uap-home-1` with `uap-home-2` joined as an agent**.
 
 ## Proxmox
 
@@ -52,11 +52,15 @@ Last updated: 2026-06-17
 
 ## k3s
 
-- Installed on: `uap-home-1`.
+- Server installed on: `uap-home-1`.
+- Agent installed on: `uap-home-2`.
 - Version: `v1.35.5+k3s1`.
 - Runtime: `containerd://2.2.3-k3s1`.
-- Node internal IP: `100.106.223.120`.
-- Config tracked at: `infra/k3s/uap-home-1.config.yaml`.
+- Server internal IP: `100.106.223.120`.
+- Agent internal IP: `100.94.228.67`.
+- Config tracked at:
+  - `infra/k3s/uap-home-1.config.yaml`
+  - `infra/k3s/uap-home-2.agent.config.yaml`
 - Local credential file: `kubeconfig.uap-home-1` (ignored by git).
 - System pods verified Ready:
   - `coredns`
@@ -64,6 +68,7 @@ Last updated: 2026-06-17
   - `metrics-server`
 - Smoke deployment verified with `registry.k8s.io/pause:3.10`.
 - `uap-home-2` can reach `uap-home-1:6443` over tailnet.
+- Scheduling on `uap-home-2` verified with a targeted `registry.k8s.io/pause:3.10` pod.
 - Reboot test: passed. `uap-home-1` rebooted and k3s returned Ready.
 - Manual etcd snapshot created and listed:
   - `uap-local-20260617T134555Z-uap-home-1-1781703956`
@@ -83,13 +88,15 @@ Last updated: 2026-06-17
   - public recipient stored in `.sops.yaml`;
   - private age key stored outside git on `uap-home-1`;
   - Kubernetes Secret: `flux-system/sops-age`.
+- SOPS CLI installed on `uap-home-1`: `v3.13.1`.
+- SOPS smoke fixture: `clusters/prod/infra/sops-smoke.sops.yaml`.
+- SOPS decrypt smoke: passed with the node-local age key.
 - Namespace applied from skeleton:
   - `uap-system`
 - Remote Git sync is not enabled yet because no remote repository URL is configured.
 
 ## Pending
 
-1. Keep `uap-home-2` prepared for future join; do not run a 2-member etcd quorum as HA.
-2. Add a third server node before claiming k3s HA.
-3. Decide whether the third node is a remote VPS or another independent failure domain.
-4. Configure remote Git sync for Flux after a remote repository is available.
+1. Add a third server node before claiming k3s HA.
+2. Decide whether the third node is a remote VPS or another independent failure domain.
+3. Configure remote Git sync for Flux after a remote repository is available.

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: uap-sops-smoke
+    namespace: uap-system
+type: Opaque
+stringData:
+    example: ENC[AES256_GCM,data:11Zz6juU7YMVqE4naFVSW4Q=,iv:kBR/Sa7Hf4hBCczLQjafc/bGkDEfKV8LRmU3Tm9RqE4=,tag:WRi7yZpGnyCHyf/a2+OZ6Q==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAxUnQ3M0N1aVdJaC9LSDNS
+            R0trZXBVMmhrdlZjVGZNOWFGUHdOeW8xeEdVCjJGc2MydUJBSE5nb25sSkVxenha
+            b0plTVhudHFJeFE2VXdrcjM1Y2Z4SGMKLS0tIGZnK1lsMEM0Ky8vQ0htMWNSZWVJ
+            bE1pcDZLQlVpTVhQNFRTOWxrTHE1SmcKFNoGlJ64DR+khl7xBtYLblZ37tdhiDG9
+            T0JQETSLn3lmm5qEw2oRgwEV5j1xzWO3Bke+ZQNzbONhrBTYdRQ5Ww==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-17T14:11:51Z"
+    mac: ENC[AES256_GCM,data:8euHprZ5/vPr+qKuO1CclE9ioh/gcHCKKSfdp6a7fBitQV9oWcU0fvkYSHJ5LiZwntKEe18AWkHEFZgZObKbXppq8pdeBvRen4DEcPEWDWvXxOYxk6NBJaMvfgJjAdSbnPLIWY24966xUI9vG4yfu63RCP+VN3fK+PH/6V/SdLA=,iv:+RT8b7qJ6zmA/mYtpl9ydkt7sebr6odG42Ras/k0SkE=,tag:15UUbklKqPEkgUWY3/goGQ==,type:str]
+    version: 3.13.1

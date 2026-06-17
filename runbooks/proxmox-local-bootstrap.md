@@ -82,4 +82,5 @@ survive loss of either member.
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\smoke\ssh-baseline.ps1
 powershell -ExecutionPolicy Bypass -File .\tests\smoke\k3s-local.ps1
+powershell -ExecutionPolicy Bypass -File .\tests\smoke\k3s-agent.ps1
 ```

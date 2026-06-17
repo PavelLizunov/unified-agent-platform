@@ -33,9 +33,10 @@ Expected: `sops-age`.
 
 When a remote Git URL exists:
 
-1. Add a `GitRepository` in `clusters/prod/flux-system`.
-2. Add a root Flux `Kustomization` pointing at `./clusters/prod`.
-3. Configure SOPS decryption with:
+1. Copy `clusters/prod/flux-system/gotk-sync.example.yaml` to a real manifest name.
+2. Replace `https://github.com/OWNER/unified-agent-platform.git` with the real remote URL.
+3. Add the real sync manifest to `clusters/prod/flux-system/kustomization.yaml`.
+4. Configure SOPS decryption with:
 
 ```yaml
 decryption:
@@ -43,3 +44,14 @@ decryption:
   secretRef:
     name: sops-age
 ```
+
+Do not add `gotk-sync.example.yaml` directly. It contains placeholders and is intentionally not referenced by
+`kustomization.yaml`.
+
+## Verify SOPS Decrypt
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\smoke\sops-decrypt.ps1
+```
+
+Expected: `sops-decrypt-ok`.
