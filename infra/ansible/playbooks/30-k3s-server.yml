@@ -1,0 +1,60 @@
+- name: Install k3s server nodes
+  hosts: k3s_servers
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Create k3s config directory
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Read join token from first server for additional servers
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      delegate_to: "{{ k3s_first_server }}"
+      register: k3s_join_token
+      no_log: true
+      when: inventory_hostname != k3s_first_server
+
+    - name: Write k3s server join token
+      ansible.builtin.copy:
+        content: "{{ k3s_join_token.content | b64decode | trim }}\n"
+        dest: /etc/rancher/k3s/token
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      when: inventory_hostname != k3s_first_server
+
+    - name: Render k3s server config
+      ansible.builtin.template:
+        src: ../templates/k3s-server.config.yaml.j2
+        dest: /etc/rancher/k3s/config.yaml
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Check k3s binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/k3s
+      register: k3s_binary
+
+    - name: Install k3s server
+      ansible.builtin.shell: >-
+        curl -sfL https://get.k3s.io |
+        INSTALL_K3S_VERSION='{{ k3s_version }}'
+        INSTALL_K3S_EXEC='server --config /etc/rancher/k3s/config.yaml'
+        sh -
+      args:
+        executable: /bin/bash
+      when: not k3s_binary.stat.exists
+
+    - name: Ensure k3s server is running
+      ansible.builtin.service:
+        name: k3s
+        enabled: true
+        state: started

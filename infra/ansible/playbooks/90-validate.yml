@@ -1,0 +1,31 @@
+- name: Validate k3s and Flux
+  hosts: "{{ groups['k3s_servers'][0] }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Read k3s nodes
+      ansible.builtin.command: k3s kubectl get nodes --no-headers
+      changed_when: false
+      register: k3s_nodes
+
+    - name: Assert every inventory k3s node is Ready
+      ansible.builtin.assert:
+        that:
+          - k3s_nodes.stdout is search(item ~ "\\s+Ready")
+        fail_msg: "Expected {{ item }} to be Ready in kubectl get nodes."
+      loop: "{{ groups['k3s_servers'] + groups['k3s_agents'] }}"
+
+    - name: Validate Flux deployments
+      ansible.builtin.command: >-
+        k3s kubectl -n flux-system get deploy
+        source-controller
+        kustomize-controller
+        helm-controller
+        notification-controller
+      changed_when: false
+      when: flux_manage | bool
+
+    - name: Validate SOPS age secret
+      ansible.builtin.command: k3s kubectl -n flux-system get secret sops-age
+      changed_when: false
+      when: flux_manage | bool

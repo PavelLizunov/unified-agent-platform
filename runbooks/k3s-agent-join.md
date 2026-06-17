@@ -11,6 +11,8 @@ Current example:
 - Server API: `https://100.106.223.120:6443`
 - Agent tailnet IP: `100.94.228.67`
 - Config template: `infra/k3s/uap-home-2.agent.config.yaml`
+- Ansible template: `infra/ansible/templates/k3s-agent.config.yaml.j2`
+- Local inventory group: `infra/ansible/inventories/local.yml` → `k3s_agents`
 
 ## Preconditions
 
@@ -27,6 +29,14 @@ ssh uap@192.168.0.202 "timeout 5 bash -lc 'cat < /dev/null > /dev/tcp/100.106.22
 ```
 
 ## Install
+
+Preferred repeatable path:
+
+```powershell
+ansible-playbook -i .\infra\ansible\inventories\local.yml .\infra\ansible\playbooks\31-k3s-agent.yml
+```
+
+Manual fallback:
 
 Get the server version:
 

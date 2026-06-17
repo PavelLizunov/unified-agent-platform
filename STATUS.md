@@ -95,8 +95,22 @@ Last updated: 2026-06-17
   - `uap-system`
 - Remote Git sync is not enabled yet because no remote repository URL is configured.
 
+## Repeatable Bootstrap
+
+- OpenTofu/Terraform-compatible provisioning skeleton added under `infra/tofu`.
+- Local Proxmox environment described at `infra/tofu/environments/local-proxmox`.
+- Proxmox VM module added at `infra/tofu/modules/proxmox-vm`.
+- Ansible bootstrap skeleton added under `infra/ansible`.
+- Current local inventory: `infra/ansible/inventories/local.yml` uses tailnet IPs for SSH and keeps LAN IPs as metadata.
+- Future 3-server template inventory: `infra/ansible/inventories/prod.example.yml`.
+- Parameterized smoke-test config: `tests/smoke/uap-smoke-config.ps1`.
+- Static IaC validation: `tests/static/validate-iac.ps1`.
+- Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
+  those CLI-specific checks unless the tools are installed.
+
 ## Pending
 
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Configure remote Git sync for Flux after a remote repository is available.
+4. Install OpenTofu and Ansible on the operator machine or CI runner before using the new bootstrap layer end to end.

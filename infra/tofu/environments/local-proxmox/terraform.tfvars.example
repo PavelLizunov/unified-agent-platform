@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and fill locally. Do not commit terraform.tfvars.
+
+# Prefer a Proxmox API token for repeatable automation:
+# proxmox_api_token = "root@pam!uap-tofu=REPLACE_ME"
+
+# Password auth is supported for first local bootstrap, but should be rotated away from:
+# proxmox_username = "root@pam"
+# proxmox_password = "REPLACE_ME"
+
+# If provider operations need SSH and ssh-agent is not enough:
+# proxmox_ssh_password = "REPLACE_ME"
+
+proxmox_endpoint = "https://192.168.0.169:8006/"
+proxmox_insecure = true

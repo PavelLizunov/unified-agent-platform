@@ -1,0 +1,59 @@
+- name: Bootstrap Flux and SOPS
+  hosts: "{{ groups['k3s_servers'][0] }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Install SOPS binary
+      ansible.builtin.get_url:
+        url: "https://github.com/getsops/sops/releases/download/{{ sops_version }}/sops-{{ sops_version }}.linux.amd64"
+        dest: /usr/local/bin/sops
+        mode: "0755"
+      when: flux_manage | bool
+
+    - name: Copy pinned Flux manifests
+      ansible.builtin.copy:
+        src: ../../../clusters/prod/flux-system/
+        dest: /tmp/uap-flux-system/
+        mode: preserve
+      when: flux_manage | bool
+
+    - name: Apply Flux manifests
+      ansible.builtin.command: k3s kubectl apply -k /tmp/uap-flux-system
+      when: flux_manage | bool
+
+    - name: Wait for Flux deployments
+      ansible.builtin.command: >-
+        k3s kubectl -n flux-system wait pod
+        --for=condition=Ready
+        --all
+        --timeout=180s
+      changed_when: false
+      when: flux_manage | bool
+
+    - name: Check node-local SOPS age key
+      ansible.builtin.stat:
+        path: "{{ sops_age_key_file }}"
+      register: sops_age_key
+      when: flux_manage | bool
+
+    - name: Render SOPS age secret
+      ansible.builtin.command: >-
+        k3s kubectl -n flux-system create secret generic sops-age
+        --from-file=age.agekey={{ sops_age_key_file }}
+        --dry-run=client
+        -o yaml
+      register: sops_age_secret
+      changed_when: false
+      no_log: true
+      when:
+        - flux_manage | bool
+        - sops_age_key.stat.exists
+
+    - name: Apply SOPS age secret
+      ansible.builtin.command: k3s kubectl apply -f -
+      args:
+        stdin: "{{ sops_age_secret.stdout }}"
+      no_log: true
+      when:
+        - flux_manage | bool
+        - sops_age_key.stat.exists

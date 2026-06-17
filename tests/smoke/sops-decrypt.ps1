@@ -1,30 +1,17 @@
 $ErrorActionPreference = "Stop"
+. "$PSScriptRoot\uap-smoke-config.ps1"
 
-$knownHosts = Join-Path $env:TEMP "uap_smoke_known_hosts"
-$sshOptions = @(
-  "-o", "BatchMode=yes",
-  "-o", "StrictHostKeyChecking=no",
-  "-o", "UserKnownHostsFile=$knownHosts",
-  "-o", "ConnectTimeout=10"
-)
-
-$server = "uap@192.168.0.201"
+$server = Get-UapSshTarget -HostName $script:UapK3sServerHost
 $encryptedSecret = Resolve-Path ".\clusters\prod\infra\sops-smoke.sops.yaml"
 $remoteSecret = "/tmp/uap-sops-smoke.sops.yaml"
 
 Write-Host "== copy encrypted SOPS smoke secret =="
-scp @sshOptions $encryptedSecret $server`:$remoteSecret
-if ($LASTEXITCODE -ne 0) {
-  throw "Cannot copy encrypted SOPS smoke secret"
-}
+Invoke-UapScp -Source $encryptedSecret -Destination "$server`:$remoteSecret"
 
 try {
   Write-Host "== decrypt with node-local age key =="
-  ssh @sshOptions $server "set -e; test -f /home/uap/.config/sops/age/keys.txt; SOPS_AGE_KEY_FILE=/home/uap/.config/sops/age/keys.txt sops -d $remoteSecret | grep -q not-a-real-secret; echo sops-decrypt-ok"
-  if ($LASTEXITCODE -ne 0) {
-    throw "SOPS decrypt smoke failed"
-  }
+  Invoke-UapSsh -Target $server -Command "set -e; test -f $script:UapSopsAgeKeyFile; SOPS_AGE_KEY_FILE=$script:UapSopsAgeKeyFile sops -d $remoteSecret | grep -q not-a-real-secret; echo sops-decrypt-ok"
 }
 finally {
-  ssh @sshOptions $server "rm -f $remoteSecret"
+  ssh @script:UapSshOptions $server "rm -f $remoteSecret"
 }

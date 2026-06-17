@@ -1,0 +1,17 @@
+uap_admin_user: uap
+
+k3s_version: v1.35.5+k3s1
+k3s_first_server: "{{ groups['k3s_servers'][0] }}"
+k3s_server_url: "https://{{ hostvars[k3s_first_server].tailnet_ip }}:6443"
+k3s_disable_components:
+  - traefik
+  - servicelb
+k3s_snapshot_retention: 7
+
+tailscale_manage: false
+tailscale_auth_key: "{{ lookup('env', 'TAILSCALE_AUTH_KEY') }}"
+
+flux_manage: true
+flux_version: v2.8.8
+sops_version: v3.13.1
+sops_age_key_file: /home/uap/.config/sops/age/keys.txt

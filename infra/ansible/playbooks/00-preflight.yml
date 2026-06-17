@@ -1,0 +1,47 @@
+- name: Preflight Linux nodes
+  hosts: linux_nodes
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Require Debian 12 or newer
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == "Debian"
+          - ansible_facts.distribution_major_version | int >= 12
+        fail_msg: "Node must run Debian 12 or newer."
+
+    - name: Require sudo through Ansible become
+      ansible.builtin.command: id -u
+      changed_when: false
+      register: become_uid
+
+    - name: Assert become is root
+      ansible.builtin.assert:
+        that:
+          - become_uid.stdout == "0"
+        fail_msg: "Ansible must be able to become root without an interactive password."
+
+    - name: Require node identity variables
+      ansible.builtin.assert:
+        that:
+          - k3s_node_name is defined
+          - tailnet_ip is defined
+          - tailnet_ip | length > 0
+        fail_msg: "Each node needs k3s_node_name and tailnet_ip."
+
+    - name: Require minimum memory
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.memtotal_mb | int >= min_memory_mb | default(1024) | int
+        fail_msg: "Node does not meet the configured minimum memory."
+
+    - name: Require minimum CPU count
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.processor_vcpus | default(ansible_facts.processor_count) | int >= min_cpu_count | default(1) | int
+        fail_msg: "Node does not meet the configured minimum CPU count."
+
+    - name: Require tailscale0 when Tailscale is externally managed
+      ansible.builtin.command: ip -o link show tailscale0
+      changed_when: false
+      when: not (tailscale_manage | bool)

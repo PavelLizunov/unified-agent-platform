@@ -1,0 +1,5 @@
+server: {{ k3s_server_url }}
+token-file: /etc/rancher/k3s/token
+node-name: {{ k3s_node_name | default(inventory_hostname) }}
+node-ip: {{ tailnet_ip }}
+flannel-iface: tailscale0

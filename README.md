@@ -11,9 +11,8 @@
 ## Статус
 
 - **Проектирование: завершено.** Ключевые решения приняты и зафиксированы в [DECISIONS.md](DECISIONS.md).
-- **Реализация: не начата.** Можно начать с local-first bootstrap
-  ([BUILD-PLAN.md](BUILD-PLAN.md) → Этап 0L) на домашнем Linux. Полный HA-этап требует Этап 0
-  на стороне владельца: VPS + Tailscale.
+- **Реализация: начата.** Локальный Proxmox bootstrap поднят: `uap-home-1` работает как k3s server,
+  `uap-home-2` подключён как k3s agent. Полный HA-этап всё ещё требует третью независимую server-ноду.
 
 ## Окружение владельца
 
@@ -47,6 +46,7 @@
 | Агенты | Claude Code, Hermes Agent | stateless-воркеры, цепляются по mesh |
 | Дашборд | Mission Control / Restate UI | окно во все сессии (сменный модуль, не фундамент) |
 | GitOps/секреты | Flux CD + SOPS/age | декларативное применение, зашифрованные секреты в git |
+| Bootstrap/IaC | OpenTofu-compatible Terraform + Ansible | repeatable provisioning и настройка указанных серверов |
 | Код платформы | Go-first; Rust для daemon/proxy | лёгкие бинарники, тестируемость, контроль зависимостей |
 
 ## Что нужно от владельца до старта HA-реализации (Этап 0)

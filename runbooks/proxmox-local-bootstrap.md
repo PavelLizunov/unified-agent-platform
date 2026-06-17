@@ -17,6 +17,52 @@ remote quorum member is available.
 
 Do not store Proxmox passwords or API tokens in this repository.
 
+## Repeatable Provisioning Path
+
+OpenTofu-compatible Terraform files now describe this local topology:
+
+```text
+infra/tofu/environments/local-proxmox
+infra/tofu/modules/proxmox-vm
+```
+
+Use this layer for VM creation/import only. Do not use Terraform/OpenTofu `remote-exec` to install k3s.
+
+Current VMs were created before this state existed. Import them before managing them with OpenTofu:
+
+```powershell
+cd .\infra\tofu\environments\local-proxmox
+tofu init
+tofu import 'module.nodes.proxmox_virtual_environment_vm.this["uap-home-1"]' pve-ninitux/201
+tofu import 'module.nodes.proxmox_virtual_environment_vm.this["uap-home-2"]' pve-ninitux3/202
+tofu plan
+```
+
+Review the first plan carefully. A plan that wants to recreate existing VMs is not safe to apply.
+
+## Repeatable Configuration Path
+
+Ansible inventory and playbooks are available under:
+
+```text
+infra/ansible
+```
+
+Local preflight:
+
+```powershell
+ansible-playbook -i .\infra\ansible\inventories\local.yml .\infra\ansible\playbooks\00-preflight.yml
+```
+
+Full local bootstrap path:
+
+```powershell
+ansible-playbook -i .\infra\ansible\inventories\local.yml .\infra\ansible\playbooks\site.yml
+```
+
+The local inventory keeps `uap-home-2` as a k3s agent. Do not move it to `k3s_servers` until a third independent
+server node is ready.
+
 ## Baseline Checks
 
 ```powershell
@@ -83,4 +129,6 @@ survive loss of either member.
 powershell -ExecutionPolicy Bypass -File .\tests\smoke\ssh-baseline.ps1
 powershell -ExecutionPolicy Bypass -File .\tests\smoke\k3s-local.ps1
 powershell -ExecutionPolicy Bypass -File .\tests\smoke\k3s-agent.ps1
+powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
+powershell -ExecutionPolicy Bypass -File .\tests\static\validate-iac.ps1
 ```

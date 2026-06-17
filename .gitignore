@@ -18,3 +18,21 @@ Thumbs.db
 *.log
 tmp/
 .tmp/
+
+# OpenTofu / Terraform local state and private inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Ansible local noise and private vault helpers
+*.retry
+.vault-pass
+vault-password.txt

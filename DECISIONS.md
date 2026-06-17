@@ -221,3 +221,24 @@
   server-ноды etcd как “почти HA” на длительный срок.
 - **Последствия:** до появления третьей ноды нельзя заявлять k3s HA. Топология `2 local + 1 remote`
   переживает отказ любой одной ноды, но не переживает полный отказ локальной площадки.
+
+## ADR-017 — OpenTofu/Terraform + Ansible как воспроизводимый bootstrap-слой
+
+- **Контекст:** платформу нужно быстро разворачивать на указанных серверах, а не только вручную повторять
+  текущий локальный bootstrap. При этом важно не смешивать создание VM/VPS, настройку ОС и GitOps-содержимое
+  Kubernetes в один хрупкий скрипт.
+- **Решение:** использовать **OpenTofu-compatible Terraform-конфигурации** для provisioning и **Ansible** для
+  configuration management. OpenTofu — путь по умолчанию из-за open-source модели; Terraform совместим и допустим
+  как CLI-альтернатива. Flux/SOPS остаётся владельцем Kubernetes-содержимого после bootstrap.
+- **Обоснование:** OpenTofu/Terraform лучше всего описывает низкоуровневую инфраструктуру: VM, диски, сеть,
+  cloud-init и outputs. Ansible лучше подходит для повторяемой настройки Debian, SSH, Tailscale, k3s и Flux
+  поверх уже доступного SSH. Разделение упрощает тестирование: `tofu validate/plan`, `ansible --syntax-check`,
+  idempotency-run и smoke-тесты кластера проверяют разные уровни.
+- **Отвергнуто:** настраивать k3s через Terraform `remote-exec`; держать всё в одном bash/PowerShell-скрипте;
+  создавать отдельный custom bootstrap tool до появления реальной сложности, которую не закрывают OpenTofu/Ansible.
+- **Последствия:** граница слоёв фиксируется в репозитории:
+  - `infra/tofu` — только provisioning и outputs;
+  - `infra/ansible` — OS/Tailscale/k3s/Flux/SOPS bootstrap;
+  - `clusters/prod` — GitOps-содержимое Kubernetes;
+  - `tests` — static checks и smoke-тесты.
+  Секреты для Proxmox/VPS/Tailscale/Ansible Vault не коммитятся; `.tfvars`, state и vault helpers игнорируются.

@@ -1,0 +1,53 @@
+- name: Configure Tailscale
+  hosts: linux_nodes
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Install Tailscale apt key
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.noarmor.gpg"
+        dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+        mode: "0644"
+      when: tailscale_manage | bool
+
+    - name: Install Tailscale apt repository
+      ansible.builtin.get_url:
+        url: "https://pkgs.tailscale.com/stable/debian/{{ ansible_facts.distribution_release }}.tailscale-keyring.list"
+        dest: /etc/apt/sources.list.d/tailscale.list
+        mode: "0644"
+      when: tailscale_manage | bool
+
+    - name: Install Tailscale package
+      ansible.builtin.apt:
+        name: tailscale
+        state: present
+        update_cache: true
+      when: tailscale_manage | bool
+
+    - name: Ensure tailscaled is running
+      ansible.builtin.service:
+        name: tailscaled
+        enabled: true
+        state: started
+
+    - name: Check Tailscale status
+      ansible.builtin.command: tailscale status
+      changed_when: false
+      failed_when: false
+      register: tailscale_status
+
+    - name: Authenticate Tailscale when managed
+      ansible.builtin.command: >-
+        tailscale up
+        --auth-key={{ tailscale_auth_key }}
+        --hostname={{ k3s_node_name | default(inventory_hostname) }}
+        --ssh=false
+      no_log: true
+      when:
+        - tailscale_manage | bool
+        - tailscale_status.rc != 0
+        - tailscale_auth_key | length > 0
+
+    - name: Require a Tailscale session
+      ansible.builtin.command: tailscale status
+      changed_when: false

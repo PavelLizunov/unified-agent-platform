@@ -1,0 +1,22 @@
+{% if k3s_cluster_init | default(false) %}
+cluster-init: true
+{% else %}
+server: {{ k3s_server_url }}
+token-file: /etc/rancher/k3s/token
+{% endif %}
+node-name: {{ k3s_node_name | default(inventory_hostname) }}
+node-ip: {{ tailnet_ip }}
+advertise-address: {{ tailnet_ip }}
+flannel-iface: tailscale0
+tls-san:
+  - {{ tailnet_ip }}
+{% if tailnet_name is defined and tailnet_name %}
+  - {{ tailnet_name }}
+{% endif %}
+disable:
+{% for component in k3s_disable_components %}
+  - {{ component }}
+{% endfor %}
+secrets-encryption: true
+write-kubeconfig-mode: "0644"
+etcd-snapshot-retention: {{ k3s_snapshot_retention }}

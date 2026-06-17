@@ -1,0 +1,7 @@
+- import_playbook: 00-preflight.yml
+- import_playbook: 10-os-baseline.yml
+- import_playbook: 20-tailscale.yml
+- import_playbook: 30-k3s-server.yml
+- import_playbook: 31-k3s-agent.yml
+- import_playbook: 40-flux-sops.yml
+- import_playbook: 90-validate.yml
