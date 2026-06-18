@@ -7,8 +7,8 @@ This runbook defines the next backup layer beyond local k3s snapshots.
 Current state:
 
 - Local k3s etcd snapshots exist on `uap-home-1`.
+- k3s `etcd-s3` -> Cloudflare R2 (EU endpoint) is configured; a restore drill from R2 passed (2026-06-19).
 - Proxmox VM backups are not yet configured in this repository.
-- No S3-compatible offsite target is configured yet.
 
 ## k3s etcd Snapshots to S3
 
@@ -18,6 +18,7 @@ Preferred k3s path:
 - Store S3 config in a Kubernetes Secret when the API is available.
 - Keep S3 credentials encrypted with SOPS in git.
 - For restore from S3, pass S3 flags directly because the Kubernetes Secret is unavailable before API restore.
+- For a **cross-node** restore, also keep the server token and `server/cred/encryption-config.json` (outside git) — without the encryption config the restored node cannot decrypt secrets. See `runbooks/restore-drill.md`.
 
 Example Secret shape:
 

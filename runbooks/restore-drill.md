@@ -108,3 +108,16 @@ Destroy the disposable VM after the drill or wipe `/var/lib/rancher/k3s`.
 
 When restoring from S3, pass S3 configuration flags to the restore command. The Kubernetes S3 config Secret cannot be
 used during restore because the API server is not available yet.
+
+Verified 2026-06-19 against Cloudflare R2 (EU endpoint): `k3s server --cluster-reset --etcd-s3 --etcd-s3-endpoint=... --etcd-s3-access-key=... --etcd-s3-secret-key=... --etcd-s3-bucket=uap-k3s-snapshots --etcd-s3-folder=prod --etcd-s3-region=auto --cluster-reset-restore-path=<snapshot-name>` downloaded the snapshot from R2, decrypted it with the home-1 server token, and restored etcd. The restored cluster showed both nodes, all namespaces, the Flux controllers, and the `uap-platform` Kustomization at the current commit.
+
+## Secrets Encryption — Cross-Node Restore Caveat
+
+The drill restored all cluster state (nodes, namespaces, Deployments, Flux GitRepository/Kustomization) and the
+secret *objects*. But with `secrets-encryption: true`, secret *values* are encrypted at rest in etcd, and on a
+**different** node `kubectl get secret` fails with `identity transformer tried to read encrypted data` — the new
+node lacks the original encryption key.
+
+For full **cross-node** DR, also back up `/var/lib/rancher/k3s/server/cred/encryption-config.json` from the live
+server, stored with the snapshot + server token (outside git, never printed). An **in-place** restore on the
+original server (`uap-home-1`) does not need this — the encryption-config is already there, so secrets decrypt.
