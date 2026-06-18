@@ -1,0 +1,32 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: uap-platform
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: ssh://git@github.com/PavelLizunov/unified-agent-platform.git
+  ref:
+    branch: master
+  secretRef:
+    name: uap-platform-git-auth
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: uap-platform
+  namespace: flux-system
+spec:
+  interval: 10m
+  retryInterval: 1m
+  timeout: 5m
+  prune: true
+  path: ./clusters/prod
+  sourceRef:
+    kind: GitRepository
+    name: uap-platform
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
