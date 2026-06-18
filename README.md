@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1
 |---|---|---|
 | Сеть | Tailscale (mesh); Headscale позже опционально | доступ с любого устройства, без единого шлюза-SPOF |
 | Оркестратор | k3s (HA, 3 узла) | health-checks, перезапуск, VIP «из коробки» |
-| Состояние | CloudNativePG (Postgres HA) + MinIO | durable-стор, артефакты и backup |
+| Состояние | CloudNativePG (Postgres HA) + Garage (S3) | durable-стор, артефакты и backup |
 | Durable execution | Restate | «замена, а не остановка» для критичных задач |
 | Шлюз моделей | LiteLLM (×2) | единый OpenAI-совместимый эндпоинт, маршрутизация, fallback, учёт |
 | Агенты | Claude Code, Hermes Agent | stateless-воркеры, цепляются по mesh |

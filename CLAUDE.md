@@ -22,6 +22,8 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
 - Git branch: `master`.
 - For exact history, run `git log --oneline --decorate -5`; this file should not be treated as the source of truth for
   commit hashes after another agent has committed.
+- Plan fact-checked 2026-06-18 (see `STATUS.md` -> Plan Fact-Check): MinIO -> Garage (ADR-019), Restate -> S3 not
+  Postgres (ADR-020), RU LLM egress (ADR-018), k3s-over-Tailscale flannel-iface (ADR-021).
 
 ## Live Nodes
 
@@ -115,6 +117,8 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `runbooks/offsite-backups.md`: future S3/Proxmox backup plan.
 - `runbooks/flux-remote-git.md`: how to enable Flux Git sync after a real remote exists.
 - `runbooks/cloudflare-r2-k3s-snapshots.md`: Cloudflare R2 setup flow for k3s snapshots.
+- `runbooks/llm-egress-vless.md`: cloud LLM egress from RU via non-RU node or VLESS+REALITY (ADR-018).
+- `runbooks/garage-object-store.md`: Garage S3 object store, replaces archived MinIO (ADR-019).
 - `runbooks/uap-ops-node.md`: create and bootstrap the optional operator VM.
 - `infra/ops/bootstrap-ops-node.sh`: installs deploy tools on `uap-ops-1`.
 - `infra/ops/configure-github-flux.sh`: after `gh auth login` on `uap-ops-1`, creates/reuses the GitHub repo,
@@ -141,6 +145,7 @@ Good next tasks that do not require redesign:
 - Remote VPS provider and credentials.
 - Remote Git repository URL.
 - S3-compatible object storage endpoint and credentials.
+- Non-RU VLESS+REALITY egress endpoint (VPS abroad) for cloud LLM access from Russia (ADR-018).
 - Claude/OpenRouter/API keys.
 - Any destructive test: VM restore over an existing VM, node shutdown, k3s server reset, etc.
 
