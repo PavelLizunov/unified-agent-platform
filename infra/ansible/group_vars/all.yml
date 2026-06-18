@@ -7,7 +7,7 @@ k3s_disable_components:
   - traefik
   - servicelb
 k3s_snapshot_retention: 7
-k3s_etcd_s3_enabled: false
+k3s_etcd_s3_enabled: true
 k3s_etcd_s3_config_secret: k3s-etcd-snapshot-s3-config
 
 tailscale_manage: false

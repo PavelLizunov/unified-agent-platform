@@ -12,3 +12,5 @@ disable:
 secrets-encryption: true
 write-kubeconfig-mode: "0644"
 etcd-snapshot-retention: 7
+etcd-s3: true
+etcd-s3-config-secret: k3s-etcd-snapshot-s3-config

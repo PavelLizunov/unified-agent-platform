@@ -178,3 +178,10 @@ to the design docs only (no infra change yet):
 - **Budget VPS:** 1 vCPU / 1 GB is half the k3s server minimum; etcd idles ~1.4-1.6 GB (RISKS #9 hardened).
 - Confirmed current/healthy: k3s v1.35.5, Flux v2.8.8 (CNCF Graduated), SOPS v3.13.1, OpenTofu 1.12.2,
   CloudNativePG (pin >=1.29.1), Restate v1.6.x (runtime BSL / SDK MIT), Hermes Agent, Mission Control v2.0.1.
+
+## Offsite Backups (2026-06-19)
+
+- k3s etcd-s3 enabled on uap-home-1 -> Cloudflare R2 (EU jurisdiction), bucket uap-k3s-snapshots, folder prod.
+- S3 creds: SOPS secret clusters/prod/infra/k3s-etcd-snapshot-s3-config.sops.yaml, applied to kube-system by Flux.
+- Verified: snapshot uploaded to R2 (prod/uap-r2-verify-...); scheduled snapshots auto-upload, retention 7.
+- R2 reachable directly from RU via the EU endpoint (no proxy needed for backups).
