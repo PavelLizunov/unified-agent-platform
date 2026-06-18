@@ -1,0 +1,50 @@
+{
+  "_comment": "Plaintext TEMPLATE for the xray-egress (VLESS+REALITY) LLM egress proxy. Placeholders only. Fill in real values, build a k8s Secret, and encrypt with SOPS/age before committing. Never commit real UUIDs/keys. See runbooks/llm-egress-vless.md (ADR-018).",
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    { "tag": "http",  "listen": "0.0.0.0", "port": 8118, "protocol": "http" },
+    { "tag": "socks", "listen": "0.0.0.0", "port": 1080, "protocol": "socks", "settings": { "udp": true } }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless-a",
+      "protocol": "vless",
+      "settings": { "vnext": [ {
+        "address": "REPLACE_WITH_VPS_HOST_A",
+        "port": 443,
+        "users": [ { "id": "REPLACE_WITH_VLESS_UUID_A", "encryption": "none", "flow": "xtls-rprx-vision" } ]
+      } ] },
+      "streamSettings": { "network": "tcp", "security": "reality", "realitySettings": {
+        "serverName": "REPLACE_WITH_SNI_DOMAIN_A", "fingerprint": "chrome",
+        "publicKey": "REPLACE_WITH_REALITY_PUBLIC_KEY_A", "shortId": "REPLACE_WITH_SHORT_ID_A" } }
+    },
+    {
+      "tag": "vless-b",
+      "protocol": "vless",
+      "settings": { "vnext": [ {
+        "address": "REPLACE_WITH_VPS_HOST_B",
+        "port": 443,
+        "users": [ { "id": "REPLACE_WITH_VLESS_UUID_B", "encryption": "none", "flow": "xtls-rprx-vision" } ]
+      } ] },
+      "streamSettings": { "network": "tcp", "security": "reality", "realitySettings": {
+        "serverName": "REPLACE_WITH_SNI_DOMAIN_B", "fingerprint": "chrome",
+        "publicKey": "REPLACE_WITH_REALITY_PUBLIC_KEY_B", "shortId": "REPLACE_WITH_SHORT_ID_B" } }
+    },
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "observatory": {
+    "subjectSelector": ["vless-"],
+    "probeURL": "https://www.cloudflare.com/cdn-cgi/trace",
+    "probeInterval": "30s"
+  },
+  "routing": {
+    "balancers": [
+      { "tag": "llm-egress", "selector": ["vless-"], "strategy": { "type": "leastPing" } }
+    ],
+    "rules": [
+      { "type": "field",
+        "domain": ["api.anthropic.com", "openrouter.ai", "api.openai.com"],
+        "balancerTag": "llm-egress" }
+    ]
+  }
+}

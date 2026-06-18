@@ -2,9 +2,9 @@
 
 ## Scope
 
-S3-compatible object storage for artifacts, checkpoints, k3s etcd-snapshot target, Restate async snapshots
-(ADR-020), and backups. MinIO community edition was archived in Feb 2026 (no further security patches), so the
-platform uses **Garage** instead. SeaweedFS is the alternative if Apache-2.0 / different load profile is needed.
+S3-compatible object storage for application artifacts, checkpoints, Restate async snapshots (ADR-020), and
+app-level backups. **k3s etcd DR snapshots go to an EXTERNAL offsite S3, not in-cluster Garage** (see Consumers).
+MinIO community edition was archived in Feb 2026 (no further security patches), so the platform uses **Garage** instead. SeaweedFS is the alternative if Apache-2.0 / different load profile is needed.
 
 Start single-node + offsite backup. Distributed mode / erasure coding is a separate step once disk layout is
 known (EC starts at 2 drives; 4/node is the production recommendation, not the floor). Garage has no S3 Object
@@ -39,6 +39,7 @@ data:
 
 ```bash
 # generate and store the RPC secret (never commit plaintext)
+mkdir -p clusters/prod/apps/garage
 openssl rand -hex 32 | kubectl -n uap-system create secret generic garage-rpc \
   --from-file=rpc_secret=/dev/stdin --dry-run=client -o yaml \
   > clusters/prod/apps/garage/garage-rpc.sops.yaml
@@ -111,12 +112,13 @@ $G bucket allow --read --write uap --key uap-app
 
 ## Consumers
 
-- **k3s etcd snapshots:** point `etcd-s3` at `http://garage.uap-system.svc:3900`, region `garage`. Reuse the
-  templates in `infra/k3s/examples/k3s-etcd-snapshot-s3-config.example.yaml` and
-  `infra/sops/templates/k3s-etcd-snapshot-s3-config.plaintext.template.yaml` (set `etcd-s3-region: garage`).
-- **Restate:** configure the snapshot destination to the same bucket (Restate writes async RocksDB snapshots to
+- **k3s etcd snapshots: do NOT target in-cluster Garage.** etcd snapshot/restore runs on the host k3s process,
+  which does not resolve `*.svc` cluster DNS; and during a cluster outage Garage is down too (circular dependency)
+  — exactly when the snapshot is needed. Send etcd DR snapshots to an **external offsite** S3 (Cloudflare R2)
+  instead — see `runbooks/offsite-backups.md` and `runbooks/cloudflare-r2-k3s-snapshots.md`.
+- **Restate:** configure the snapshot destination to the Garage bucket (Restate writes async RocksDB snapshots to
   S3; it does NOT use Postgres — ADR-020).
-- **Artifacts / checkpoints:** agents use the `uap-app` key.
+- **Artifacts / checkpoints:** agents use the `uap-app` key against `http://garage.uap-system.svc:3900` (in-cluster).
 
 ## Backup
 

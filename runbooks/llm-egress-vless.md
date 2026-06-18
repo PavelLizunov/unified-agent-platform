@@ -17,12 +17,19 @@ Pin LiteLLM pods to a non-RU k3s node; it reaches Anthropic/OpenRouter directly.
 tailnet. No censorship tooling in the API path.
 
 ```yaml
-# In the LiteLLM Deployment spec:
+# In the LiteLLM Deployment spec. The foreign egress node must be adequately sized —
+# NOT the thin 1 GB etcd-only VPS profile (see BUILD-PLAN Stage 2 placement).
 spec:
+  replicas: 2
   template:
     spec:
       nodeSelector:
         uap.region: non-ru        # label the foreign node: kubectl label node <vps> uap.region=non-ru
+      topologySpreadConstraints:  # spread the 2 replicas across nodes
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app: litellm } }
 ```
 
 This is the target state. Until a foreign node exists (Stage 0P is all-local), use Plan B.
@@ -54,31 +61,44 @@ Namespace `uap-system` already exists. The xray config carries the UUID and REAL
   ],
   "outbounds": [
     {
-      "tag": "vless-reality",
+      "tag": "vless-a",
       "protocol": "vless",
       "settings": { "vnext": [ {
-        "address": "REPLACE_WITH_VPS_HOST",
+        "address": "REPLACE_WITH_VPS_HOST_A",
         "port": 443,
-        "users": [ { "id": "REPLACE_WITH_VLESS_UUID", "encryption": "none", "flow": "xtls-rprx-vision" } ]
+        "users": [ { "id": "REPLACE_WITH_VLESS_UUID_A", "encryption": "none", "flow": "xtls-rprx-vision" } ]
       } ] },
-      "streamSettings": {
-        "network": "tcp",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "REPLACE_WITH_SNI_DOMAIN",
-          "fingerprint": "chrome",
-          "publicKey": "REPLACE_WITH_REALITY_PUBLIC_KEY",
-          "shortId": "REPLACE_WITH_SHORT_ID"
-        }
-      }
+      "streamSettings": { "network": "tcp", "security": "reality", "realitySettings": {
+        "serverName": "REPLACE_WITH_SNI_DOMAIN_A", "fingerprint": "chrome",
+        "publicKey": "REPLACE_WITH_REALITY_PUBLIC_KEY_A", "shortId": "REPLACE_WITH_SHORT_ID_A" } }
+    },
+    {
+      "tag": "vless-b",
+      "protocol": "vless",
+      "settings": { "vnext": [ {
+        "address": "REPLACE_WITH_VPS_HOST_B",
+        "port": 443,
+        "users": [ { "id": "REPLACE_WITH_VLESS_UUID_B", "encryption": "none", "flow": "xtls-rprx-vision" } ]
+      } ] },
+      "streamSettings": { "network": "tcp", "security": "reality", "realitySettings": {
+        "serverName": "REPLACE_WITH_SNI_DOMAIN_B", "fingerprint": "chrome",
+        "publicKey": "REPLACE_WITH_REALITY_PUBLIC_KEY_B", "shortId": "REPLACE_WITH_SHORT_ID_B" } }
     },
     { "tag": "direct", "protocol": "freedom" }
   ],
+  "observatory": {
+    "subjectSelector": ["vless-"],
+    "probeURL": "https://www.cloudflare.com/cdn-cgi/trace",
+    "probeInterval": "30s"
+  },
   "routing": {
+    "balancers": [
+      { "tag": "llm-egress", "selector": ["vless-"], "strategy": { "type": "leastPing" } }
+    ],
     "rules": [
       { "type": "field",
         "domain": ["api.anthropic.com", "openrouter.ai", "api.openai.com"],
-        "outboundTag": "vless-reality" }
+        "balancerTag": "llm-egress" }
     ]
   }
 }
@@ -90,6 +110,7 @@ Encrypt and store the Secret:
 
 ```bash
 # build the Secret manifest from the filled-in (non-committed) config, then encrypt with the cluster age recipient
+mkdir -p clusters/prod/apps/llm-egress
 kubectl -n uap-system create secret generic xray-egress-config \
   --from-file=config.json=./xray-egress.config.json \
   --dry-run=client -o yaml > clusters/prod/apps/llm-egress/xray-egress-config.sops.yaml
@@ -109,6 +130,13 @@ spec:
   template:
     metadata: { labels: { app: xray-egress } }
     spec:
+      affinity:                                   # keep the 2 replicas on different nodes
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector: { matchLabels: { app: xray-egress } }
       containers:
         - name: xray
           image: ghcr.io/xtls/xray-core:25.6.8   # pin a real released tag
@@ -146,8 +174,9 @@ env:
   - { name: NO_PROXY,    value: "localhost,127.0.0.1,.svc,.cluster.local,100.64.0.0/10" }
 ```
 
-For Claude, keep the native Anthropic passthrough (`anthropic/claude-opus-4-8`) so prompt caching and adaptive
-thinking survive — do not force a bare OpenAI schema (see BUILD-PLAN Stage 3).
+For Claude, keep the native `anthropic/` provider (`anthropic/claude-opus-4-8`) — a translation path, not a
+passthrough — and verify that prompt caching and adaptive thinking actually survive it; do not force a bare
+OpenAI schema (see BUILD-PLAN Stage 3).
 
 ## Verification
 
@@ -160,7 +189,9 @@ kubectl -n uap-system run egress-test --rm -it --image=curlimages/curl --restart
 
 ## Health and fallback
 
-- Run >=2 VLESS endpoints in different ASNs/countries; alert on tunnel failure.
+- The config above balances over >=2 VLESS servers (`leastPing` + observatory health probes) — run them in
+  different ASNs/countries so one server (or one Secret) is not a single point of failure. Alert on tunnel failure.
+- The Deployment uses `podAntiAffinity` so the 2 xray replicas land on different nodes.
 - Egress is a SPOF for Plane B. If the foreign channel is fully down, the `smart-cloud -> cloud-fallback`
   chain also fails — the ultimate fallback is `cheap-local` (Ollama in RU): degradation, not outage.
 - Related: Tailscale's own control plane may be throttled in RU (RISKS #16) — keep a Headscale migration plan.

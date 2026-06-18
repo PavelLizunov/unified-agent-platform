@@ -155,7 +155,7 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 
 ---
 
-## Этап 2 — Слой состояния (Postgres HA + MinIO) 🤖
+## Этап 2 — Слой состояния (Postgres HA + Garage S3) 🤖
 
 **Цель:** durable-стор и хранилище артефактов с репликацией.
 
@@ -165,9 +165,15 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
   на домашнем сервере + регулярный offsite backup; распределённый режим / erasure coding (EC стартует с 2 дисков,
   4/нода — рекомендация) вынести в отдельный шаг, когда раскладка дисков ясна.
 - Секреты (пароли) — через SOPS/age и k8s Secrets, не plaintext в манифестах.
+- **Размещение (placement):** бюджетные VPS (1 ГБ) несут ТОЛЬКО тонкий etcd — без Postgres/Restate/LiteLLM.
+  Тяжёлый data-plane (Postgres ×3, Restate, Garage) — на домашнем сервере; реплики разносить `podAntiAffinity` +
+  `topologySpreadConstraints`, задавать `requests/limits`. Для Plan A (LiteLLM на не-РФ ноде, ADR-018) egress-нода
+  должна быть адекватного профиля, а НЕ «тонкий» 1 ГБ etcd-VPS.
 
 **Веха:** удалить под primary Postgres → новый primary избирается за секунды, данные на месте.
 Загрузить/скачать объект из Garage (S3) и проверить, что offsite backup создаётся и восстанавливается.
+> HA объектного хранилища на этой вехе НЕ проверяется: single-node Garage прикрыт offsite-бэкапом, а не
+> репликацией. Отказоустойчивость Garage (распределённый режим) — отдельная веха, когда раскладка дисков ясна.
 
 ---
 
@@ -177,8 +183,9 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 
 - Deployment LiteLLM, `replicas: 2`, за Service. Учёт/ключи — в Postgres из Этапа 2.
 - ⚠️ Из РФ облачные группы (`smart-cloud`/`cloud-fallback`) недостижимы напрямую — egress через не-РФ ноду или
-  VLESS-прокси (ADR-018); в LiteLLM задаётся `HTTPS_PROXY` / per-model client. Для Claude сохранить нативный
-  Anthropic-passthrough (prompt caching + adaptive thinking), не «голую» OpenAI-схему.
+  VLESS-прокси (ADR-018); в LiteLLM задаётся `HTTPS_PROXY` / per-model client. Для Claude через `anthropic/`-провайдера
+  (это translation-путь, не «passthrough») **проверить**, что `cache_control` и reasoning-effort реально проходят;
+  для полной точности Claude-нативные клиенты могут идти в `/anthropic` passthrough-эндпоинт LiteLLM.
 - 👤 владелец: запустить Ollama на Mac (мелкие модели) и Windows (большие), выдать ключи Claude + OpenRouter.
 
 Скелет конфига (`config.yaml`):
@@ -186,7 +193,7 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 model_list:
   - model_name: smart-cloud           # основной
     litellm_params:
-      model: anthropic/claude-opus-4-8 # текущий флагман Opus (2026); сохранить passthrough caching/thinking
+      model: anthropic/claude-opus-4-8 # текущий флагман Opus (2026); проверить, что caching/thinking проходят
       api_key: os.environ/ANTHROPIC_API_KEY
   - model_name: cloud-fallback         # запас
     litellm_params:
@@ -197,7 +204,7 @@ model_list:
       model: ollama_chat/<model>
       api_base: http://<TAILNET_IP_MAC>:11434
 litellm_settings:
-  fallbacks: [{"smart-cloud": ["cloud-fallback"]}]
+  fallbacks: [{"smart-cloud": ["cloud-fallback", "cheap-local"]}]  # last hop = локальный Ollama (без egress)
 ```
 
 **Веха:** запрос к `smart-cloud` → Claude; сломать ключ Claude → автопереход на `cloud-fallback`

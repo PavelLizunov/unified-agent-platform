@@ -12,6 +12,10 @@ kubeconfig*
 age-key.txt
 keys.txt
 
+# Filled-in plaintext configs generated from *.plaintext.template.* (encrypt with SOPS before committing)
+xray-egress.config.json
+infra/sops/templates/*.config.json
+
 # Local tooling noise
 .DS_Store
 Thumbs.db
