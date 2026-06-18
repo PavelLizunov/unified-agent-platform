@@ -163,8 +163,8 @@ Last updated: 2026-06-19
 2. Decide whether the third node is a remote VPS or another independent failure domain.
 3. Stage 3 (LiteLLM): owner provides Anthropic/OpenRouter keys; route LiteLLM through the VLESS egress (now working).
 4. Investigate intermittent Windows-to-`uap-ops-1` tailnet SSH; LAN SSH is currently the verified workstation-to-ops path.
-5. Configure Proxmox VM backups; back up the k3s server token + `cred/encryption-config.json` offsite for full
-   cross-node DR. (R2 etcd-snapshot restore drill passed 2026-06-19 — see `runbooks/restore-drill.md`.)
+5. Configure Proxmox VM backups. (DR materials complete in R2: etcd snapshots in `prod/` + age-encrypted server
+   token + `encryption-config.json` in `dr/`; cross-node restore drill passed 2026-06-19 — see `runbooks/restore-drill.md`.)
 
 ## Plan Fact-Check (2026-06-18)
 

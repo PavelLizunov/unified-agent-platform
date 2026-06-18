@@ -8,6 +8,7 @@ Current state:
 
 - Local k3s etcd snapshots exist on `uap-home-1`.
 - k3s `etcd-s3` -> Cloudflare R2 (EU endpoint) is configured; a restore drill from R2 passed (2026-06-19).
+- Bootstrap DR materials (server token + `encryption-config.json`, age-encrypted) are in R2 `dr/` for cross-node restore.
 - Proxmox VM backups are not yet configured in this repository.
 
 ## k3s etcd Snapshots to S3

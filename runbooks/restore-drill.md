@@ -121,3 +121,38 @@ node lacks the original encryption key.
 For full **cross-node** DR, also back up `/var/lib/rancher/k3s/server/cred/encryption-config.json` from the live
 server, stored with the snapshot + server token (outside git, never printed). An **in-place** restore on the
 original server (`uap-home-1`) does not need this — the encryption-config is already there, so secrets decrypt.
+
+## Bootstrap Materials Offsite (R2 `dr/`)
+
+For a self-contained cross-node DR, the server token and the secrets-encryption config are kept in R2 alongside the
+etcd snapshots, **age-encrypted** (same recipient as `.sops.yaml`). Decryption needs the age **private** key — keep
+it off the homelab (password manager). These files are static: re-run the upload only after rotating the server
+token or re-keying secrets-encryption.
+
+Upload (encrypt on `uap-home-1`, push from `uap-ops-1` which has the R2 `rclone` remote; shred the /tmp copies after):
+
+```bash
+# uap-home-1 — RECIP is the public age recipient from .sops.yaml
+RECIP=$(awk -F"'" '/age:/{print $2}' .sops.yaml)   # or paste the age1... recipient
+sudo age -r "$RECIP" -o /tmp/k3s-server-token.age            /var/lib/rancher/k3s/server/token
+sudo age -r "$RECIP" -o /tmp/k3s-encryption-config.json.age  /var/lib/rancher/k3s/server/cred/encryption-config.json
+sudo chown uap:uap /tmp/k3s-*.age
+# move to uap-ops-1, then:
+rclone copy k3s-server-token.age            r2:uap-k3s-snapshots/dr/
+rclone copy k3s-encryption-config.json.age  r2:uap-k3s-snapshots/dr/
+```
+
+Restore use (on the replacement node, with the age private key present):
+
+```bash
+rclone copy r2:uap-k3s-snapshots/dr/k3s-server-token.age           .
+rclone copy r2:uap-k3s-snapshots/dr/k3s-encryption-config.json.age .
+age -d -i age-keys.txt -o server-token           k3s-server-token.age
+age -d -i age-keys.txt -o encryption-config.json k3s-encryption-config.json.age
+sudo install -m 0600 server-token /var/lib/rancher/k3s/server/token
+sudo install -d -m 0700 /var/lib/rancher/k3s/server/cred
+sudo install -m 0600 encryption-config.json /var/lib/rancher/k3s/server/cred/encryption-config.json
+# then run the cluster-reset S3 restore above; secrets now decrypt because the encryption key matches.
+```
+
+Verified 2026-06-19: the offsite token age-decrypts back to the live token (round-trip OK).
