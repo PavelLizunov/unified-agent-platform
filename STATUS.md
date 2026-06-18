@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 ## Phase
 
@@ -95,7 +95,9 @@ Last updated: 2026-06-18
 - SOPS decrypt smoke: passed with the node-local age key.
 - Namespace applied from skeleton:
   - `uap-system`
-- Remote Git sync is not enabled yet because no remote repository URL is configured.
+- Flux Git sync **active**: `GitRepository` + `Kustomization` `uap-platform` reconcile `clusters/prod` from the
+  GitHub remote via a read-only SSH deploy key + SOPS decryption. First real SOPS secret applied by Flux:
+  `k3s-etcd-snapshot-s3-config` in `kube-system`.
 
 ## Repeatable Bootstrap
 
@@ -140,28 +142,28 @@ Last updated: 2026-06-18
 - `uap-ops-1` has a node-local kubeconfig at `~/.kube/config` with mode `0600`. The kubeconfig is not stored in git.
 - `kubectl` from `uap-ops-1` can read k3s nodes and Flux deployments through the tailnet API endpoint.
 - `uap-ops-1` can SSH to `uap-home-1` and `uap-home-2` over tailnet, so it is usable as the deploy/control machine.
-- The ops-node git copy has no `origin` remote configured; it is waiting for a real Git remote, not the temporary bundle.
+- The ops-node git copy now has the GitHub `origin` (set up via `configure-github-flux.sh`); `master` is pushed and Flux syncs from it.
 - Local workstation currently does not have `tofu`, `terraform`, or `ansible` installed, so static validation skips
   those CLI-specific checks unless the tools are installed.
 
 ## Git Remote Readiness
 
-- Current repository has no `origin` remote configured.
-- `infra/ops/configure-github-flux.sh` is prepared for the moment a GitHub token/auth session exists on `uap-ops-1`.
+- GitHub `origin` configured (private repo, read-only SSH deploy key for Flux); `master` pushed; `gh` authed on `uap-ops-1`.
+- `infra/ops/configure-github-flux.sh` was run on `uap-ops-1` to create the repo, push, add the deploy key, and create the Flux git-auth secret.
 - Local Windows SSH public key exists:
   - fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`
   - comment: `windows`
 - GitHub and Bitbucket did not accept that key during the last SSH probe.
 - Windows tailnet IP `100.114.172.40` responded to ping, but TCP `22` was not listening during the last check.
-- Flux Git sync remains disabled until a reachable remote URL and credentials exist.
+- Flux Git sync is enabled and reconciling (see GitOps section).
 
 ## Pending
 
 1. Add a third server node before claiming k3s HA.
 2. Decide whether the third node is a remote VPS or another independent failure domain.
-3. Configure remote Git sync for Flux after a remote repository is available.
+3. Stage 3 (LiteLLM): owner provides Anthropic/OpenRouter keys; route LiteLLM through the VLESS egress (now working).
 4. Investigate intermittent Windows-to-`uap-ops-1` tailnet SSH; LAN SSH is currently the verified workstation-to-ops path.
-5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.
+5. Run a disposable restore drill from the R2 etcd snapshots (offsite object storage now configured -> R2).
 
 ## Plan Fact-Check (2026-06-18)
 
