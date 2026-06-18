@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: k3s-etcd-snapshot-s3-config
+    namespace: kube-system
+type: etcd.k3s.cattle.io/s3-config-secret
+stringData:
+    etcd-s3-endpoint: ENC[AES256_GCM,data:JhHllbwyb79KRpzMvYyVD8oIvkhDZDsM1KIqdtszGYCWAIW3Q7upkGheVctnuEw2Km5P93xGvXDCeGfZ,iv:3CcWWIngXHpCTtkMPtH63NdMDWAFoiUD8D8r9gkgaa4=,tag:WkRuOEn6VLqbWd4B9jOm4g==,type:str]
+    etcd-s3-endpoint-ca: ""
+    etcd-s3-endpoint-ca-name: ""
+    etcd-s3-skip-ssl-verify: ENC[AES256_GCM,data:kwFanuE=,iv:HCROG29WAjMnXLufHyEdnuorAjkYKLtOjsJiqpBY6JE=,tag:qHoiqrV9ZD20wfIqtYMl9A==,type:str]
+    etcd-s3-access-key: ENC[AES256_GCM,data:VbKvRKVBHebFM0mu0ISXarOKFAmrOATMhQ0FTRO4zOQ=,iv:YjdoDST9tiaVSFjHqdfkXBYIFBytv0A6d3h899HO8j4=,tag:cypTHFTfFhxoLYqlRywX0Q==,type:str]
+    etcd-s3-secret-key: ENC[AES256_GCM,data:G7PN/+o/cogNxGH35oOMfP++lohMNXa3nSOhwpr1NpUJAp5OahXwNSoHLY5UkbjHcG78+0+CrgOcf4Px3DoNHw==,iv:J3sZtvq/tgHP+84YSagm41b1d20bWndMwwZ177830G4=,tag:z6XxSrxq/oPn7lgAIsYe4Q==,type:str]
+    etcd-s3-bucket: ENC[AES256_GCM,data:uJDzZYfm4DgXdfHVu+mMLu4=,iv:k69qddLpJ6a9IHnNboGtAU3Fy93OvV+8VleG4dNS89c=,tag:gObuNRTSGOOH/Vks1j+t/w==,type:str]
+    etcd-s3-folder: ENC[AES256_GCM,data:y9tfdQ==,iv:96yDNqznP7PiJj5Gc3mSZ3b9v4h1LQAw91B4P4H6uGs=,tag:NK/y89x+7s3BGiLH7dBqeQ==,type:str]
+    etcd-s3-region: ENC[AES256_GCM,data:w9+++Q==,iv:G93NWaoccSbgoWQSPrNJ5XaDaW28m/jIZLkGxsLfalU=,tag:GudgEOsEhsYD1y7fn3F3vg==,type:str]
+    etcd-s3-insecure: ENC[AES256_GCM,data:qoK58Rw=,iv:s7gBBKWd5EojULDx0IOZEj2nd7fA6ibJnlpdgbV6C4Y=,tag:UDohI8UcurM4ZjRLsJcOwg==,type:str]
+    etcd-s3-timeout: ENC[AES256_GCM,data:67Y=,iv:UJGVM1EESTUCD7DUNKGiYqNUBGt1emMJA/2JXdfypak=,tag:P2uAcvs1tGspRU5mlhtnVw==,type:str]
+    etcd-s3-proxy: ""
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBQaFphNjlRNEtSalpPUlIx
+            WXlqMnlPc0VyNlZvNWJSaDE3UCtLQnpRTW1VClNXMkJueTYrMnZhNHo4cG9uVWFq
+            N3ZlaTd6czVLMmF5RlhJbEM3TnhLSVkKLS0tIHMyb3JoSjg1TUVwTi9LZGpKdUdi
+            VHhaZXI4LzFvSFdlRVpUWGE5elF5RGsKKd7A9znqZyRuQfqffJGT2AcC0tCm06rI
+            1fIJo7aqsNh/r4DNRZ/JFJvO6UPzqVxsxQ1rMvfMMN4PnV9LLGD8Dg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-18T21:22:29Z"
+    mac: ENC[AES256_GCM,data:a/wNWE6QgZFBAg7gI9YAcIcExG0xl64OytmP5Zq7xVbTnf9Hq5kXFXe3F4LyO2fBCo4bt2OVaiidPTQjmDaD8OMvUMUTjAmfEGcLCTD4+L//yvxWBH4tog6DRCTqBvoOccRL3QkGfbXp0YiJmZ3cT/4mSvk2K6SpuEmvh/Ftz2w=,iv:TfOXdddXysyu+UZPVXipBluxAgrRF4voR8VgvDH0qS8=,tag:PfS1a5GV5XzW+MCnpJnnPQ==,type:str]
+    version: 3.13.1
