@@ -162,3 +162,19 @@ Last updated: 2026-06-18
 3. Configure remote Git sync for Flux after a remote repository is available.
 4. Investigate intermittent Windows-to-`uap-ops-1` tailnet SSH; LAN SSH is currently the verified workstation-to-ops path.
 5. Configure offsite object storage for k3s snapshots and run a disposable restore drill.
+
+## Plan Fact-Check (2026-06-18)
+
+BUILD-PLAN / ARCHITECTURE / DECISIONS were fact-checked against current (June 2026) reality. Corrections applied
+to the design docs only (no infra change yet):
+
+- **Object storage:** MinIO community edition was archived (Feb 2026, no patches) -> replaced by **Garage** (ADR-019).
+- **Restate storage:** the "durable journal -> Postgres" mapping was wrong -> Restate uses an embedded log + local
+  RocksDB + async S3 snapshots (Garage), not Postgres (ADR-020).
+- **RU egress:** Anthropic/OpenAI/OpenRouter are unreachable from Russia -> new egress ADR (ADR-018; VLESS+REALITY
+  or a non-RU LiteLLM node). New risks RISKS #15/#16.
+- **k3s-over-Tailscale:** flannel-over-`tailscale0` confirmed (native `--vpn-auth` still experimental) -> ADR-021;
+  `--advertise-address` added to the Stage-1 command.
+- **Budget VPS:** 1 vCPU / 1 GB is half the k3s server minimum; etcd idles ~1.4-1.6 GB (RISKS #9 hardened).
+- Confirmed current/healthy: k3s v1.35.5, Flux v2.8.8 (CNCF Graduated), SOPS v3.13.1, OpenTofu 1.12.2,
+  CloudNativePG (pin >=1.29.1), Restate v1.6.x (runtime BSL / SDK MIT), Hermes Agent, Mission Control v2.0.1.
