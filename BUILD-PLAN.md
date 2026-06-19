@@ -160,17 +160,30 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 **Цель:** durable-стор и хранилище артефактов с репликацией.
 
 - **Postgres:** оператор **CloudNativePG** (пин ≥1.29.1 — фикс CVE-2026-44477; включить Quorum-Based Failover);
-  кластер 1 primary + 2 replica, авто-failover.
+  кластер 1 primary + 2 replica, авто-failover. Перед деплоем: запинить КОНКРЕТНУЮ версию chart/оператора,
+  подтвердить совместимость с k3s v1.35 (API v1.35), добавить pinned HelmRelease-заготовку в `clusters/prod`.
 - **Объектное хранилище (S3):** **Garage** (ADR-019; MinIO community заархивирован в 2026) — на старте single-node
   на домашнем сервере + регулярный offsite backup; распределённый режим / erasure coding (EC стартует с 2 дисков,
-  4/нода — рекомендация) вынести в отдельный шаг, когда раскладка дисков ясна.
+  4/нода — рекомендация) вынести в отдельный шаг, когда раскладка дисков ясна. Версию Garage перевалидировать перед
+  деплоем (на момент ревью 2026-06-19 upstream — v2.3.0, в `runbooks/garage-object-store.md` запинено v2.1.0).
 - Секреты (пароли) — через SOPS/age и k8s Secrets, не plaintext в манифестах.
 - **Размещение (placement):** бюджетные VPS (1 ГБ) несут ТОЛЬКО тонкий etcd — без Postgres/Restate/LiteLLM.
   Тяжёлый data-plane (Postgres ×3, Restate, Garage) — на домашнем сервере; реплики разносить `podAntiAffinity` +
   `topologySpreadConstraints`, задавать `requests/limits`. Для Plan A (LiteLLM на не-РФ ноде, ADR-018) egress-нода
   должна быть адекватного профиля, а НЕ «тонкий» 1 ГБ etcd-VPS.
+- **Честная HA-оговорка (REVIEW-CODEX.md):** `podAntiAffinity`/`topologySpreadConstraints` дают реальную
+  отказоустойчивость ТОЛЬКО при ≥2 независимых worker-нодах (разные failure domains). На одном физическом домашнем
+  сервере все 3 пода Postgres — один домен отказа: «удалить primary-под» пройдёт, но это SPOF, а **не** node-HA.
+  Поэтому без 3-й независимой ноды Этап 2 заявляет Postgres как **recovery-oriented single-node** (быстрый
+  process-failover + offsite-бэкап), НЕ как node-HA. Право на «Postgres HA» даёт только веха 2 ниже.
 
-**Веха:** удалить под primary Postgres → новый primary избирается за секунды, данные на месте.
+**Веха (две, НЕ путать):**
+1. **Process/pod-failover — доступно сейчас, это НЕ HA:** удалить под primary Postgres → новый primary избирается за
+   секунды, данные на месте. Доказывает работу оператора, не отказоустойчивость по железу.
+2. **Node / failure-domain failover — настоящая HA-веха, требует ≥2 независимых worker-нод:** выключить ЦЕЛУЮ ноду с
+   primary → primary переезжает на другую ноду, данные целы. Только это даёт право заявлять «Postgres HA» (gated на
+   зелёный Этап 1).
+
 Загрузить/скачать объект из Garage (S3) и проверить, что offsite backup создаётся и восстанавливается.
 > HA объектного хранилища на этой вехе НЕ проверяется: single-node Garage прикрыт offsite-бэкапом, а не
 > репликацией. Отказоустойчивость Garage (распределённый режим) — отдельная веха, когда раскладка дисков ясна.

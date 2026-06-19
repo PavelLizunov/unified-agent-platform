@@ -29,6 +29,7 @@
         mode: "0600"
       no_log: true
       when: inventory_hostname != k3s_first_server
+      notify: Restart k3s server
 
     - name: Render k3s server config
       ansible.builtin.template:
@@ -37,13 +38,24 @@
         owner: root
         group: root
         mode: "0644"
+      notify: Restart k3s server
 
     - name: Check k3s binary
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
       register: k3s_binary
 
-    - name: Install k3s server
+    - name: Get installed k3s version
+      ansible.builtin.command: /usr/local/bin/k3s --version
+      register: k3s_installed
+      changed_when: false
+      failed_when: false
+      when: k3s_binary.stat.exists
+
+    # Install when the binary is missing, OR (when a version is pinned) when the
+    # installed version does not match k3s_version. This makes upgrades and a
+    # fresh install converge instead of being skipped whenever any binary exists.
+    - name: Install or upgrade k3s server
       ansible.builtin.shell: >-
         curl -sfL https://get.k3s.io |
         INSTALL_K3S_VERSION='{{ k3s_version }}'
@@ -51,10 +63,22 @@
         sh -
       args:
         executable: /bin/bash
-      when: not k3s_binary.stat.exists
+      when: >-
+        not k3s_binary.stat.exists
+        or (k3s_version | length > 0
+            and (k3s_version | string) not in (k3s_installed.stdout | default('')))
+      notify: Restart k3s server
 
-    - name: Ensure k3s server is running
+    - name: Ensure k3s server is enabled and running
       ansible.builtin.service:
         name: k3s
         enabled: true
         state: started
+
+  handlers:
+    # Applies config/token/version changes that would otherwise sit unloaded
+    # until an unrelated restart. serial:1 keeps this rolling across servers.
+    - name: Restart k3s server
+      ansible.builtin.service:
+        name: k3s
+        state: restarted

@@ -26,6 +26,7 @@
         group: root
         mode: "0600"
       no_log: true
+      notify: Restart k3s agent
 
     - name: Render k3s agent config
       ansible.builtin.template:
@@ -34,13 +35,23 @@
         owner: root
         group: root
         mode: "0644"
+      notify: Restart k3s agent
 
     - name: Check k3s binary
       ansible.builtin.stat:
         path: /usr/local/bin/k3s
       register: k3s_binary
 
-    - name: Install k3s agent
+    - name: Get installed k3s version
+      ansible.builtin.command: /usr/local/bin/k3s --version
+      register: k3s_installed
+      changed_when: false
+      failed_when: false
+      when: k3s_binary.stat.exists
+
+    # Install when the binary is missing, OR (when a version is pinned) when the
+    # installed version does not match k3s_version, so upgrades actually apply.
+    - name: Install or upgrade k3s agent
       ansible.builtin.shell: >-
         curl -sfL https://get.k3s.io |
         INSTALL_K3S_VERSION='{{ k3s_version }}'
@@ -48,10 +59,20 @@
         sh -
       args:
         executable: /bin/bash
-      when: not k3s_binary.stat.exists
+      when: >-
+        not k3s_binary.stat.exists
+        or (k3s_version | length > 0
+            and (k3s_version | string) not in (k3s_installed.stdout | default('')))
+      notify: Restart k3s agent
 
-    - name: Ensure k3s agent is running
+    - name: Ensure k3s agent is enabled and running
       ansible.builtin.service:
         name: k3s-agent
         enabled: true
         state: started
+
+  handlers:
+    - name: Restart k3s agent
+      ansible.builtin.service:
+        name: k3s-agent
+        state: restarted
