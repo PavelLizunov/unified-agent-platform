@@ -114,20 +114,26 @@ Verified 2026-06-19 against Cloudflare R2 (EU endpoint): `k3s server --cluster-r
 ## Secrets Encryption — Cross-Node Restore Caveat
 
 The drill restored all cluster state (nodes, namespaces, Deployments, Flux GitRepository/Kustomization) and the
-secret *objects*. But with `secrets-encryption: true`, secret *values* are encrypted at rest in etcd, and on a
-**different** node `kubectl get secret` fails with `identity transformer tried to read encrypted data` — the new
-node lacks the original encryption key.
+secret *objects*. With `secrets-encryption: true`, secret *values* are encrypted at rest in etcd; in this drill
+`kubectl get secret` returned `identity transformer tried to read encrypted data` on the fresh node.
 
-For full **cross-node** DR, also back up `/var/lib/rancher/k3s/server/cred/encryption-config.json` from the live
-server, stored with the snapshot + server token (outside git, never printed). An **in-place** restore on the
-original server (`uap-home-1`) does not need this — the encryption-config is already there, so secrets decrypt.
+**Caveat — not yet root-caused (see `REVIEW-CODEX.md`).** k3s docs state an etcd snapshot taken with
+secrets-encryption enabled already contains the encryption config + keys, as bootstrap data encrypted by the
+*original server token* — so a snapshot **+ the original token** *should* suffice to decrypt secrets on another node.
+The drill's read failure coincided with `k3s.service` failing to start cleanly, so it does **not** prove a separate
+`encryption-config.json` is mandatory. The `dr/` `encryption-config.json` is kept as belt-and-suspenders.
+**TODO before any DR claim:** re-run on a clean disposable node with a known **canary Secret**, restore from the R2
+snapshot + token only, and confirm the canary decrypts; only then state whether the separate encryption-config is
+required. An **in-place** restore on `uap-home-1` is unaffected (encryption-config already present).
 
 ## Bootstrap Materials Offsite (R2 `dr/`)
 
 For a self-contained cross-node DR, the server token and the secrets-encryption config are kept in R2 alongside the
 etcd snapshots, **age-encrypted** (same recipient as `.sops.yaml`). Decryption needs the age **private** key — keep
-it off the homelab (password manager). These files are static: re-run the upload only after rotating the server
-token or re-keying secrets-encryption.
+it in a verified, owner-controlled escrow **off the homelab**. NOTE: the cluster's `sops-age` secret (the same key)
+is readable from `uap-ops-1` via kubectl, so an in-homelab copy is **not** an independent escrow. These files are
+static: re-upload only after rotating the server token or re-keying secrets-encryption. After uploading, shred the
+staging copies: `shred -u /tmp/k3s-*.age` on the staging host (and on `uap-home-1` if produced there).
 
 Upload (encrypt on `uap-home-1`, push from `uap-ops-1` which has the R2 `rclone` remote; shred the /tmp copies after):
 

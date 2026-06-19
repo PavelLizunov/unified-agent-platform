@@ -19,7 +19,7 @@ Preferred k3s path:
 - Store S3 config in a Kubernetes Secret when the API is available.
 - Keep S3 credentials encrypted with SOPS in git.
 - For restore from S3, pass S3 flags directly because the Kubernetes Secret is unavailable before API restore.
-- For a **cross-node** restore, also keep the server token and `server/cred/encryption-config.json` (outside git) — without the encryption config the restored node cannot decrypt secrets. See `runbooks/restore-drill.md`.
+- For a **cross-node** restore, keep the server token outside git (and, as belt-and-suspenders, `server/cred/encryption-config.json`). Whether the separate encryption-config is *required* vs. already inside the snapshot is not yet proven — see the canary TODO in `runbooks/restore-drill.md`.
 
 Example Secret shape:
 

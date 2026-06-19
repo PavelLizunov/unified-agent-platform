@@ -24,6 +24,10 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
   commit hashes after another agent has committed.
 - Plan fact-checked 2026-06-18 (see `STATUS.md` -> Plan Fact-Check): MinIO -> Garage (ADR-019), Restate -> S3 not
   Postgres (ADR-020), RU LLM egress (ADR-018), k3s-over-Tailscale flannel-iface (ADR-021).
+- Live since 2026-06-19 (see STATUS.md): Flux GitOps sync; VLESS LLM egress (sing-box on `uap-ops-1`); k3s
+  etcd-s3 -> Cloudflare R2 offsite backups + a restore drill; Vaultwarden on `uap-ops-1`. CAVEAT: egress + Vaultwarden
+  run ad-hoc on `uap-ops-1` (a 2 GB non-cluster VM) — blast-radius/SPOF + secrets-at-rest issues are flagged in
+  `REVIEW-CODEX.md` (2026-06-19 cross-review). Address those before Stage 2.
 
 ## Live Nodes
 
@@ -42,11 +46,13 @@ tailnet and can run `kubectl` against the cluster.
 
 ## Git Remote Readiness
 
-- No `origin` remote is configured.
-- Local Windows SSH key fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`; comment: `windows`.
-- GitHub and Bitbucket did not accept that key during the last SSH probe.
-- Windows tailnet IP `100.114.172.40` responded to ping, but TCP `22` was not listening during the last check.
-- `tests/verify-local.ps1 -SkipSmoke -IncludeReadiness` currently reports `git-remote-missing` and `s3-env-missing`.
+- GitHub `origin` IS configured on `uap-ops-1` (private repo, read-only SSH deploy key for Flux; `gh` authed there).
+  Flux Git sync is ACTIVE. STATUS.md is the source of truth for deployed state.
+- The **local Windows workstation** has no `origin` and no S3 env, so `tests/verify-local.ps1 -IncludeReadiness`
+  still reports `git-remote-missing` / `s3-env-missing` *from the workstation* — this is EXPECTED: origin + S3 creds
+  live on `uap-ops-1` and in SOPS, not on Windows.
+- Windows SSH key fingerprint `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c` (comment `windows`); the
+  workstation does not run sshd (TCP 22 closed), so node->workstation SSH is unavailable.
 
 ## Important Boundaries
 
@@ -134,10 +140,11 @@ Good next tasks that do not require redesign:
 
 1. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 2. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-3. Configure remote Git URL and enable Flux Git sync from `gotk-sync.ssh.example.yaml` or
-   `gotk-sync.https-token.example.yaml`.
-4. Configure S3-compatible offsite snapshot storage with SOPS-encrypted credentials.
-5. Create a disposable VM and execute `runbooks/restore-drill.md`.
+3. Work the 2026-06-19 cross-review (`REVIEW-CODEX.md`): reduce `uap-ops-1` blast radius (rotate R2 token to a
+   bucket-scoped key, GitHub branch protection + least-privilege token, separate backup creds from interactive
+   rclone), prove cross-node Secret restore with a canary, set explicit S3 retention.
+4. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
+5. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
 6. Add third independent k3s server, then run a real failover drill.
 
 ## Things That Need Owner Input

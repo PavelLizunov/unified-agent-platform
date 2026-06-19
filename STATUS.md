@@ -186,5 +186,11 @@ to the design docs only (no infra change yet):
 
 - k3s etcd-s3 enabled on uap-home-1 -> Cloudflare R2 (EU jurisdiction), bucket uap-k3s-snapshots, folder prod.
 - S3 creds: SOPS secret clusters/prod/infra/k3s-etcd-snapshot-s3-config.sops.yaml, applied to kube-system by Flux.
-- Verified: snapshot uploaded to R2 (prod/uap-r2-verify-...); scheduled snapshots auto-upload, retention 7.
+- Verified: snapshot uploaded to R2 (prod/uap-r2-verify-...); scheduled snapshots auto-upload. Retention: the
+  `etcd-snapshot-retention` value (7) is LOCAL-disk; k3s prunes SCHEDULED S3 snapshots too, but MANUAL/on-demand R2
+  snapshots are NOT auto-pruned — set an R2 lifecycle rule. (Corrected per REVIEW-CODEX.md; the prior "retention 7"
+  for R2 was inaccurate.)
 - R2 reachable directly from RU via the EU endpoint (no proxy needed for backups).
+- Operator-node services (ad-hoc on uap-ops-1, NOT yet in GitOps): sing-box VLESS egress, Vaultwarden. Flagged as a
+  blast-radius/SPOF + secrets-at-rest concern in REVIEW-CODEX.md; migrate into the cluster (Stage 3) or back up +
+  document with a recovery runbook.
