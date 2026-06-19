@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily uap-ops-1 stateful-services backup to R2
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

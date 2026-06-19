@@ -37,8 +37,10 @@ Pass criteria:
 | k3s agent | Scheduling on agent | `tests/smoke/k3s-agent.ps1` | After node scheduling changes | targeted pod runs on the agent |
 | Flux | Controllers and SOPS secret | `tests/smoke/flux-local.ps1` | After GitOps changes | four Flux deployments Available |
 | Backup existence | Snapshot list | `tests/smoke/k3s-snapshot.ps1` | Daily/manual | expected snapshot appears |
+| Offsite backup | etcd snapshot in R2 | `rclone lsf r2:uap-k3s-snapshots/prod/` (on uap-ops-1) | weekly | recent snapshot object present |
+| ops-1 services backup | Vaultwarden + egress secrets archive in R2 | `rclone lsf r2:uap-k3s-snapshots/ops-backup/` (on uap-ops-1) | weekly | recent `ops-*.tar.gz.age` present; see `runbooks/uap-ops-services-backup.md` |
 | SOPS | Decrypt fixture | `tests/smoke/sops-decrypt.ps1` | After SOPS key changes | `sops-decrypt-ok` |
-| Disaster recovery | Disposable restore | `runbooks/restore-drill.md` | Before claiming recovery readiness; then periodically | restored disposable cluster answers `kubectl` |
+| Disaster recovery | Disposable restore (+ canary Secret decrypt) | `runbooks/restore-drill.md` | Before claiming recovery readiness; then quarterly | restored cluster answers `kubectl` AND a known canary Secret decrypts |
 | HA failover | Kill one server | future Stage 1 drill | After third server joins | API and workloads survive one server loss |
 
 ## Notes

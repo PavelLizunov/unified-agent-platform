@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup uap-ops-1 stateful services (Vaultwarden + egress secrets + units) to R2, age-encrypted
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/ops-backup/backup.sh
