@@ -1,0 +1,42 @@
+# Stage 2 (REVIEW ONLY — see README.md; do NOT apply until the Stage 1 HA gate is green).
+# CloudNativePG operator via Flux HelmRelease.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 24h
+  url: https://cloudnative-pg.github.io/charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+  namespace: cnpg-system
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: cloudnative-pg
+      version: "0.28.3"   # VALIDATE before apply: appVersion (operator) must be >= 1.29.1 (CVE-2026-44477)
+      sourceRef:
+        kind: HelmRepository
+        name: cloudnative-pg
+        namespace: cnpg-system
+  install:
+    crds: Create
+  upgrade:
+    crds: CreateReplace
+  values:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 200Mi
+      limits:
+        memory: 256Mi

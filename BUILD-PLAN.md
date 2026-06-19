@@ -159,6 +159,10 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 
 **Цель:** durable-стор и хранилище артефактов с репликацией.
 
+> Скаффолдинг (review-only, **НЕ применять** до зелёного Этапа 1): `clusters/staging-stage2/` — оператор CNPG
+> (Helm chart `0.28.3`), `Cluster` (recovery-oriented), Garage (`v2.3.0`); вне Flux-пути, без `kustomization.yaml`.
+> Version-pins + gate + promote-инструкция — в `clusters/staging-stage2/README.md`.
+
 - **Postgres:** оператор **CloudNativePG** (пин ≥1.29.1 — фикс CVE-2026-44477; включить Quorum-Based Failover);
   кластер 1 primary + 2 replica, авто-failover. Перед деплоем: запинить КОНКРЕТНУЮ версию chart/оператора,
   подтвердить совместимость с k3s v1.35 (API v1.35), добавить pinned HelmRelease-заготовку в `clusters/prod`.

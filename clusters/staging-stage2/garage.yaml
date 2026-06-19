@@ -1,0 +1,94 @@
+# Stage 2 (REVIEW ONLY — see README.md; do NOT apply until the Stage 1 HA gate is green).
+# Garage single-node S3 (ADR-019). SINGLE-NODE HAS NO REDUNDANCY — protected by offsite backup,
+# not replication. Distributed/EC mode is a later milestone (disk layout dependent).
+#
+# The config below contains an rpc_secret + admin_token, so at promotion it MUST be a
+# SOPS-encrypted Secret under clusters/prod (the placeholders here are NOT for apply).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: garage-config
+  namespace: uap-system
+type: Opaque
+stringData:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "lmdb"
+    replication_factor = 1
+    rpc_bind_addr = "[::]:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+    rpc_secret = "REPLACE_WITH_SOPS_64_HEX"   # `openssl rand -hex 32`
+    [s3_api]
+    api_bind_addr = "[::]:3900"
+    s3_region = "garage"
+    root_domain = ".s3.garage.local"
+    [admin]
+    api_bind_addr = "[::]:3903"
+    admin_token = "REPLACE_WITH_SOPS_TOKEN"   # `openssl rand -base64 32`
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garage
+  namespace: uap-system
+spec:
+  selector:
+    app: garage
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: 3900
+    - name: admin
+      port: 3903
+      targetPort: 3903
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: garage
+  namespace: uap-system
+spec:
+  serviceName: garage
+  replicas: 1
+  selector:
+    matchLabels:
+      app: garage
+  template:
+    metadata:
+      labels:
+        app: garage
+    spec:
+      containers:
+        - name: garage
+          image: dxflrs/garage:v2.3.0   # VALIDATE current upstream stable before apply
+          ports:
+            - containerPort: 3900
+            - containerPort: 3901
+            - containerPort: 3903
+          volumeMounts:
+            - name: config
+              mountPath: /etc/garage.toml
+              subPath: garage.toml
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/garage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: garage-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 50Gi

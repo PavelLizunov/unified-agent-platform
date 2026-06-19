@@ -1,0 +1,48 @@
+# Stage 2 (REVIEW ONLY — see README.md; do NOT apply until the Stage 1 HA gate is green).
+# PostgreSQL cluster. On a single home server this is RECOVERY-ORIENTED single-failure-domain
+# (process failover + offsite backup), NOT node-HA — see BUILD-PLAN Stage 2 honest-HA caveat.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: uap-pg
+  namespace: uap-system
+spec:
+  instances: 3
+  # VALIDATE the current supported minor for the chosen operator before apply.
+  imageName: ghcr.io/cloudnative-pg/postgresql:17
+  primaryUpdateStrategy: unsupervised
+
+  storage:
+    size: 10Gi
+    storageClass: local-path        # k3s default provisioner
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+
+  affinity:
+    # podAntiAffinity is only EFFECTIVE with >=2 schedulable nodes. On one physical host it
+    # does not provide node-HA; it is preparation for when real failure domains exist.
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+      # Secret created via SOPS at promotion (NOT committed here).
+      secret:
+        name: uap-pg-app
+
+  # Offsite backup to Garage (S3) — uncomment + wire the SOPS S3 credentials at promotion.
+  # backup:
+  #   barmanObjectStore:
+  #     destinationPath: s3://uap-pg-backups/
+  #     endpointURL: http://garage.uap-system.svc:3900
+  #     s3Credentials:
+  #       accessKeyId:     { name: uap-pg-s3, key: ACCESS_KEY_ID }
+  #       secretAccessKey: { name: uap-pg-s3, key: SECRET_ACCESS_KEY }
+  #   retentionPolicy: "30d"
