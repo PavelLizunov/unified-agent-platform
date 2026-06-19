@@ -21,6 +21,15 @@ Tracked items that are **not** done yet, split by who must act. Source: the 2026
 | #11 | **kubeconfig `0644`->`0600` + tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | LIVE change on the single control-plane node + k3s restart + firewall = lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
 | #10 | **R2 lifecycle rule** for manual/on-demand snapshots (retention) | Blocked on #1 (do after the scoped token exists). |
 
+## Development inputs (to promote the staging scaffolding)
+
+| For | Input | Note |
+|---|---|---|
+| Stage 3-LITE | Claude Code subscription **OpenAI-compatible endpoint** (URL + auth + model name) | owner-provided; NOT a raw Anthropic API key — `smart-cloud` |
+| Stage 3-LITE | Codex subscription OpenAI-compatible endpoint (URL + auth + model name) | `cloud-fallback` |
+| Stage 3-LITE | Owner Ollama tailnet IP + model tag | `cheap-local` |
+| Stage 3 egress | SOPS egress Secret — ONLY if a backend is remote + RU-blocked | in-cluster sing-box config (else unused) |
+
 ## Notes
 
 - Stage 2 (`Postgres HA + Garage`) manifests may be **prepared and reviewed** now (review-only scaffolding), but

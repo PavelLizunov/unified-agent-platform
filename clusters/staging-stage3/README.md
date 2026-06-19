@@ -7,10 +7,10 @@ deploys by accident.
 
 ## Two scopes
 
-- **Stage 3-LITE (felt impact — does NOT need Stage 1 HA or Stage 2 Postgres):** single LiteLLM replica, keys from a
-  SOPS Secret, egress via the in-cluster sing-box. Promotable as soon as the **egress config Secret** and the
-  **API-key Secret** exist (both owner inputs — see `BACKLOG.md`). This is the fastest path to a live Claude endpoint
-  reachable from every device over tailnet.
+- **Stage 3-LITE (felt impact — does NOT need Stage 1 HA or Stage 2 Postgres):** single LiteLLM replica, backends +
+  keys from a SOPS Secret. Promotable as soon as the **backend Secret** (subscription-endpoint URLs/keys) exists —
+  plus the in-cluster egress Secret ONLY if a backend is remote + RU-blocked (see Backends + egress). This is the
+  fastest path to a live OpenAI-compatible endpoint reachable from every device over tailnet.
 - **Stage 3-FULL:** `replicas: 2`, virtual-keys + spend accounting in the Stage 2 Postgres
   (`ghcr.io/berriai/litellm-database` image + `DATABASE_URL`). Gated on Stage 2.
 
@@ -20,20 +20,27 @@ deploys by accident.
   `127.0.0.1`), and (b) `litellm-keys` SOPS Secret (Anthropic + OpenRouter keys + master key). No Stage 1/2 dependency.
 - FULL: additionally needs Stage 2 Postgres green and the HA decision recorded.
 
-## Egress
+## Backends + egress
 
-In-cluster `sing-box` reuses the **proven** ops-1 config (3 foreign VLESS+REALITY nodes, `urltest` auto-select) but
-binds the mixed proxy on `0.0.0.0:12080` so the cluster Service is reachable. LiteLLM sends `HTTPS_PROXY`/`HTTP_PROXY`
-to `http://singbox-egress.uap-system.svc:12080`; `NO_PROXY` keeps cluster + tailnet traffic (Ollama) off the tunnel.
-This replaces the localhost-only ops-1 proxy as the cluster egress and removes that Stage-3 blocker.
+The cloud groups are **OpenAI-compatible endpoints backed by a Claude Code / Codex subscription session** (NOT raw
+Anthropic/OpenAI API keys). Each is an `openai/<model>` provider with a custom `api_base`; the endpoint itself handles
+the upstream auth + egress. So egress is conditional:
+
+- **Backend on tailnet/LAN** (reachable from the homelab): LiteLLM calls it **directly** — `NO_PROXY` (incl.
+  `100.64.0.0/10`) keeps it off any tunnel; the in-cluster `singbox-egress` is **not needed** for that backend.
+- **Backend remote + RU-blocked:** point LiteLLM's `HTTPS_PROXY` at `singbox-egress.uap-system.svc:12080` (the
+  in-cluster sing-box reusing the proven VLESS config, bound `0.0.0.0`) and remove that host from `NO_PROXY`.
+- `cheap-local` (Ollama on the owner's Mac/Win over tailnet) is always direct.
+
+So `singbox-egress.yaml` is **optional** — keep it only if a subscription endpoint is remote and blocked from RU.
 
 ## Model groups (agent picks the name; LiteLLM maps it — ADR-006)
 
 | Group | Backend | Note |
 |---|---|---|
-| `smart-cloud` | `anthropic/claude-opus-4-8` | via egress |
-| `cloud-fallback` | `openrouter/...` | via egress |
-| `cheap-local` | `ollama/...` on owner Mac/Win over tailnet | overflow / egress-down fallback |
+| `smart-cloud` | `openai/<model>` -> Claude Code session endpoint | subscription auth; interactive rate-limits |
+| `cloud-fallback` | `openai/<model>` -> Codex session endpoint | subscription auth |
+| `cheap-local` | `ollama/...` on owner Mac/Win over tailnet | overflow / used when sessions rate-limit or expire |
 
 Fallback chain: `smart-cloud -> cloud-fallback -> cheap-local`.
 
@@ -43,9 +50,10 @@ Fallback chain: `smart-cloud -> cloud-fallback -> cheap-local`.
 |---|---|---|
 | LiteLLM | `ghcr.io/berriai/litellm:v1.89.0` | current stable; use `litellm-database` for Stage 3-FULL |
 | sing-box | `ghcr.io/sagernet/sing-box:v1.13.13` | current stable |
-| Anthropic prompt caching | — | confirm `cache_control` + reasoning-effort survive the `anthropic/` translation path; if not, route native Claude clients to LiteLLM's `/anthropic` passthrough (REVIEW-CODEX.md) |
+| Prompt caching / reasoning | — | features depend on what the subscription proxy returns in OpenAI format, not native Anthropic; confirm `cache_control`/effort behaviour against the actual endpoint |
+| Backend URL/auth/model | placeholders | set the Claude/Codex endpoint URL, api_key, and the model name each exposes |
 | `cheap-local` api_base + model | placeholder | set the owner Ollama tailnet IP + model tag |
-| `cloud-fallback` model slug | placeholder | set a valid OpenRouter model id |
+| subscription reliability | — | sessions can rate-limit / expire; rely on the fallback chain + `num_retries` |
 
 ## Promote
 
