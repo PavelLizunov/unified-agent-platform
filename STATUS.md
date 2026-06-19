@@ -194,3 +194,20 @@ to the design docs only (no infra change yet):
 - Operator-node services (ad-hoc on uap-ops-1, NOT yet in GitOps): sing-box VLESS egress, Vaultwarden. Flagged as a
   blast-radius/SPOF + secrets-at-rest concern in REVIEW-CODEX.md; migrate into the cluster (Stage 3) or back up +
   document with a recovery runbook.
+
+## Cross-Review Remediation (REVIEW-CODEX.md, 2026-06-19)
+
+Done:
+- ops-1 live secrets perms tightened (Vaultwarden `rsa_key.pem` 0644->0600, `~/.config/gh` 0755->0700).
+- Stale handoff docs corrected (CLAUDE.md Git Remote Readiness; restore-drill encryption-config theory softened to a
+  canary TODO; R2-retention wording).
+- Ansible k3s playbooks now converge: notify-restart on config/token change + version-aware install (not binary-only).
+- BUILD-PLAN Stage 2: honest HA milestone (node-loss test vs pod-delete) + version-pin requirements.
+- ops-1 services backup LIVE: `ops-backup.timer` (systemd --user) daily age-encrypted archive of Vaultwarden +
+  `~/.secrets` + units -> `r2:uap-k3s-snapshots/ops-backup/`; first run verified. See
+  `runbooks/uap-ops-services-backup.md`.
+
+Pending (owner action): rotate R2 token to a bucket-scoped key + R2 lifecycle rule; independent off-homelab age-key
+escrow (verify decrypt); GitHub least-privilege push token + branch protection; rotate Vaultwarden key/admin token;
+foreign VPS (Stage 1 HA + Stage 3 egress). Pending (agent): canary cross-node Secret-restore drill; kubeconfig
+0644->0600 + tailnet-only API firewall (needs restart).
