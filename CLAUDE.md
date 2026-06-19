@@ -46,8 +46,9 @@ tailnet and can run `kubectl` against the cluster.
 
 ## Git Remote Readiness
 
-- GitHub `origin` IS configured on `uap-ops-1` (private repo, read-only SSH deploy key for Flux; `gh` authed there).
-  Flux Git sync is ACTIVE. STATUS.md is the source of truth for deployed state.
+- GitHub `origin` on `uap-ops-1` is SSH; pushes use a repo-scoped read-WRITE deploy key (`uap-ops-1 push`), Flux
+  pulls via a separate read-ONLY deploy key. The broad `gh` OAuth token was removed (gh logged out) — re-auth with
+  `gh auth login` only if a one-off gh-api op is needed. Flux Git sync is ACTIVE; STATUS.md is the source of truth.
 - The **local Windows workstation** has no `origin` and no S3 env, so `tests/verify-local.ps1 -IncludeReadiness`
   still reports `git-remote-missing` / `s3-env-missing` *from the workstation* — this is EXPECTED: origin + S3 creds
   live on `uap-ops-1` and in SOPS, not on Windows.

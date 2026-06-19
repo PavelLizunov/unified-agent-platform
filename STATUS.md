@@ -206,8 +206,14 @@ Done:
 - ops-1 services backup LIVE: `ops-backup.timer` (systemd --user) daily age-encrypted archive of Vaultwarden +
   `~/.secrets` + units -> `r2:uap-k3s-snapshots/ops-backup/`; first run verified. See
   `runbooks/uap-ops-services-backup.md`.
+- #3 GitHub least-privilege: broad `gh` OAuth token removed from ops-1; pushes now use a repo-scoped read-WRITE SSH
+  deploy key (origin = SSH), push/fetch verified. Branch protection NOT applied (classic protection needs GitHub Pro
+  on a private repo) — residual.
+- #4 Vaultwarden rotated: admin token regenerated and stored as an Argon2 PHC hash in `.env` (no longer plaintext);
+  RSA identity key regenerated (0600). New admin token staged at `~/vaultwarden/admin-token.NEW.txt` on ops-1 for
+  owner retrieval (move to a password manager, then delete).
 
 Pending (owner action): rotate R2 token to a bucket-scoped key + R2 lifecycle rule; independent off-homelab age-key
-escrow (verify decrypt); GitHub least-privilege push token + branch protection; rotate Vaultwarden key/admin token;
-foreign VPS (Stage 1 HA + Stage 3 egress). Pending (agent): canary cross-node Secret-restore drill; kubeconfig
-0644->0600 + tailnet-only API firewall (needs restart).
+escrow (verify decrypt); foreign VPS (Stage 1 HA + Stage 3 egress); optional — revoke the old "GitHub CLI" OAuth grant
+in GitHub settings, and enable branch protection if upgrading to GitHub Pro. Pending (agent): canary cross-node
+Secret-restore drill; kubeconfig 0644->0600 + tailnet-only API firewall (needs restart).
