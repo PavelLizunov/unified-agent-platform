@@ -198,6 +198,10 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="server \
 
 **Цель:** единый эндпоинт с маршрутизацией и fallback.
 
+> Скаффолдинг (review-only, **НЕ применять**): `clusters/staging-stage3/` — LiteLLM (`v1.89.0`) + in-cluster
+> sing-box egress (`v1.13.13`, закрывает blocker REVIEW-CODEX #6). **Stage 3-LITE промоутится БЕЗ Этапа 1/2** —
+> нужны только два SOPS-секрета (egress-конфиг + ключи). Gate/группы/validate — в `clusters/staging-stage3/README.md`.
+
 - Deployment LiteLLM, `replicas: 2`, за Service. Учёт/ключи — в Postgres из Этапа 2.
 - ⚠️ Из РФ облачные группы (`smart-cloud`/`cloud-fallback`) недостижимы напрямую — egress через не-РФ ноду или
   VLESS-прокси (ADR-018); в LiteLLM задаётся `HTTPS_PROXY` / per-model client. Для Claude через `anthropic/`-провайдера

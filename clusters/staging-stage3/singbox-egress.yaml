@@ -1,0 +1,65 @@
+# Stage 3 (REVIEW ONLY — see README.md; do NOT apply until egress + key Secrets exist).
+# In-cluster VLESS+REALITY egress (sing-box). Reuses the proven ops-1 client config but binds 0.0.0.0
+# so the Service is cluster-reachable. The real config is a SOPS Secret created at promotion;
+# the placeholder below is NOT for apply.
+#
+# At promotion the Secret's config.json mixed inbound MUST listen on "::" / 0.0.0.0 (not 127.0.0.1):
+#   "inbounds":[{"type":"mixed","listen":"::","listen_port":12080}]
+apiVersion: v1
+kind: Secret
+metadata:
+  name: singbox-egress-config
+  namespace: uap-system
+type: Opaque
+stringData:
+  config.json: |
+    { "REPLACE_WITH_SOPS": "working sb-client.json with mixed inbound on ::, listen_port 12080" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: singbox-egress
+  namespace: uap-system
+spec:
+  selector:
+    app: singbox-egress
+  ports:
+    - name: proxy
+      port: 12080
+      targetPort: 12080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: singbox-egress
+  namespace: uap-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: singbox-egress
+  template:
+    metadata:
+      labels:
+        app: singbox-egress
+    spec:
+      containers:
+        - name: sing-box
+          image: ghcr.io/sagernet/sing-box:v1.13.13   # VALIDATE current stable before apply
+          args: ["run", "-c", "/etc/sing-box/config.json"]
+          ports:
+            - containerPort: 12080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sing-box
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: singbox-egress-config

@@ -1,0 +1,107 @@
+# Stage 3 (REVIEW ONLY — see README.md; do NOT apply until egress + key Secrets exist).
+# LiteLLM gateway (LITE: single replica, keys from a SOPS Secret, no Postgres).
+# For Stage 3-FULL switch the image to ghcr.io/berriai/litellm-database and add DATABASE_URL.
+#
+# The Secret below is a PLACEHOLDER; the real keys are a SOPS Secret created at promotion.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: litellm-keys
+  namespace: uap-system
+type: Opaque
+stringData:
+  ANTHROPIC_API_KEY: "REPLACE_WITH_SOPS"
+  OPENROUTER_API_KEY: "REPLACE_WITH_SOPS"
+  LITELLM_MASTER_KEY: "REPLACE_WITH_SOPS"   # sk-... proxy auth key
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: uap-system
+data:
+  config.yaml: |
+    model_list:
+      - model_name: smart-cloud
+        litellm_params:
+          model: anthropic/claude-opus-4-8
+          api_key: os.environ/ANTHROPIC_API_KEY
+      - model_name: cloud-fallback
+        litellm_params:
+          model: openrouter/anthropic/claude-3.7-sonnet   # VALIDATE OpenRouter slug
+          api_key: os.environ/OPENROUTER_API_KEY
+      - model_name: cheap-local
+        litellm_params:
+          model: ollama/qwen2.5:7b                         # VALIDATE owner Ollama model
+          api_base: http://OWNER_OLLAMA_TAILNET_IP:11434   # owner Mac/Win Ollama over tailnet
+    litellm_settings:
+      drop_params: true
+      num_retries: 2
+      request_timeout: 600
+    router_settings:
+      routing_strategy: simple-shuffle
+      fallbacks:
+        - smart-cloud: ["cloud-fallback", "cheap-local"]
+        - cloud-fallback: ["cheap-local"]
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: uap-system
+spec:
+  selector:
+    app: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: uap-system
+spec:
+  replicas: 1   # Stage 3-FULL: 2 (with Postgres-backed keys/spend)
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+        - name: litellm
+          image: ghcr.io/berriai/litellm:v1.89.0   # VALIDATE current stable before apply
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: litellm-keys
+          env:
+            # cloud groups egress via the in-cluster sing-box; cluster + tailnet stay direct
+            - name: HTTPS_PROXY
+              value: "http://singbox-egress.uap-system.svc:12080"
+            - name: HTTP_PROXY
+              value: "http://singbox-egress.uap-system.svc:12080"
+            - name: NO_PROXY
+              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,100.64.0.0/10"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
