@@ -2,13 +2,18 @@
 # Flux deploy of subfleet (the model backend) wrapping its Helm chart deploy/helm/claude2api.
 # Values verified against subfleet/deploy/helm/claude2api/values.yaml.
 #
+# Supply chain (architecturally-correct): subfleet CI builds + pushes images to GHCR on a v* tag;
+# k3s pulls them by pinned ref with a read:packages imagePullSecret. No manual ctr-import.
+#
 # PROMOTE GATE (all must hold before moving this to clusters/prod/infra + applying):
-#   [ ] images built + `k3s ctr images import`ed on every node, image.*.tag pinned (not "latest")
-#   [ ] subfleet-secrets is a SOPS-encrypted Secret (bridgeSecret, adminToken, credentials.json)
-#   [ ] credentials.json seeded via `claude setup-token` THROUGH the single egress exit (IP-pin)
+#   [x] images published to GHCR by subfleet CI on tag v0.2.0 (rust + leak-scan + publish all green)
+#   [ ] pin images by DIGEST (resolve `ghcr.io/<owner>/subfleet-*@sha256:...` once the PAT exists)
+#   [ ] ghcr-pull imagePullSecret (read:packages PAT) — SOPS
+#   [ ] subfleet-secrets SOPS Secret (bridgeSecret, adminToken, credentials.json)
+#   [ ] credentials.json seeded via scripts/login.sh THROUGH the single egress exit (IP-pin)
 #   [ ] singbox-egress pins ONE fixed VLESS exit (NOT urltest) — same exit as setup-token
 #   [ ] token-service stays single-writer (replicas:1 + Recreate / file backend)
-#   [ ] a read-only Flux deploy key for the subfleet repo exists (subfleet-git-auth, SOPS)
+#   [ ] read-only Flux deploy key for the subfleet repo exists (subfleet-git-auth, SOPS)
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
@@ -19,7 +24,7 @@ spec:
   interval: 1h
   url: ssh://git@github.com/REPLACE_OWNER/subfleet.git   # private; needs read-only deploy key
   ref:
-    branch: main                                          # or a cut release tag
+    tag: v0.2.0                                           # immutable release ref (matches the images)
   secretRef:
     name: subfleet-git-auth                               # SOPS-managed read-only deploy key
 ---
@@ -40,14 +45,17 @@ spec:
         name: subfleet
         namespace: flux-system
   values:
+    # read:packages pull secret for the private GHCR packages (SOPS Secret below).
+    imagePullSecrets:
+      - name: ghcr-pull
     image:
       bridge:
-        repository: subfleet-bridge    # locally built + ctr-imported
-        tag: "REPLACE_BUILT_TAG"
-        pullPolicy: IfNotPresent       # never pull — image is imported into containerd
+        repository: ghcr.io/REPLACE_OWNER_LC/subfleet-bridge   # lowercase owner; pin by @digest at promote
+        tag: "v0.2.0"
+        pullPolicy: IfNotPresent
       tokenService:
-        repository: subfleet-token
-        tag: "REPLACE_BUILT_TAG"
+        repository: ghcr.io/REPLACE_OWNER_LC/subfleet-token
+        tag: "v0.2.0"
         pullPolicy: IfNotPresent
     secrets:
       existingSecret: subfleet-secrets         # keys: bridgeSecret, adminToken
@@ -74,8 +82,8 @@ spec:
       codex:
         enabled: false                     # PENDING subfleet Phase C (#2/#3)
 ---
-# REVIEW-ONLY placeholder. At promote, this becomes a SOPS-encrypted Secret under clusters/prod/infra
-# (NOT plaintext). credentials.json comes from `claude setup-token` run through the egress exit.
+# REVIEW-ONLY placeholders. At promote these become SOPS-encrypted Secrets under clusters/prod/infra
+# (NOT plaintext). credentials.json comes from scripts/login.sh run through the egress exit.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -86,3 +94,13 @@ stringData:
   bridgeSecret: "REPLACE_WITH_SOPS"        # = LiteLLM SUBFLEET_KEY; openssl rand -hex 24
   adminToken: "REPLACE_WITH_SOPS"          # openssl rand -hex 24
   credentials.json: "REPLACE_WITH_SOPS"    # {access_token, refresh_token} from claude setup-token
+---
+# GHCR pull secret (read:packages PAT). At promote: SOPS-encrypted dockerconfigjson.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ghcr-pull
+  namespace: uap-system
+type: kubernetes.io/dockerconfigjson
+stringData:
+  .dockerconfigjson: "REPLACE_WITH_SOPS"   # {\"auths\":{\"ghcr.io\":{\"auth\":\"<base64 user:read-pkgs-PAT>\"}}}
