@@ -1,12 +1,12 @@
-# Stage 3 (REVIEW ONLY — see README.md; do NOT apply until backend + key Secrets exist).
-# LiteLLM gateway (LITE: single replica, no Postgres).
+# Stage 3 (REVIEW ONLY — see README.md; do NOT apply until subfleet is deployed + creds seeded).
+# LiteLLM gateway in front of subfleet.
 #
-# Backends are OpenAI-COMPATIBLE endpoints backed by a Claude Code / Codex *subscription session*
-# (NOT raw Anthropic/OpenAI API keys). So each cloud group is an `openai/<model>` provider with a
-# custom api_base. The endpoint itself handles the upstream auth + egress; LiteLLM only needs to
-# reach the endpoint (tailnet/LAN = direct; remote+RU-blocked = via singbox-egress).
-#
-# The Secret below is a PLACEHOLDER; real values are a SOPS Secret at promotion.
+# Backend = the subfleet *bridge* (ONE in-cluster OpenAI-compatible endpoint). subfleet routes by
+# model prefix to the Claude (and, after subfleet Phase C, Codex) subscription and handles RU egress
+# itself — so LiteLLM needs NO proxy for this hop (it is a ClusterIP call). Per subfleet's integration
+# delta: same 4 claude models + one image, plus optional reasoning_effort (extended thinking) and
+# 429 backpressure (BRIDGE_MAX_CONCURRENT). All cloud groups share one api_base + one key
+# (subfleet BRIDGE_SECRET); only the model id differs. Codex groups are additive (commented until #2/#3).
 apiVersion: v1
 kind: Secret
 metadata:
@@ -14,10 +14,8 @@ metadata:
   namespace: uap-system
 type: Opaque
 stringData:
-  # Bearer/api_key each endpoint expects (use "sk-noauth" if the endpoint needs none).
-  SMART_CLOUD_KEY: "REPLACE_WITH_SOPS"      # Claude Code session endpoint
-  CLOUD_FALLBACK_KEY: "REPLACE_WITH_SOPS"   # Codex session endpoint
-  LITELLM_MASTER_KEY: "REPLACE_WITH_SOPS"   # sk-... proxy auth (clients -> LiteLLM)
+  SUBFLEET_KEY: "REPLACE_WITH_SOPS"        # = subfleet BRIDGE_SECRET (Bearer to the bridge)
+  LITELLM_MASTER_KEY: "REPLACE_WITH_SOPS"  # sk-... clients -> LiteLLM
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -27,33 +25,45 @@ metadata:
 data:
   config.yaml: |
     model_list:
-      # Claude Code subscription session, exposed as an OpenAI-compatible endpoint.
-      - model_name: smart-cloud
+      # --- Claude via subfleet (live once subfleet is deployed + credentials.json seeded) ---
+      - model_name: smart-cloud            # reasoning-on Opus for hard agent tasks
         litellm_params:
-          model: openai/CLAUDE_ENDPOINT_MODEL_NAME   # VALIDATE: the model id the endpoint exposes
-          api_base: CLAUDE_ENDPOINT_URL              # tailnet/LAN (direct) or remote (see README egress)
-          api_key: os.environ/SMART_CLOUD_KEY
-      # Codex subscription session, OpenAI-compatible.
-      - model_name: cloud-fallback
+          model: openai/claude-opus-4-5
+          api_base: http://subfleet-bridge.uap-system.svc:18902/v1   # VALIDATE release/ns DNS
+          api_key: os.environ/SUBFLEET_KEY
+          extra_body: { reasoning_effort: high }   # subfleet enables Claude extended thinking
+      - model_name: balanced-cloud
         litellm_params:
-          model: openai/CODEX_ENDPOINT_MODEL_NAME
-          api_base: CODEX_ENDPOINT_URL
-          api_key: os.environ/CLOUD_FALLBACK_KEY
-      # Local overflow / used when the subscription sessions are rate-limited or down.
+          model: openai/claude-sonnet-4-6
+          api_base: http://subfleet-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      - model_name: cheap-cloud
+        litellm_params:
+          model: openai/claude-haiku-4-5
+          api_base: http://subfleet-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      # --- Codex via subfleet — PENDING subfleet Phase C (#2/#3); additive, SAME bridge ---
+      # - model_name: cloud-fallback
+      #   litellm_params:
+      #     model: openai/<codex-or-gpt-id subfleet advertises>
+      #     api_base: http://subfleet-bridge.uap-system.svc:18902/v1
+      #     api_key: os.environ/SUBFLEET_KEY
+      # --- Local overflow / used when the subscription is rate-limited or down ---
       - model_name: cheap-local
         litellm_params:
-          model: ollama/qwen2.5:7b                    # VALIDATE owner Ollama model
+          model: ollama/qwen2.5:7b                 # VALIDATE owner Ollama model
           api_base: http://OWNER_OLLAMA_TAILNET_IP:11434
     litellm_settings:
-      drop_params: true        # subscription endpoints may not accept every OpenAI param
-      num_retries: 3           # subscription rate-limits -> retry before falling back
+      num_retries: 3            # subfleet returns 429 + Retry-After when over BRIDGE_MAX_CONCURRENT
       request_timeout: 600
+      # Forward reasoning_effort; subfleet silently ignores temp/top_p/stop in its default mode.
+      # Do NOT set subfleet UNSUPPORTED_PARAMS_MODE=enforce while LiteLLM may forward those.
+      drop_params: false
     router_settings:
       routing_strategy: simple-shuffle
-      # On rate-limit/session-expiry, fall through to the next backend.
       fallbacks:
-        - smart-cloud: ["cloud-fallback", "cheap-local"]
-        - cloud-fallback: ["cheap-local"]
+        - smart-cloud: ["balanced-cloud", "cheap-local"]
+        - balanced-cloud: ["cheap-local"]
       allowed_fails: 2
       cooldown_time: 30
     general_settings:
@@ -96,17 +106,8 @@ spec:
           envFrom:
             - secretRef:
                 name: litellm-keys
-          env:
-            # Egress is only needed if the subscription endpoints are REMOTE and RU-blocked.
-            # tailnet/LAN endpoints already bypass via NO_PROXY (100.64.0.0/10) and need no proxy.
-            # If a backend is remote+blocked, point HTTPS_PROXY at the in-cluster sing-box and
-            # REMOVE that host from NO_PROXY. If all backends are tailnet/local, delete these vars.
-            - name: HTTPS_PROXY
-              value: "http://singbox-egress.uap-system.svc:12080"
-            - name: HTTP_PROXY
-              value: "http://singbox-egress.uap-system.svc:12080"
-            - name: NO_PROXY
-              value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,100.64.0.0/10"
+          # No HTTPS_PROXY: LiteLLM only talks to the in-cluster subfleet bridge and the
+          # tailnet Ollama. subfleet owns the upstream egress (PROXY_URL / CLI_HTTPS_PROXY).
           volumeMounts:
             - name: config
               mountPath: /etc/litellm
