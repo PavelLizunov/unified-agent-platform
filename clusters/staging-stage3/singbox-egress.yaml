@@ -5,6 +5,11 @@
 #
 # At promotion the Secret's config.json mixed inbound MUST listen on "::" / 0.0.0.0 (not 127.0.0.1):
 #   "inbounds":[{"type":"mixed","listen":"::","listen_port":12080}]
+#
+# IMPORTANT for subfleet OAuth (egress-IP pinning): use a SINGLE fixed VLESS outbound here, NOT a
+# urltest/round-robin selector. subfleet's token refresh AND the spawned CLI must always exit from
+# the SAME IP — the one that ran `claude setup-token` — or the provider returns 403. A urltest
+# selector can rotate exits and silently break the pin.
 apiVersion: v1
 kind: Secret
 metadata:

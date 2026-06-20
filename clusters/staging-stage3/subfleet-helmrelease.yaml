@@ -1,0 +1,88 @@
+# Stage 3 (REVIEW ONLY — see README.md + runbooks/subfleet-integration.md; do NOT apply yet).
+# Flux deploy of subfleet (the model backend) wrapping its Helm chart deploy/helm/claude2api.
+# Values verified against subfleet/deploy/helm/claude2api/values.yaml.
+#
+# PROMOTE GATE (all must hold before moving this to clusters/prod/infra + applying):
+#   [ ] images built + `k3s ctr images import`ed on every node, image.*.tag pinned (not "latest")
+#   [ ] subfleet-secrets is a SOPS-encrypted Secret (bridgeSecret, adminToken, credentials.json)
+#   [ ] credentials.json seeded via `claude setup-token` THROUGH the single egress exit (IP-pin)
+#   [ ] singbox-egress pins ONE fixed VLESS exit (NOT urltest) — same exit as setup-token
+#   [ ] token-service stays single-writer (replicas:1 + Recreate / file backend)
+#   [ ] a read-only Flux deploy key for the subfleet repo exists (subfleet-git-auth, SOPS)
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: subfleet
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: ssh://git@github.com/REPLACE_OWNER/subfleet.git   # private; needs read-only deploy key
+  ref:
+    branch: main                                          # or a cut release tag
+  secretRef:
+    name: subfleet-git-auth                               # SOPS-managed read-only deploy key
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: subfleet
+  namespace: uap-system
+spec:
+  interval: 30m
+  releaseName: subfleet                # -> Service `subfleet-bridge` (matches litellm.yaml api_base)
+  targetNamespace: uap-system
+  chart:
+    spec:
+      chart: deploy/helm/claude2api
+      sourceRef:
+        kind: GitRepository
+        name: subfleet
+        namespace: flux-system
+  values:
+    image:
+      bridge:
+        repository: subfleet-bridge    # locally built + ctr-imported
+        tag: "REPLACE_BUILT_TAG"
+        pullPolicy: IfNotPresent       # never pull — image is imported into containerd
+      tokenService:
+        repository: subfleet-token
+        tag: "REPLACE_BUILT_TAG"
+        pullPolicy: IfNotPresent
+    secrets:
+      existingSecret: subfleet-secrets         # keys: bridgeSecret, adminToken
+    bridge:
+      replicaCount: 2
+      # egress for the spawned claude CLI — the SAME single exit as token-service refresh (IP-pin)
+      cliProxy: http://singbox-egress.uap-system.svc:12080
+      extraEnv:
+        - name: BRIDGE_MAX_CONCURRENT       # size to the subscription tier; excess -> 429
+          value: "8"
+        - name: UNSUPPORTED_PARAMS_MODE     # leave ignore/warn (LiteLLM may forward temp/max_tokens)
+          value: "warn"
+        - name: EXTENDED_THINKING_MAX_BUDGET
+          value: "32768"
+    tokenService:
+      replicas: 1                          # single-writer (file backend)
+      proxyUrl: http://singbox-egress.uap-system.svc:12080   # refresh egress — same exit as cliProxy
+      store:
+        backend: file
+    providers:
+      claude:
+        enabled: true
+        bootstrapExistingSecret: subfleet-secrets   # key: credentials.json (seeded via setup-token)
+      codex:
+        enabled: false                     # PENDING subfleet Phase C (#2/#3)
+---
+# REVIEW-ONLY placeholder. At promote, this becomes a SOPS-encrypted Secret under clusters/prod/infra
+# (NOT plaintext). credentials.json comes from `claude setup-token` run through the egress exit.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: subfleet-secrets
+  namespace: uap-system
+type: Opaque
+stringData:
+  bridgeSecret: "REPLACE_WITH_SOPS"        # = LiteLLM SUBFLEET_KEY; openssl rand -hex 24
+  adminToken: "REPLACE_WITH_SOPS"          # openssl rand -hex 24
+  credentials.json: "REPLACE_WITH_SOPS"    # {access_token, refresh_token} from claude setup-token
