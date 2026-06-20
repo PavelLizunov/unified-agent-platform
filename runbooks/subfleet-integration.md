@@ -23,18 +23,55 @@ model groups, once subfleet `#2/#3` land).
 1. A **Claude Code subscription** logged in via `claude setup-token` (below).
 2. The non-RU egress already exists (UAP VLESS/sing-box) — subfleet routes its upstream through it.
 
-## Step 1 — seed Claude credentials (egress-IP-pinned!)
+## Step 1 — seed Claude credentials (server-side, DE-egress)
 
-The OAuth token is **pinned to the egress IP** that authenticates. Run `setup-token` through the
-**same foreign exit** subfleet will use, or every request returns `403`.
+Seed a FRESH `/login` credential authorized through the **same German (DE) VLESS exit** the cluster
+will use. Verified subtleties (see the 2026 research notes below):
+
+- **Use interactive `claude` `/login`, NOT `claude setup-token`.** `setup-token` prints a 1-year
+  `sk-ant-oat01-` bearer token to the terminal and writes **nothing** to `.credentials.json` (no
+  `refresh_token`). subfleet's token-service needs the **access + refresh** pair that only `/login`
+  writes to `~/.claude/.credentials.json`. (`login.sh`'s auto-`setup-token` branch is wrong — use
+  `--import`.) The 1-year `setup-token` is only usable as an optional `CLAUDE_CODE_OAUTH_TOKEN`
+  bridge-env fallback (no refresh), never in the token-service refresh loop.
+- **Do NOT reuse your existing `~/.claude/.credentials.json`** from normal Claude Code use — it was
+  authorized from another location. Use a CLEAN environment so the credential is DE-authorized.
+- **There is no hard server-side IP lock** (Mitiga research; CC issue #21765 — the copy-to-remote
+  failure is a missing-refresh 401, not an IP 403). The real `403 Request not allowed` is **client
+  gating** — the token is only honored from the bundled CLI, which subfleet spawns. **Still pin all
+  egress to one DE exit** for geolocation/behavioral plausibility (a sudden RU-origin request on a
+  DE-authorized subscription is exactly what anomaly detection flags) — but understand the mechanism
+  is anti-anomaly + client-identity, not a documented IP binding.
+
+Run it **server-side**, through the DE exit, in a clean container with the same bundled `claude`
+(operator first stands up a DE-pinned proxy on the host, e.g. `127.0.0.1:12081`, and verifies
+`curl -x http://127.0.0.1:12081 https://ifconfig.co/country` prints `DE` BEFORE authorizing):
 
 ```bash
-# on a host whose egress is the foreign VLESS exit (e.g. via the ops-1 sing-box / HTTPS_PROXY):
-cd reserch/subfleet
-./scripts/login.sh          # wraps `claude setup-token`; writes credentials.json (access+refresh)
+mkdir -p ~/claude-seed
+podman run -it --rm --network=host --userns=keep-id \
+  -e HTTPS_PROXY=http://127.0.0.1:12081 -e HTTP_PROXY=http://127.0.0.1:12081 \
+  -e ALL_PROXY=socks5://127.0.0.1:12081 \
+  -v ~/claude-seed:/home/bridge/.claude:U \
+  --entrypoint /usr/local/bin/claude ghcr.io/<owner>/subfleet-bridge:v0.2.0
+# in the REPL run /login -> open the printed URL in ANY browser -> authorize ->
+# paste the returned code back. Writes ~/claude-seed/.credentials.json (access+refresh).
 ```
 
-`credentials.json` = the only real secret here. Never commit it.
+Then normalize + capture for SOPS (explicit `--import`, NOT the auto branch):
+
+```bash
+cd reserch/subfleet
+./scripts/login.sh claude --import ~/claude-seed/.credentials.json --stdout > /tmp/credentials.json
+```
+
+`/tmp/credentials.json` = the only real secret here (`{access_token, refresh_token, expires_at,
+last_refresh}`). Never commit it; SOPS-encrypt it (Step 2) and shred the plaintext.
+
+> Research refs: Anthropic auth docs (setup-token prints a 1-yr token, saves nothing; headless
+> paste-code login); Mitiga (no IP binding); CC issues #21765/#42904/#28091 (token shape, ~24h
+> access token, Feb-2026 third-party block). Keep the bundled CLI current so its client fingerprint
+> stays accepted.
 
 ## Step 2 — SOPS-encrypt the subfleet Secret
 
