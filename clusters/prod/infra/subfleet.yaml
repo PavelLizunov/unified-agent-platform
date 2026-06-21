@@ -45,6 +45,7 @@ spec:
         tag: "v0.2.0"
         pullPolicy: IfNotPresent
     secrets:
+      create: false                           # use the SOPS-managed Secret, don't generate one
       existingSecret: subfleet-secrets        # bridgeSecret, adminToken
     bridge:
       replicaCount: 1
