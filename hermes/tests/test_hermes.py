@@ -126,18 +126,30 @@ class TestReact(unittest.TestCase):
         self.assertEqual(len(trace), 2)
         self.assertEqual(final, "done")
 
-    def test_repeated_identical_call_is_nudged_not_reexecuted(self):
+    def test_repeated_call_forces_final_answer(self):
         hermes.call_model = _MockModel([
             '```tool_call\n{"name":"now","arguments":{}}\n```',
-            '```tool_call\n{"name":"now","arguments":{}}\n```',  # identical repeat
-            "the time is X",
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # identical repeat -> forced final
+            "the time is X",  # forced-final answer
         ])
         final, trace = hermes.run_react("time?")
-        self.assertIn("FINAL answer now", trace[1]["result"])  # 2nd call nudged, not re-run
         self.assertEqual(final, "the time is X")
+        self.assertEqual(len(trace), 1)  # tool executed once; repeat did not re-run or add a trace entry
+
+    def test_repeated_call_still_looping_falls_back_to_result(self):
+        hermes.call_model = _MockModel([
+            '```tool_call\n{"name":"now","arguments":{}}\n```',
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # repeat
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # even the forced-final tries a tool
+        ])
+        final, _ = hermes.run_react("time?")
+        self.assertIn("from tool results", final)  # falls back to the cached result, never loops forever
 
     def test_max_steps_guard(self):
-        hermes.call_model = _MockModel(['```tool_call\n{"name":"now","arguments":{}}\n```'] * 50)
+        # distinct args each step -> no dedup -> exercises the real max_steps ceiling
+        hermes.call_model = _MockModel(
+            ['```tool_call\n{"name":"calc","arguments":{"expression":"%d+1"}}\n```' % i for i in range(50)]
+        )
         final, trace = hermes.run_react("loop", max_steps=3)
         self.assertIn("max steps", final)
         self.assertEqual(len(trace), 3)

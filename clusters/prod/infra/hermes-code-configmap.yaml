@@ -328,7 +328,7 @@ data:
             {"role": "user", "content": user_text},
         ]
         trace = []
-        seen = set()
+        seen = {}
         for step in range(1, max_steps + 1):
             out = call_model(messages, model=model)
             if len(out) > MAX_RESP_CHARS:
@@ -339,18 +339,22 @@ data:
             name, a = tc["name"], tc["arguments"]
             key = name + ":" + json.dumps(a, sort_keys=True)
             if key in seen:
-                # the model is repeating an identical call instead of answering — break the loop
-                result = ("You ALREADY called %s with these exact arguments and the result is above. "
-                          "Give your FINAL answer now in prose; do NOT call this tool again." % name)
-            elif name in TOOLS:
+                # the model is repeating an identical call instead of answering — force a final answer
+                messages.append({"role": "assistant", "content": out})
+                messages.append({"role": "user", "content":
+                                 "STOP calling tools. You already have every result you need above. "
+                                 "Reply NOW with ONLY your final answer in prose — do not output a tool_call."})
+                final = call_model(messages, model=model)
+                return (final.strip() if not parse_tool_call(final) else "(from tool results) " + seen[key]), trace
+            if name in TOOLS:
                 try:
                     result = TOOLS[name]["fn"](a)
                 except Exception as e:  # noqa: BLE001
                     result = "error: " + str(e)
-                seen.add(key)
             else:
                 result = "error: unknown tool '%s'. Available: %s" % (name, ", ".join(TOOLS))
             result = str(result)[:8000]
+            seen[key] = result
             trace.append({"step": step, "tool": name, "arguments": a, "result": result})
             messages.append({"role": "assistant", "content": out})
             messages.append({"role": "user",
