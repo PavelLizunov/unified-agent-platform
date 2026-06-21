@@ -95,6 +95,9 @@ spec:
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:
             - containerPort: 4000
+          env:
+            - name: LITELLM_LOCAL_MODEL_COST_MAP   # work offline: skip github cost-map fetch (RU egress)
+              value: "True"
           envFrom:
             - secretRef:
                 name: litellm-keys
@@ -105,9 +108,9 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
-            limits:
               memory: 512Mi
+            limits:
+              memory: 2Gi        # LiteLLM was OOMKilled (exit 137) under 512Mi at startup; give headroom
       volumes:
         - name: config
           configMap:
