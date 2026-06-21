@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: litellm-keys
+    namespace: uap-system
+type: Opaque
+stringData:
+    SUBFLEET_KEY: ENC[AES256_GCM,data:dj8TLDHRvu7OTD491a74Kr20j66/bFrrPjP9g1g0lyr9rPNNFj19v8IPZgl9d+zu,iv:H8Trhkt1s8GCDUgFMtwgQW7QU7INWnsRVw0oJ0sbuCk=,tag:UKeXN7NzzvaQ1lTlOZA+Zw==,type:str]
+    LITELLM_MASTER_KEY: ENC[AES256_GCM,data:NBNLebqZXqIDFs8s8IKj1HfTiTXnBH1FpIVxixzeevefW1/ga+GilfTv+A==,iv:3+D6fj+Zi80FSYmPaCL/YpXLquJKw8g+kXUfrSQLcwU=,tag:YcztaF4DU/VhbAkAGV5fbg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBtOWRYR3dWQXNaOHIwdHRn
+            dWxVZUJ2eDY3dUtOdldtOFVKbkhBUUh1ZTAwCm5Ndk11NS9PSWVMWGowdzViRENX
+            Q0JTMTdoc3FpVXRSZ0tSUWM5VndkM3cKLS0tIDBhUHZNZURYQ2E3ME9SaHZuWUNT
+            UzVKeU8zMnYvT1pmbGY4K0NweTVCU0kKT6iINtNp58ks8LUSSlpvmr9OnZrPJfCQ
+            7wFGql3u7Jpj7AKp4kiK84OqDNrpVDA3wfocJ0QZIPMbARx+QLWuKQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-21T09:25:43Z"
+    mac: ENC[AES256_GCM,data:Sk6VnX8C92U34TJU0ABIL+ff3NNVKJvqcxSSuNVbdlfzaA9i3h+PbfRfSfBWT2nVoM+ij7g67CPBPkd+5xDpeNnSGOiHEL/kKx/YZluwNWQmyRdAK5pvHUCl0n5SknpUeCRly6lNmm7AGYX2cFPWQlgKb+J/Nvz6g6So44D5D70=,iv:vIaOuJWTOO7h/Up5leozfy3FEqzw9K2RN4xZkrihPNo=,tag:nxMS1/xZYym/L2cSy4sGAA==,type:str]
+    version: 3.13.1

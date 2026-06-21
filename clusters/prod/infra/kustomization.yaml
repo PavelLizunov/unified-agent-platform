@@ -3,3 +3,10 @@ kind: Kustomization
 resources:
   - namespaces.yaml
   - k3s-etcd-snapshot-s3-config.sops.yaml
+  # subfleet (model backend) — phase 1: egress + bridge/token-service
+  - subfleet-git-auth.sops.yaml
+  - ghcr-pull.sops.yaml
+  - subfleet-secrets.sops.yaml
+  - singbox-egress-config.sops.yaml
+  - subfleet-egress.yaml
+  - subfleet.yaml

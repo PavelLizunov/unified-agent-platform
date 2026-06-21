@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: subfleet-git-auth
+    namespace: flux-system
+type: Opaque
+stringData:
+    identity: ENC[AES256_GCM,data:CT7ps5Yq+xYIB04fK4aPxQsCu7pc8u++TIDC6jAk1I16Qnro6X1BJtG/AXLtjkM75thGPvC8bsv2Dett1PvOZUAnUJ3WiZ6zhD5Cdx8eizhA7Qai6nd6GRiFrZ73RvtamJdb7AaTDxAVryE9qAzMoNSfjEVchVzVaxewc1TjurrDdBVewPzznzqUcQTRWOTpR0S78HrRCQMywOt4oWiE011ZiWDLzP/VVIz9mCIC+FTO5IvMa0yUj+NlKroqHRvk1s6+Mfpc4wGbIRSQAocfrp8J/HZJPCR+sPTXGzOH0Lr1QufHYwQVsu9svOLcw26bRVOt07sTvUYCrg8xNxMQlSb+fMjZbHRW3ByY+JyfpaJfLcxavDPt8ryQaIxzNnuGBYrF805cbUrB1olTvHdtqYGpNH5rjoge4n480D84RV5fHP7DrGYLOSHwawJvtgmENfB2UIcU+1+XyCSTaSY/fEUN4aNcBMjEjxJlZ/6tPjINXcm2RxUS1DMZ6rhxb2hoAcXAyd9g4dj45xDztFbvGK9icTIn6iMsb58r,iv:6twOZDbJx9UonIz9RYu7azFJypZljxvzY17wjAP12zs=,tag:Vg5PikbRgGqwhlPNlBoBKA==,type:str]
+    identity.pub: ENC[AES256_GCM,data:cW5+4dQRIl9EE74BB+UTr3VrqgxWVgTjjgwrljRq0ty9ztYYlLfPJN4g6xmp1vIHP1FliTFLvekZsqMj4et5y6DI/GlG52UlS7300aSuzQI+pZ7uNadb5aKGJyL8y+e0rLV5/iX3,iv:0AN2pjR//7uKQ9JHQFSl0iWOiyDtJ833UqDeqgJs7u4=,tag:AVbBxsA9oFEe9KgIiIFQ8A==,type:str]
+    known_hosts: ENC[AES256_GCM,data:cBY78OJ/cuv+i+rlPJDjFx+mza4f1a1+SHWRYOF5uMQD4ECDC/EW6ZxDmxurPg9Lzgk1ZLsGXVAQR6O0cj7ee/fbXy9AdnqTRxsRFRCrn3YPz9n+pCGxUlWro0w=,iv:HvT8MDQntqtHq+Izgqh1qZagsGZdWSj/S11RI2mK73g=,tag:YZ5lRYABnsW0YnkLUykSjA==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSByem1hV3JIZFZveWhPcER5
+            b3JlQ0NkQUh3RHRrWW83NUpOZEtndzBvVW04CmQzbFlxbHNIMXM1OE0vNzZidHJx
+            Q243ejkzZDNnZmx6aXZ0eVVoZ1MzT1EKLS0tIGVRMHBDUnhhQWFPQ0poUHVtak13
+            dEptMDNxVmdwMFlwRG5TbVBVVUJRYTAKc3IpgWKrAQCBG5oQyk8c5OVreLRaoe6P
+            s3y6jfqW4QJCXS1mQ6hGeG3MJ2t+orLIrBEZutUspjP+FVj2ITltjg==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-21T09:26:50Z"
+    mac: ENC[AES256_GCM,data:vX2ZRdq+xBtC7a0GndGFsxLHjaug7oEmmXCN0A+Kq5Osf/QKsMdyVIaoKyyv85+LCJnoAIwl+Gq/uw46cBFDKg/ERCLMZ4XQnL7cYKvyWYnxH+F0PxoQlCRuBLuyDDX6NZqqulVfFcFVl5kKddlIp5ayjg5xWc/UwnRY+H7wOLU=,iv:1VY60FUpQ71Tivq/6LqyupfusD3MfFRfDzPRnobNO3Q=,tag:VJK72NRQJyqrmHjn0CSE4g==,type:str]
+    version: 3.13.1

@@ -1,0 +1,67 @@
+# subfleet (model backend) — Flux deploy of its Helm chart from the subfleet repo @ v0.2.0.
+# Images pulled from GHCR (ghcr-pull secret); chart pulled via the read-only deploy key
+# (subfleet-git-auth). Claude provider only; codex disabled (subfleet Phase C not wired yet).
+# Single-writer token-service (replicas:1 + file backend) serves the seeded credential; the bridge
+# spawns the bundled claude CLI per request, egressing the SAME DE exit as the token-service refresh.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: subfleet
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: ssh://git@github.com/PavelLizunov/subfleet.git
+  ref:
+    tag: v0.2.0
+  secretRef:
+    name: subfleet-git-auth
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: subfleet
+  namespace: uap-system
+spec:
+  interval: 30m
+  releaseName: subfleet                # -> Service `subfleet-bridge` on :18902
+  targetNamespace: uap-system
+  chart:
+    spec:
+      chart: deploy/helm/claude2api
+      sourceRef:
+        kind: GitRepository
+        name: subfleet
+        namespace: flux-system
+  values:
+    imagePullSecrets:
+      - name: ghcr-pull
+    image:
+      bridge:
+        repository: ghcr.io/pavellizunov/subfleet-bridge
+        tag: "v0.2.0"
+        pullPolicy: IfNotPresent
+      tokenService:
+        repository: ghcr.io/pavellizunov/subfleet-token
+        tag: "v0.2.0"
+        pullPolicy: IfNotPresent
+    secrets:
+      existingSecret: subfleet-secrets        # bridgeSecret, adminToken
+    bridge:
+      replicaCount: 1
+      cliProxy: http://singbox-egress.uap-system.svc:12080   # CLI egress -> DE
+      extraEnv:
+        - name: BRIDGE_MAX_CONCURRENT
+          value: "6"
+        - name: UNSUPPORTED_PARAMS_MODE
+          value: "warn"
+    tokenService:
+      replicas: 1                              # single-writer (file backend)
+      proxyUrl: http://singbox-egress.uap-system.svc:12080   # refresh egress -> same DE exit
+      store:
+        backend: file
+    providers:
+      claude:
+        enabled: true
+        bootstrapExistingSecret: subfleet-secrets   # credentials.json (seeded, static 1y token)
+      codex:
+        enabled: false

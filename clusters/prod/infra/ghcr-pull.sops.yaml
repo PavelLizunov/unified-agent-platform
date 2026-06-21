@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: ghcr-pull
+    namespace: uap-system
+type: kubernetes.io/dockerconfigjson
+stringData:
+    .dockerconfigjson: ENC[AES256_GCM,data:Cf/jJPo5nE0kHRI8hYgw3gYBg05znzzZBIkIZAI0yt/1uVGsTBwQDTw6zDF2DBj9r40Y+YyDi40jieSsALckmfxTuojLSwVrW+dCn6bD5KCRBXVKOuNfKelFkHJAw7jGtyqilF/5SS7r,iv:nIFSwGQkA5zV9EH4mDTc141L1G0DYpiV2qy7n1gD2h4=,tag:qazxlKfJZ3WPJKhYxRwsNg==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAxeEVtdDFKZ1pZSTBJQjQ4
+            VlJobWxmQ2FIODlXVC96aWErRVpkSmluZlhJCko2emc2RkgwazJ3dGxRWFJpTjY3
+            ZlVVMTVMczk3VkZpNDdqNjh0blZ0ZHMKLS0tIGFOSXQyYjRxSGhuZUJYNDhRMUp3
+            clYxcTd0YUN3SlRLaUtwbTdvQnUwcjgKJAzbG199KzzNKV1M/xnu+1i0i8j162Hd
+            qTlQuPVzwVH8IJDg72+gAg/98vGpOmSxSXSCBwGSdCdwKLl++qX8GA==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-21T09:25:43Z"
+    mac: ENC[AES256_GCM,data:pCwCjNPEX1K6oUesyN77bZ9WwMpKdjcZwGe5cERPVJ7Dh9mXC1S364g27mrQWfazq9sKlGaDqzweDl2D75exsAUdYdB32Ki5FcVEQRRz0kDR07HsVEsugeFvGxXuVJenCZmJG+JLpa2MO1OX/Hv+DPplJyCXXZQ3uyUlO/Jpa6A=,iv:d894KQwOYn2VEcOmLUIUIZ0ttP9kJnFM04iLIkV3HZI=,tag:5H/0kseAyydJeFIJZmTV8A==,type:str]
+    version: 3.13.1

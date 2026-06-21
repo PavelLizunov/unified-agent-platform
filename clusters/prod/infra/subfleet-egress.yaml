@@ -1,0 +1,52 @@
+# In-cluster VLESS+REALITY egress for subfleet (single fixed DE exit, bound ::).
+# subfleet's bridge CLI + token-service refresh both route through this Service so all upstream
+# traffic exits from the same German IP the credential was authorized through. Config = SOPS Secret
+# singbox-egress-config (clusters/prod/infra/singbox-egress-config.sops.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: singbox-egress
+  namespace: uap-system
+spec:
+  selector:
+    app: singbox-egress
+  ports:
+    - name: proxy
+      port: 12080
+      targetPort: 12080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: singbox-egress
+  namespace: uap-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: singbox-egress
+  template:
+    metadata:
+      labels:
+        app: singbox-egress
+    spec:
+      containers:
+        - name: sing-box
+          image: ghcr.io/sagernet/sing-box:v1.13.13
+          args: ["run", "-c", "/etc/sing-box/config.json"]
+          ports:
+            - containerPort: 12080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sing-box
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: singbox-egress-config
