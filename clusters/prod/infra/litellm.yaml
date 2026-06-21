@@ -95,6 +95,16 @@ spec:
           args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
           ports:
             - containerPort: 4000
+          readinessProbe:                          # don't route until uvicorn actually serves (no ready-but-listening gap)
+            httpGet: { path: /health/liveliness, port: 4000 }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health/liveliness, port: 4000 }
+            initialDelaySeconds: 45
+            periodSeconds: 20
+            failureThreshold: 3
           env:
             - name: LITELLM_LOCAL_MODEL_COST_MAP   # work offline: skip github cost-map fetch (RU egress)
               value: "True"
