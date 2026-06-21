@@ -126,6 +126,16 @@ class TestReact(unittest.TestCase):
         self.assertEqual(len(trace), 2)
         self.assertEqual(final, "done")
 
+    def test_repeated_identical_call_is_nudged_not_reexecuted(self):
+        hermes.call_model = _MockModel([
+            '```tool_call\n{"name":"now","arguments":{}}\n```',
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # identical repeat
+            "the time is X",
+        ])
+        final, trace = hermes.run_react("time?")
+        self.assertIn("FINAL answer now", trace[1]["result"])  # 2nd call nudged, not re-run
+        self.assertEqual(final, "the time is X")
+
     def test_max_steps_guard(self):
         hermes.call_model = _MockModel(['```tool_call\n{"name":"now","arguments":{}}\n```'] * 50)
         final, trace = hermes.run_react("loop", max_steps=3)
