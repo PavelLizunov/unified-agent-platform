@@ -1,53 +1,80 @@
-# Hermes — the agent orchestrator (design + POC)
+# Hermes — the agent orchestrator (DEPLOYED)
 
 Hermes is UAP's **agent/orchestration layer**: it turns the plain chat backend (LiteLLM → subfleet →
 Claude) into a tool-using agent. It is the "agent" in unified-**agent**-platform.
 
+## Live
+
+- Code: `hermes.py` — a single-file **stdlib-only** service, deployed on a stock `python:3.11-slim`
+  with the code mounted from the `hermes-code` ConfigMap (no image build, no pip — RU-egress safe).
+- In-cluster: `hermes.uap-system.svc:8900`. Over the tailnet: **`http://<node-tailnet-ip>:30890`**
+  (NodePort; WireGuard-encrypted, `HERMES_KEY` auth). E.g. `http://uap-home-1.tail9fd337.ts.net:30890`.
+  (tailscale-serve can't proxy to the ClusterIP — the cluster net itself runs on tailscale, ADR-021 —
+  so NodePort is used; see the Service note in `clusters/prod/infra/hermes.yaml`.)
+- Auth key: `kubectl -n uap-system get secret hermes-keys -o jsonpath='{.data.HERMES_KEY}' | base64 -d`
+- OpenAI-compatible: `POST /v1/chat/completions` runs a tool-using ReAct loop and returns the final
+  answer (plus a `hermes_trace`). Also `GET /healthz`, `GET /tools`, and slash commands (`/help`,
+  `/tools`, `/model`) handled locally.
+
 ## Why prompt-based ReAct (not native function-calling)
 
-subfleet's bridge spawns the bundled `claude` CLI, which is a **monolithic agentic loop that executes
-tools itself** and does NOT surface `tool_use` to the caller. So native OpenAI `tools`/`tool_calls`
-through the bridge is infeasible (verified: the bridge drops `tools`/`tool_choice`; the CLI is frozen
-at 2.1.90 because newer = 403). Decision: **prompt-based ReAct at the Hermes layer, zero subfleet
-change.** Hermes owns the tool registry, the loop, and tool execution. See memory
-`uap-subfleet-integration`.
+subfleet's bridge spawns the bundled `claude` CLI, a monolithic agentic loop that executes tools
+itself and does NOT surface `tool_use` to the caller — so native OpenAI `tools`/`tool_calls` through
+the bridge is infeasible (the CLI is frozen at 2.1.90; newer = 403). Decision: **prompt-based ReAct at
+the Hermes layer, zero subfleet change.** Hermes owns the tool registry, the loop, and tool execution.
 
 ## How it works
 
-1. Hermes serializes its tool registry into the **system prompt** with a rigid grammar:
-   to call a tool the model must emit ONLY a fenced block and nothing else:
-   ````
-   ```tool_call
-   {"name":"calc","arguments":{"expression":"2*(3+4)"}}
-   ```
-   ````
-2. Hermes calls LiteLLM (`smart-cloud` etc.) as a normal `chat.completions` request.
-3. It parses the assistant text for a `tool_call` block.
-   - none  → that text is the final answer (the model stopped naturally).
-   - found → Hermes executes the tool out-of-band, appends the assistant turn + a `user` turn carrying
-     a ```tool_result``` block, and re-calls. Loop until no tool_call or a max-steps guard.
+The model is told to emit ONLY a fenced ```tool_call``` block to call a tool; Hermes parses it,
+executes the tool out-of-band, feeds back a ```tool_result``` (untrusted data), and loops until the
+model answers in prose. Effort routes to the `-think` model group (LiteLLM rejects a client-sent
+`reasoning_effort`). Repeated identical calls are force-converged (the model is told to answer now),
+so the loop never hangs.
 
-This rides only on capabilities the bridge already has (faithful system-prompt + multi-turn + streamed
-text), so it works against the live stack today.
+## Tools
 
-## POC
+- `calc` — arithmetic via an AST sandbox (no `eval`; magnitude/length caps).
+- `now` — current UTC.
+- `http_get` — fetch a public URL, **SSRF-guarded** (blocks private/internal IPs incl. on redirects).
+- `kube_pods` — list pods+status in a namespace via the in-cluster k8s API (ServiceAccount `hermes`
+  + a read-only `pods` ClusterRole). Least privilege; nothing else.
 
-`poc/react_poc.py` (stdlib only) is a working ReAct loop with a `calc` tool, run against the live
-LiteLLM endpoint. Run:
+## Hardening (from the multi-agent code review)
+
+Bounded thread pool, per-connection socket timeout, request body-size cap, SSRF-revalidating
+redirects, constant-time auth that **fails closed** unless `HERMES_DEVMODE=1`, upstream retry +
+error sanitisation (no key leak), step/conversation caps, graceful shutdown, stderr request logging.
+
+## Tests
+
+- `tests/test_hermes.py` — 26 unit tests (parser, calc sandbox, SSRF guard, ReAct loop incl. dedup/
+  force-final, slash, registry). Run: `cd hermes && python3 -m unittest -v`.
+- `tests/run_integration.py` — live scenarios against the gateway (tool use, no-tool, model variants,
+  effort, injection resistance). Needs `LITELLM_BASE`/`LITELLM_KEY` (+ `HERMES_DEVMODE=1` for the local
+  kubectl fallback). Last run: 8/8.
+
+## Known limitation
+
+Prompt-based ReAct tool-compliance is **probabilistic**: the model usually calls tools correctly, but
+on some tasks (e.g. "count and reply with only the number") it may skip a tool, miscount, or loop.
+Hermes guarantees convergence (no infinite loops) and the tools/infra are deterministic, but final
+answer quality on adversarial-terse tasks varies. Native function-calling would fix this but is
+infeasible through the subscription CLI (see above). Mitigations in place: firm system prompt,
+identical-call dedup + forced final answer.
+
+## Deploy / iterate
+
+Code lives in `hermes/hermes.py`; the deploy ConfigMap is generated from it and the Deployment's
+`hermes/code-rev` annotation is set to the file hash (so a code change rolls the pod):
 
 ```bash
-export LITELLM_BASE="https://uap-home-1.tail9fd337.ts.net/v1"
-export LITELLM_KEY="$(kubectl -n uap-system get secret litellm-keys -o jsonpath='{.data.LITELLM_MASTER_KEY}' | base64 -d)"
-python3 poc/react_poc.py "What is 48271 * 99173 + 9999999 - 12345? Then say if it is even or odd."
+H=$(sha256sum hermes/hermes.py | cut -c1-12)
+kubectl create configmap hermes-code -n uap-system --from-file=hermes.py=hermes/hermes.py --dry-run=client -o yaml > clusters/prod/infra/hermes-code-configmap.yaml
+sed -i "s|hermes/code-rev: .*|hermes/code-rev: \"$H\"|" clusters/prod/infra/hermes.yaml
+# commit -> Flux rolls it
 ```
 
-## Production TODO (not built yet)
+## Next (not built)
 
-- **Deployment**: Hermes as an in-cluster service (its own Deployment) calling LiteLLM by ClusterIP,
-  exposed on the tailnet like LiteLLM.
-- **Tool registry + sandbox**: real tools (HTTP, k8s read, retrieval) with a hardened executor — the
-  POC's `calc` uses a charset-restricted `eval`, which is NOT production-safe.
-- **Grammar robustness**: strict fenced-block extraction, JSON-repair/retry, unknown-tool handling.
-- **Known limits**: an extra round-trip per tool hop (latency); tool_result arrives as ordinary user
-  text → treat it as **untrusted** (prompt-injection surface); no real parallel tool calls; the full
-  tool schema rides in every request's system prompt (token cost — keep it prompt-cache friendly).
+More tools (HTTP POST, k8s logs/events read, retrieval/RAG) in the sandboxed registry; a chat UI;
+per-tool authz; a scoped LiteLLM key for Hermes instead of the master key.
