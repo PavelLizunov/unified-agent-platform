@@ -391,8 +391,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")  # close per response — friendliest to reverse proxies (tailscale serve)
         self.end_headers()
         self.wfile.write(body)
+        self.close_connection = True
 
     def _auth_ok(self):
         if not HERMES_KEY:
