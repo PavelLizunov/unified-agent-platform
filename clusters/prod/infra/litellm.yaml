@@ -1,0 +1,114 @@
+# LiteLLM gateway in front of subfleet (prod). The ONE OpenAI-compatible endpoint devices/agents hit.
+# Backend = the subfleet bridge (ClusterIP); subfleet routes by model id to the Claude subscription and
+# owns RU egress — so LiteLLM needs NO proxy for this hop. Keys come from the SOPS Secret
+# `litellm-keys` (clusters/prod/infra/litellm-keys.sops.yaml): SUBFLEET_KEY (= bridge BRIDGE_SECRET)
+# and LITELLM_MASTER_KEY (clients -> LiteLLM). No inline Secret here.
+#
+# Model groups use the CLI ALIASES opus/sonnet/haiku, which the bundled claude CLI resolves to the
+# LATEST model of each family (auto-tracks; no version pinning). reasoning_effort is forwarded but only
+# becomes REAL once subfleet >= v0.2.1 is deployed (v0.2.0 emits the dropped --max-thinking-tokens).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: uap-system
+data:
+  config.yaml: |
+    model_list:
+      # --- Claude via subfleet. Aliases => latest of each family (opus≈4.8, sonnet≈4.6, haiku≈4.5). ---
+      - model_name: smart-cloud                 # latest Opus, default effort
+        litellm_params:
+          model: openai/opus
+          api_base: http://subfleet-claude2api-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      - model_name: smart-cloud-think           # latest Opus + high reasoning effort (real once subfleet>=v0.2.1)
+        litellm_params:
+          model: openai/opus
+          api_base: http://subfleet-claude2api-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+          extra_body: { reasoning_effort: high }
+      - model_name: balanced-cloud              # latest Sonnet
+        litellm_params:
+          model: openai/sonnet
+          api_base: http://subfleet-claude2api-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      - model_name: cheap-cloud                 # latest Haiku (fast/cheap default)
+        litellm_params:
+          model: openai/haiku
+          api_base: http://subfleet-claude2api-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      # --- Pinned variant for reproducibility (explicit version, not the auto-latest alias) ---
+      - model_name: smart-cloud-pinned
+        litellm_params:
+          model: openai/claude-opus-4-8
+          api_base: http://subfleet-claude2api-bridge.uap-system.svc:18902/v1
+          api_key: os.environ/SUBFLEET_KEY
+      # --- cheap-local (Ollama overflow) — OMITTED until an Ollama endpoint exists. Add when ready:
+      # - model_name: cheap-local
+      #   litellm_params: { model: ollama/<m>, api_base: http://<tailnet-ip>:11434 }
+    litellm_settings:
+      num_retries: 3            # subfleet returns 429 + Retry-After over BRIDGE_MAX_CONCURRENT
+      request_timeout: 600
+      drop_params: false        # forward reasoning_effort; subfleet warns+ignores temp/top_p/max_tokens
+    router_settings:
+      routing_strategy: simple-shuffle
+      fallbacks:
+        - smart-cloud: ["balanced-cloud", "cheap-cloud"]
+        - smart-cloud-think: ["smart-cloud", "balanced-cloud"]
+        - balanced-cloud: ["cheap-cloud"]
+      allowed_fails: 2
+      cooldown_time: 30
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: uap-system
+spec:
+  selector:
+    app: litellm
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: uap-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: litellm
+  template:
+    metadata:
+      labels:
+        app: litellm
+    spec:
+      containers:
+        - name: litellm
+          image: ghcr.io/berriai/litellm:v1.89.0
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          envFrom:
+            - secretRef:
+                name: litellm-keys
+          volumeMounts:
+            - name: config
+              mountPath: /etc/litellm
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config

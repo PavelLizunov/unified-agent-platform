@@ -10,3 +10,5 @@ resources:
   - singbox-egress-config.sops.yaml
   - subfleet-egress.yaml
   - subfleet.yaml
+  - litellm-keys.sops.yaml
+  - litellm.yaml
