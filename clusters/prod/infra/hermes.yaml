@@ -1,0 +1,99 @@
+# Hermes — agent orchestrator (prompt-based ReAct over LiteLLM). Runs on a stock python:3.11-slim
+# with the single-file code mounted from the `hermes-code` ConfigMap (no image build, no pip — RU-safe).
+# Code lives at hermes/hermes.py; the ConfigMap is generated from it (see runbooks/hermes.md).
+# Keys from SOPS `hermes-keys`: LITELLM_KEY (Hermes -> LiteLLM master key) + HERMES_KEY (clients -> Hermes).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes
+  namespace: uap-system
+---
+# Least-privilege: read-only pod metadata, cluster-wide, for the kube_pods tool. Nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: hermes-pods-read
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: hermes-pods-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hermes-pods-read
+subjects:
+  - kind: ServiceAccount
+    name: hermes
+    namespace: uap-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes
+  namespace: uap-system
+spec:
+  selector:
+    app: hermes
+  ports:
+    - name: http
+      port: 8900
+      targetPort: 8900
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes
+  namespace: uap-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: hermes
+  template:
+    metadata:
+      labels:
+        app: hermes
+      annotations:
+        # roll the pod when the code ConfigMap changes (set by the deploy step to the file's hash)
+        hermes/code-rev: "d0773fe54f96"
+    spec:
+      serviceAccountName: hermes
+      containers:
+        - name: hermes
+          image: python:3.11-slim
+          command: ["python", "/app/hermes.py"]
+          ports:
+            - containerPort: 8900
+          env:
+            - name: LITELLM_BASE
+              value: http://litellm.uap-system.svc:4000/v1
+            - name: HERMES_MODEL
+              value: smart-cloud
+            - name: LITELLM_KEY
+              valueFrom: { secretKeyRef: { name: hermes-keys, key: LITELLM_KEY } }
+            - name: HERMES_KEY
+              valueFrom: { secretKeyRef: { name: hermes-keys, key: HERMES_KEY } }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8900 }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8900 }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: code
+              mountPath: /app
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: code
+          configMap:
+            name: hermes-code

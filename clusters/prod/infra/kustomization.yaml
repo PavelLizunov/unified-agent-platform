@@ -12,3 +12,6 @@ resources:
   - subfleet.yaml
   - litellm-keys.sops.yaml
   - litellm.yaml
+  - hermes-keys.sops.yaml
+  - hermes-code-configmap.yaml
+  - hermes.yaml
