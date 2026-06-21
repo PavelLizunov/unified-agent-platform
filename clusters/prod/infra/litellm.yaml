@@ -121,7 +121,49 @@ spec:
               memory: 512Mi
             limits:
               memory: 2Gi        # LiteLLM was OOMKilled (exit 137) under 512Mi at startup; give headroom
+        # Tailscale sidecar (userspace, no privilege): serves LiteLLM on the tailnet as
+        # https://litellm.<tailnet>.ts.net — no node port. Auth key from SOPS secret tailscale-auth.
+        - name: tailscale
+          image: ghcr.io/tailscale/tailscale:v1.98.4
+          env:
+            - name: TS_AUTHKEY
+              valueFrom: { secretKeyRef: { name: tailscale-auth, key: TS_AUTHKEY } }
+            - name: TS_USERSPACE
+              value: "true"
+            - name: TS_HOSTNAME
+              value: "litellm"
+            - name: TS_SERVE_CONFIG
+              value: "/etc/tsconfig/serve.json"
+            - name: TS_STATE_DIR
+              value: "/tmp/tsstate"
+          volumeMounts:
+            - { name: tsstate, mountPath: /tmp/tsstate }
+            - { name: tsconfig, mountPath: /etc/tsconfig, readOnly: true }
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
       volumes:
         - name: config
           configMap:
             name: litellm-config
+        - name: tsstate
+          emptyDir: {}
+        - name: tsconfig
+          configMap:
+            name: tailscale-serve
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tailscale-serve
+  namespace: uap-system
+data:
+  serve.json: |
+    {
+      "TCP": { "443": { "HTTPS": true } },
+      "Web": {
+        "${TS_CERT_DOMAIN}:443": {
+          "Handlers": { "/": { "Proxy": "http://127.0.0.1:4000" } }
+        }
+      }
+    }
