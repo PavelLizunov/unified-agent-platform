@@ -37,12 +37,17 @@ metadata:
   name: hermes
   namespace: uap-system
 spec:
+  # NodePort: reachable over the tailnet at http://<node-tailnet-ip>:30890 (WireGuard-encrypted,
+  # HERMES_KEY auth). tailscale-serve can't proxy to this ClusterIP (the cluster net itself runs on
+  # tailscale, ADR-021 — the serve proxy never reaches the backend); NodePort routes via kube-proxy.
+  type: NodePort
   selector:
     app: hermes
   ports:
     - name: http
       port: 8900
       targetPort: 8900
+      nodePort: 30890
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -60,7 +65,7 @@ spec:
         app: hermes
       annotations:
         # roll the pod when the code ConfigMap changes (set by the deploy step to the file's hash)
-        hermes/code-rev: "e37bbe711eb1"
+        hermes/code-rev: "managed-by-deploy"
     spec:
       serviceAccountName: hermes
       containers:
