@@ -11,5 +11,4 @@ resources:
   - subfleet-egress.yaml
   - subfleet.yaml
   - litellm-keys.sops.yaml
-  - tailscale-auth.sops.yaml
   - litellm.yaml
