@@ -136,6 +136,8 @@ spec:
               value: "/etc/tsconfig/serve.json"
             - name: TS_STATE_DIR
               value: "/tmp/tsstate"
+            - name: TS_KUBE_SECRET           # "" -> store state in TS_STATE_DIR (emptyDir); no kube-secret RBAC needed
+              value: ""
           volumeMounts:
             - { name: tsstate, mountPath: /tmp/tsstate }
             - { name: tsconfig, mountPath: /etc/tsconfig, readOnly: true }
