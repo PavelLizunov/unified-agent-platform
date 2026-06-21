@@ -17,7 +17,7 @@ data:
       HERMES_KEY                    bearer clients must present (REQUIRED unless HERMES_DEVMODE=1)
       HERMES_DEVMODE=1             allow no-auth + kubectl fallback (local dev only)
       HERMES_MODEL                  default model group (default smart-cloud)
-      HERMES_MAX_STEPS / HERMES_PORT / HERMES_MAX_WORKERS / HERMES_HTTP_TIMEOUT
+      HERMES_MAX_STEPS / HERMES_BIND_PORT / HERMES_MAX_WORKERS / HERMES_HTTP_TIMEOUT
     """
     import ast
     import hmac
@@ -44,7 +44,7 @@ data:
     DEVMODE = os.environ.get("HERMES_DEVMODE") == "1"
     DEFAULT_MODEL = os.environ.get("HERMES_MODEL", "smart-cloud")
     MAX_STEPS = int(os.environ.get("HERMES_MAX_STEPS", "6"))
-    PORT = int(os.environ.get("HERMES_PORT", "8900"))
+    PORT = int(os.environ.get("HERMES_BIND_PORT", "8900"))  # NOT HERMES_PORT — k8s injects that as a Service env
     MAX_WORKERS = int(os.environ.get("HERMES_MAX_WORKERS", "50"))
     HTTP_TIMEOUT = int(os.environ.get("HERMES_HTTP_TIMEOUT", "60"))
     TOOL_TIMEOUT = 20

@@ -60,7 +60,7 @@ spec:
         app: hermes
       annotations:
         # roll the pod when the code ConfigMap changes (set by the deploy step to the file's hash)
-        hermes/code-rev: "d0773fe54f96"
+        hermes/code-rev: "e8502478b42c"
     spec:
       serviceAccountName: hermes
       containers:
