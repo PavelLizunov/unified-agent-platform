@@ -38,11 +38,11 @@ spec:
     image:
       bridge:
         repository: ghcr.io/pavellizunov/subfleet-bridge
-        tag: "v0.2.0"
+        tag: "v0.2.1"
         pullPolicy: IfNotPresent
       tokenService:
         repository: ghcr.io/pavellizunov/subfleet-token
-        tag: "v0.2.0"
+        tag: "v0.2.1"
         pullPolicy: IfNotPresent
     secrets:
       create: false                           # use the SOPS-managed Secret, don't generate one
