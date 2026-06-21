@@ -12,7 +12,7 @@ spec:
   interval: 1h
   url: ssh://git@github.com/PavelLizunov/subfleet.git
   ref:
-    tag: v0.2.0
+    tag: v0.3.0
   secretRef:
     name: subfleet-git-auth
 ---
@@ -38,11 +38,11 @@ spec:
     image:
       bridge:
         repository: ghcr.io/pavellizunov/subfleet-bridge
-        tag: "v0.2.1"
+        tag: "v0.3.0"
         pullPolicy: IfNotPresent
       tokenService:
         repository: ghcr.io/pavellizunov/subfleet-token
-        tag: "v0.2.1"
+        tag: "v0.3.0"
         pullPolicy: IfNotPresent
     secrets:
       create: false                           # use the SOPS-managed Secret, don't generate one
