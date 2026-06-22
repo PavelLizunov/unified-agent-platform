@@ -172,5 +172,73 @@ class TestRegistry(unittest.TestCase):
             self.assertIn(name, t)
 
 
+class TestAuthz(unittest.TestCase):
+    def setUp(self):
+        self._k, self._sk, self._dev = hermes.HERMES_KEY, hermes.SCOPED_KEYS, hermes.DEVMODE
+        hermes.HERMES_KEY = "master"
+        hermes.SCOPED_KEYS = {"ro": frozenset({"read"})}
+        hermes.DEVMODE = False
+
+    def tearDown(self):
+        hermes.HERMES_KEY, hermes.SCOPED_KEYS, hermes.DEVMODE = self._k, self._sk, self._dev
+
+    def test_master_grants_all_scopes(self):
+        self.assertEqual(hermes.resolve_scopes("Bearer master"), hermes.ALL_SCOPES)
+
+    def test_scoped_key_subset(self):
+        self.assertEqual(hermes.resolve_scopes("Bearer ro"), frozenset({"read"}))
+
+    def test_unknown_key_is_none(self):
+        self.assertIsNone(hermes.resolve_scopes("Bearer nope"))
+
+    def test_missing_header_is_none(self):
+        self.assertIsNone(hermes.resolve_scopes(""))
+
+
+class TestAuthzGating(unittest.TestCase):
+    def setUp(self):
+        self._o = hermes.call_model
+
+    def tearDown(self):
+        hermes.call_model = self._o
+
+    def test_net_tool_blocked_for_read_only_key(self):
+        hermes.call_model = _MockModel([
+            '```tool_call\n{"name":"http_get","arguments":{"url":"http://example.com"}}\n```',
+            "ok",
+        ])
+        _final, trace = hermes.run_react("fetch", allowed_scopes=frozenset({"read"}))
+        self.assertIn("not authorized", trace[0]["result"])
+
+    def test_in_scope_tool_runs(self):
+        hermes.call_model = _MockModel([
+            '```tool_call\n{"name":"now","arguments":{}}\n```',
+            "the time",
+        ])
+        _final, trace = hermes.run_react("time", allowed_scopes=frozenset({"compute"}))
+        self.assertNotIn("not authorized", trace[0]["result"])
+
+
+class TestScopeFilter(unittest.TestCase):
+    def test_read_only_key_sees_only_read_tools(self):
+        t = hermes.list_tools_text(frozenset({"read"}))
+        self.assertIn("kube_pods", t)
+        self.assertIn("kube_logs", t)
+        self.assertNotIn("http_get", t)
+        self.assertNotIn("calc", t)
+
+
+class TestNewTools(unittest.TestCase):
+    def test_kube_get_rejects_unknown_kind(self):
+        self.assertTrue(hermes.tool_kube_get({"kind": "secrets"}).startswith("error"))
+
+    def test_kube_logs_validates_pod_name(self):
+        self.assertTrue(hermes.tool_kube_logs({"namespace": "x", "pod": "bad pod!"}).startswith("error"))
+
+    def test_http_post_ssrf_and_scheme(self):
+        self.assertIn("blocked", hermes.tool_http_post({"url": "http://127.0.0.1/", "body": "x"}))
+        self.assertTrue(hermes.tool_http_post({"url": "ftp://x/y", "body": "x"}).startswith("error"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

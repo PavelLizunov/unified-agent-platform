@@ -5,20 +5,21 @@ metadata:
     namespace: uap-system
 type: Opaque
 stringData:
-    LITELLM_KEY: ENC[AES256_GCM,data:XTeRtIxhf1khhE3s0WD5wDP7bytjRNa7vrxMgPpKaBIN5+PNDNdqYPFhfw==,iv:xQR9WF0DEK8mflQJQANylZzm7pUH8NQPngGu2Feyaa8=,tag:Z7GsjaDLXCwyVOfh09CTAA==,type:str]
-    HERMES_KEY: ENC[AES256_GCM,data:T9FM/hQnrA+q1ca/O6fR/B0SyAzoYFjRHbOzmLrEU5xZ9/ePacb9yOiuuuYJApEPk3WPJUfgEw==,iv:gqmXNE1RlJavAMI5bowQfO4QLeEHCU+fT+3hiw54KGs=,tag:1ElDmpAv4+3yymWItpIH8Q==,type:str]
+    LITELLM_KEY: ENC[AES256_GCM,data:D7fciq/+Cy0khzbg1V+bQp+tfEN+1DZ5P1B3xQOFznVwCt+6FBvQ3HBrbQ==,iv:QF8H/ncr17ccTvc3Ox3tXosbsb5WhKRnNAvtIj1GF9s=,tag:Lm62rqFdUOSj4Z5YhhuRCQ==,type:str]
+    HERMES_KEY: ENC[AES256_GCM,data:HfNwn4eogj3Mn2ppw3MpdKopEIqkpAKwBkYqIER1jn+97bowdsKiDam1lIc8jvYtqDkykH/2SA==,iv:wnh9ZcrHe5cothEXQvBSN6XxzDV69cGbRHvEgsTj9ic=,tag:bB1nAOGvZ9czYF3CQvqpSg==,type:str]
+    HERMES_KEYS_JSON: ENC[AES256_GCM,data:HcyhiPYPNuH0SWiazM5FzY2+XIZGMAw/D+k/o36WEdPUzPIegQIZlYzz6XT8F+ek5VodvkVZTLomiQ5hN2JELIUbDw==,iv:EUTP38aSslUD6ZQG7lU+x6BJUXiaewkMvO19RgbJxXw=,tag:oSgA6a5pTt79EYhcPwCLzA==,type:str]
 sops:
     age:
         - enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBxa2tSVVRQeEZiRllwQitS
-            eDlPR0gzekk3dXAxUjhzdno3UTRBQklEOHhzCnBEZ0sxOUtPM3NhNk9USVpBWXE2
-            WkRyM09NdnhtR2NXcHBQYTZ1c2F5LzgKLS0tIGJab1E2ODNCa1BaTWNtNk02aDh1
-            cGFDano5dVdCY25zd3IybGdqNTlyajQKH9miYrAgAz8sqpKZjb7CuCr1OcdU17BE
-            ux5uXB2IroepLbGrLtSjc3rOTaeZQxxVh9tkeNubrbi81Sbl+IUn+A==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBOaUlUZy82K1pSSU9CRnJV
+            aHdqdFRqdEIzQ1B4Q1R4MkF5OGRTelZBbVc0CncwYU9YRkN2N1c3RjZ4UU85OEN2
+            KzRvNVBlRGVhNmpnbU9jSkhMNXlSNFEKLS0tIHNBNkpUWHNBU1dvZndUZnJkay9k
+            dGFaYjltc1VLQ1owT2N3cjdweksvRlkKdWauQ5Tj0dcH51igCcnuCW8F48qUsrOS
+            nD1UKJhRb+n1UO2l3NiOC1iKb9ZEv+dp3sZadahFY90v/p62SKc4qQ==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-06-21T22:12:14Z"
-    mac: ENC[AES256_GCM,data:B0CStPcPcWcYKgoo0+lMmcwS9declUG9+oUxm2VNq3gxK+YEGFNdjkLLIY5qrmlSZssBVzfFJWsp0LUPJ4IYuN+kn/r9sxK7oJ4yjED9mPpTK83ebnWlE/fgdXa56wfA58H2kptvTA8Xdy0/yVuOuY4idruc+29J2skCMpUwomA=,iv:WLJpDvycDLEfsOhJFhpphHmrkoUEzljIJ0fkJN8pF3s=,tag:QniL3HjWhXeVNq0mBNfDIw==,type:str]
+    lastmodified: "2026-06-22T08:31:03Z"
+    mac: ENC[AES256_GCM,data:uHoA+jmKRMujISB6WGcCCSPuAcAXiZuKpx9RuUekdrBooZGwvpiDP8kmw9nkvrdHwb+9iO3fVONjJcqLjdz9bZJIV5DzdCwtb+Cg7gcs1+DEUoA2RNTeoptE1yRX5CodnZMhR378F6Dxq9kF5SH38ZNyOKSB+JAyM+OtrI/wGDE=,iv:lhtw8APDk8TeXuaJFognaZXJkbpB42JK6+l1mNwbnfA=,tag:9QDjLWJPnnq7dRRV3zdpyw==,type:str]
     version: 3.13.1

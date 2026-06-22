@@ -8,14 +8,17 @@ metadata:
   name: hermes
   namespace: uap-system
 ---
-# Least-privilege: read-only pod metadata, cluster-wide, for the kube_pods tool. Nothing else.
+# Least-privilege: read-only (get/list) metadata cluster-wide for the kube_* tools. No write verbs.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: hermes-pods-read
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
+    resources: ["pods", "pods/log", "services", "events", "namespaces", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -65,7 +68,7 @@ spec:
         app: hermes
       annotations:
         # roll the pod when the code ConfigMap changes (set by the deploy step to the file's hash)
-        hermes/code-rev: "0ad6e391958f"
+        hermes/code-rev: "ac4a6c48e1f3"
     spec:
       serviceAccountName: hermes
       containers:
@@ -83,6 +86,8 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-keys, key: LITELLM_KEY } }
             - name: HERMES_KEY
               valueFrom: { secretKeyRef: { name: hermes-keys, key: HERMES_KEY } }
+            - name: HERMES_KEYS_JSON   # optional: scoped keys {"<key>": ["compute","read"]}
+              valueFrom: { secretKeyRef: { name: hermes-keys, key: HERMES_KEYS_JSON, optional: true } }
           readinessProbe:
             httpGet: { path: /healthz, port: 8900 }
             initialDelaySeconds: 3
