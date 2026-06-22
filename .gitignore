@@ -40,3 +40,7 @@ override.tf.json
 *.retry
 .vault-pass
 vault-password.txt
+
+# python bytecode
+__pycache__/
+*.pyc
