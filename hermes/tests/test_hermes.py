@@ -241,5 +241,50 @@ class TestNewTools(unittest.TestCase):
         self.assertTrue(hermes.tool_http_post({"url": "ftp://x/y", "body": "x"}).startswith("error"))
 
 
+class TestReWOO(unittest.TestCase):
+    def setUp(self):
+        self._o = hermes.call_model
+
+    def tearDown(self):
+        hermes.call_model = self._o
+
+    def test_plan_execute_solve_chains_all_tools(self):
+        hermes.call_model = _MockModel([
+            '#E1 = {"name":"now","arguments":{}}\n#E2 = {"name":"calc","arguments":{"expression":"2+2"}}',
+            "time is T and 2+2=4",
+        ])
+        final, trace = hermes.run_rewoo("the time and 2+2")
+        self.assertEqual([s["tool"] for s in trace], ["now", "calc"])  # BOTH planned tools ran (chaining)
+        self.assertEqual(final, "time is T and 2+2=4")
+
+    def test_direct_answer_when_no_tool_needed(self):
+        hermes.call_model = _MockModel(["#ANSWER: Paris"])
+        final, trace = hermes.run_rewoo("capital of France")
+        self.assertEqual(final, "Paris")
+        self.assertEqual(trace, [])
+
+    def test_unusable_plan_falls_back_to_react(self):
+        hermes.call_model = _MockModel([
+            "I'm not sure how to plan this.",                    # no #E lines, no #ANSWER -> fallback
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # ReAct fallback then answers
+            "done",
+        ])
+        final, _ = hermes.run_rewoo("time?")
+        self.assertEqual(final, "done")
+
+    def test_authz_blocks_planned_out_of_scope_tool(self):
+        hermes.call_model = _MockModel([
+            '#E1 = {"name":"http_get","arguments":{"url":"http://x"}}',
+            "could not fetch",
+        ])
+        _final, trace = hermes.run_rewoo("fetch x", allowed_scopes=frozenset({"read"}))
+        self.assertIn("not authorized", trace[0]["result"])
+
+    def test_run_agent_defaults_to_rewoo(self):
+        hermes.call_model = _MockModel(["#ANSWER: hi"])
+        final, _ = hermes.run_agent("hello")
+        self.assertEqual(final, "hi")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

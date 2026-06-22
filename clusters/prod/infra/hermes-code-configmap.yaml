@@ -518,6 +518,69 @@ data:
         return "[stopped: no answer]", trace
 
 
+    _PLAN_RE = re.compile(r"#E\d+\s*=\s*(\{.*\})\s*$")
+
+
+    def run_rewoo(user_text, model=None, reasoning_effort=None, allowed_scopes=None, max_tools=8):
+        """ReWOO plan-then-execute: the model PLANS every tool call upfront, the worker executes them all,
+        then a solver answers from the evidence with NO tool affordance. Fixes multi-tool chaining (every
+        planned step runs) and tool-result faithfulness (solver answers from evidence, can't re-guess).
+        Falls back to ReAct if the plan is unusable. 2 model calls + tool executions (research-backed)."""
+        if allowed_scopes is None:
+            allowed_scopes = ALL_SCOPES
+        model = resolve_model(model, reasoning_effort)
+        plan_prompt = (
+            "You are a planner with these tools:\n" + list_tools_text(allowed_scopes) + "\n\n"
+            "Output a PLAN of the EXACT tool calls needed for the task, one per line as JSON:\n"
+            '#E1 = {"name":"<tool>","arguments":{...}}\n'
+            '#E2 = {"name":"<tool>","arguments":{...}}\n'
+            "List EVERY tool the task needs — if it asks for two separate facts, plan TWO calls. If no tool "
+            "is needed, output exactly one line: #ANSWER: <your direct answer>. Output ONLY the plan lines.\n\n"
+            "Task: " + user_text)
+        plan = call_model([{"role": "user", "content": plan_prompt}], model=model)
+        if "#ANSWER:" in plan and "#E1" not in plan:
+            return plan.split("#ANSWER:", 1)[1].strip(), []
+        trace, evidence = [], []
+        for line in plan.splitlines():
+            m = _PLAN_RE.search(line)
+            if not m:
+                continue
+            try:
+                tc = json.loads(m.group(1))
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(tc, dict) or "name" not in tc:
+                continue
+            name = tc["name"]
+            a = tc.get("arguments", {}) if isinstance(tc.get("arguments"), dict) else {}
+            tool = TOOLS.get(name)
+            if tool is None:
+                result = "error: unknown tool '%s'" % name
+            elif tool["scope"] not in allowed_scopes:
+                result = "error: not authorized — tool '%s' requires scope '%s'" % (name, tool["scope"])
+            else:
+                try:
+                    result = tool["fn"](a)
+                except Exception as e:  # noqa: BLE001
+                    result = "error: " + str(e)
+            result = str(result)[:8000]
+            trace.append({"step": len(trace) + 1, "tool": name, "arguments": a, "result": result})
+            evidence.append("#E%d = %s(%s) -> %s" % (len(trace), name, json.dumps(a), result))
+            if len(trace) >= max_tools:
+                break
+        if not evidence:
+            return run_react(user_text, model=model, allowed_scopes=allowed_scopes)  # plan unusable -> ReAct
+        return _summarize("\n".join(evidence), user_text, model), trace
+
+
+    def run_agent(user_text, model=None, reasoning_effort=None, max_steps=MAX_STEPS, allowed_scopes=None):
+        """Default agent entrypoint. ReWOO (plan-then-execute) by default; HERMES_AGENT_MODE=react for ReAct."""
+        if os.environ.get("HERMES_AGENT_MODE", "rewoo") == "react":
+            return run_react(user_text, model=model, reasoning_effort=reasoning_effort,
+                             max_steps=max_steps, allowed_scopes=allowed_scopes)
+        return run_rewoo(user_text, model=model, reasoning_effort=reasoning_effort, allowed_scopes=allowed_scopes)
+
+
     def handle_slash(text, allowed=None):
         cmd = text.strip().split()[0] if text.strip() else ""
         if cmd == "/help":
@@ -598,7 +661,7 @@ data:
                 final, trace = slash, []
             else:
                 try:
-                    final, trace = run_react(user_text, model=model, reasoning_effort=effort,
+                    final, trace = run_agent(user_text, model=model, reasoning_effort=effort,
                                              max_steps=max_steps, allowed_scopes=scopes)
                 except Exception as e:  # noqa: BLE001
                     return self._send(502, {"error": "agent error: " + str(e)})

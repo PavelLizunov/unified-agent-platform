@@ -54,9 +54,12 @@ SCENARIOS = [
 ]
 
 
+_TEST_MODEL = os.environ.get("HERMES_TEST_MODEL") or None  # override the model under test (else default)
+
+
 def _trial(prompt):
     try:
-        f, t = hermes.run_react(prompt)
+        f, t = hermes.run_agent(prompt, model=_TEST_MODEL)  # ReWOO by default; HERMES_AGENT_MODE=react to compare
         return f, t, None
     except Exception as e:  # noqa: BLE001
         return "", [], str(e)
