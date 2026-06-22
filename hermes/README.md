@@ -56,20 +56,28 @@ error sanitisation (no key leak), step/conversation caps, graceful shutdown, std
 
 ## Tests
 
-- `tests/test_hermes.py` — 26 unit tests (parser, calc sandbox, SSRF guard, ReAct loop incl. dedup/
-  force-final, slash, registry). Run: `cd hermes && python3 -m unittest -v`.
+- `tests/test_hermes.py` — 36 unit tests (parser, calc sandbox, SSRF guard, ReAct loop incl. dedup +
+  single-shot summarization, per-tool authz/scopes, new tools, slash, registry). `python3 -m unittest -v`.
 - `tests/run_integration.py` — live scenarios against the gateway (tool use, no-tool, model variants,
-  effort, injection resistance). Needs `LITELLM_BASE`/`LITELLM_KEY` (+ `HERMES_DEVMODE=1` for the local
-  kubectl fallback). Last run: 8/8.
+  effort, injection resistance). Needs `LITELLM_BASE`/`LITELLM_KEY` (+ `HERMES_DEVMODE=1`). Last run: 8/8.
+- `tests/reliability.py` — measures how faithfully the MODEL reads/uses what Hermes feeds it: N trials
+  per scenario vs the live model, pass rates. This is the agent's behavioral characterisation.
 
-## Known limitation
+## Known limitation (measured)
 
-Prompt-based ReAct tool-compliance is **probabilistic**: the model usually calls tools correctly, but
-on some tasks (e.g. "count and reply with only the number") it may skip a tool, miscount, or loop.
-Hermes guarantees convergence (no infinite loops) and the tools/infra are deterministic, but final
-answer quality on adversarial-terse tasks varies. Native function-calling would fix this but is
-infeasible through the subscription CLI (see above). Mitigations in place: firm system prompt,
-identical-call dedup + forced final answer.
+Prompt-based ReAct quality is a function of the **model's** loop behavior — the tools/infra are
+deterministic (unit + direct-call verified). Measured via `reliability.py`:
+
+- **Reliable:** counting, listing pods, plain recall. (Counting was fixed 0→5/5 by the loop redesign:
+  on a repeated tool call or max_steps, Hermes does ONE clean **single-shot summarization with no tool
+  affordance**, answering from the gathered data — this breaks the model's tendency to re-call tools or
+  dump raw results.)
+- **Still weak (genuine model limits, not Hermes):** (1) multi-tool **chaining** — the model calls one
+  tool then hallucinates the other ("time AND pod count" → invents "0 pods"); (2) arithmetic
+  **result-faithfulness** — the model calls `calc`, gets the correct value, then states its OWN wrong
+  number, ignoring the tool result.
+
+Native function-calling would fix these but is infeasible through the subscription CLI (see above).
 
 ## Deploy / iterate
 
