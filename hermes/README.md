@@ -25,11 +25,13 @@ the Hermes layer, zero subfleet change.** Hermes owns the tool registry, the loo
 
 ## How it works
 
-The model is told to emit ONLY a fenced ```tool_call``` block to call a tool; Hermes parses it,
-executes the tool out-of-band, feeds back a ```tool_result``` (untrusted data), and loops until the
-model answers in prose. Effort routes to the `-think` model group (LiteLLM rejects a client-sent
-`reasoning_effort`). Repeated identical calls are force-converged (the model is told to answer now),
-so the loop never hangs.
+Default loop is **ReWOO plan-then-execute** (`run_rewoo`): a planner lists every needed tool call
+upfront → a worker executes them all → a solver answers from the gathered evidence with NO tool
+affordance. This is the research-backed fix for tool-result faithfulness + multi-tool chaining (see
+Reliability below); it is the default. `HERMES_AGENT_MODE=react` switches to the interleaved ReAct loop
+(also the fallback for a malformed plan). Tools are invoked by the model emitting a fenced JSON
+`tool_call`; Hermes executes them out-of-band and treats every `tool_result` as UNTRUSTED data. Effort
+routes to the `-think` model group (LiteLLM rejects a client-sent `reasoning_effort`).
 
 ## Tools (each carries a scope: compute | read | net)
 
@@ -56,28 +58,34 @@ error sanitisation (no key leak), step/conversation caps, graceful shutdown, std
 
 ## Tests
 
-- `tests/test_hermes.py` — 36 unit tests (parser, calc sandbox, SSRF guard, ReAct loop incl. dedup +
-  single-shot summarization, per-tool authz/scopes, new tools, slash, registry). `python3 -m unittest -v`.
+- `tests/test_hermes.py` — 41 unit tests (parser, calc sandbox, SSRF guard, ReAct + ReWOO loops,
+  per-tool authz/scopes, tools, slash, registry). `python3 -m unittest -v`.
 - `tests/run_integration.py` — live scenarios against the gateway (tool use, no-tool, model variants,
   effort, injection resistance). Needs `LITELLM_BASE`/`LITELLM_KEY` (+ `HERMES_DEVMODE=1`). Last run: 8/8.
 - `tests/reliability.py` — measures how faithfully the MODEL reads/uses what Hermes feeds it: N trials
-  per scenario vs the live model, pass rates. This is the agent's behavioral characterisation.
+  per scenario vs the live model. `HERMES_TEST_MODEL` and `HERMES_AGENT_MODE` let you compare models and
+  loops. This is the agent's behavioral characterisation (see Reliability).
 
-## Known limitation (measured)
+## Reliability (measured)
 
-Prompt-based ReAct quality is a function of the **model's** loop behavior — the tools/infra are
-deterministic (unit + direct-call verified). Measured via `reliability.py`:
+The harness surfaced two real, named failure modes under plain interleaved ReAct — *tool-result
+faithfulness* (the model calls `calc`, gets the right value, then states its OWN wrong number) and
+*multi-tool chaining* (calls one tool, hallucinates the second). The research-backed fix, **ReWOO
+plan-then-execute** (now the default loop), resolves both: the plan forces every tool to run, and the
+solver answers from evidence with no tool affordance so it can't re-guess. Measured on Opus:
 
-- **Reliable:** counting, listing pods, plain recall. (Counting was fixed 0→5/5 by the loop redesign:
-  on a repeated tool call or max_steps, Hermes does ONE clean **single-shot summarization with no tool
-  affordance**, answering from the gathered data — this breaks the model's tendency to re-call tools or
-  dump raw results.)
-- **Still weak (genuine model limits, not Hermes):** (1) multi-tool **chaining** — the model calls one
-  tool then hallucinates the other ("time AND pod count" → invents "0 pods"); (2) arithmetic
-  **result-faithfulness** — the model calls `calc`, gets the correct value, then states its OWN wrong
-  number, ignoring the tool result.
+| scenario | ReAct | **ReWOO** |
+|---|---|---|
+| count / list-pods / recall | reliable | reliable |
+| multi-tool **chaining** | 0/5 | **5/5** |
+| arithmetic **faithfulness** | 0/5 | **4/5** |
+| **overall** | 13/25 (52%) | **24/25 (96%)** |
 
-Native function-calling would fix these but is infeasible through the subscription CLI (see above).
+**Model choice:** Opus (`smart-cloud`) is the most reliable — a comparison run gave Opus 47% vs Sonnet
+40% vs **Haiku 0%** under ReAct. The weakness was the *technique*, not the model (constrained-decoding /
+grammars need token-logit access Claude doesn't expose; "a flagship is worse at faithfulness" was
+refuted in the literature — larger instruction-tuned models follow grounding prompts *better*). The
+failure modes are studied 2026 phenomena ("artifact-faithfulness" / "Tool Ignored").
 
 ## Deploy / iterate
 
