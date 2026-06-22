@@ -31,13 +31,22 @@ model answers in prose. Effort routes to the `-think` model group (LiteLLM rejec
 `reasoning_effort`). Repeated identical calls are force-converged (the model is told to answer now),
 so the loop never hangs.
 
-## Tools
+## Tools (each carries a scope: compute | read | net)
 
-- `calc` — arithmetic via an AST sandbox (no `eval`; magnitude/length caps).
-- `now` — current UTC.
-- `http_get` — fetch a public URL, **SSRF-guarded** (blocks private/internal IPs incl. on redirects).
-- `kube_pods` — list pods+status in a namespace via the in-cluster k8s API (ServiceAccount `hermes`
-  + a read-only `pods` ClusterRole). Least privilege; nothing else.
+- `calc` (compute) — arithmetic via an AST sandbox (no `eval`; magnitude/length caps).
+- `now` (compute) — current UTC.
+- `http_get` / `http_post` (net) — GET/POST a public URL, **SSRF-guarded** (blocks private/internal
+  IPs incl. on every redirect hop).
+- `kube_pods` / `kube_get` / `kube_logs` (read) — read-only cluster inspection via the in-cluster k8s
+  API (ServiceAccount `hermes` + a get/list-only ClusterRole on pods, pods/log, services, events,
+  deployments, nodes, namespaces). `kube_get` lists pods|services|events|deployments|nodes|namespaces.
+
+## Authorization (per-tool scopes)
+
+`HERMES_KEY` grants ALL scopes. `HERMES_KEYS_JSON` (a SOPS secret value, e.g. `{"<key>":["compute","read"]}`)
+defines scoped keys: a key only SEES (in the system prompt) and can only CALL tools whose scope it holds —
+e.g. a read-only key gets calc/now + the kube_* tools but is blocked from http_get/http_post. A deployed
+read-only key exists for safe inspection. Unknown bearer → 401; out-of-scope tool call → authz error.
 
 ## Hardening (from the multi-agent code review)
 
