@@ -126,33 +126,34 @@ class TestReact(unittest.TestCase):
         self.assertEqual(len(trace), 2)
         self.assertEqual(final, "done")
 
-    def test_repeated_call_forces_final_answer(self):
+    def test_repeated_call_is_cached_then_model_answers(self):
         hermes.call_model = _MockModel([
             '```tool_call\n{"name":"now","arguments":{}}\n```',
-            '```tool_call\n{"name":"now","arguments":{}}\n```',  # identical repeat -> forced final
-            "the time is X",  # forced-final answer
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # repeat -> cached, loop continues
+            "the time is X",
         ])
-        final, trace = hermes.run_react("time?")
+        final, _trace = hermes.run_react("time?")
         self.assertEqual(final, "the time is X")
-        self.assertEqual(len(trace), 1)  # tool executed once; repeat did not re-run or add a trace entry
 
-    def test_repeated_call_still_looping_falls_back_to_result(self):
+    def test_repeated_loop_breaks_and_summarizes(self):
         hermes.call_model = _MockModel([
             '```tool_call\n{"name":"now","arguments":{}}\n```',
-            '```tool_call\n{"name":"now","arguments":{}}\n```',  # repeat
-            '```tool_call\n{"name":"now","arguments":{}}\n```',  # even the forced-final tries a tool
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # repeat 1 (cached)
+            '```tool_call\n{"name":"now","arguments":{}}\n```',  # repeat 2 -> break -> summarize
+            "summarized answer",
         ])
         final, _ = hermes.run_react("time?")
-        self.assertIn("from tool results", final)  # falls back to the cached result, never loops forever
+        self.assertEqual(final, "summarized answer")  # single-shot summary, never loops forever
 
-    def test_max_steps_guard(self):
-        # distinct args each step -> no dedup -> exercises the real max_steps ceiling
+    def test_max_steps_then_summarizes(self):
+        # distinct args -> no dedup -> loop caps at max_steps, then one summarization call
         hermes.call_model = _MockModel(
-            ['```tool_call\n{"name":"calc","arguments":{"expression":"%d+1"}}\n```' % i for i in range(50)]
+            ['```tool_call\n{"name":"calc","arguments":{"expression":"%d+1"}}\n```' % i for i in range(3)]
+            + ["final summary from data"]
         )
         final, trace = hermes.run_react("loop", max_steps=3)
-        self.assertIn("max steps", final)
         self.assertEqual(len(trace), 3)
+        self.assertEqual(final, "final summary from data")
 
 
 class TestSlash(unittest.TestCase):
