@@ -72,14 +72,15 @@ The harness surfaced two real, named failure modes under plain interleaved ReAct
 faithfulness* (the model calls `calc`, gets the right value, then states its OWN wrong number) and
 *multi-tool chaining* (calls one tool, hallucinates the second). The research-backed fix, **ReWOO
 plan-then-execute** (now the default loop), resolves both: the plan forces every tool to run, and the
-solver answers from evidence with no tool affordance so it can't re-guess. Measured on Opus:
+solver answers from evidence with no tool affordance so it can't re-guess. Measured on Opus over a
+representative run (9 scenarios × 20 trials = 180):
 
 | scenario | ReAct | **ReWOO** |
 |---|---|---|
-| count / list-pods / recall | reliable | reliable |
-| multi-tool **chaining** | 0/5 | **5/5** |
-| arithmetic **faithfulness** | 0/5 | **4/5** |
-| **overall** | 13/25 (52%) | **24/25 (96%)** |
+| count / list / deployments / nodes / recall / http_fetch | mixed (1–20/20) | **20/20 each** |
+| multi-tool **chaining** (time+count, 3-facts) | 0–1/20 | **20/20** |
+| arithmetic **faithfulness** | 0/20 | **20/20** |
+| **overall (180 trials)** | 84/180 (47%) | **180/180 (100%)** |
 
 **Model choice:** Opus (`smart-cloud`) is the most reliable — a comparison run gave Opus 47% vs Sonnet
 40% vs **Haiku 0%** under ReAct. The weakness was the *technique*, not the model (constrained-decoding /
