@@ -1,0 +1,15 @@
+title = "UAP gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "SOPS-encrypted-at-rest files are committed by design"
+paths = [
+  '''clusters/.*\.sops\.ya?ml$''',
+  '''infra/.*\.sops\.ya?ml$''',
+]
+regexes = [
+  '''-----BEGIN AGE ENCRYPTED FILE-----''',
+  '''ENC\[AES256_GCM''',
+]

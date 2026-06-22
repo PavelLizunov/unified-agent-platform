@@ -1,0 +1,40 @@
+name: ci
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# NOTE (first-run draft from the 2026-06-23 audit):
+# - Action refs use version tags for readability; SHA-PIN them for supply-chain safety
+#   (the github-actions Dependabot block will surface updates) before requiring this check.
+# - The job name `static-checks` is load-bearing: the master ruleset requires exactly that context.
+# - Smoke tests are intentionally NOT here (they SSH to tailnet IPs + need the age key) — they stay
+#   a workstation/ops-1 job. This job is cluster-free on purpose.
+
+jobs:
+  static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4            # TODO: SHA-pin
+      - uses: actions/setup-python@v5        # TODO: SHA-pin
+        with:
+          python-version: '3.11'
+      - name: Install Python deps
+        run: pip install -r requirements-dev.txt   # PyYAML (validate_iac); secret_scan needs only git
+      - name: Secret scan (repo-root as argv[1], same call as secret-scan.ps1)
+        run: python tests/static/secret_scan.py .
+      - name: IaC static validation
+        run: python tests/static/validate_iac.py .
+      - name: Hermes unit tests (hermetic, offline; test_*.py only — NOT *.py, which imports the live-endpoint scripts)
+        run: python -m unittest discover -s hermes/tests -p 'test_*.py'
+      - name: Install kustomize
+        uses: imranismail/setup-kustomize@v2   # TODO: SHA-pin
+      - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
+        run: kustomize build clusters/prod >/dev/null
+      - name: gitleaks (defense-in-depth over the hand-rolled 10-pattern scanner; free for personal repos)
+        uses: gitleaks/gitleaks-action@v2      # TODO: SHA-pin
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml

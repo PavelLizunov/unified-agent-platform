@@ -1,0 +1,3 @@
+# Dev/CI verification toolchain only. hermes runtime stays stdlib-only (RU-egress-safe).
+# Pin exact versions; bump deliberately.
+PyYAML==6.0.2

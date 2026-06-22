@@ -44,3 +44,4 @@ vault-password.txt
 # python bytecode
 __pycache__/
 *.pyc
+.pytest_cache/

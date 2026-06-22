@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+# Intentionally NO cargo (subfleet lives in github.com/PavelLizunov/subfleet, consumed by Flux as a tagged GitRepository)
+# Intentionally NO pip (hermes is single-file stdlib-only; PyYAML is a CI-runner dep, not an app dep)
