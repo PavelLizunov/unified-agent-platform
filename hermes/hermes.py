@@ -363,7 +363,16 @@ def tool_kube_get(args):
             out.append(nm)
         return "\n".join(out) or "(none)"
     except FileNotFoundError:
-        return "error: not in-cluster (kube tools unavailable)"
+        if not DEVMODE:
+            return "error: not in-cluster (kube tools unavailable)"
+        import subprocess  # local-dev fallback only
+        try:
+            cmd = ["kubectl"] + (["-n", ns] if namespaced else []) + \
+                ["get", kind, "--no-headers", "-o", "custom-columns=NAME:.metadata.name"]
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            return (r.stdout.strip() or "(none)") if r.returncode == 0 else ("error: " + r.stderr.strip())
+        except Exception as e:  # noqa: BLE001
+            return "error: " + str(e)
     except Exception as e:  # noqa: BLE001
         return "error: " + str(e)
 
@@ -381,7 +390,15 @@ def tool_kube_logs(args):
         text = _k8s_request("/api/v1/namespaces/%s/pods/%s/log?tailLines=%d" % (ns, pod, tail), parse_json=False)
         return text[:12000] or "(no logs)"
     except FileNotFoundError:
-        return "error: not in-cluster (kube tools unavailable)"
+        if not DEVMODE:
+            return "error: not in-cluster (kube tools unavailable)"
+        import subprocess  # local-dev fallback only
+        try:
+            r = subprocess.run(["kubectl", "-n", ns, "logs", pod, "--tail=" + str(tail)],
+                               capture_output=True, text=True, timeout=15)
+            return (r.stdout.strip()[:12000] or "(no logs)") if r.returncode == 0 else ("error: " + r.stderr.strip())
+        except Exception as e:  # noqa: BLE001
+            return "error: " + str(e)
     except Exception as e:  # noqa: BLE001
         return "error: " + str(e)
 
