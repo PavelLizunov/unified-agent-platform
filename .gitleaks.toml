@@ -4,12 +4,19 @@ title = "UAP gitleaks config"
 useDefault = true
 
 [allowlist]
-description = "SOPS-encrypted-at-rest files are committed by design"
+description = "SOPS-encrypted-at-rest files + documented placeholders are committed by design"
 paths = [
   '''clusters/.*\.sops\.ya?ml$''',
   '''infra/.*\.sops\.ya?ml$''',
+  '''.*\.example$''',
+  '''.*\.example\..*$''',
+  '''.*\.template\..*$''',
 ]
 regexes = [
   '''-----BEGIN AGE ENCRYPTED FILE-----''',
   '''ENC\[AES256_GCM''',
+  # documented placeholders, never real secrets (e.g. staging garage.yaml rpc_secret/admin_token)
+  '''REPLACE_WITH[A-Z0-9_]*''',
+  '''CHANGEME''',
+  '''<[A-Za-z0-9_-]+>''',
 ]
