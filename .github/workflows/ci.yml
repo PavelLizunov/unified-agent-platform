@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 # NOTE (first-run draft from the 2026-06-23 audit):
 # - Action refs use version tags for readability; SHA-PIN them for supply-chain safety
@@ -19,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4            # TODO: SHA-pin
+        with:
+          fetch-depth: 0                     # full history so gitleaks can scan the PR commit range (base^..head)
       - uses: actions/setup-python@v5        # TODO: SHA-pin
         with:
           python-version: '3.11'
@@ -37,4 +40,5 @@ jobs:
       - name: gitleaks (defense-in-depth over the hand-rolled 10-pattern scanner; free for personal repos)
         uses: gitleaks/gitleaks-action@v2      # TODO: SHA-pin
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by gitleaks-action v2 on pull_request events
           GITLEAKS_CONFIG: .gitleaks.toml
