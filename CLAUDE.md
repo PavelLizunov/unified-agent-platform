@@ -12,22 +12,40 @@ project decisions in `DECISIONS.md`.
 5. `STATUS.md`
 6. `runbooks/validation-matrix.md`
 
+**Model/agent layer + the 2026-06 pivot — read these before touching anything model/agent/coding:**
+
+7. `docs/infrastructure.md` — consolidated fleet + what-runs-where + target architecture
+8. `docs/next-steps.md` — the hermes-agent pilot plan + the still-open foundation work
+9. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` — why hermes-agent, and why **Codex (not Claude)** is the brain
+10. `hermes/README.md` + `hermes/docs/claude-code-autonomous-reference.md` — the parked bespoke agent + the Claude Code headless reference
+
 If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask the owner before changing direction.
 
 ## Current State
 
-- Current phase: Stage 0P, local Proxmox bootstrap.
-- HA status: not HA ready.
-- Reason: only two local VMs exist; a third independent k3s server is still required.
-- Git branch: `master`.
-- For exact history, run `git log --oneline --decorate -5`; this file should not be treated as the source of truth for
-  commit hashes after another agent has committed.
-- Plan fact-checked 2026-06-18 (see `STATUS.md` -> Plan Fact-Check): MinIO -> Garage (ADR-019), Restate -> S3 not
-  Postgres (ADR-020), RU LLM egress (ADR-018), k3s-over-Tailscale flannel-iface (ADR-021).
-- Live since 2026-06-19 (see STATUS.md): Flux GitOps sync; VLESS LLM egress (sing-box on `uap-ops-1`); k3s
-  etcd-s3 -> Cloudflare R2 offsite backups + a restore drill; Vaultwarden on `uap-ops-1`. CAVEAT: egress + Vaultwarden
-  run ad-hoc on `uap-ops-1` (a 2 GB non-cluster VM) — blast-radius/SPOF + secrets-at-rest issues are flagged in
-  `REVIEW-CODEX.md` (2026-06-19 cross-review). Address those before Stage 2.
+- **North star: vibe-coding** — the owner supplies ideas + infrastructure; the agent ships *verified* code. The owner
+  does **NOT review code**, so the agent's own self-testing is the quality gate. (See `docs/next-steps.md`, `docs/infrastructure.md`.)
+- **Three layers, live (namespace `uap-system`):**
+  - **Infra** — k3s 2-node (**NOT HA**: server `uap-home-1` + agent `uap-home-2` = single etcd member), Flux GitOps + SOPS, k3s→R2 DR.
+  - **Model** — `subfleet` (the Claude subscription as an OpenAI **chat** API; drops `tool_calls`) + **LiteLLM** v1.89.0.
+    subfleet is **retained for the owner's OTHER projects** (a Telegram bot + web sessions); redundant for in-repo coding.
+  - **Agent** — bespoke `hermes/hermes.py` ("Hermes-legacy"; prompt-based ReAct/ReWOO; NodePort `:30890`). **PARKED.**
+- **Active direction (2026-06-22/23 pivot):** adopt the **external NousResearch hermes-agent** as the vibe-coding harness.
+  Brain = a **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling) OR a **local FC model** on the
+  RTX 5060 Ti; coding = `claude -p` (Claude Max) + `codex exec` as skills. **Do NOT point hermes-agent's brain at the
+  subfleet endpoint — it is FC-less and every tool silently goes dark.** Rationale + citations in `docs/research/`.
+- **GitOps-coverage nuance (verified):** only `subfleet` + `singbox-egress` are Flux-reconciled. `litellm.yaml` and
+  `hermes.yaml` are **untracked**, `litellm-keys.sops.yaml` is committed-but-unreferenced, and the `hermes-keys` Secret
+  has **no manifest at all** — LiteLLM/Hermes were applied by hand. Do not claim "live via GitOps" for those; bringing
+  them into the kustomization (or parking them) is follow-up **B0** in `docs/next-steps.md`.
+- **⚠️ The quality gate is NOT enforced.** `tests/verify-local.ps1` runs only on manual invocation; Flux reconciles
+  whatever lands on `master` (`prune:true`) = any push to master is a cluster-admin deploy. A GitHub Actions CI gate
+  (`.github/workflows/ci.yml`, job `static-checks`) exists as a **signal** (green), but is **not a required check** —
+  rulesets/branch-protection need GitHub Pro or a public repo. See `docs/next-steps.md` → Platform hardening.
+- Git branch `master`. For exact history run `git log --oneline -8` (this file is not the source of truth for hashes).
+  Plan fact-check (2026-06-18, `STATUS.md`): Garage (ADR-019), Restate→S3 (ADR-020), RU egress (ADR-018),
+  k3s-over-Tailscale (ADR-021). The ad-hoc egress + Vaultwarden on `uap-ops-1` (2 GB non-cluster VM) remain a
+  blast-radius/SPOF concern (`REVIEW-CODEX.md`).
 
 ## Live Nodes
 
@@ -38,6 +56,11 @@ Use tailnet IPs for SSH and smoke tests.
 | `uap-home-1` | k3s server, embedded etcd | `192.168.0.201` | `100.106.223.120` | control-plane/etcd |
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
 | `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; deploy path verified from ops |
+| `desktop-m922ij2` | workstation / **GPU host** | — | `100.114.172.40` | Win 11, 32c/32GB, **RTX 5060 Ti 16GB**; **NOT always-on**; future local-FC-model host + agent-worker |
+| `pavels-mac-mini` | personal / agent-worker | — | `100.116.97.112` | Apple Silicon; SSH off; **NOT always-on** |
+
+Full fleet + roles: `docs/infrastructure.md`. The only GPU is on the **not-always-on** Windows desktop, so a
+local-model brain on the RTX is only available when it is on (hence Codex-sub is the durable brain).
 
 Do not rely on LAN SSH as the default path. LAN SSH has shown intermittent resets; tailnet SSH is the stable path.
 Exception: Windows-to-`uap-ops-1` tailnet SSH intermittently timed out after enrollment, so workstation-to-ops checks
@@ -47,8 +70,9 @@ tailnet and can run `kubectl` against the cluster.
 ## Git Remote Readiness
 
 - GitHub `origin` on `uap-ops-1` is SSH; pushes use a repo-scoped read-WRITE deploy key (`uap-ops-1 push`), Flux
-  pulls via a separate read-ONLY deploy key. The broad `gh` OAuth token was removed (gh logged out) — re-auth with
-  `gh auth login` only if a one-off gh-api op is needed. Flux Git sync is ACTIVE; STATUS.md is the source of truth.
+  pulls via a separate read-ONLY deploy key. `gh` is **authenticated** on `uap-ops-1` (device-flow, account
+  `PavelLizunov`, scopes `repo,read:org,gist,workflow`) for gh-api ops (rulesets, CI inspection). Commit identity on
+  ops-1 is `UAP Agent <slovnmi@gmail.com>`. Flux Git sync is ACTIVE; STATUS.md is the source of truth.
 - The **local Windows workstation** has no `origin` and no S3 env, so `tests/verify-local.ps1 -IncludeReadiness`
   still reports `git-remote-missing` / `s3-env-missing` *from the workstation* — this is EXPECTED: origin + S3 creds
   live on `uap-ops-1` and in SOPS, not on Windows.

@@ -7,28 +7,28 @@ description: Commit a change and get it pushed. The git origin + write deploy ke
 
 ## Hard facts
 
-- The Windows workstation has NO `origin`. `git push` there fails. Pushes happen FROM uap-ops-1 (`100.82.241.121`) via the repo-scoped read-WRITE SSH deploy key.
-- Flux follows `master` with prune:true on ./clusters/prod, so a push to master DEPLOYS. Treat master as production.
+- The Windows workstation has NO `origin`. `git push` there fails. Git operations happen FROM uap-ops-1 (`100.82.241.121`) via the repo-scoped read-WRITE SSH deploy key. `gh` is authed on ops-1 (account `PavelLizunov`). Identity is already set: `UAP Agent <slovnmi@gmail.com>`.
+- The repo is PUBLIC and `master` is protected by the `protect-master` ruleset: **a direct `git push origin master` is REJECTED.** Changes land via a **PR** that requires a green **`static-checks`** CI check (0 human approvals — the owner doesn't review). After merge, Flux reconciles `master`. See `docs/next-steps.md`, ADR-026.
 
-## Steps
+## Steps (changes land via PR — NOT direct push)
 
-1. Run the gate first: invoke **uap-verify** (or at minimum `python tests/static/secret_scan.py .`). Do not commit if it fails.
-2. Set a canonical identity on the machine that creates the commit BEFORE committing (it currently defaults to the placeholder `Codex <codex@local>` / `Debian <uap@uap-ops-1.local>`):
+1. Run the gate first: invoke **uap-verify** (at minimum `python tests/static/secret_scan.py .` and, if you touched `hermes/`, `python -m unittest discover -s hermes/tests -p 'test_*.py'`). Do not proceed if it fails.
+2. On uap-ops-1, branch + commit (transfer workstation edits to ops-1 first via tar/scp). Conventional-Commits subject + the trailer:
    ```bash
-   git config user.name  "UAP Codex Agent"      # distinct from the Claude-worker identity
-   git config user.email "<a-real-routable-email>"
+   git checkout -b <type/short-topic>
+   git commit -m "type(scope): summary" -m "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+   git push -u origin <type/short-topic>      # the deploy key may push non-master branches
    ```
-3. Commit with a Conventional-Commits subject and the required trailer:
+3. Open + auto-merge a PR (the deploy key pushes the branch; `gh` opens/merges the PR):
+   ```bash
+   gh pr create --base master --head <type/short-topic> --title "type(scope): summary" --body "..."
+   gh pr merge --auto --squash <pr-number>    # merges automatically once `static-checks` is green
    ```
-   type(scope): summary
-
-   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-   ```
-4. Push from uap-ops-1 (the only host with origin + the write key). If you edited on the workstation, transfer the change to ops-1 first (tar/scp or git bundle/patch over ssh), then push there.
+4. The merge only succeeds when **`static-checks`** is green. Then Flux reconciles `master`.
 
 ## Do NOT
 
-- Do NOT `--no-verify` or bypass signing.
-- Do NOT push straight to master if a branch-protection ruleset is in place — open a PR so the `static-checks` CI gate runs.
+- Do NOT `git push origin master` directly (blocked by the ruleset) or use `--no-verify`.
+- Do NOT disable/bypass the `protect-master` ruleset to force a change in — fix the failing check instead.
 
-Authoritative reference: CLAUDE.md -> Git Remote Readiness, STATUS.md.
+Authoritative reference: CLAUDE.md -> Git Remote Readiness, STATUS.md, ADR-026, `docs/next-steps.md`.
