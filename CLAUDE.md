@@ -73,9 +73,11 @@ tailnet and can run `kubectl` against the cluster.
   pulls via a separate read-ONLY deploy key. `gh` is **authenticated** on `uap-ops-1` (device-flow, account
   `PavelLizunov`, scopes `repo,read:org,gist,workflow`) for gh-api ops (rulesets, CI inspection). Commit identity on
   ops-1 is `UAP Agent <slovnmi@gmail.com>`. Flux Git sync is ACTIVE; STATUS.md is the source of truth.
-- The **local Windows workstation** has no `origin` and no S3 env, so `tests/verify-local.ps1 -IncludeReadiness`
-  still reports `git-remote-missing` / `s3-env-missing` *from the workstation* — this is EXPECTED: origin + S3 creds
-  live on `uap-ops-1` and in SOPS, not on Windows.
+- The **local Windows workstation** now has a **read-only `origin`** (the public GitHub URL; added 2026-06-23 after
+  the repo went public) so it can `git fetch`/sync — but **pushes still go via `uap-ops-1`** (the write deploy key
+  lives there; Windows has no push creds). `-IncludeReadiness` may still report `s3-env-missing` *from the
+  workstation* (S3 creds live in SOPS / on ops-1) — EXPECTED. **Deploys are PR-based** (direct push to master is
+  blocked by the ruleset — see ADR-026 + the `uap-commit-push` skill).
 - Windows SSH key fingerprint `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c` (comment `windows`); the
   workstation does not run sshd (TCP 22 closed), so node->workstation SSH is unavailable.
 

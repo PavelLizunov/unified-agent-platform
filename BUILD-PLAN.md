@@ -239,8 +239,8 @@ litellm_settings:
 
 - **Restate** в кластере (durable: Bifrost-лог + локальный RocksDB + async-снапшоты в **S3/Garage** из Этапа 2;
   Postgres Restate НЕ использует — ADR-020).
-- Шаблон **agent-воркера** (Claude Code / Hermes / собственный worker-daemon): stateless, ходит в LiteLLM,
-  состояние наружу.
+- Шаблон **agent-воркера** (Claude Code / **hermes-agent**-харнесс / собственный worker-daemon; «Hermes» здесь =
+  внешний hermes-agent, ADR-024, не bespoke Hermes-legacy): stateless, ходит в LiteLLM, состояние наружу.
   - Критичные/длинные задачи — durable workflow (Restate SDK, идемпотентные побочные эффекты).
   - Мелкие задачи — обычный вызов с перезапуском при сбое.
 - Windows/Mac/Linux-воркеры цепляются к Restate по tailnet — их **не** нужно делать нодами k3s.

@@ -28,7 +28,7 @@ data:
       # --- Claude via subfleet (live once subfleet is deployed + credentials.json seeded) ---
       - model_name: smart-cloud            # reasoning-on Opus for hard agent tasks
         litellm_params:
-          model: openai/claude-opus-4-5
+          model: openai/claude-opus-4-8
           api_base: http://subfleet-bridge.uap-system.svc:18902/v1   # VALIDATE release/ns DNS
           api_key: os.environ/SUBFLEET_KEY
           extra_body: { reasoning_effort: high }   # subfleet enables Claude extended thinking
