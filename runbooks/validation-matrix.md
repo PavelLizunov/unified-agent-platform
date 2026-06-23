@@ -44,11 +44,15 @@ Pass criteria:
 | ops-1 services backup | Vaultwarden + egress secrets archive in R2 | `rclone lsf r2:uap-k3s-snapshots/ops-backup/` (on uap-ops-1) | weekly | recent `ops-*.tar.gz.age` present; see `runbooks/uap-ops-services-backup.md` |
 | SOPS | Decrypt fixture | `tests/smoke/sops-decrypt.ps1` | After SOPS key changes | `sops-decrypt-ok` |
 | Disaster recovery | Disposable restore (+ canary Secret decrypt) | `runbooks/restore-drill.md` | Before claiming recovery readiness; then quarterly | restored cluster answers `kubectl` AND a known canary Secret decrypts |
+| Local FC brain (A1) | Structured `tool_calls` at >= 64k context | `tests/smoke/local-fc-toolcall.ps1 -StartOllama` | On the GPU desktop, when standing up/verifying the local brain | `local-fc-toolcall-ok` (tool_calls present, not text; greeting yields none; context >= 64k) |
 | HA failover | Kill one server | future Stage 1 drill | After third server joins | API and workloads survive one server loss |
 
 ## Notes
 
 - Smoke tests default to tailnet IPs. Override with `UAP_*` environment variables for another cluster.
+- The **Local FC brain (A1)** check is **opportunistic**: it runs only on the GPU desktop (`desktop-m922ij2`) when it
+  is on and a local server is serving, so it is **deliberately excluded from `run-all.ps1`** (which targets the
+  always-on cluster). See `runbooks/local-fc-model.md`.
 - Warnings from `k3s etcd-snapshot list` about server-only flags are expected in the current local config and are
   documented in `runbooks/k3s-snapshots.md`.
 - A green local gate does not mean HA is ready. HA requires a third independent k3s server and a failover drill.

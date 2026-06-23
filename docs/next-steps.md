@@ -32,7 +32,7 @@ subscriptions doing the actual edits. **Decisive constraint:** hermes-agent **re
 function-calling** — the subfleet/Claude chat path cannot be its brain (it would connect and chat but
 every tool goes dark). Detail + citations in the two research docs.
 
-### Phase A1 — Local function-calling brain on the RTX (proof of FC)
+### Phase A1 — Local function-calling brain on the RTX (proof of FC) — ✅ DONE (2026-06-23)
 
 *Why first:* cheapest way to prove the hermes-agent tool loop end-to-end with **no** cloud egress and
 **no** subscription risk, on hardware we already own.
@@ -44,6 +44,15 @@ every tool goes dark). Detail + citations in the two research docs.
   local model — structured `tool_calls`, not text.
 - *Caveat:* the desktop is **not always-on**, so this brain is opportunistic; the durable brain is Codex
   (A5).
+
+> **Result (2026-06-23):** proven via **Ollama 0.16.1 + `gpt-oss:20b`** (native Windows; already on disk → no model
+> download over the RU network). `/v1/chat/completions` with a `tools` array returns a **structured `tool_calls`**
+> (`get_weather({"city":"Paris"})`, `finish_reason=tool_calls`), the tool-result round-trip yields a final answer, and
+> a greeting yields no tool call. Served `context_length=65536`, **100% GPU**, ~14.7 GB VRAM. WSL2/Docker absent, so
+> vLLM-in-WSL2 deferred; `gpt-oss` chosen over a fresh Hermes/Qwen pull for the no-download reason. Proof:
+> `tests/smoke/local-fc-toolcall.ps1` → `local-fc-toolcall-ok`. Runbook: `runbooks/local-fc-model.md`. STATUS.md →
+> "Local FC Brain". **The strict A1 wording ("a *hermes-agent* run invokes a tool") completes in A2** — A1 proved the
+> exact endpoint contract hermes-agent requires; pointing hermes-agent at it (tailnet bind + `allow_private_urls`) is A2.
 
 ### Phase A2 — hermes-agent in Docker on an always-on Linux node, behind the egress
 

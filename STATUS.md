@@ -127,6 +127,26 @@ against `clusters/prod/infra/kustomization.yaml` + `git status`): only part is F
 Treat "LiteLLM/Hermes are live" as *running + verified*, NOT *reconciled by GitOps*. Bringing them into the
 kustomization (or formally parking them) is follow-up **B0** in `docs/next-steps.md`.
 
+## Local FC Brain — Track A1 (PROVEN 2026-06-23)
+
+Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain on the RTX, no cloud egress.
+
+- **Host:** `desktop-m922ij2` (RTX 5060 Ti 16 GB, Blackwell sm_120, driver 610.62 / CUDA 13.3); **not always-on**, so
+  this brain is **opportunistic** (durable brain is Codex, A5).
+- **Stack:** **Ollama 0.16.1** (native Windows) serving **`gpt-oss:20b`** — already on disk, so **no model download
+  over the RU network**. Chosen over a fresh Hermes/Qwen pull for that reason; `--tool-call-parser hermes` (vLLM) /
+  `--jinja` (llama.cpp) are the equivalents if a Hermes/Qwen GGUF is swapped in. **WSL2/Docker are NOT installed**, so
+  vLLM-in-WSL2 is deferred (heaviest path).
+- **Proof (the A1 "Done" gate):** against `http://127.0.0.1:11434/v1/chat/completions` with a `tools` array, the model
+  returns a **structured `tool_calls`** object — `get_weather({"city":"Paris"})`, `finish_reason=tool_calls` — **not
+  text**; feeding the tool result back yields a correct final answer (`finish_reason=stop`); a bare greeting yields
+  **no** tool call. Served `context_length=65536` (>= 64k), **100% GPU**, ~14.7 GB VRAM (`/api/ps`).
+- **Reproduce:** `powershell -ExecutionPolicy Bypass -File .\tests\smoke\local-fc-toolcall.ps1 -StartOllama` →
+  `local-fc-toolcall-ok`. Runbook: `runbooks/local-fc-model.md`.
+- **Not yet done (Phase A2):** running hermes-agent itself against this endpoint (bind Ollama to the tailnet +
+  `security.allow_private_urls: true` for the CGNAT `100.64/10` range). A1 proves the *endpoint contract*, not the
+  hermes-agent startup/run.
+
 ## Repeatable Bootstrap
 
 - OpenTofu/Terraform-compatible provisioning skeleton added under `infra/tofu`.
@@ -140,6 +160,8 @@ kustomization (or formally parking them) is follow-up **B0** in `docs/next-steps
 - Unified local gate: `tests/verify-local.ps1`.
 - Secret scan: `tests/static/secret-scan.ps1`.
 - Validation matrix: `runbooks/validation-matrix.md`.
+- Local FC brain runbook (Track A1): `runbooks/local-fc-model.md`.
+- Local FC tool-call smoke test (opportunistic, GPU desktop): `tests/smoke/local-fc-toolcall.ps1`.
 - Restore drill runbook: `runbooks/restore-drill.md`.
 - Offsite backup runbook: `runbooks/offsite-backups.md`.
 - Flux remote Git runbook: `runbooks/flux-remote-git.md`.
