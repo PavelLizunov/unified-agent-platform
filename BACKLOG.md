@@ -34,5 +34,7 @@ Tracked items that are **not** done yet, split by who must act. Source: the 2026
 
 - Stage 2 (`Postgres HA + Garage`) manifests may be **prepared and reviewed** now (review-only scaffolding), but
   must NOT be applied until the Stage 1 HA gate is green — see `BUILD-PLAN.md` Stage 2 and `clusters/staging-stage2/`.
-- Residual accepted for Stage 0P: classic GitHub branch protection unavailable on a free private repo; single-region
-  R2; ops-1 remains a SPOF until services migrate into the cluster (Stage 3).
+- Residual: ~~classic GitHub branch protection unavailable on a free private repo~~ → **CLOSED 2026-06-23**: the repo
+  was made **public** and a free `protect-master` ruleset now requires a PR + green `static-checks` (both classic
+  protection AND rulesets need Pro on a *private* repo — going public was the fix; see ADR-026). Still open:
+  single-region R2; ops-1 remains a SPOF until services migrate into the cluster.

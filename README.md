@@ -54,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1
 | Состояние | CloudNativePG (Postgres HA) + Garage (S3) | durable-стор, артефакты и backup |
 | Durable execution | Restate | «замена, а не остановка» для критичных задач |
 | Шлюз моделей | LiteLLM (×2) | единый OpenAI-совместимый эндпоинт, маршрутизация, fallback, учёт |
-| Агенты | Claude Code, Hermes Agent | stateless-воркеры, цепляются по mesh |
+| Агенты | Claude Code (кодинг), hermes-agent (харнесс) | Hermes-legacy (bespoke) припаркован — см. DECISIONS ADR-024 |
 | Дашборд | Mission Control / Restate UI | окно во все сессии (сменный модуль, не фундамент) |
 | GitOps/секреты | Flux CD + SOPS/age | декларативное применение, зашифрованные секреты в git |
 | Bootstrap/IaC | OpenTofu-compatible Terraform + Ansible | repeatable provisioning и настройка указанных серверов |

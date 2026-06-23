@@ -11,8 +11,8 @@ model groups, once subfleet `#2/#3` land).
 ## Contract (from subfleet's integration delta)
 
 - Bridge: `http://<release>-bridge.<ns>.svc:18902/v1`, auth `Bearer <BRIDGE_SECRET>`.
-- Models advertised: `claude-opus-4-5`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`
-  (LiteLLM uses `openai/<id>`).
+- Models advertised: `claude-opus-4-8`, `claude-sonnet-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`
+  (LiteLLM uses `openai/<id>`; prod pins `claude-opus-4-8`, the `openai/opus` alias auto-tracks latest).
 - Optional, back-compatible: request field `reasoning_effort` (`low|medium|high`) enables Claude
   extended thinking; `BRIDGE_MAX_CONCURRENT` env → `429 + Retry-After` backpressure;
   `UNSUPPORTED_PARAMS_MODE` (leave `ignore`/`warn` — do NOT `enforce` while LiteLLM forwards
@@ -20,7 +20,7 @@ model groups, once subfleet `#2/#3` land).
 
 ## Owner inputs (one-time)
 
-1. A **Claude Code subscription** logged in via `claude setup-token` (below).
+1. A **Claude Code subscription** seeded via interactive `claude /login` (NOT `setup-token` — see Step 1).
 2. The non-RU egress already exists (UAP VLESS/sing-box) — subfleet routes its upstream through it.
 
 ## Step 1 — seed Claude credentials (server-side, DE-egress)

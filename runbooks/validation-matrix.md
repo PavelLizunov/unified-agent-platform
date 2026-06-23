@@ -36,6 +36,9 @@ Pass criteria:
 | k3s baseline | API, system pods, smoke deployment | `tests/smoke/k3s-local.ps1` | After k3s changes | nodes Ready; smoke deployment rolls out |
 | k3s agent | Scheduling on agent | `tests/smoke/k3s-agent.ps1` | After node scheduling changes | targeted pod runs on the agent |
 | Flux | Controllers and SOPS secret | `tests/smoke/flux-local.ps1` | After GitOps changes | four Flux deployments Available |
+| **Agent logic** | hermes unit tests | `python -m unittest discover -s hermes/tests -p 'test_*.py'` | Every `hermes/` change | 41 tests pass — **CI-enforced** (`static-checks`) |
+| **GitOps build** | kustomize builds clean | `kustomize build clusters/prod` | Every `clusters/**` change | exit 0 — **CI-enforced** |
+| **Secrets (CI)** | gitleaks + `*.sops.yaml` encrypted | CI `static-checks` (gitleaks, `.gitleaks.toml`) | Every push/PR | no leaks; committed SOPS files contain `ENC[…]` — **CI-enforced** |
 | Backup existence | Snapshot list | `tests/smoke/k3s-snapshot.ps1` | Daily/manual | expected snapshot appears |
 | Offsite backup | etcd snapshot in R2 | `rclone lsf r2:uap-k3s-snapshots/prod/` (on uap-ops-1) | weekly | recent snapshot object present |
 | ops-1 services backup | Vaultwarden + egress secrets archive in R2 | `rclone lsf r2:uap-k3s-snapshots/ops-backup/` (on uap-ops-1) | weekly | recent `ops-*.tar.gz.age` present; see `runbooks/uap-ops-services-backup.md` |
@@ -49,3 +52,7 @@ Pass criteria:
 - Warnings from `k3s etcd-snapshot list` about server-only flags are expected in the current local config and are
   documented in `runbooks/k3s-snapshots.md`.
 - A green local gate does not mean HA is ready. HA requires a third independent k3s server and a failover drill.
+- **CI is the enforced gate (2026-06-23):** the rows marked *CI-enforced* run in GitHub Actions
+  (`.github/workflows/ci.yml`, job `static-checks`) on every push/PR; the `protect-master` ruleset **requires** that
+  check green before a PR can merge to `master` (deploys are PR-based — ADR-026). The PowerShell smoke tests need the
+  tailnet + age key, so they stay a workstation/ops-1 job, not CI.

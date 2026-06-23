@@ -4,6 +4,12 @@ Date: 2026-06-19
 Reviewed commit: `0ab1d056726bba90e5a8d2b65f73ce8584fad664` (`master`)  
 Mode: read-only review; no destructive tests; secret values were not printed or recorded.
 
+> **Banner (2026-06-23):** point-in-time review of commit `0ab1d05`. **Superseded in part by the 2026-06-22/23
+> hermes-agent / vibe-coding pivot** (see `STATUS.md`, `docs/next-steps.md`, ADR-022..026). The handoff-drift this
+> review flagged reopened at larger scale (the live model+agent layer was absent from CLAUDE.md/STATUS.md) and is now
+> addressed. The **foundation findings remain valid** — HA, ops-1 blast-radius, DR are tracked as Track B in
+> `docs/next-steps.md`.
+
 ## Scope
 
 Independent adversarial review of the Stage 0P repository and live nodes:
