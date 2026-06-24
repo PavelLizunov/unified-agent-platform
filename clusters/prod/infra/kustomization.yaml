@@ -21,3 +21,5 @@ resources:
   - hermes-agent-dashboard.sops.yaml    # web dashboard basic-auth password
   - hermes-agent-config.yaml
   - hermes-agent.yaml
+  - hermes-agent-backup-r2.sops.yaml    # PR B - R2 rclone creds for the DR backup CronJob
+  - hermes-agent-backup.yaml            # PR B - daily PVC backup to R2

@@ -1,0 +1,22 @@
+apiVersion: v1
+data:
+    rclone.conf: ENC[AES256_GCM,data:RDPgMMRHAE+t5TeN3Lop9cuctSOHfIVlnRUQwojO5mKwDuCN8Kp0A6t7a482ru8JBfduqeSxhStBZtXzl38+eVDkyVG1cFx7DvY6wrhwyo4D5kRoEQYWnyuKzMcQfFTAbmE3SWhupogkpj0KDJjEt6lvtCFuJ1QmJaaMZinSEYRc0LTdUcs8o9uZgsbzpSLnyGb2PbUlucFdOkf7/lH9VFleQ+OcwBDl1RFm9sP8JoQp3o1qchvMi8gWKtYF2Yg+Lal9qMbPKwq03OIinyG6DF+Z5zc5QU1+E5ktdOv64s/UKaOy6MaoV254nrG29P8+MWoTC7QNvph0XEvHMP23cMEcxo+Qw7vDXPRz88EMSDYb+pGTA5WybvpmClcvM96kp/xd4jYCYSZUOv7QR+Rbn0VXJDrzRMT5F+XgNrTYpTeNQogsrwYIcjOt6BF/v+KVlFWXKLaxJUZ0wBh691puoVTqtDRBO1dgY6fQMLypWwD78poy,iv:BJVKAYwsbPuhzw8PVEY3KufDWN/43uOGqvoBGBEPKfk=,tag:Kt94ZVyoRVncO+vDIJGXzA==,type:str]
+kind: Secret
+metadata:
+    name: hermes-agent-backup-r2
+    namespace: uap-system
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBodEw2MnJTYzJwWm13THNJ
+            WXNrcGhraEJ5S3d2T0hIUHJBUEt3OTJxMlNNCmswcGNEUTNEYjRnMHdmNmszelVR
+            dnk2di9pNDNHSmJ4QVBsdnBGY0JqNk0KLS0tIDZGcm5QbW1NMlIxdzJRbXFHQ2Zj
+            UzdGbkhnTVBadGE5Y2RkNHhwNjVocWcKJk8q/Ukfi8SkVM4p2irQ8MWRLrvDv264
+            DMEDqEpHuODvFnrnzOfyrFC5s0MyfRaNdehdu0UzEUhywqFbbcVn+w==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-24T23:23:35Z"
+    mac: ENC[AES256_GCM,data:p1rsVy7Ypxj4mw3o8SUkjVXDxqTGFh2isj3GmevWYNqJBWQGKM7ohGdS1atxvpN/GwC4oFNeAcmuN3yeQQKH9HZTBq/Djf8iTq9++nYdQT7DCuUj6HiuOYc7QyXdD9GT0Ko0WV+VAY+mTfbNPp4kwQGBXHsaZeKDwqWgXGh7O1k=,iv:co7MwBRIRmcN614B7O1eldW6jNC2foEt654caiZI2YU=,tag:lBLHVZNE57iwKM/WigarnQ==,type:str]
+    version: 3.13.1

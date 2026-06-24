@@ -1,0 +1,83 @@
+# hermes-agent DR: PVC backup + restore (PR B)
+
+> The hermes-agent state PVC has no other safety net. This runbook covers the daily R2 backup
+> and how to restore after a node/disk loss. Companion: `hermes-agent-codex-brain.md` (deploy +
+> config ownership).
+
+## Why this exists (the gap)
+
+`PVC hermes-agent-data` is **`local-path`**, hostPath-pinned to **uap-home-2**, and is **NOT** in the
+etcd->R2 snapshots (those capture k8s API objects + the PV *definition*, never the hostPath bytes).
+So a uap-home-2 disk loss would lose **all earned state**: `state.db` (sessions/messages), the **Codex
+brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.json`, agent-enriched
+`memories/USER.md`, `SOUL.md`, `channel_directory.json`, and the live `auth.json`. The bulk of the PVC
+(~400M of `.local`/codex logs/caches) is regeneratable; the irreplaceable state is small.
+
+## What runs
+
+- **CronJob `hermes-agent-backup`** (`clusters/prod/infra/hermes-agent-backup.yaml`) — daily 03:00,
+  pinned to uap-home-2 (it co-mounts the RWO PVC as a second reader). It runs a **FULL** `hermes backup`
+  (NOT `--quick` — `--quick` omits `.codex/`, the Codex brain) into an emptyDir, then `rclone copy`s the
+  zip to **`r2:uap-k3s-snapshots/hermes-agent-backup/`**. Retention: keep the **most recent 7**.
+- **Secret `hermes-agent-backup-r2`** (SOPS) — the `[r2]` rclone remote (reused from the existing R2
+  access; same bucket as the etcd snapshots, distinct folder).
+- The backup is a **consistent** snapshot (`hermes backup` uses `sqlite3.backup()`), so it is safe to run
+  against the live gateway. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs;
+  acceptable for a daily object, and it guarantees no critical file is missed).
+
+The upload goes **direct to Cloudflare R2** (the CronJob sets no `HTTPS_PROXY`), so it is **independent of
+the LLM egress proxy** — backups keep working even when the German VLESS exit is down.
+
+## PV reclaim policy (run once)
+
+local-path PVs default to `reclaimPolicy: Delete`, so an accidental `PVC` delete drops the bytes. Flip the
+**existing** PV to `Retain` (it is a dynamically-provisioned PV with a generated name, not in Git, so this
+is an imperative one-time action):
+
+```bash
+PV=$(kubectl -n uap-system get pvc hermes-agent-data -o jsonpath='{.spec.volumeName}')
+kubectl patch pv "$PV" -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+kubectl get pv "$PV" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}{"\n"}'   # -> Retain
+```
+
+With `Retain`, deleting the PVC leaves the PV `Released` (data intact on disk). To reuse it, clear
+`spec.claimRef` on the PV and re-create the PVC, or provision a fresh PVC and restore from R2 (below).
+
+## Verify the backup (manual run)
+
+```bash
+kubectl -n uap-system create job --from=cronjob/hermes-agent-backup hermes-backup-manual
+kubectl -n uap-system wait --for=condition=complete job/hermes-backup-manual --timeout=600s
+kubectl -n uap-system logs job/hermes-backup-manual -c ship | tail
+# objects now in R2:
+rclone --config <r2.conf> lsf r2:uap-k3s-snapshots/hermes-agent-backup/    # from ops-1, or exec the ship container
+kubectl -n uap-system delete job hermes-backup-manual
+```
+
+## Restore (after node/disk loss)
+
+1. Bring up a fresh `hermes-agent-data` PVC (GitOps re-creates it on the surviving/replacement node; if
+   you replaced uap-home-2, re-pin the Deployment/PVC nodeSelector to the new hostname).
+2. Pull the latest zip from R2 onto the new PVC and import it **before** the gateway writes new state:
+   ```bash
+   # exec a shell in the (initContainer-only / scaled-to-0) context, or a throwaway pod mounting the PVC
+   rclone --config <r2.conf> copy r2:uap-k3s-snapshots/hermes-agent-backup/<latest>.zip /opt/data/restore/
+   env HOME=/opt/data hermes import /opt/data/restore/<latest>.zip --force
+   ```
+   `hermes import` restores config, sessions (`state.db`), the Codex brain (`.codex/*.sqlite`), kanban,
+   cron, and memories.
+3. **Re-auth Codex.** The `auth.json` in the zip carries a single-use refresh token that is almost
+   certainly stale by restore time (hermes refreshes it in place between backups). If the brain 401s,
+   re-seed `codex-auth` (see `hermes-agent-codex-brain.md` -> "Create / rotate the codex-auth SOPS
+   secret") and roll the pod.
+4. GitOps re-seeds the **managed** config (brain overlay `/etc/hermes/config.yaml`, proxy/allowlist
+   `/etc/hermes/.env`) and the seed-if-absent files automatically — those need no restore.
+
+## Hardening follow-ups
+
+- **Bucket-scoped R2 key.** The backup reuses the broad R2 key (same as the etcd snapshots). Scope a
+  dedicated key to `uap-k3s-snapshots` (the open `REVIEW-CODEX.md` R2 item) and repoint the secret.
+- **Client-side encryption.** The zip contains plaintext `auth.json` + `.env` (Codex OAuth + Telegram
+  token) — same exposure class as the unencrypted etcd snapshots already in this bucket. R2 is private +
+  encrypted-at-rest, but for defense-in-depth add an rclone `crypt` remote or age-encrypt before upload
+  (mirroring `~/ops-backup/backup.sh`'s `.age` step). Restore then decrypts before `hermes import`.
