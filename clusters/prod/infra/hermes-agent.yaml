@@ -64,12 +64,18 @@ spec:
                 HOME=/opt/data CODEX_HOME=/opt/data/.codex /opt/hermes/.venv/bin/python -c \
                   'import sys; from hermes_cli.auth import _import_codex_cli_tokens, _save_codex_tokens; t=_import_codex_cli_tokens(); sys.exit("codex token import failed (expired/invalid seed?)") if not t else _save_codex_tokens(t)'
               fi
+              # 3b) Telegram bot token -> user .env (hermes reads it as self.config.token).
+              #     Proxy + allowlist are NOT here — they go in the managed scope
+              #     (/etc/hermes/.env) so they reach the isolated per-profile os.environ.
+              printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat /telegram/token)" > /opt/data/.env
+              chmod 600 /opt/data/.env
               # 4) ownership for the uid-10000 hermes services
               chown -R 10000:10000 /opt/data
           volumeMounts:
             - { name: data, mountPath: /opt/data }
             - { name: config, mountPath: /config, readOnly: true }
             - { name: codex-seed, mountPath: /seed, readOnly: true }
+            - { name: telegram-seed, mountPath: /telegram, readOnly: true }
       containers:
         - name: gateway
           image: nousresearch/hermes-agent:latest
@@ -84,6 +90,11 @@ spec:
             - { name: HERMES_DISABLE_LAZY_INSTALLS, value: "1" }
           volumeMounts:
             - { name: data, mountPath: /opt/data }
+            # managed scope: loaded LAST with override into os.environ, authoritative for
+            # every profile + subprocess (codex spawn = os.environ.copy()). This is how the
+            # Telegram adapter AND the gateway-driven codex brain reach the egress proxy —
+            # the per-profile os.environ is isolated and does NOT see /opt/data/.env.
+            - { name: config, mountPath: /etc/hermes/.env, subPath: managed-env, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { memory: 1536Mi }
@@ -97,3 +108,6 @@ spec:
         - name: codex-seed
           secret:
             secretName: codex-auth
+        - name: telegram-seed
+          secret:
+            secretName: hermes-agent-telegram
