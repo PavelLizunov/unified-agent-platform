@@ -15,3 +15,7 @@ resources:
   - hermes-keys.sops.yaml
   - hermes-code-configmap.yaml
   - hermes.yaml
+  # hermes-agent (Track A2) — external NousResearch agent, brain = Codex (codex_app_server)
+  - codex-auth.sops.yaml
+  - hermes-agent-config.yaml
+  - hermes-agent.yaml

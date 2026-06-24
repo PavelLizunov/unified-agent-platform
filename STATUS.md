@@ -147,6 +147,27 @@ Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain o
   `security.allow_private_urls: true` for the CGNAT `100.64/10` range). A1 proves the *endpoint contract*, not the
   hermes-agent startup/run.
 
+## hermes-agent — Track A2 (manifests authored; Codex brain proven in-cluster 2026-06-24)
+
+Phase A2: the external NousResearch **hermes-agent** gateway as a Flux-managed k3s workload, brain = the **Codex /
+ChatGPT-Plus subscription** (`codex_app_server`) reached through `singbox-egress`. Owner chose the GitOps/k3s path
+over bare Docker.
+
+- **Proven in the real image (2026-06-24):** running `nousresearch/hermes-agent:latest` (v0.17.0) in-cluster,
+  `hermes chat -q` drove the Codex brain (gpt-5.5) to **execute a tool end-to-end** (wrote a `BRAIN-OK` file). The
+  Codex subscription reaches OpenAI through the cluster egress (chatgpt.com); raw `curl` probes are unfaithful
+  (Cloudflare resets curl's TLS fingerprint, not the real Rust codex CLI).
+- **Manifests authored, NOT yet deployed:** `clusters/prod/infra/hermes-agent.yaml` (PVC + Deployment with a
+  bootstrap initContainer), `hermes-agent-config.yaml` (ConfigMap), `codex-auth.sops.yaml` (the seed) — all added
+  to `clusters/prod/infra/kustomization.yaml`. The 4 non-obvious knobs (creds in hermes's OWN store, not
+  `~/.codex`; `codex_app_server`; codex `danger-full-access`; uid-10000 + egress env) are in
+  `runbooks/hermes-agent-codex-brain.md`.
+- **Owner action done:** `codex login` on the desktop with the owner's own ChatGPT Plus → `~/.codex/auth.json`,
+  which seeds the `codex-auth` secret.
+- **Next:** SOPS-encrypt the seed on ops-1, land via PR, let Flux reconcile, then run the `kubectl exec` round-trip
+  to confirm the brain executes a tool in the deployed pod.
+- **Caveat:** the seed shares the Codex CLI's single-use refresh-token lineage — see the runbook.
+
 ## Repeatable Bootstrap
 
 - OpenTofu/Terraform-compatible provisioning skeleton added under `infra/tofu`.

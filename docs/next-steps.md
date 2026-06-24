@@ -67,6 +67,13 @@ every tool goes dark). Detail + citations in the two research docs.
 - **Done when:** the gateway runs persistently, survives a node reboot, and a CLI chat round-trips
   through it to the A1 brain.
 
+> **In progress (2026-06-24):** owner chose **k3s via Flux** (not bare Docker) and to wire the **Codex brain
+> directly** (pulling A5's brain forward) rather than the opportunistic RTX brain. The full recipe was **proven
+> in the real image in-cluster** (`hermes chat -q` → `codex_app_server` → gpt-5.5 → tool executed, `BRAIN-OK`).
+> Manifests authored (`clusters/prod/infra/hermes-agent*.yaml` + `codex-auth.sops.yaml`); deploy via PR pending.
+> The 4 non-obvious knobs + verify steps: `runbooks/hermes-agent-codex-brain.md`. The brain is the always-on
+> Codex subscription through the egress, so this workload does **not** depend on the GPU desktop.
+
 ### Phase A3 — Telegram gateway (phone control)
 
 - BotFather `/newbot` → `TELEGRAM_BOT_TOKEN` in `~/.hermes/.env`; lock down with

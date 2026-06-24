@@ -1,0 +1,99 @@
+# hermes-agent — NousResearch hermes-agent gateway (Track A2). Brain = Codex
+# (codex_app_server, owner's ChatGPT Plus OAuth) reached through the in-cluster
+# singbox-egress. Official image nousresearch/hermes-agent:latest (Docker Hub —
+# reachable from RU). State (config, SQLite, skills, memories, codex + hermes auth)
+# lives on a local-path PVC at /opt/data. The container starts as root; the image's
+# s6 /init drops services to uid 10000 (hermes). Full proven recipe + verify steps:
+# runbooks/hermes-agent-codex-brain.md.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hermes-agent-data
+  namespace: uap-system
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hermes-agent
+  namespace: uap-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate          # single-writer SQLite/auth state on one PVC — never two pods
+  selector:
+    matchLabels:
+      app: hermes-agent
+  template:
+    metadata:
+      labels:
+        app: hermes-agent
+      annotations:
+        hermes-agent/config-rev: "a2-codex-v1"   # bump to roll the pod on config changes
+    spec:
+      # local-path PVC is node-local; pin to the designated always-on worker.
+      nodeSelector:
+        kubernetes.io/hostname: uap-home-2
+      securityContext:
+        fsGroup: 10000        # PVC group-owned by hermes so the uid-10000 services can write
+      initContainers:
+        - name: bootstrap
+          image: nousresearch/hermes-agent:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              # 1) codex CLI onto the PVC (lands in /opt/data/.local/bin, already on the image PATH)
+              export npm_config_prefix=/opt/data/.local
+              if [ ! -x /opt/data/.local/bin/codex ]; then
+                npm i -g @openai/codex
+              fi
+              # 2) hermes + codex config from the ConfigMap
+              cp /config/config.yaml /opt/data/config.yaml
+              mkdir -p /opt/data/.codex
+              cp /config/codex-config.toml /opt/data/.codex/config.toml
+              # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
+              #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
+              if [ ! -f /opt/data/auth.json ]; then
+                cp /seed/auth.json /opt/data/.codex/auth.json
+                HOME=/opt/data CODEX_HOME=/opt/data/.codex /opt/hermes/.venv/bin/python -c \
+                  'import sys; from hermes_cli.auth import _import_codex_cli_tokens, _save_codex_tokens; t=_import_codex_cli_tokens(); sys.exit("codex token import failed (expired/invalid seed?)") if not t else _save_codex_tokens(t)'
+              fi
+              # 4) ownership for the uid-10000 hermes services
+              chown -R 10000:10000 /opt/data
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: codex-seed, mountPath: /seed, readOnly: true }
+      containers:
+        - name: gateway
+          image: nousresearch/hermes-agent:latest
+          args: ["gateway", "run"]
+          env:
+            - { name: HERMES_HOME, value: /opt/data }
+            - { name: CODEX_HOME, value: /opt/data/.codex }
+            # Codex CLI egress -> singbox -> DE exit -> chatgpt.com (the proven path)
+            - { name: HTTPS_PROXY, value: "http://singbox-egress.uap-system.svc:12080" }
+            - { name: HTTP_PROXY, value: "http://singbox-egress.uap-system.svc:12080" }
+            - { name: NO_PROXY, value: ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10" }
+            - { name: HERMES_DISABLE_LAZY_INSTALLS, value: "1" }
+          volumeMounts:
+            - { name: data, mountPath: /opt/data }
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 1536Mi }
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hermes-agent-data
+        - name: config
+          configMap:
+            name: hermes-agent-config
+        - name: codex-seed
+          secret:
+            secretName: codex-auth
