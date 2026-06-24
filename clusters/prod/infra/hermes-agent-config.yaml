@@ -1,0 +1,26 @@
+# hermes-agent (Track A2) — non-secret config, mounted by the bootstrap initContainer.
+#  - config.yaml      -> /opt/data/config.yaml (HERMES_HOME)
+#  - codex-config.toml -> /opt/data/.codex/config.toml (CODEX_HOME)
+# Brain = Codex (owner's ChatGPT Plus) via the codex_app_server runtime. WHY these exact
+# values is proven + explained in runbooks/hermes-agent-codex-brain.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hermes-agent-config
+  namespace: uap-system
+data:
+  config.yaml: |
+    # Brain: the Codex subprocess (codex_app_server) owns the tool loop. The default
+    # codex_responses mode does NOT work in-cluster — hermes's Python httpx cannot reach
+    # chatgpt.com through the singbox proxy ("Connection error"); the codex CLI (Rust) can.
+    model:
+      provider: openai-codex
+      openai_runtime: codex_app_server
+    agent:
+      tool_use_enforcement: auto
+  codex-config.toml: |
+    # codex's own bubblewrap sandbox cannot initialise in the restricted container
+    # (no user namespaces) -> writes fail with "sandbox permission error". The pod
+    # itself is the security boundary, so disable codex's sandbox.
+    sandbox_mode = "danger-full-access"
+    approval_policy = "never"
