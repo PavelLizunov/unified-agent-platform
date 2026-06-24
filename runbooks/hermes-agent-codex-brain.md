@@ -13,7 +13,7 @@
 | Object | File | Purpose |
 |---|---|---|
 | `Secret codex-auth` (SOPS) | `clusters/prod/infra/codex-auth.sops.yaml` | the Codex CLI `auth.json` (owner's ChatGPT-Plus OAuth) — the seed |
-| `ConfigMap hermes-agent-config` | `clusters/prod/infra/hermes-agent-config.yaml` | `config.yaml` + codex `config.toml` |
+| `ConfigMap hermes-agent-config` | `clusters/prod/infra/hermes-agent-config.yaml` | soft `config.yaml` + codex `config.toml` + **managed brain overlay** (`managed-config`) + managed-env proxy/allowlist |
 | `PVC hermes-agent-data` + `Deployment hermes-agent` | `clusters/prod/infra/hermes-agent.yaml` | state on `local-path`; gateway + bootstrap initContainer |
 
 Image: official `nousresearch/hermes-agent:latest` (Docker Hub — reachable from RU, verified). No custom build.
@@ -88,6 +88,41 @@ Layout:
 
 Rotate the bot token: re-create `hermes-agent-telegram.sops.yaml` (same flow as `codex-auth`, key `token`), then
 roll the pod. Verified end-to-end 2026-06-24: a phone message → Codex brain (gpt-5.5) → reply.
+
+## Config ownership: GitOps owns the brain, the dashboard owns the rest (v5 hybrid)
+
+The owner edits soft config from the web dashboard; GitOps owns only the critical brain. This works because
+hermes has a **managed config overlay** that deep-merges `/etc/hermes/config.yaml` **per-leaf** over the user/PVC
+`~/.hermes/config.yaml` (= `/opt/data/config.yaml`), and **managed wins per-leaf** over user config *and* env. A
+dashboard/CLI write to a managed key is refused **loudly** ("managed by your administrator") instead of silently
+reverting on the next restart.
+
+| Tier | Where | Owner |
+|---|---|---|
+| Brain (`model.provider`/`openai_runtime`/`model`) | ConfigMap `managed-config` → `/etc/hermes/config.yaml` (RO) | **GitOps** (dashboard refused) |
+| Egress proxy + `TELEGRAM_ALLOWED_USERS` | ConfigMap `managed-env` → `/etc/hermes/.env` (RO) | **GitOps** (authz boundary) |
+| Telegram bot token | `/opt/data/.env`, the `TELEGRAM_BOT_TOKEN=` line replaced-in-place each boot from the SOPS secret | **GitOps** (rotate by rolling) |
+| Soft config (`display.*`, `agent.*`, platform toggles), other platform tokens (Discord/MCP), `/sethome` chat-IDs | `/opt/data/{config.yaml,.env}` | **dashboard** (persists across restarts) |
+
+The initContainer **seeds `/opt/data/config.yaml` + `/opt/data/.codex/config.toml` only if absent** (so dashboard
+edits survive a roll) and **replaces only the `TELEGRAM_BOT_TOKEN=` line** in `/opt/data/.env` each boot (so token
+rotation still works while dashboard-written lines are preserved). A **fail-closed guard** aborts the boot (CrashLoop)
+if the managed brain overlay is missing/malformed — because the managed loader is fail-OPEN and the brain has **no PVC
+fallback on a fresh volume**.
+
+**Operational caveats of seed-if-absent (existing PVC):**
+- To push a NEW `config.yaml` default or a changed codex `config.toml` (e.g. `sandbox_mode`) onto an EXISTING PVC, the
+  ConfigMap change alone is **not** enough — delete the PVC file first, then roll:
+  `kubectl -n uap-system exec deploy/hermes-agent -- rm /opt/data/.codex/config.toml` (or `/opt/data/config.yaml`).
+  The **brain is exempt** (it is the managed overlay, refreshed every boot).
+- The stale inline `model:` block left in an existing PVC `config.yaml` is harmless (the managed overlay wins
+  per-leaf); drop it once via exec+edit if you want `hermes config` to show the brain purely as managed-sourced.
+
+Verify after rollout:
+```bash
+kubectl -n uap-system exec deploy/hermes-agent -- env HOME=/opt/data hermes config | grep -i managed   # brain leaves shown as managed
+```
+plus the CLI round-trip above (brain still drives a tool), and confirm a dashboard-added Discord token survives a roll.
 
 ## Caveats / follow-ups
 

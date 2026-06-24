@@ -13,10 +13,9 @@ data:
     # Brain: the Codex subprocess (codex_app_server) owns the tool loop. The default
     # codex_responses mode does NOT work in-cluster — hermes's Python httpx cannot reach
     # chatgpt.com through the singbox proxy ("Connection error"); the codex CLI (Rust) can.
-    model:
-      provider: openai-codex
-      openai_runtime: codex_app_server
-      model: gpt-5.5          # give the auxiliary client an explicit model (fixes "openai-codex requested without a model")
+    # NB: the BRAIN (model.*) is intentionally NOT here -- it is pinned by the managed overlay
+    # /etc/hermes/config.yaml (the `managed-config` key below), which deep-merges per-leaf and
+    # always wins, so dashboard/CLI edits to it are refused loudly. This file is SOFT config only.
     agent:
       tool_use_enforcement: auto
     display:
@@ -30,6 +29,15 @@ data:
     # itself is the security boundary, so disable codex's sandbox.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
+  # Managed CONFIG overlay -> /etc/hermes/config.yaml. hermes deep-merges this OVER the user
+  # (PVC) config.yaml, winning PER-LEAF, and refuses dashboard/CLI writes to these keys with a
+  # loud "managed by your administrator". Keeps the BRAIN GitOps-owned while the dashboard owns
+  # every other (soft) config key. Proof + verify: runbooks/hermes-agent-codex-brain.md.
+  managed-config: |
+    model:
+      provider: openai-codex
+      openai_runtime: codex_app_server
+      model: gpt-5.5
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram
