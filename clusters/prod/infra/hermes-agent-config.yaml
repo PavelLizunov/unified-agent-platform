@@ -40,9 +40,9 @@ data:
     HTTP_PROXY=http://singbox-egress.uap-system.svc:12080
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
     TELEGRAM_ALLOWED_USERS=729937253
-    # api.telegram.org is blocked direct here; the fallback-IP attempts just fail (httpx.ConnectError noise)
-    # before the proxy path succeeds. Disable them so polling uses only the working proxy path.
-    HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1
+    # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the
+    # fallback IPs add redundant connection targets through the proxy). The occasional reconnects are
+    # egress-stability noise; they self-heal and Telegram re-delivers queued updates, so no message loss.
   # Seed user profile (memories/USER.md) — initContainer writes it only if absent; the
   # agent enriches it over time via conversation (memory.user_profile_enabled: true).
   user-profile: |
