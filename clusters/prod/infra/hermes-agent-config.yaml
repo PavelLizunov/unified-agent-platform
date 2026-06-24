@@ -18,6 +18,8 @@ data:
       openai_runtime: codex_app_server
     agent:
       tool_use_enforcement: auto
+    display:
+      language: ru
   codex-config.toml: |
     # codex's own bubblewrap sandbox cannot initialise in the restricted container
     # (no user namespaces) -> writes fail with "sandbox permission error". The pod
@@ -34,3 +36,13 @@ data:
     HTTP_PROXY=http://singbox-egress.uap-system.svc:12080
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
     TELEGRAM_ALLOWED_USERS=729937253
+  # Seed user profile (memories/USER.md) — initContainer writes it only if absent; the
+  # agent enriches it over time via conversation (memory.user_profile_enabled: true).
+  user-profile: |
+    # Профиль владельца
+    - Оператор/владелец платформы unified-agent-platform (UAP).
+    - Язык: русский. Стиль: кратко — результат + следующий шаг, без воды.
+    - Рабочий поток — вайб-кодинг: даёт идеи и инфраструктуру; код НЕ ревьюит,
+      поэтому агент обязан САМ тестировать (самопроверка = гейт качества).
+    - Инфраструктура: k3s (Flux GitOps + SOPS); мозг = Codex (ChatGPT Plus) через
+      egress-прокси (хост в РФ — прямой доступ к OpenAI/Anthropic закрыт).
