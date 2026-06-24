@@ -54,7 +54,7 @@ every tool goes dark). Detail + citations in the two research docs.
 > "Local FC Brain". **The strict A1 wording ("a *hermes-agent* run invokes a tool") completes in A2** — A1 proved the
 > exact endpoint contract hermes-agent requires; pointing hermes-agent at it (tailnet bind + `allow_private_urls`) is A2.
 
-### Phase A2 — hermes-agent in Docker on an always-on Linux node, behind the egress
+### Phase A2 — hermes-agent on an always-on Linux node, behind the egress — ✅ DONE (2026-06-24)
 
 - Run the **prebuilt `nousresearch/hermes-agent`** image (not `curl|bash` — the installer pulls
   PyPI/npm/GitHub, awkward on RU egress) on an always-on Linux node that can reach the egress proxy.
@@ -70,9 +70,11 @@ every tool goes dark). Detail + citations in the two research docs.
 > **In progress (2026-06-24):** owner chose **k3s via Flux** (not bare Docker) and to wire the **Codex brain
 > directly** (pulling A5's brain forward) rather than the opportunistic RTX brain. The full recipe was **proven
 > in the real image in-cluster** (`hermes chat -q` → `codex_app_server` → gpt-5.5 → tool executed, `BRAIN-OK`).
-> Manifests authored (`clusters/prod/infra/hermes-agent*.yaml` + `codex-auth.sops.yaml`); deploy via PR pending.
-> The 4 non-obvious knobs + verify steps: `runbooks/hermes-agent-codex-brain.md`. The brain is the always-on
-> Codex subscription through the egress, so this workload does **not** depend on the GPU desktop.
+> Manifests merged (PR #8) and **deployed via Flux** — `hermes-agent` is **1/1 Running** on uap-home-2; the
+> `kubectl exec` round-trip **in the deployed pod** wrote `BRAIN-OK` (brain executed a tool through the egress).
+> **A2 DONE.** The 4 non-obvious knobs + verify/rotate steps: `runbooks/hermes-agent-codex-brain.md`. The brain is
+> the always-on Codex subscription through the egress, so this workload does **not** depend on the GPU desktop.
+> Chosen k3s/Flux over bare Docker, and the Codex brain (pulled forward from A5) over the opportunistic RTX brain.
 
 ### Phase A3 — Telegram gateway (phone control)
 
