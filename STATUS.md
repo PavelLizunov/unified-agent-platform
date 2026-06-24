@@ -166,7 +166,13 @@ over bare Docker.
 - **Owner action done:** `codex login` on the desktop with the owner's own ChatGPT Plus → `~/.codex/auth.json`,
   which seeds the `codex-auth` secret.
 - **Verified (A2 Done):** the `kubectl exec` round-trip **in the deployed pod** wrote `BRAIN-OK` — the brain
-  (gpt-5.5) executed a tool through the egress. **Next: A3** (Telegram gateway for phone control).
+  (gpt-5.5) executed a tool through the egress.
+- **A3 (Telegram) DONE 2026-06-24:** a message from the owner's phone round-trips through the gateway to the Codex
+  brain (gpt-5.5) and back ("17×23 = 391") — the harness is now **phone-driven** (PR #10). The fix was non-obvious:
+  hermes's per-profile `os.environ` is isolated (multiplex), so the egress proxy + Telegram allowlist had to go in
+  hermes's **managed scope** (`/etc/hermes/.env`, loaded last with override) — which also feeds the gateway-driven
+  Codex brain (codex spawn = `os.environ.copy()`). See `runbooks/hermes-agent-codex-brain.md`. **Next: A4** (coding
+  skills — `claude -p` / `codex exec` — the actual vibe-coding gate).
 - **Caveat:** the seed shares the Codex CLI's single-use refresh-token lineage — see the runbook (rotate/re-seed if
   the brain starts 401-ing). Hardening follow-ups: non-root, pinned GHCR image, autonomous-run permission policy.
 

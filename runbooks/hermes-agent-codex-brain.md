@@ -69,6 +69,26 @@ grep -q 'ENC\[' clusters/prod/infra/codex-auth.sops.yaml && echo encrypted-ok
    ```
    `BRAIN-OK` means hermes drove the Codex brain through the egress and executed a tool. **Done.**
 
+## Telegram (A3) + the managed-scope proxy
+
+Phone control via Telegram (outbound long-poll — no inbound port). Two non-obvious facts drove the wiring:
+
+- **`api.telegram.org` is blocked direct from the cluster** — reachable only through `singbox-egress` (verified:
+  httpx→proxy = 302, direct = timeout). So Telegram MUST use the egress proxy.
+- **hermes's per-profile `os.environ` is isolated** (multiplex mode): the Telegram adapter (`resolve_proxy_url`,
+  reads `os.environ`) and `TELEGRAM_ALLOWED_USERS` (read via `os.getenv`) do **not** see `/opt/data/.env` (that only
+  feeds hermes *config*, where the bot token is read as `self.config.token`). The egress proxy + allowlist therefore
+  go in hermes's **managed scope** — `/etc/hermes/.env` (mounted from the `managed-env` ConfigMap key) — which hermes
+  loads **last with `override=True` into `os.environ`**, authoritative for every profile **and subprocess**. The same
+  mechanism is what gives the **gateway-driven Codex brain** the proxy, since codex is spawned with `os.environ.copy()`.
+
+Layout:
+- `Secret hermes-agent-telegram` (SOPS) → `TELEGRAM_BOT_TOKEN` → initContainer writes `/opt/data/.env` (hermes config).
+- ConfigMap `managed-env` → `/etc/hermes/.env`: `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` + `TELEGRAM_ALLOWED_USERS`.
+
+Rotate the bot token: re-create `hermes-agent-telegram.sops.yaml` (same flow as `codex-auth`, key `token`), then
+roll the pod. Verified end-to-end 2026-06-24: a phone message → Codex brain (gpt-5.5) → reply.
+
 ## Caveats / follow-ups
 
 - **Shared refresh-token lineage:** the seed shares the Codex CLI's single-use refresh token. If the owner's
