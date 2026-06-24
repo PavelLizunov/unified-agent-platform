@@ -175,6 +175,28 @@ over bare Docker.
   skills — `claude -p` / `codex exec` — the actual vibe-coding gate).
 - **Caveat:** the seed shares the Codex CLI's single-use refresh-token lineage — see the runbook (rotate/re-seed if
   the brain starts 401-ing). Hardening follow-ups: non-root, pinned GHCR image, autonomous-run permission policy.
+- **Config-ownership hybrid DONE 2026-06-25 (PR #16, merged):** GitOps owns only the brain via a **managed config
+  overlay** (`/etc/hermes/config.yaml`, ConfigMap key `managed-config`) that deep-merges per-leaf over the PVC config
+  and WINS — `hermes config` now reports `Managed config keys: model.{provider,openai_runtime,model}` and refuses
+  dashboard/CLI edits to them ("managed by your administrator"). The initContainer no longer clobbers the PVC every
+  boot: `config.yaml` + codex `config.toml` are **seed-if-absent** and the bot token is **replaced in-place**
+  (preserving dashboard-written `.env` lines — Discord/MCP tokens, `/sethome` chat-IDs — across restarts). A
+  fail-closed guard aborts boot if the managed brain overlay is missing/malformed. So the **dashboard is now a
+  durable self-serve surface** for soft config while the brain stays reproducible. Independently reviewed; pod rolled
+  once to `v5-config-hybrid`, healthy. See the "Config ownership" section in `runbooks/hermes-agent-codex-brain.md`.
+- **PVC DR backup DONE 2026-06-25 (PR #17, merged):** the node-local `hermes-agent-data` PVC (NOT in the etcd→R2
+  snapshots) now has a daily **`CronJob hermes-agent-backup`** — FULL `hermes backup` (consistent sqlite snapshot,
+  incl. the `.codex` brain DBs) → `r2:uap-k3s-snapshots/hermes-agent-backup/`, keep-7, direct to R2 (so it works
+  while the egress is down). Fail-loud integrity guards (non-empty + valid zip + `.codex` present). PV flipped to
+  `reclaimPolicy: Retain`. **Verified:** a manual job shipped a 40MB zip to R2. Restore + hardening follow-ups
+  (bucket-scoped key, client-side encryption) in `runbooks/hermes-agent-dr.md`.
+- **⚠️ CURRENT BLOCKER (egress, 2026-06-25):** the **German VLESS+REALITY exit is DOWN** — `singbox-egress` logs show
+  `EOF` opening connections to chatgpt.com, api.telegram.org, api.ipify.org and dns.google alike (the upstream VLESS
+  connection to the German VPS fails at ~100ms). This is **independent of the work above** (`singbox-egress` is a
+  separate, untouched deployment) and blocks BOTH the Codex brain and Telegram. The brain *config* is correct
+  (managed keys verified); the round-trip will pass once the exit is restored. **Owner action:** check/replace the
+  German VPS / VLESS endpoint (the owner-provided egress, `singbox-egress-config.sops.yaml`; see "Things That Need
+  Owner Input").
 
 ## Repeatable Bootstrap
 
