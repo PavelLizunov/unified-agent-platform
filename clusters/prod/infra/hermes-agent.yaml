@@ -34,7 +34,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v4-revert-tg-fallback"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v5-config-hybrid"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -53,10 +53,18 @@ spec:
               if [ ! -x /opt/data/.local/bin/codex ]; then
                 npm i -g @openai/codex
               fi
-              # 2) hermes + codex config from the ConfigMap
-              cp /config/config.yaml /opt/data/config.yaml
+              # 2) Soft config + codex sandbox config from the ConfigMap, SEED-IF-ABSENT so the
+              #    dashboard/CLI can own them on the PVC across restarts. The BRAIN is pinned
+              #    separately by the managed overlay /etc/hermes/config.yaml, which always wins.
+              [ -f /opt/data/config.yaml ] || cp /config/config.yaml /opt/data/config.yaml
               mkdir -p /opt/data/.codex
-              cp /config/codex-config.toml /opt/data/.codex/config.toml
+              [ -f /opt/data/.codex/config.toml ] || cp /config/codex-config.toml /opt/data/.codex/config.toml
+              # 2b) Fail CLOSED on a broken brain overlay: the brain lives ONLY in the managed
+              #     overlay now (no PVC fallback on a fresh volume), and the managed loader is
+              #     fail-OPEN, so a malformed overlay would silently un-pin the brain. Abort the boot
+              #     (visible CrashLoop) instead. /config/managed-config = the bytes the gateway
+              #     mounts at /etc/hermes/config.yaml.
+              /opt/hermes/.venv/bin/python -c 'import yaml,sys; d=yaml.safe_load(open("/config/managed-config")) or {}; sys.exit("FATAL: managed brain overlay missing model.provider") if not d.get("model",{}).get("provider") else None'
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
               #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
               if [ ! -f /opt/data/auth.json ]; then
@@ -67,7 +75,13 @@ spec:
               # 3b) Telegram bot token -> user .env (hermes reads it as self.config.token).
               #     Proxy + allowlist are NOT here — they go in the managed scope
               #     (/etc/hermes/.env) so they reach the isolated per-profile os.environ.
-              printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat /telegram/token)" > /opt/data/.env
+              # The bot token is GitOps-owned (seeded from the SOPS secret, ROTATABLE by rolling
+              # the pod). Replace ONLY its line each boot; PRESERVE all OTHER .env lines the
+              # dashboard writes (Discord/MCP tokens, /sethome chat-IDs) so they survive restarts.
+              touch /opt/data/.env
+              grep -v '^TELEGRAM_BOT_TOKEN=' /opt/data/.env > /opt/data/.env.tmp || true
+              printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat /telegram/token)" >> /opt/data/.env.tmp
+              mv /opt/data/.env.tmp /opt/data/.env
               chmod 600 /opt/data/.env
               # 3c) seed the user profile (memories/USER.md) once; the agent enriches it via chat
               mkdir -p /opt/data/memories
@@ -108,6 +122,8 @@ spec:
             # Telegram adapter AND the gateway-driven codex brain reach the egress proxy —
             # the per-profile os.environ is isolated and does NOT see /opt/data/.env.
             - { name: config, mountPath: /etc/hermes/.env, subPath: managed-env, readOnly: true }
+            # managed CONFIG overlay: pins the BRAIN (model.*) per-leaf OVER the PVC config.yaml.
+            - { name: config, mountPath: /etc/hermes/config.yaml, subPath: managed-config, readOnly: true }
           resources:
             requests: { cpu: 100m, memory: 512Mi }
             limits: { memory: 1536Mi }
