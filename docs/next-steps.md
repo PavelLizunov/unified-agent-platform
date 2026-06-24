@@ -76,13 +76,20 @@ every tool goes dark). Detail + citations in the two research docs.
 > the always-on Codex subscription through the egress, so this workload does **not** depend on the GPU desktop.
 > Chosen k3s/Flux over bare Docker, and the Codex brain (pulled forward from A5) over the opportunistic RTX brain.
 
-### Phase A3 — Telegram gateway (phone control)
+### Phase A3 — Telegram gateway (phone control) — ✅ DONE (2026-06-24)
 
 - BotFather `/newbot` → `TELEGRAM_BOT_TOKEN` in `~/.hermes/.env`; lock down with
   `TELEGRAM_ALLOWED_USERS` / DM pairing (deny-by-default).
 - Use **outbound long-poll** (default) — no inbound port, NAT/RU-friendly. If NAT idle timeouts kill the
   poll, shorten `messaging.telegram.poll_timeout`.
 - **Done when:** a phone message reaches the agent and a tool-using reply comes back.
+
+> **Done (2026-06-24):** a phone message round-trips through the gateway to the Codex brain (gpt-5.5) and back
+> ("17×23 = 391"), verified end-to-end (PR #10). Non-obvious fix: api.telegram.org is **blocked direct** from the
+> cluster, and hermes's per-profile `os.environ` is **isolated** (multiplex) — so the proxy + `TELEGRAM_ALLOWED_USERS`
+> had to go in hermes's **managed scope** (`/etc/hermes/.env`, loaded last with override into `os.environ`,
+> authoritative for every profile + subprocess). The same fix gives the **gateway-driven Codex brain** the egress
+> (codex spawn = `os.environ.copy()`). Token via SOPS; details in `runbooks/hermes-agent-codex-brain.md`.
 
 ### Phase A4 — First `claude -p` coding worker (the vibe-coding gate)
 
