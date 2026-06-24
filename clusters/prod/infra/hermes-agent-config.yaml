@@ -24,3 +24,13 @@ data:
     # itself is the security boundary, so disable codex's sandbox.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
+  # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
+  # os.environ, authoritative for every profile + subprocess. Required because the per-profile
+  # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram
+  # adapter's resolve_proxy_url and the codex spawn (os.environ.copy()) only get the egress
+  # proxy from here. api.telegram.org is blocked direct from the cluster -> proxy is mandatory.
+  managed-env: |
+    HTTPS_PROXY=http://singbox-egress.uap-system.svc:12080
+    HTTP_PROXY=http://singbox-egress.uap-system.svc:12080
+    NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
+    TELEGRAM_ALLOWED_USERS=729937253

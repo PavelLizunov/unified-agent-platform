@@ -1,0 +1,22 @@
+apiVersion: v1
+data:
+    token: ENC[AES256_GCM,data:eqYkyt+CFdX+rn1zMaFfaiphv///Vm3jc++5APIHb9Ck5cnGjJ8KzIz5uU/7OH0SHcfRP/BwosNb+/JYJD7Ejw==,iv:ehLbKS+otIBnzf5M6FS9H2VjOdBVp4b3R0J/2bNSEwA=,tag:x3zzXx1P8yfJ4Q4FNwSYsw==,type:str]
+kind: Secret
+metadata:
+    name: hermes-agent-telegram
+    namespace: uap-system
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSAvS1lKN0ptS3VsRjFrbWZP
+            NDdKMTUwWTZiUlIxai9tMUFETlZyRXpWeFJjCkdKWW10SDV6eS9sWlY2OHh2aHlI
+            MmluY0dBUDZ4U3N3RkVyMTcwT0d2NmsKLS0tIGhncEhISCtlVGJCc0wvVWE2Wkxn
+            OEtubFlmRE5HejNEUDNzNERtYXpIak0KAV3LrmxJxm9ruvNagVaw43WN9C8cRBrX
+            s8/Vr8mzc0pA3JsXpQtbzeME9I1eu8+3nXc9brZp+V1KP2fa+Km0sw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-06-24T15:08:03Z"
+    mac: ENC[AES256_GCM,data:lOxI6my/xIlDm+Eqjg4M3auliW4Iy20OT5Py5MNGhhsyZw/FGY1jatoL800eIsNA42w2CpI/klriWsD1VSq2SGDf7p94FdR5nVWPuLwtl3aNMggkXx9+fdybEad4RSy3Dsu6rKWTzL7GnMdvR8MCyJBe/3rt1p6HxogPdjZ1wSU=,iv:G9JjoSNhhAHyYD08ZlOe7kBwdP+miiYTDzY6WWgn0II=,tag:4TUmITtyZQ9UhZj5yFjm/Q==,type:str]
+    version: 3.13.1
