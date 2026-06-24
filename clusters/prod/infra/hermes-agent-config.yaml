@@ -16,10 +16,14 @@ data:
     model:
       provider: openai-codex
       openai_runtime: codex_app_server
+      model: gpt-5.5          # give the auxiliary client an explicit model (fixes "openai-codex requested without a model")
     agent:
       tool_use_enforcement: auto
     display:
       language: ru
+    # set these explicitly (not null) to silence the tui_gateway "empty section" warning; generous for a single user
+    max_concurrent_sessions: 20
+    context_file_max_chars: 200000
   codex-config.toml: |
     # codex's own bubblewrap sandbox cannot initialise in the restricted container
     # (no user namespaces) -> writes fail with "sandbox permission error". The pod
@@ -36,6 +40,9 @@ data:
     HTTP_PROXY=http://singbox-egress.uap-system.svc:12080
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
     TELEGRAM_ALLOWED_USERS=729937253
+    # api.telegram.org is blocked direct here; the fallback-IP attempts just fail (httpx.ConnectError noise)
+    # before the proxy path succeeds. Disable them so polling uses only the working proxy path.
+    HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1
   # Seed user profile (memories/USER.md) — initContainer writes it only if absent; the
   # agent enriches it over time via conversation (memory.user_profile_enabled: true).
   user-profile: |
