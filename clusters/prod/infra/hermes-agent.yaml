@@ -34,7 +34,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "a2-codex-v1"   # bump to roll the pod on config changes
+        hermes-agent/config-rev: "v3-config-fixes"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
