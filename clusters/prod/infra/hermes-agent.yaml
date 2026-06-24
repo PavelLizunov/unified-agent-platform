@@ -69,6 +69,9 @@ spec:
               #     (/etc/hermes/.env) so they reach the isolated per-profile os.environ.
               printf 'TELEGRAM_BOT_TOKEN=%s\n' "$(cat /telegram/token)" > /opt/data/.env
               chmod 600 /opt/data/.env
+              # 3c) seed the user profile (memories/USER.md) once; the agent enriches it via chat
+              mkdir -p /opt/data/memories
+              [ -f /opt/data/memories/USER.md ] || cp /config/user-profile /opt/data/memories/USER.md
               # 4) ownership for the uid-10000 hermes services
               chown -R 10000:10000 /opt/data
           volumeMounts:
@@ -88,6 +91,16 @@ spec:
             - { name: HTTP_PROXY, value: "http://singbox-egress.uap-system.svc:12080" }
             - { name: NO_PROXY, value: ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10" }
             - { name: HERMES_DISABLE_LAZY_INSTALLS, value: "1" }
+            # Web dashboard (the "morda": config + sessions UI), over tailnet via the NodePort Service below.
+            # Auth is mandatory (June 2026 hardening); basic auth, password from the SOPS secret.
+            - { name: HERMES_DASHBOARD, value: "1" }
+            - { name: HERMES_DASHBOARD_HOST, value: "0.0.0.0" }
+            - { name: HERMES_DASHBOARD_PORT, value: "9119" }
+            - { name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "pavel" }
+            - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
+              valueFrom: { secretKeyRef: { name: hermes-agent-dashboard, key: password } }
+          ports:
+            - { name: dashboard, containerPort: 9119 }
           volumeMounts:
             - { name: data, mountPath: /opt/data }
             # managed scope: loaded LAST with override into os.environ, authoritative for
@@ -111,3 +124,21 @@ spec:
         - name: telegram-seed
           secret:
             secretName: hermes-agent-telegram
+---
+# Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
+# tailscale-serve proxy can't reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy
+# :30890). Reach it at http://<any-node-tailnet-ip>:30911 with basic auth (user "pavel").
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-agent-dashboard
+  namespace: uap-system
+spec:
+  type: NodePort
+  selector:
+    app: hermes-agent
+  ports:
+    - name: dashboard
+      port: 9119
+      targetPort: 9119
+      nodePort: 30911
