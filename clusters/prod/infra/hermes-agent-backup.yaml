@@ -1,0 +1,99 @@
+# hermes-agent PVC DR backup (PR B). The hermes-agent-data PVC is local-path, node-pinned to
+# uap-home-2, reclaimPolicy was Delete, and is NOT covered by the etcd->R2 snapshots (those
+# capture k8s API objects, never the hostPath bytes). A uap-home-2 disk loss would lose ALL
+# earned state: sessions (state.db), the Codex brain (.codex/*.sqlite), kanban, cron, USER.md.
+# This CronJob takes a daily FULL `hermes backup` (consistent sqlite snapshot, safe on the live
+# pod) and ships it to R2. FULL, not --quick: --quick omits .codex/ = the Codex brain memory.
+# Restore: see runbooks/hermes-agent-dr.md. The backup zip contains plaintext auth.json/.env
+# (same exposure class as the etcd->R2 snapshots already in this bucket); harden via the
+# bucket-scoped R2 key + optional client-side encryption follow-up noted in the runbook.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hermes-agent-backup
+  namespace: uap-system
+spec:
+  schedule: "0 3 * * *"            # daily 03:00 (node-local time); matches the etcd snapshot cadence
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          # RWO local-path PVC lives on uap-home-2; a second reader pod must co-locate there.
+          nodeSelector:
+            kubernetes.io/hostname: uap-home-2
+          securityContext:
+            fsGroup: 10000              # shared by both containers -> 0640 zip handoff works without root-read
+          initContainers:
+            # 1) produce the FULL backup zip into a shared emptyDir (reads the PVC; no writes to it).
+            - name: dump
+              image: nousresearch/hermes-agent:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  ts=$(date +%Y%m%d-%H%M%S)
+                  zip="/work/hermes-backup-$ts.zip"
+                  # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). hermes uses
+                  # sqlite3.backup() for a consistent copy, so this is safe while the gateway runs.
+                  env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip"
+                  # Fail LOUD on an empty/corrupt/brain-less zip. Without this, a 0-byte or
+                  # exit-0-but-broken backup would ship to R2 as a useless "success" — and this is
+                  # the ONLY backup of the PVC, so a silent bad backup is the worst outcome.
+                  [ -s "$zip" ] || { echo "FATAL: backup zip missing/empty"; exit 1; }
+                  /opt/hermes/.venv/bin/python -c "import zipfile,sys; z=zipfile.ZipFile(\"$zip\"); sys.exit(\"FATAL: corrupt zip\") if z.testzip() else (sys.exit(\"FATAL: .codex brain DB missing from backup\") if not any(n.startswith(\".codex/\") and n.endswith(\".sqlite\") for n in z.namelist()) else None)"
+                  chmod 640 "$zip"          # owner+group(10000); ship container reads via fsGroup, not root
+                  ls -la /work
+              env:
+                - { name: HERMES_HOME, value: /opt/data }
+              volumeMounts:
+                - { name: data, mountPath: /opt/data }
+                - { name: work, mountPath: /work }
+              resources:
+                requests: { cpu: 50m, memory: 256Mi }
+                limits: { memory: 512Mi }
+          containers:
+            # 2) ship to R2 (direct to Cloudflare, NOT through the LLM egress proxy) + retention.
+            - name: ship
+              image: rclone/rclone:latest
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  export RCLONE_CONFIG=/cfg/rclone.conf
+                  DST="r2:uap-k3s-snapshots/hermes-agent-backup/"
+                  # guard: never report success on an empty /work (would be a silent backup miss).
+                  ls /work/hermes-backup-*.zip >/dev/null 2>&1 || { echo "FATAL: no backup zip in /work to ship"; exit 1; }
+                  rclone copy /work "$DST" --include "hermes-backup-*.zip" --s3-no-check-bucket
+                  # retention: keep the most recent 7 (busybox-safe; oldest sort to the top of the list).
+                  keep=7
+                  files=$(rclone lsf "$DST" | grep -E '^hermes-backup-.*\.zip$' | sort)
+                  n=$(printf '%s\n' "$files" | grep -c . || true)
+                  if [ "$n" -gt "$keep" ]; then
+                    printf '%s\n' "$files" | head -n "$((n - keep))" | while IFS= read -r o; do
+                      [ -n "$o" ] && { echo "retention: deleting $o"; rclone deletefile "$DST$o"; }
+                    done
+                  fi
+                  echo "=== current backups in R2 ==="
+                  rclone lsf "$DST" | grep -E '^hermes-backup-.*\.zip$' | sort || true
+              volumeMounts:
+                - { name: work, mountPath: /work }
+                - { name: r2cfg, mountPath: /cfg, readOnly: true }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { memory: 256Mi }
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: hermes-agent-data
+            - name: work
+              emptyDir: { sizeLimit: 2Gi }
+            - name: r2cfg
+              secret:
+                secretName: hermes-agent-backup-r2
