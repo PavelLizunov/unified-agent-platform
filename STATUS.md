@@ -190,13 +190,20 @@ over bare Docker.
   while the egress is down). Fail-loud integrity guards (non-empty + valid zip + `.codex` present). PV flipped to
   `reclaimPolicy: Retain`. **Verified:** a manual job shipped a 40MB zip to R2. Restore + hardening follow-ups
   (bucket-scoped key, client-side encryption) in `runbooks/hermes-agent-dr.md`.
-- **⚠️ CURRENT BLOCKER (egress, 2026-06-25):** the **German VLESS+REALITY exit is DOWN** — `singbox-egress` logs show
-  `EOF` opening connections to chatgpt.com, api.telegram.org, api.ipify.org and dns.google alike (the upstream VLESS
-  connection to the German VPS fails at ~100ms). This is **independent of the work above** (`singbox-egress` is a
-  separate, untouched deployment) and blocks BOTH the Codex brain and Telegram. The brain *config* is correct
-  (managed keys verified); the round-trip will pass once the exit is restored. **Owner action:** check/replace the
-  German VPS / VLESS endpoint (the owner-provided egress, `singbox-egress-config.sops.yaml`; see "Things That Need
-  Owner Input").
+- **Egress outage RESOLVED 2026-06-25 (PR #19, merged) — HA failover egress.** The single German VLESS+REALITY exit
+  had died server-side (`singbox-egress` logged `EOF` to chatgpt.com/api.telegram.org/ipify/dns alike), taking the
+  Codex brain + Telegram offline. Fix: a **separate `singbox-egress-ha`** (Deployment + Service + SOPS config) running
+  sing-box with a **`urltest`** outbound that auto-fails-over across the owner's 3-server subscription (DE/IS/NL) —
+  probe every 30s, route the fastest LIVE server, migrate in-flight connections off a dead one; **no `direct` outbound**
+  (no RU-origin leak). hermes-agent (brain + Telegram) is repointed at it (config-rev `v6-egress-ha`). **subfleet stays
+  on the single-fixed `singbox-egress` (untouched)** — its OAuth is IP-pinned and must NOT sit behind a rotating egress.
+  Regenerate the server list with `infra/sops/gen-singbox-failover.py` (see `runbooks/llm-egress-vless.md`). **Verified:**
+  `sing-box check` valid + 12/12 live reachability (telegram 302 / chatgpt 403) pre-deploy; in-cluster the **brain
+  round-trip wrote `BRAIN-OK`** and Telegram reconnected. Per-server probe: Iceland rock-solid, Germany good, Netherlands
+  dead (urltest excludes it). Independently reviewed (the split fixed a subfleet IP-pin blocker).
+- **subfleet egress note:** subfleet's `singbox-egress` still points at its original (now-dead) German exit. Restoring
+  subfleet needs the owner to repoint it to a live server AND re-run `claude setup-token` from that exit IP (changing the
+  IP breaks the existing pin) — a separate, owner-gated task. Do NOT fold subfleet onto the rotating HA egress.
 
 ## Repeatable Bootstrap
 
