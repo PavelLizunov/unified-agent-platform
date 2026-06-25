@@ -1,0 +1,62 @@
+# HA LLM egress for hermes-agent (Codex brain + Telegram): VLESS+REALITY with urltest
+# AUTO-FAILOVER across the owner's subscription servers (Germany/Iceland/Netherlands ...).
+# urltest probes each server every 30s and routes the fastest LIVE one, migrating in-flight
+# connections off a server that dies (interrupt_exist_connections).
+#
+# WHY a SEPARATE Service from `singbox-egress` (subfleet-egress.yaml): urltest ROTATES exit IPs,
+# which would break subfleet's OAuth IP-pin (its static token was authorized through ONE exit IP;
+# a refresh from a different IP 403s and can poison the credential -- see the warning in
+# clusters/staging-stage3/singbox-egress.yaml). hermes-agent is NOT IP-pinned (Codex refreshes its
+# own OAuth across IPs; Telegram is stateless), so it is safe behind a rotating egress and gets
+# real failover. subfleet stays on the single-fixed `singbox-egress`.
+#
+# Config = SOPS Secret singbox-egress-ha-config (singbox-egress-ha-config.sops.yaml), regenerated
+# from the subscription via infra/sops/gen-singbox-failover.py. See runbooks/llm-egress-vless.md.
+apiVersion: v1
+kind: Service
+metadata:
+  name: singbox-egress-ha
+  namespace: uap-system
+spec:
+  selector:
+    app: singbox-egress-ha
+  ports:
+    - name: proxy
+      port: 12080
+      targetPort: 12080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: singbox-egress-ha
+  namespace: uap-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: singbox-egress-ha
+  template:
+    metadata:
+      labels:
+        app: singbox-egress-ha
+    spec:
+      containers:
+        - name: sing-box
+          image: ghcr.io/sagernet/sing-box:v1.13.13
+          args: ["run", "-c", "/etc/sing-box/config.json"]
+          ports:
+            - containerPort: 12080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/sing-box
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+      volumes:
+        - name: config
+          secret:
+            secretName: singbox-egress-ha-config
