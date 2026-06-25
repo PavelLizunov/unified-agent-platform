@@ -44,8 +44,8 @@ data:
   # adapter's resolve_proxy_url and the codex spawn (os.environ.copy()) only get the egress
   # proxy from here. api.telegram.org is blocked direct from the cluster -> proxy is mandatory.
   managed-env: |
-    HTTPS_PROXY=http://singbox-egress.uap-system.svc:12080
-    HTTP_PROXY=http://singbox-egress.uap-system.svc:12080
+    HTTPS_PROXY=http://singbox-egress-ha.uap-system.svc:12080
+    HTTP_PROXY=http://singbox-egress-ha.uap-system.svc:12080
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
     TELEGRAM_ALLOWED_USERS=729937253
     # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the

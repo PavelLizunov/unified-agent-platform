@@ -34,7 +34,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v5-config-hybrid"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v6-egress-ha"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -100,9 +100,9 @@ spec:
           env:
             - { name: HERMES_HOME, value: /opt/data }
             - { name: CODEX_HOME, value: /opt/data/.codex }
-            # Codex CLI egress -> singbox -> DE exit -> chatgpt.com (the proven path)
-            - { name: HTTPS_PROXY, value: "http://singbox-egress.uap-system.svc:12080" }
-            - { name: HTTP_PROXY, value: "http://singbox-egress.uap-system.svc:12080" }
+            # Codex CLI egress -> singbox-egress-ha (urltest failover) -> VLESS exit -> chatgpt.com (the proven path)
+            - { name: HTTPS_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
+            - { name: HTTP_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
             - { name: NO_PROXY, value: ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10" }
             - { name: HERMES_DISABLE_LAZY_INSTALLS, value: "1" }
             # Web dashboard (the "morda": config + sessions UI), over tailnet via the NodePort Service below.

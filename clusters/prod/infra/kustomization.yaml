@@ -9,6 +9,9 @@ resources:
   - subfleet-secrets.sops.yaml
   - singbox-egress-config.sops.yaml
   - subfleet-egress.yaml
+  # HA egress for hermes-agent (urltest auto-failover); separate from subfleet's IP-pinned egress
+  - singbox-egress-ha-config.sops.yaml
+  - singbox-egress-ha.yaml
   - subfleet.yaml
   - litellm-keys.sops.yaml
   - litellm.yaml

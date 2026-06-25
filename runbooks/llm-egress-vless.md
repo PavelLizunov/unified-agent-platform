@@ -196,9 +196,59 @@ kubectl -n uap-system run egress-test --rm -it --image=curlimages/curl --restart
   chain also fails — the ultimate fallback is `cheap-local` (Ollama in RU): degradation, not outage.
 - Related: Tailscale's own control plane may be throttled in RU (RISKS #16) — keep a Headscale migration plan.
 
+## Deployed: sing-box HA egress for hermes-agent (urltest failover, 2026-06-25)
+
+The live egress is **sing-box** (not xray). Two SEPARATE Services keep the IP-pin and the failover
+concerns apart:
+
+- **`singbox-egress`** (`subfleet-egress.yaml`) — a SINGLE fixed VLESS+REALITY exit, consumed by
+  **subfleet** (`subfleet.yaml`). subfleet's OAuth token is IP-pinned to one exit, so this Service
+  must NOT rotate exits (see the warning in `clusters/staging-stage3/singbox-egress.yaml`).
+- **`singbox-egress-ha`** (`singbox-egress-ha.yaml`) — VLESS+REALITY with a **`urltest`** outbound
+  that AUTO-FAILS-OVER across the owner's subscription servers (probe every 30s, route the fastest
+  live one, migrate in-flight connections off a dead one). Consumed by **hermes-agent** (Codex
+  brain + Telegram), which is NOT IP-pinned. `route.final` = the urltest group; there is **no
+  `direct` outbound**, so traffic can never exit clear from the RU origin IP.
+
+### Regenerate the HA server list (when servers rotate / a server dies)
+
+Servers come from the owner's VPN subscription (a base64 list of `vless://` URIs). Regenerate the
+sing-box config + Secret with `infra/sops/gen-singbox-failover.py` (on uap-ops-1: has curl + sing-box
++ sops). `SUB_URL` = the owner's subscription endpoint:
+
+```bash
+curl -sL "$SUB_URL" -o /tmp/sub.dat
+python3 infra/sops/gen-singbox-failover.py /tmp/sub.dat /tmp/config.json   # prints a SECRET-MASKED summary
+sing-box check -c /tmp/config.json                                         # must validate
+kubectl create secret generic singbox-egress-ha-config -n uap-system \
+  --from-file=config.json=/tmp/config.json --dry-run=client -o yaml \
+  > clusters/prod/infra/singbox-egress-ha-config.sops.yaml
+sops -e -i clusters/prod/infra/singbox-egress-ha-config.sops.yaml
+shred -u /tmp/sub.dat /tmp/config.json
+# commit via a PR (uap-commit-push); Flux rolls singbox-egress-ha onto the new config.
+```
+
+The generator fails loudly if a server is missing REALITY params and emits NO plaintext/`direct`
+outbound. A dead server in the pool is harmless — urltest excludes it within ~30s (it re-joins
+automatically if it recovers).
+
+### Verify
+
+```bash
+# real-target reachability through the HA proxy (from a debug pod or ops-1 with a local sing-box):
+curl -x http://singbox-egress-ha.uap-system.svc:12080 -sS -o /dev/null -w '%{http_code}\n' \
+  https://api.telegram.org    # expect 302 (reached Telegram) — NOT a connection reset
+# the brain round-trip is the real proof: see runbooks/hermes-agent-codex-brain.md (CLI round-trip).
+```
+
+> subfleet note: `singbox-egress` (subfleet's) still points at its original fixed exit. If that exit
+> is dead, subfleet stays down until the owner repoints it to a live server AND re-runs
+> `claude setup-token` from the new exit IP (changing the exit IP breaks the existing pin). That is a
+> separate, owner-gated task — do NOT fold subfleet onto the rotating HA egress.
+
 ## Do Not
 
-- Do not commit the filled-in xray config, VLESS UUID, REALITY keys, or VPS address — SOPS/age only.
+- Do not commit the filled-in xray/sing-box config, VLESS UUID, REALITY keys, or VPS address — SOPS/age only.
 - Do not tunnel the whole node; only the LLM domains. k3s/etcd/Flux stay off the proxy.
 - Do not put the egress proxy in the etcd/Flux critical path.
 - Do not rely on OpenRouter to bypass the block — it does not.
