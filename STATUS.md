@@ -216,8 +216,14 @@ over bare Docker.
 - **A5 coding engines + worktree isolation — verified 2026-06-26:** BOTH coding engines work in-cluster —
   `codex exec "<task>"` (the 2nd engine, via the Codex auth + egress) edits files autonomously, and `claude -p -w <name>`
   runs in an **isolated git worktree** (`.claude/worktrees/<name>`, its own branch) so a coding task never touches the
-  main checkout. The harness for the north-star demo is complete; the remaining step is the actual end-to-end run
-  (phone idea → plan → worker edits in a worktree → its own tests pass → PR via ops-1, **no owner review**).
+  main checkout.
+- **NORTH-STAR MILESTONE — A4 demo PASSED 2026-06-26 (PR #25):** the hermes-agent `claude -p` worker autonomously
+  shipped a real change (a kustomization-orphan check in `validate_iac.py` + its test, 10 turns / $0.63) in an isolated
+  git worktree, **self-verified** (its own test + `validate_iac` green), and it landed in `master` via the required
+  `static-checks` CI — **with NO human diff review**. The thesis is proven: the worker's self-test + the enforced CI
+  is the quality gate, not human review. (This run was orchestrated — task chosen + worker invoked via `kubectl exec`
+  + the patch bridged to ops-1 for the push. The remaining AUTOMATION is wiring a phone message → hermes → worker →
+  ops-1 push so the whole loop runs unattended from the phone.)
 
 ## Repeatable Bootstrap
 
