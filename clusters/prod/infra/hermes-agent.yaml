@@ -34,7 +34,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v6-egress-ha"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v7-claude-worker"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -48,10 +48,13 @@ spec:
           args:
             - |
               set -eu
-              # 1) codex CLI onto the PVC (lands in /opt/data/.local/bin, already on the image PATH)
+              # 1) coding CLIs onto the PVC (land in /opt/data/.local/bin, already on the image PATH)
               export npm_config_prefix=/opt/data/.local
               if [ ! -x /opt/data/.local/bin/codex ]; then
                 npm i -g @openai/codex
+              fi
+              if [ ! -x /opt/data/.local/bin/claude ]; then
+                npm i -g @anthropic-ai/claude-code
               fi
               # 2) Soft config + codex sandbox config from the ConfigMap, SEED-IF-ABSENT so the
               #    dashboard/CLI can own them on the PVC across restarts. The BRAIN is pinned
@@ -59,6 +62,10 @@ spec:
               [ -f /opt/data/config.yaml ] || cp /config/config.yaml /opt/data/config.yaml
               mkdir -p /opt/data/.codex
               [ -f /opt/data/.codex/config.toml ] || cp /config/codex-config.toml /opt/data/.codex/config.toml
+              # 2a) claude -p worker: seed deny-first settings (defense-in-depth vs accidental secret reads;
+              #     Bash is unconstrained, so the pod itself is the real boundary)
+              mkdir -p /opt/data/.claude
+              [ -f /opt/data/.claude/settings.json ] || cp /config/claude-settings /opt/data/.claude/settings.json
               # 2b) Fail CLOSED on a broken brain overlay: the brain lives ONLY in the managed
               #     overlay now (no PVC fallback on a fresh volume), and the managed loader is
               #     fail-OPEN, so a malformed overlay would silently un-pin the brain. Abort the boot
@@ -113,6 +120,9 @@ spec:
             - { name: HERMES_DASHBOARD_BASIC_AUTH_USERNAME, value: "pavel" }
             - name: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
               valueFrom: { secretKeyRef: { name: hermes-agent-dashboard, key: password } }
+            # A4 - Claude Max OAuth token for the claude -p coding worker (claude reads CLAUDE_CODE_OAUTH_TOKEN)
+            - name: CLAUDE_CODE_OAUTH_TOKEN
+              valueFrom: { secretKeyRef: { name: hermes-agent-claude, key: oauth-token } }
           ports:
             - { name: dashboard, containerPort: 9119 }
           volumeMounts:
