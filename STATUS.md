@@ -205,6 +205,19 @@ over bare Docker.
 - **subfleet egress note:** subfleet's `singbox-egress` still points at its original (now-dead) German exit. Restoring
   subfleet needs the owner to repoint it to a live server AND re-run `claude setup-token` from that exit IP (changing the
   IP breaks the existing pin) — a separate, owner-gated task. Do NOT fold subfleet onto the rotating HA egress.
+- **A4 (claude -p coding worker) DONE 2026-06-26 (PR #23):** Anthropic's `claude` CLI runs as an autonomous
+  `claude -p` worker INSIDE the hermes-agent pod, alongside the Codex brain. Claude Max OAuth (a portable 1-year
+  `claude setup-token`) was obtained via a **server-side device-flow** (run in the pod under a PTY through the egress;
+  owner clicked the URL + pasted the code), stored in the SOPS secret `hermes-agent-claude`, injected as env
+  `CLAUDE_CODE_OAUTH_TOKEN`. The claude CLI installs in the initContainer (seed-if-absent, mirrors codex); deny-first
+  `/opt/data/.claude/settings.json` is defense-in-depth (the pod is the real boundary, Bash is unconstrained).
+  **Verified in-cluster:** `claude -p` returns a result through the egress with the secret-injected token, and the
+  deny rule blocks a decoy secret read. Recipe + gotchas in memory `uap-claude-worker`; config-rev `v7-claude-worker`.
+- **A5 coding engines + worktree isolation — verified 2026-06-26:** BOTH coding engines work in-cluster —
+  `codex exec "<task>"` (the 2nd engine, via the Codex auth + egress) edits files autonomously, and `claude -p -w <name>`
+  runs in an **isolated git worktree** (`.claude/worktrees/<name>`, its own branch) so a coding task never touches the
+  main checkout. The harness for the north-star demo is complete; the remaining step is the actual end-to-end run
+  (phone idea → plan → worker edits in a worktree → its own tests pass → PR via ops-1, **no owner review**).
 
 ## Repeatable Bootstrap
 

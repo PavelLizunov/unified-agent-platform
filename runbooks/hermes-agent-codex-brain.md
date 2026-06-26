@@ -124,6 +124,32 @@ kubectl -n uap-system exec deploy/hermes-agent -- env HOME=/opt/data hermes conf
 ```
 plus the CLI round-trip above (brain still drives a tool), and confirm a dashboard-added Discord token survives a roll.
 
+## Coding workers — `claude -p` + `codex exec` (A4/A5)
+
+Two coding engines, both installed on the PVC (`/opt/data/.local/bin`) and reaching their providers through
+`singbox-egress-ha`:
+
+- **`claude -p` (Claude Max OAuth)** — token in env `CLAUDE_CODE_OAUTH_TOKEN` from the SOPS secret
+  `hermes-agent-claude`. Run headless + isolated:
+  `claude -p "<task>" -w <name> --permission-mode acceptEdits --output-format json` — `-w` runs in an isolated git
+  worktree (`.claude/worktrees/<name>`, own branch). Deny-first `/opt/data/.claude/settings.json` blocks accidental
+  reads of the in-pod auth stores + repo `*.sops.yaml` (defense-in-depth; the pod is the real boundary, Bash is open).
+- **`codex exec "<task>"` (ChatGPT/Codex)** — same Codex auth as the brain; edits autonomously (sandbox
+  `danger-full-access`, approval `never`).
+
+Both verified in-cluster (2026-06-26): each edits files end-to-end through the egress.
+
+### Re-issue the Claude Max token (server-side device-flow, no owner install needed)
+
+The token is a **portable** 1-year `setup-token` (used via `CLAUDE_CODE_OAUTH_TOKEN`, NOT IP-pinned):
+1. In the pod, run `claude setup-token` under a PTY with stdin from a held-open FIFO (no tmux available — use
+   `script -qfc "claude setup-token" /tmp/out` with stdin `<&9` where `exec 9<>/tmp/fifo`); capture the printed
+   `https://claude.com/cai/oauth/authorize?...` URL.
+2. Owner opens the URL (logged into Claude Max), authorizes, copies the `code#state`.
+3. Write `code#state` to the FIFO, then a `\r` (the trailing newline alone does NOT submit).
+4. The token prints — the TUI letter-spaces the prefix hyphens, so reconstruct `sk-ant-oat01-` + body. SOPS-encrypt
+   it into `hermes-agent-claude` (key `oauth-token`), `shred` the plaintext, roll the pod.
+
 ## Caveats / follow-ups
 
 - **Shared refresh-token lineage:** the seed shares the Codex CLI's single-use refresh token. If the owner's
