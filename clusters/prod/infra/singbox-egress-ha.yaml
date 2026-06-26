@@ -39,6 +39,8 @@ spec:
     metadata:
       labels:
         app: singbox-egress-ha
+      annotations:
+        singbox-egress-ha/config-rev: "v2-6servers"   # bump when regenerating the config secret so Flux rolls the pod (sing-box reads its config only at startup)
     spec:
       containers:
         - name: sing-box

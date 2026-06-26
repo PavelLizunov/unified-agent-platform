@@ -225,7 +225,9 @@ kubectl create secret generic singbox-egress-ha-config -n uap-system \
   > clusters/prod/infra/singbox-egress-ha-config.sops.yaml
 sops -e -i clusters/prod/infra/singbox-egress-ha-config.sops.yaml
 shred -u /tmp/sub.dat /tmp/config.json
-# commit via a PR (uap-commit-push); Flux rolls singbox-egress-ha onto the new config.
+# BUMP singbox-egress-ha/config-rev in singbox-egress-ha.yaml so Flux ROLLS the pod (sing-box reads
+# its config only at startup; a Secret change alone does NOT restart it).
+# commit via a PR (uap-commit-push); Flux applies the secret + rolls singbox-egress-ha onto the new config.
 ```
 
 The generator fails loudly if a server is missing REALITY params and emits NO plaintext/`direct`
