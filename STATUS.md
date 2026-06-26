@@ -193,7 +193,8 @@ over bare Docker.
 - **Egress outage RESOLVED 2026-06-25 (PR #19, merged) — HA failover egress.** The single German VLESS+REALITY exit
   had died server-side (`singbox-egress` logged `EOF` to chatgpt.com/api.telegram.org/ipify/dns alike), taking the
   Codex brain + Telegram offline. Fix: a **separate `singbox-egress-ha`** (Deployment + Service + SOPS config) running
-  sing-box with a **`urltest`** outbound that auto-fails-over across the owner's 3-server subscription (DE/IS/NL) —
+  sing-box with a **`urltest`** outbound that auto-fails-over across the owner's **6-server** subscription (3 VLESS+REALITY
+  + 3 WS+TLS `*.ninitux.top`, the WS exits more DPI-resistant; PR #21, verified 6/6 + `BRAIN-OK-6`) —
   probe every 30s, route the fastest LIVE server, migrate in-flight connections off a dead one; **no `direct` outbound**
   (no RU-origin leak). hermes-agent (brain + Telegram) is repointed at it (config-rev `v6-egress-ha`). **subfleet stays
   on the single-fixed `singbox-egress` (untouched)** — its OAuth is IP-pinned and must NOT sit behind a rotating egress.
