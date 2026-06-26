@@ -29,6 +29,25 @@ data:
     # itself is the security boundary, so disable codex's sandbox.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
+  # claude -p worker settings -> seeded to /opt/data/.claude/settings.json. Deny-first rules are
+  # DEFENSE-IN-DEPTH against ACCIDENTAL secret reads (e.g. a task that greps config files), NOT an
+  # exfil boundary: Bash is unconstrained, so the POD is the real boundary and the worker is the
+  # owner's own claude. Absolute (//) specs cover the in-pod auth stores; ./ specs cover the cloned repo.
+  claude-settings: |
+    {
+      "permissions": {
+        "deny": [
+          "Read(//opt/data/auth.json)",
+          "Read(//opt/data/.codex/auth.json)",
+          "Read(//opt/data/.claude/.credentials.json)",
+          "Read(//opt/data/.env)",
+          "Read(./**/*.sops.yaml)",
+          "Edit(./**/*.sops.yaml)",
+          "Read(./**/.env)",
+          "Read(./**/age-key.txt)"
+        ]
+      }
+    }
   # Managed CONFIG overlay -> /etc/hermes/config.yaml. hermes deep-merges this OVER the user
   # (PVC) config.yaml, winning PER-LEAF, and refuses dashboard/CLI writes to these keys with a
   # loud "managed by your administrator". Keeps the BRAIN GitOps-owned while the dashboard owns
