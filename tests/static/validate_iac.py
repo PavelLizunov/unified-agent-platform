@@ -30,6 +30,26 @@ REQUIRED_PATHS = [
     "runbooks/uap-ops-node.md",
 ]
 
+# Intentional exceptions: repo-root-relative paths that are deliberately NOT listed
+# as resources in a same-directory kustomization.yaml.
+KUSTOMIZATION_ORPHAN_ALLOWLIST = {
+    # Flux example/template files; validate_flux_examples_not_enabled already ensures
+    # they can never be referenced in a live kustomization.
+    "clusters/prod/flux-system/gotk-sync.example.yaml",
+    "clusters/prod/flux-system/gotk-sync.https-token.example.yaml",
+    "clusters/prod/flux-system/gotk-sync.ssh.example.yaml",
+    # SOPS smoke fixture for restore-drill testing — intentionally not a live Flux resource.
+    "clusters/prod/infra/sops-smoke.sops.yaml",
+    # staging-stage2: REVIEW-ONLY manifests, no kustomization.yaml yet (do not apply to cluster).
+    "clusters/staging-stage2/cnpg-cluster.yaml",
+    "clusters/staging-stage2/cnpg-operator.helmrelease.yaml",
+    "clusters/staging-stage2/garage.yaml",
+    # staging-stage3: REVIEW-ONLY manifests, no kustomization.yaml yet (do not apply to cluster).
+    "clusters/staging-stage3/litellm.yaml",
+    "clusters/staging-stage3/singbox-egress.yaml",
+    "clusters/staging-stage3/subfleet-helmrelease.yaml",
+}
+
 SECRET_PATTERNS = [
     re.compile(r"AGE-SECRET-KEY", re.IGNORECASE),
     re.compile(r"BEGIN [A-Z ]*PRIVATE KEY", re.IGNORECASE),
@@ -152,6 +172,53 @@ def validate_flux_examples_not_enabled(root: Path) -> None:
             fail(f"{name} must not be referenced until a real remote Git URL exists")
 
 
+def _find_kustomization_orphans(root: Path) -> list[str]:
+    """Return sorted repo-root-relative paths of cluster yaml files not in a same-dir kustomization."""
+    clusters_dir = root / "clusters"
+    if not clusters_dir.is_dir():
+        return []
+
+    orphans: list[str] = []
+    dirs = [clusters_dir] + sorted(p for p in clusters_dir.rglob("*") if p.is_dir())
+
+    for directory in dirs:
+        yaml_files = sorted(
+            f for f in directory.iterdir()
+            if f.is_file()
+            and f.suffix.lower() in {".yaml", ".yml"}
+            and f.name.lower() not in {"kustomization.yaml", "kustomization.yml"}
+        )
+        if not yaml_files:
+            continue
+
+        kustomization = directory / "kustomization.yaml"
+        if kustomization.exists():
+            with kustomization.open("r", encoding="utf-8") as handle:
+                data = yaml.safe_load(handle) or {}
+            resources = data.get("resources") or []
+            referenced = {Path(r).name for r in resources}
+        else:
+            referenced = set()
+
+        for yaml_file in yaml_files:
+            rel = yaml_file.relative_to(root).as_posix()
+            if rel in KUSTOMIZATION_ORPHAN_ALLOWLIST:
+                continue
+            if yaml_file.name not in referenced:
+                orphans.append(rel)
+
+    return sorted(orphans)
+
+
+def validate_kustomization_orphans(root: Path) -> None:
+    orphans = _find_kustomization_orphans(root)
+    if orphans:
+        for orphan in orphans:
+            print(f"ERROR: clusters orphan not in kustomization.yaml resources: {orphan}", file=sys.stderr)
+        raise SystemExit(1)
+    print("kustomization-orphans-ok")
+
+
 def validate_k3s_s3_template(root: Path) -> None:
     template_path = root / "infra" / "sops" / "templates" / "k3s-etcd-snapshot-s3-config.plaintext.template.yaml"
     with template_path.open("r", encoding="utf-8") as handle:
@@ -185,6 +252,7 @@ def main() -> None:
     validate_smoke_scripts(root)
     validate_flux_examples_not_enabled(root)
     validate_k3s_s3_template(root)
+    validate_kustomization_orphans(root)
     print("iac-static-ok")
 
 
