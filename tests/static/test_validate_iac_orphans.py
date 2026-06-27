@@ -68,12 +68,46 @@ def test_allowlist_suppresses_known_exception() -> None:
         assert allowlist_entry not in orphans, f"Allowlisted {allowlist_entry} should not be flagged"
 
 
+def test_cross_dir_reference_resolves() -> None:
+    # Documents intent (the OLD basename code also passed this one); the actual regression guard for
+    # the basename bug is test_duplicate_basename_local_not_masked below.
+    # A kustomization referencing ../shared/foo.yaml must mark that file referenced from its real
+    # location — not leave it looking like an orphan in clusters/shared (which has no kustomization).
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_file(root / "clusters" / "prod" / "kustomization.yaml",
+                  kust("resources:\n  - ../shared/foo.yaml\n"))
+        make_file(root / "clusters" / "shared" / "foo.yaml", "")
+        orphans = validate_iac._find_kustomization_orphans(root)
+        assert "clusters/shared/foo.yaml" not in orphans, \
+            f"../shared/foo.yaml is referenced cross-dir, should not be orphan; got: {orphans}"
+
+
+def test_duplicate_basename_local_not_masked() -> None:
+    # The basename bug: clusters/prod references ../shared/app.yaml while an UNREFERENCED local
+    # clusters/prod/app.yaml exists. A basename compare clears the local app.yaml (same name); the
+    # path-resolving check must still flag it, and must NOT flag the referenced ../shared/app.yaml.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_file(root / "clusters" / "prod" / "kustomization.yaml",
+                  kust("resources:\n  - ../shared/app.yaml\n"))
+        make_file(root / "clusters" / "shared" / "app.yaml", "")
+        make_file(root / "clusters" / "prod" / "app.yaml", "")  # local, unreferenced → orphan
+        orphans = validate_iac._find_kustomization_orphans(root)
+        assert "clusters/prod/app.yaml" in orphans, \
+            f"unreferenced local app.yaml must be flagged despite the ../shared/app.yaml basename; got: {orphans}"
+        assert "clusters/shared/app.yaml" not in orphans, \
+            f"referenced ../shared/app.yaml should not be orphan; got: {orphans}"
+
+
 if __name__ == "__main__":
     tests = [
         test_unreferenced_file_is_flagged,
         test_fully_referenced_dir_passes,
         test_no_kustomization_flags_all_yaml,
         test_allowlist_suppresses_known_exception,
+        test_cross_dir_reference_resolves,
+        test_duplicate_basename_local_not_masked,
     ]
     passed = failed = 0
     for test in tests:
