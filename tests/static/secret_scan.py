@@ -16,6 +16,14 @@ PATTERNS = [
     ("Tailscale auth key", re.compile(r"tskey-(?:auth|client|api)-[A-Za-z0-9_-]+")),
     ("plain tfvars password", re.compile(r"(?m)^\s*proxmox_password\s*=\s*\"(?!REPLACE_)")),
     ("plain tfvars api token", re.compile(r"(?m)^\s*proxmox_api_token\s*=\s*\"(?!REPLACE_)")),
+    # Provider tokens (plaintext) — these must only ever appear SOPS-encrypted (ENC[...]).
+    ("Anthropic API/OAuth token", re.compile(r"\bsk-ant-[a-z0-9]{2,8}-[A-Za-z0-9_-]{24,}")),
+    ("OpenAI API key", re.compile(r"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{20,}|\bsk-[A-Za-z0-9_-]{40,}")),
+    ("OpenRouter key", re.compile(r"\bsk-or-v1-[A-Za-z0-9]{24,}")),
+    ("GitHub token", re.compile(r"\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{40,}")),
+    ("AWS/R2 access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
+    ("Telegram bot token", re.compile(r"\b[0-9]{8,10}:[A-Za-z0-9_-]{35}\b")),
 ]
 
 SKIP_FILES = {

@@ -112,6 +112,55 @@ def validate_no_plaintext_secrets(root: Path) -> None:
                 fail(f"secret-like pattern {pattern.pattern!r} found in {path.relative_to(root)}")
 
 
+def _unencrypted_leaves(prefix: str, node: object, bad: list[str]) -> None:
+    """Recurse dicts + lists; append the dotted path of any non-empty string leaf not ENC[...]."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            _unencrypted_leaves(f"{prefix}.{key}", value, bad)
+    elif isinstance(node, list):
+        for idx, value in enumerate(node):
+            _unencrypted_leaves(f"{prefix}[{idx}]", value, bad)
+    elif isinstance(node, str):
+        if node.strip() and not node.startswith("ENC["):
+            bad.append(prefix)
+
+
+def _sops_unencrypted_values(path: Path) -> list[str]:
+    """Return dotted paths of any non-empty data/stringData string leaf in a SOPS file that is NOT
+    SOPS-encrypted (does not start with 'ENC['). Empty strings (e.g. optional config keys) are
+    allowed. Recurses into nested dicts/lists so a token can't hide in a sub-structure. Scoped to
+    data/stringData to mirror the .sops.yaml `encrypted_regex: ^(data|stringData)$`."""
+    bad: list[str] = []
+    with path.open("r", encoding="utf-8") as handle:
+        docs = list(yaml.safe_load_all(handle))
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        for section in ("data", "stringData"):
+            if section in doc:
+                _unencrypted_leaves(section, doc[section], bad)
+    return bad
+
+
+def validate_sops_encrypted(root: Path) -> None:
+    """Every committed *.sops.yaml must have its Secret data/stringData values SOPS-encrypted.
+    Closes the hole where a plaintext secret in a .sops.yaml (whose whole path is allowlisted by
+    gitleaks) would otherwise reach the repo. Deterministic: no reliance on entropy heuristics."""
+    for path in git_files(root):
+        name = path.name.lower()
+        if not (name.endswith(".sops.yaml") or name.endswith(".sops.yml")):
+            continue
+        try:
+            bad = _sops_unencrypted_values(path)
+        except Exception as exc:  # noqa: BLE001 - any parse error on a secret file must fail loudly.
+            fail(f"SOPS file failed to parse: {path.relative_to(root)}: {exc}")
+        if bad:
+            fail(
+                f"SOPS file {path.relative_to(root)} has UNENCRYPTED value(s) {sorted(bad)} "
+                "(each must be 'ENC[...]'); run `sops -e -i` before committing."
+            )
+
+
 def validate_tofu(root: Path) -> None:
     committed_tfvars = [
         path.relative_to(root).as_posix()
@@ -247,6 +296,7 @@ def main() -> None:
     validate_required_paths(root)
     validate_yaml(root)
     validate_no_plaintext_secrets(root)
+    validate_sops_encrypted(root)
     validate_tofu(root)
     validate_ansible_inventory(root)
     validate_smoke_scripts(root)
