@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-23
+Last updated: 2026-06-28
 
 ## Phase
 
@@ -11,11 +11,11 @@ Last updated: 2026-06-23
 - HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
   independent server + a failover drill are still required.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
-- ⚠️ **Quality gate is NOT enforced.** The owner does not review code, yet `tests/verify-local.ps1` runs only on
-  manual invocation and Flux reconciles whatever lands on `master` (`prune:true`). A GitHub Actions CI gate
-  (`.github/workflows/ci.yml`, job `static-checks`) was added 2026-06-23 as a **signal** (green on `6494e97`), but
-  it is **not a required check** — rulesets/branch-protection need GitHub Pro or a public repo (verified via API
-  403). See the Cross-Review residual below + `docs/next-steps.md` (Platform hardening).
+- ✅ **Quality gate is ENFORCED.** The owner does not review code; the agent's self-test + CI **is** the gate, and it
+  is now enforced. The repo is **public**, the GitHub ruleset `protect-master` is **active**, a PR is **required**, and
+  the `static-checks` CI check (`.github/workflows/ci.yml`) is a **required (strict) status check** — direct push to
+  `master` is **BLOCKED**. Deploys are PR-gated: branch → PR → green `static-checks` → merge → Flux reconciles `master`
+  (`prune:true`). Human code review remains absent by design. See `docs/next-steps.md` (Platform hardening).
 
 ## Proxmox
 
@@ -109,23 +109,24 @@ Last updated: 2026-06-23
 
 ## Model & Agent Layer (LIVE — 2026-06-23)
 
-The model + agent value layers are deployed in namespace `uap-system`. **GitOps-coverage nuance** (verified
-against `clusters/prod/infra/kustomization.yaml` + `git status`): only part is Flux-reconciled.
+The model + agent value layers are deployed in namespace `uap-system`. **All of them are now Flux-reconciled**
+(verified against `clusters/prod/infra/kustomization.yaml`): `litellm.yaml`, `litellm-keys.sops.yaml`, `hermes.yaml`,
+`hermes-keys.sops.yaml`, and every hermes-agent manifest are referenced by the kustomization. **B0 is DONE.**
 
 - **subfleet** (Flux-managed): wraps the **Claude subscription** as an OpenAI-compatible **chat** API (spawns the
   bundled `claude` CLI per request; drops `tools`/`tool_calls`). `subfleet-bridge.uap-system.svc:18902`. Egress to
   Anthropic via the in-cluster `singbox-egress` (VLESS+REALITY, ADR-018). Retained for the owner's **other**
   projects (a Telegram bot + web sessions); redundant for in-repo coding (which uses `claude -p` directly).
-- **LiteLLM** v1.89.0 — deployed + smoke-verified, **NOT Flux-reconciled** (`clusters/prod/infra/litellm.yaml` is
-  untracked; `litellm-keys.sops.yaml` is committed but not referenced by the kustomization). OpenAI gateway, groups
+- **LiteLLM** v1.89.0 — deployed + smoke-verified, **Flux-reconciled** (`clusters/prod/infra/litellm.yaml` +
+  `litellm-keys.sops.yaml` are now referenced by the kustomization). OpenAI gateway, groups
   `smart-cloud`/`-think`/`balanced-cloud`/`cheap-cloud`/`smart-cloud-pinned`; tailnet via `tailscale serve` on
   `uap-home-1`; `opus-4-8` verified end-to-end.
-- **Hermes-legacy** (bespoke `hermes/hermes.py`) — deployed + smoke-verified, **NOT Flux-reconciled** (`hermes.yaml`
-  untracked AND its `hermes-keys` Secret has no manifest in-repo at all). Prompt-based ReAct/ReWOO tool agent,
+- **Hermes-legacy** (bespoke `hermes/hermes.py`) — deployed + smoke-verified, now **Flux-reconciled** (`hermes.yaml`
+  + its `hermes-keys` SOPS Secret are referenced by the kustomization). Prompt-based ReAct/ReWOO tool agent,
   NodePort `:30890`, 41 unit + 8 integration tests. **PARKED** — superseded by the external hermes-agent direction.
 
-Treat "LiteLLM/Hermes are live" as *running + verified*, NOT *reconciled by GitOps*. Bringing them into the
-kustomization (or formally parking them) is follow-up **B0** in `docs/next-steps.md`.
+LiteLLM/Hermes and the hermes-agent stack are now *running + verified* **and** *reconciled by GitOps* — **B0 is DONE**
+(see `docs/next-steps.md`).
 
 ## Local FC Brain — Track A1 (PROVEN 2026-06-23)
 
@@ -335,11 +336,10 @@ Done:
   `~/.secrets` + units -> `r2:uap-k3s-snapshots/ops-backup/`; first run verified. See
   `runbooks/uap-ops-services-backup.md`.
 - #3 GitHub least-privilege: broad `gh` OAuth token removed from ops-1; pushes now use a repo-scoped read-WRITE SSH
-  deploy key (origin = SSH), push/fetch verified. Branch protection still NOT applied — **both classic protection
-  AND rulesets require GitHub Pro on a private repo** ("rulesets are free on private" was WRONG; verified 2026-06-23:
-  `POST /repos/.../rulesets` → 403 "Upgrade to GitHub Pro or make this repository public"). A CI gate
-  (`.github/workflows/ci.yml`) was added 2026-06-23 as an unenforced **signal** (green); enforcing it needs Pro, a
-  public repo, or a CI-gated deploy branch (see `docs/next-steps.md` → Platform hardening). Residual.
+  deploy key (origin = SSH), push/fetch verified. Branch protection is now **APPLIED**: the repo was made **public**,
+  the ruleset `protect-master` is **active** (PR required + the `static-checks` CI check required/strict), and direct
+  push to `master` is **blocked**. The CI gate (`.github/workflows/ci.yml`) is therefore an **enforced required check**,
+  not just a signal (see `docs/next-steps.md` → Platform hardening). DONE.
 - #4 Vaultwarden rotated: admin token regenerated and stored as an Argon2 PHC hash in `.env` (no longer plaintext);
   RSA identity key regenerated (0600). New admin token staged at `~/vaultwarden/admin-token.NEW.txt` on ops-1 for
   owner retrieval (move to a password manager, then delete).
