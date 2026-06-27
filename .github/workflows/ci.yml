@@ -33,6 +33,9 @@ jobs:
         run: python tests/static/validate_iac.py .
       - name: Hermes unit tests (hermetic, offline; test_*.py only — NOT *.py, which imports the live-endpoint scripts)
         run: python -m unittest discover -s hermes/tests -p 'test_*.py'
+      - name: Static fixture tests (regression tests for validate_iac/secret_scan logic)
+        run: |
+          for t in tests/static/test_*.py; do echo "== $t =="; python "$t" || exit 1; done
       - name: Install kustomize
         uses: imranismail/setup-kustomize@v2   # TODO: SHA-pin
       - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
