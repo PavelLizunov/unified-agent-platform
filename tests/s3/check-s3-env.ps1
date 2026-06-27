@@ -1,5 +1,6 @@
 param(
-  [string]$Prefix = "UAP_S3"
+  [string]$Prefix = "UAP_S3",
+  [switch]$Require
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,7 @@ if ($missing.Count -gt 0) {
   foreach ($name in $missing) {
     Write-Host "missing: $name"
   }
+  if ($Require) { Write-Host "FAIL: -Require set but S3 env is incomplete."; exit 1 }
   exit 0
 }
 
