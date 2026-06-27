@@ -40,6 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadin
 | S3 env | Required offsite variables exist | `tests/s3/check-s3-env.ps1` | Before creating S3 Secret | `s3-env-ok` |
 | Ops node | Deploy tools installed | `tests/ops/check-ops-node.ps1 -Require` | After creating `uap-ops-1` | `ops-node-ok` |
 | Ops node | Cluster deploy path | `tests/ops/check-ops-deploy-path.ps1 -Require` | After copying kubeconfig to `uap-ops-1` | `ops-deploy-path-ok` |
+| PV reclaim | hermes-agent-data PV is `Retain` (DR) | `tests/ops/check-pv-reclaim.ps1 -Require` | After any PVC re-create / restore / node reschedule | `pv-reclaim-ok` |
 | Ansible | Syntax and inventory | included in `validate-iac.ps1` when Ansible is installed | Every Ansible change | syntax check passes |
 | Ansible | Idempotency | `tests/ansible/idempotency-check.ps1 -ConfirmRun` | Before relying on playbooks for repeatable bootstrap | second run reports `changed=0` |
 | SSH baseline | Debian, sudo, SSH hardening | `tests/smoke/ssh-baseline.ps1` | After VM/OS changes | Debian 12+, sudo OK, password/root SSH disabled |

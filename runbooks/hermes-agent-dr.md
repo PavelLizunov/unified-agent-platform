@@ -48,6 +48,16 @@ kubectl get pv "$PV" -o jsonpath='{.spec.persistentVolumeReclaimPolicy}{"\n"}'  
 With `Retain`, deleting the PVC leaves the PV `Released` (data intact on disk). To reuse it, clear
 `spec.claimRef` on the PV and re-create the PVC, or provision a fresh PVC and restore from R2 (below).
 
+Because this is live (not declarative) state, a **re-created PVC / restore / node reschedule can silently
+regress to `Delete`**. Guard against that with the live-smoke check (not in CI — needs cluster access):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\ops\check-pv-reclaim.ps1 -Require   # -> pv-reclaim-ok
+```
+
+It is also wired into `tests/verify-local.ps1 -IncludeOps -Require`. Re-run it (and re-patch above) after
+any PVC re-create or restore.
+
 ## Verify the backup (manual run)
 
 ```bash
