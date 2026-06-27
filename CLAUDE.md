@@ -21,6 +21,15 @@ project decisions in `DECISIONS.md`.
 
 If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask the owner before changing direction.
 
+## Current Bug-Hunt Handoff (2026-06-28)
+
+**CLAUDE CODE: read [BUG-HUNT-CODEX-2026-06-28.md](BUG-HUNT-CODEX-2026-06-28.md) before starting post-A4 hardening work.**
+
+That file is the current actionable bug-hunt handoff from Codex. It flags stale source-of-truth docs, the ADR-026
+bootstrap mismatch, hermes-agent runtime pinning, pod-boundary hardening, missing probes, and the `validate_iac.py`
+kustomization-orphan path bug. Treat the bug-hunt file as newer than stale sections below until those sections are
+cleaned up.
+
 ## Current State
 
 - **North star: vibe-coding** — the owner supplies ideas + infrastructure; the agent ships *verified* code. The owner
@@ -34,14 +43,13 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
   Brain = a **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling) OR a **local FC model** on the
   RTX 5060 Ti; coding = `claude -p` (Claude Max) + `codex exec` as skills. **Do NOT point hermes-agent's brain at the
   subfleet endpoint — it is FC-less and every tool silently goes dark.** Rationale + citations in `docs/research/`.
-- **GitOps-coverage nuance (verified):** only `subfleet` + `singbox-egress` are Flux-reconciled. `litellm.yaml` and
-  `hermes.yaml` are **untracked**, `litellm-keys.sops.yaml` is committed-but-unreferenced, and the `hermes-keys` Secret
-  has **no manifest at all** — LiteLLM/Hermes were applied by hand. Do not claim "live via GitOps" for those; bringing
-  them into the kustomization (or parking them) is follow-up **B0** in `docs/next-steps.md`.
-- **⚠️ The quality gate is NOT enforced.** `tests/verify-local.ps1` runs only on manual invocation; Flux reconciles
-  whatever lands on `master` (`prune:true`) = any push to master is a cluster-admin deploy. A GitHub Actions CI gate
-  (`.github/workflows/ci.yml`, job `static-checks`) exists as a **signal** (green), but is **not a required check** —
-  rulesets/branch-protection need GitHub Pro or a public repo. See `docs/next-steps.md` → Platform hardening.
+- **GitOps coverage (verified):** the model+agent layer is now **fully Flux-reconciled** — `litellm.yaml`,
+  `litellm-keys.sops.yaml`, `hermes.yaml`, `hermes-keys.sops.yaml`, and every hermes-agent manifest are referenced by
+  `clusters/prod/infra/kustomization.yaml`. **B0 is DONE** (`docs/next-steps.md`).
+- **✅ The quality gate IS enforced.** The repo is **public**, the ruleset `protect-master` is **active** (PR required +
+  `static-checks` CI a **required/strict** check), so direct push to `master` is **BLOCKED**. Deploys are PR-gated
+  (branch → PR → green `static-checks` → merge → Flux reconciles `master`). Human code review stays absent by design —
+  the agent's self-test + CI is the gate. See `docs/next-steps.md` → Platform hardening.
 - Git branch `master`. For exact history run `git log --oneline -8` (this file is not the source of truth for hashes).
   Plan fact-check (2026-06-18, `STATUS.md`): Garage (ADR-019), Restate→S3 (ADR-020), RU egress (ADR-018),
   k3s-over-Tailscale (ADR-021). The ad-hoc egress + Vaultwarden on `uap-ops-1` (2 GB non-cluster VM) remain a

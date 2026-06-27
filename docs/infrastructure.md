@@ -106,24 +106,21 @@ exactly what the hermes-agent pilot reuses.
 
 ### Model + agent layer (namespace `uap-system`)
 
-**Important GitOps-coverage nuance** (verified against `clusters/prod/infra/kustomization.yaml` +
-`git status`):
+**GitOps coverage** (verified against `clusters/prod/infra/kustomization.yaml`):
 
-- **Flux-managed (in the kustomization):** `singbox-egress`, the subfleet token-service, and the
-  **subfleet bridge** (`:18902`). Committed and reconciled.
-- **Deployed + smoke-verified, but NOT reconciled by Flux:** `litellm.yaml` and `hermes.yaml` are
-  **untracked** in git and **not** referenced by the kustomization. `litellm-keys.sops.yaml` *is*
-  committed but is **also not referenced**, so Flux does not apply it either. And `hermes.yaml`
-  consumes a `hermes-keys` Secret that has **no manifest in the repo at all**. These workloads were
-  applied manually (`kubectl`). Until the manifests (and the missing Secret) are committed and added to
-  the kustomization, Flux does not own them — treat "LiteLLM/Hermes are live" as "running and verified",
-  not "reconciled by GitOps". (Tracked as follow-up **B0** in [next-steps.md](next-steps.md).)
+- **Flux-managed (in the kustomization):** `singbox-egress` (+ the HA egress), the subfleet token-service,
+  the **subfleet bridge** (`:18902`), **LiteLLM** (`litellm.yaml` + `litellm-keys.sops.yaml`),
+  **Hermes-legacy** (`hermes.yaml` + `hermes-keys.sops.yaml` + `hermes-code-configmap.yaml`), and the
+  **hermes-agent** stack (config, Codex/Telegram/dashboard/Claude SOPS secrets, `hermes-agent.yaml`, and the
+  daily PVC backup CronJob + its R2 secret). All committed and reconciled.
+- **B0 is DONE:** the model+agent layer is now fully owned by Flux — "LiteLLM/Hermes are live" is now both
+  "running and verified" **and** "reconciled by GitOps". (See **B0** in [next-steps.md](next-steps.md).)
 
 | Component | What it is | Endpoint | GitOps |
 |---|---|---|---|
 | **subfleet** | Rust gateway wrapping the **Claude subscription** as an OpenAI-compatible **chat** API; spawns the real `claude` CLI per request. Drops `tools`/`tool_calls` — chat passthrough only. | `subfleet-bridge.uap-system.svc:18902/v1` | **Flux** |
-| **LiteLLM** (v1.89.0) | The OpenAI-compatible gateway devices/agents hit; routes model groups to subfleet. Groups: `smart-cloud` (opus), `smart-cloud-think`, `balanced-cloud` (sonnet), `cheap-cloud` (haiku), `smart-cloud-pinned` (`claude-opus-4-8`). Reached from tailnet via `tailscale serve` on `uap-home-1`; master key via SOPS `litellm-keys`. | `litellm.uap-system.svc:4000` | **Not reconciled** (manifest untracked) |
-| **Hermes (bespoke, "Hermes-legacy")** | Single-file stdlib `hermes/hermes.py`; turns the chat backend into a **prompt-based ReAct/ReWOO** tool-using agent (native FC is infeasible through the subfleet CLI). Read-only kube tools, SSRF-guarded HTTP, per-tool scopes. 41 unit + 8 integration tests. | NodePort `:30890` (in-cluster `:8900`) | **Not reconciled** (untracked; needs a `hermes-keys` Secret) |
+| **LiteLLM** (v1.89.0) | The OpenAI-compatible gateway devices/agents hit; routes model groups to subfleet. Groups: `smart-cloud` (opus), `smart-cloud-think`, `balanced-cloud` (sonnet), `cheap-cloud` (haiku), `smart-cloud-pinned` (`claude-opus-4-8`). Reached from tailnet via `tailscale serve` on `uap-home-1`; master key via SOPS `litellm-keys`. | `litellm.uap-system.svc:4000` | **Flux** |
+| **Hermes (bespoke, "Hermes-legacy")** | Single-file stdlib `hermes/hermes.py`; turns the chat backend into a **prompt-based ReAct/ReWOO** tool-using agent (native FC is infeasible through the subfleet CLI). Read-only kube tools, SSRF-guarded HTTP, per-tool scopes. 41 unit + 8 integration tests. **PARKED.** | NodePort `:30890` (in-cluster `:8900`) | **Flux** |
 
 ### Operator VM (`uap-ops-1`) — ad-hoc, outside GitOps
 
@@ -158,7 +155,8 @@ under its limits.
 
 **North star:** vibe-coding. The owner supplies ideas + infrastructure; the agent ships **verified**
 code. The owner does **not** review generated code, so the agent's **own self-testing is the quality
-gate** (today that gate is unenforced — see next-steps Track A4 and the CI work).
+gate** — and that gate is now **enforced** (public repo + `protect-master` ruleset requiring a PR and the
+strict `static-checks` CI check; direct push to master blocked). See next-steps Track A4 (DONE).
 
 **Harness:** the external **NousResearch hermes-agent** (MIT) — tool-calling agent with skills, local
 SQLite/FTS memory, subagents, cron, checkpoints/rollback, git worktrees, 20+ messaging platforms. It

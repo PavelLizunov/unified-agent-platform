@@ -17,11 +17,11 @@
   A 3rd **independent** k3s server in a separate failure domain is required before any HA claim. Do
   **not** turn `uap-home-2` into a second server (2-member etcd is not HA) — see
   [CLAUDE.md → Important Boundaries](../CLAUDE.md).
-- **The quality gate is unenforced.** `tests/verify-local.ps1` runs only when an agent manually invokes
-  it on the not-always-on Windows box; Flux reconciles whatever lands on master (prune:true). Closing
-  this (CI + a free master ruleset + a commit secret-scan hook) is a prerequisite for trusting the
-  "agent ships unreviewed code" model — see Track A4 and the platform-hardening items.
-- **Model backend is live but partly out of GitOps** (Track B0).
+- **The quality gate is ENFORCED.** The repo is public, the ruleset `protect-master` is active (PR
+  required + `static-checks` CI a required/strict check), and direct push to master is blocked. The
+  "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
+  design) — see Track A4 (DONE) and the platform-hardening items.
+- **Model+agent backend is fully in GitOps** (Track B0 DONE).
 
 ---
 
@@ -91,25 +91,26 @@ every tool goes dark). Detail + citations in the two research docs.
 > authoritative for every profile + subprocess). The same fix gives the **gateway-driven Codex brain** the egress
 > (codex spawn = `os.environ.copy()`). Token via SOPS; details in `runbooks/hermes-agent-codex-brain.md`.
 
-### Phase A4 — First `claude -p` coding worker (the vibe-coding gate)
+### Phase A4 — First `claude -p` coding worker (the vibe-coding gate) — ✅ DONE (PR #23; north-star demo PASSED, PR #25)
 
 - Install the **Claude Code** bundled skill; it shells `claude -p '<task>'` in print mode and reads back
   the JSON result (session id, turns, cost, tokens). Auth via the **Claude Max** subscription OAuth,
-  reusing the carried-forward headless-auth + egress know-how.
+  reusing the carried-forward headless-auth + egress know-how. **LIVE (PR #23).**
 - Drive a **real, small change in this repo** end-to-end: idea (phone) → hermes-agent plans → `claude -p`
   edits in a **git worktree** → **the change's own tests pass (the enforced gate from the hardening
   work)** → commit/push via `uap-ops-1`.
-- **Done when:** a verified change lands **without the owner reviewing the diff** — the agent's self-test
-  was the gate. This is the north-star milestone. (Prerequisite: the CI/ruleset/hook hardening below, so
-  "self-test passed" is actually enforced, not honor-system.)
+- **Done:** a verified change landed **without the owner reviewing the diff** — the worker autonomously
+  shipped it through the enforced CI gate (**north-star demo PASSED, PR #25**). The agent's self-test +
+  the now-enforced CI was the gate.
 
-### Phase A5 — Codex brain + redundancy
+### Phase A5 — Codex brain + redundancy — `codex exec` + worktree isolation ✅ DONE (PR #24)
 
 - Switch the durable brain to the **ChatGPT/Codex** subscription via the **`codex_app_server`** runtime
   (`model.openai_runtime: codex_app_server`, provider `openai-codex`) — native FC, **no API key**, OAuth
   (`~/.codex/auth.json`). Codex CLI must reach OpenAI **through the egress proxy**. Two Plus accounts give
-  rate-limit headroom.
-- Add **`codex exec`** as a second coding skill alongside `claude -p` to **split coding load**.
+  rate-limit headroom. **DONE** (brain live, A2/A3).
+- Add **`codex exec`** as a second coding skill alongside `claude -p` to **split coding load**, with
+  per-worker git worktree isolation. **DONE (PR #24).**
 - **Redundancy:** keep the **local RTX FC model** (A1) as a fallback brain; bring **`pavels-mac-mini`**
   online (enable SSH) as a second worker / small local model host.
 - **Done when:** the agent runs with the Codex brain by default, fails over to the local brain when
@@ -126,16 +127,13 @@ Open infrastructure debt from [STATUS.md](../STATUS.md) and the 2026-06-19 cross
 [REVIEW-CODEX.md](../REVIEW-CODEX.md). Progresses regardless of Track A. (owner) = owner action,
 (agent) = agent action.
 
-### B0 — Bring the model+agent layer fully into GitOps (quick, do early) (agent)
+### B0 — Bring the model+agent layer fully into GitOps (quick, do early) (agent) — ✅ DONE
 
-- `clusters/prod/infra/litellm.yaml` and `hermes.yaml` are **untracked**; `litellm-keys.sops.yaml` is
-  **committed but not referenced** by `clusters/prod/infra/kustomization.yaml`. None of the three is in
-  the kustomization, yet LiteLLM and Hermes run (applied manually). So Flux reconciles none of them.
-  Either **commit the manifests and add all of them to the kustomization** so Flux owns them, or document
-  why they are intentionally out-of-band.
-- `hermes.yaml` consumes a `hermes-keys` Secret (`LITELLM_KEY`, `HERMES_KEY`, optional `HERMES_KEYS_JSON`)
-  that **has no manifest in the repo at all**. Before Flux can reconcile Hermes, author that Secret as a
-  SOPS file (on uap-home-1) and add it to the kustomization too — otherwise the Deployment won't start.
+- `clusters/prod/infra/litellm.yaml`, `hermes.yaml`, `litellm-keys.sops.yaml`, and `hermes-keys.sops.yaml`
+  are **now committed and referenced** by `clusters/prod/infra/kustomization.yaml`, along with the
+  `hermes-code-configmap.yaml` and every hermes-agent manifest — so Flux reconciles all of them. **DONE.**
+- The `hermes-keys` Secret (`LITELLM_KEY`, `HERMES_KEY`, optional `HERMES_KEYS_JSON`) is **authored as a
+  SOPS file and in the kustomization** — Flux can reconcile Hermes. **DONE.**
 - `sops-smoke.sops.yaml` is likewise committed but intentionally **left out** (a decrypt smoke fixture) —
   keep it that way.
 - Add a `validate_iac.py` check that flags any `*.yaml` under `clusters/prod/**` not referenced by a
@@ -194,9 +192,9 @@ Remaining:
 
 These make "the agent ships unreviewed code" actually safe; they gate A4.
 
-- **Enforce the gate:** GitHub Actions CI (`static-checks`) running secret_scan + validate_iac + hermes
-  unit tests + `kustomize build` + gitleaks on every push/PR; a **free master ruleset** requiring it; a
-  **PreToolUse hook** that runs `python tests/static/secret_scan.py .` on `git commit` and blocks on a hit.
+- **Enforce the gate:** ✅ DONE — GitHub Actions CI (`static-checks`) runs on every push/PR, the repo is
+  public, and the `protect-master` ruleset requires a PR + the `static-checks` check (strict), so direct
+  push to master is blocked. (A PreToolUse commit secret-scan hook remains a nice-to-have defense-in-depth.)
 - **Bring hermes tests into the local gate** (`python -m unittest discover -s hermes/tests -p 'test_*.py'`).
 - **Isolate coding workers:** docker backend (`--cap-drop ALL`, `no-new-privileges`, `--pids-limit`,
   capped tmpfs, repo bind-mounted, NO host secrets in env); deny-first `.claude/settings.json`
@@ -210,10 +208,10 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 
 ## Sequencing
 
-- **B0** and the **gate-enforcement** hardening are small and remove live risk — do them first.
-- **Track A** (the pilot) proceeds **in parallel**: it mostly uses the RTX, the subscriptions, and one
-  always-on Linux node, none of which block on HA work. A4 should land **after** gate enforcement so
-  "self-test passed" is real.
+- **B0** and the **gate-enforcement** hardening are ✅ DONE — both removed live risk.
+- **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
+  always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
+  "self-test passed" is real (north-star demo PASSED, PR #25).
 - **B1 (3rd node + failover)** and **B3 (DR proof)** gate any "HA ready" / "DR complete" claim and need
   **owner input** (VPS, escrow) — start those conversations now.
 - **B2** hardening should land before the platform takes on more load or secrets.
