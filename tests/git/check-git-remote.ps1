@@ -1,6 +1,7 @@
 param(
   [string]$GitUrl = "",
-  [string]$Branch = "master"
+  [string]$Branch = "master",
+  [switch]$Require
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,6 +20,7 @@ if ([string]::IsNullOrWhiteSpace($GitUrl)) {
 if ([string]::IsNullOrWhiteSpace($GitUrl)) {
   Write-Host "git-remote-missing"
   Write-Host "No origin remote is configured. Provide -GitUrl or configure git remote add origin <url>."
+  if ($Require) { Write-Host "FAIL: -Require set but git remote is not readable."; exit 1 }
   exit 0
 }
 

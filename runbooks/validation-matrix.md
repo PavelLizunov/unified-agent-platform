@@ -17,6 +17,16 @@ Pass criteria:
 - Static IaC validation passes.
 - Current smoke tests pass against the tailnet nodes.
 
+The opt-in `-IncludeReadiness` / `-IncludeOps` checks are **advisory by default**: a missing dependency
+(no git remote, no S3 env, ops tools absent) prints `*-missing` and exits 0 so they can run from a
+workstation where, e.g., S3 creds live only on `uap-ops-1`. For an **authoritative** gate (run from
+`uap-ops-1` or wherever those deps are expected), add `-Require` so a missing dependency **fails** the
+run instead of silently passing:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadiness -IncludeOps -Require
+```
+
 ## Matrix
 
 | Layer | Check | Command | When | Pass criteria |
