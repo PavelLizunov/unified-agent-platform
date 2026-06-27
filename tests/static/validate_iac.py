@@ -221,40 +221,57 @@ def validate_flux_examples_not_enabled(root: Path) -> None:
             fail(f"{name} must not be referenced until a real remote Git URL exists")
 
 
+def _kustomization_referenced(rootr: Path, clusters_dir: Path) -> set[str]:
+    """Repo-root-relative paths referenced by ANY kustomization under clusters/, with each
+    `resources:` entry resolved relative to its OWN kustomization's directory.
+
+    Resolving relative to the kustomization directory (instead of comparing basenames) is what makes
+    `../shared/foo.yaml`, sibling references, and same-name files in different directories
+    distinguishable — a basename compare conflates them (a `../shared/foo.yaml` reference would mask a
+    local unreferenced `foo.yaml`, and a duplicate basename in another dir would be wrongly cleared)."""
+    referenced: set[str] = set()
+    for kust in clusters_dir.rglob("*"):
+        if not kust.is_file() or kust.name.lower() not in {"kustomization.yaml", "kustomization.yml"}:
+            continue
+        with kust.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        # resources + the other file/dir-list fields kustomize applies, so a manifest pulled in via
+        # components/bases/crds is not falsely flagged as an unapplied orphan.
+        entries: list[str] = []
+        for field in ("resources", "components", "bases", "crds"):
+            entries.extend(data.get(field) or [])
+        for entry in entries:
+            if not isinstance(entry, str):
+                continue
+            resolved = (kust.parent / entry).resolve()
+            try:
+                referenced.add(resolved.relative_to(rootr).as_posix())
+            except ValueError:
+                continue  # resolves outside the repo root — not a local orphan candidate
+    return referenced
+
+
 def _find_kustomization_orphans(root: Path) -> list[str]:
-    """Return sorted repo-root-relative paths of cluster yaml files not in a same-dir kustomization."""
-    clusters_dir = root / "clusters"
+    """Return sorted repo-root-relative paths of cluster yaml files not referenced by ANY kustomization
+    (resources resolved relative to each kustomization's directory, not by basename)."""
+    rootr = root.resolve()
+    clusters_dir = rootr / "clusters"
     if not clusters_dir.is_dir():
         return []
 
+    referenced = _kustomization_referenced(rootr, clusters_dir)
+
     orphans: list[str] = []
-    dirs = [clusters_dir] + sorted(p for p in clusters_dir.rglob("*") if p.is_dir())
-
-    for directory in dirs:
-        yaml_files = sorted(
-            f for f in directory.iterdir()
-            if f.is_file()
-            and f.suffix.lower() in {".yaml", ".yml"}
-            and f.name.lower() not in {"kustomization.yaml", "kustomization.yml"}
-        )
-        if not yaml_files:
+    for yaml_file in sorted(clusters_dir.rglob("*")):
+        if not yaml_file.is_file() or yaml_file.suffix.lower() not in {".yaml", ".yml"}:
             continue
-
-        kustomization = directory / "kustomization.yaml"
-        if kustomization.exists():
-            with kustomization.open("r", encoding="utf-8") as handle:
-                data = yaml.safe_load(handle) or {}
-            resources = data.get("resources") or []
-            referenced = {Path(r).name for r in resources}
-        else:
-            referenced = set()
-
-        for yaml_file in yaml_files:
-            rel = yaml_file.relative_to(root).as_posix()
-            if rel in KUSTOMIZATION_ORPHAN_ALLOWLIST:
-                continue
-            if yaml_file.name not in referenced:
-                orphans.append(rel)
+        if yaml_file.name.lower() in {"kustomization.yaml", "kustomization.yml"}:
+            continue
+        rel = yaml_file.resolve().relative_to(rootr).as_posix()
+        if rel in KUSTOMIZATION_ORPHAN_ALLOWLIST:
+            continue
+        if rel not in referenced:
+            orphans.append(rel)
 
     return sorted(orphans)
 
