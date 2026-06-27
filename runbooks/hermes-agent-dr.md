@@ -22,8 +22,13 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
 - **Secret `hermes-agent-backup-r2`** (SOPS) — the `[r2]` rclone remote (reused from the existing R2
   access; same bucket as the etcd snapshots, distinct folder).
 - The backup is a **consistent** snapshot (`hermes backup` uses `sqlite3.backup()`), so it is safe to run
-  against the live gateway. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs;
-  acceptable for a daily object, and it guarantees no critical file is missed).
+  against the live gateway. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
+- **Completeness is enforced** (this was a silent gap — the old check only verified one `.codex/*.sqlite`):
+  the dump container runs as **root** (`runAsUser: 0`) so no `/opt/data` file is skipped on permissions; the
+  job **fails** on a permission error, an empty/corrupt zip, or a missing **hard-required** file
+  (`state.db`, `auth.json` — always-present earned state). It **warns but does not fail** when a
+  *regeneratable* file is absent (`.env`, `.codex/*.sqlite`), because those can legitimately be missing on a
+  fresh or just-restored PVC and a false-fail would mean **no backup that day** — worse than an incomplete one.
 
 The upload goes **direct to Cloudflare R2** (the CronJob sets no `HTTPS_PROXY`), so it is **independent of
 the LLM egress proxy** — backups keep working even when the German VLESS exit is down.
