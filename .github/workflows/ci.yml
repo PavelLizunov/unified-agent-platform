@@ -41,7 +41,7 @@ jobs:
       - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
         run: kustomize build clusters/prod >/dev/null
       - name: gitleaks (defense-in-depth over the hand-rolled 10-pattern scanner; free for personal repos)
-        uses: gitleaks/gitleaks-action@v2      # TODO: SHA-pin
+        uses: gitleaks/gitleaks-action@v3      # TODO: SHA-pin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by gitleaks-action v2 on pull_request events
           GITLEAKS_CONFIG: .gitleaks.toml
