@@ -35,6 +35,8 @@ spec:
             - name: dump
               image: nousresearch/hermes-agent:latest
               command: ["/bin/sh", "-c"]
+              securityContext:
+                runAsUser: 0       # read ALL of /opt/data (some files are root-owned) so nothing is skipped
               args:
                 - |
                   set -eu
@@ -42,13 +44,20 @@ spec:
                   zip="/work/hermes-backup-$ts.zip"
                   # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). hermes uses
                   # sqlite3.backup() for a consistent copy, so this is safe while the gateway runs.
-                  env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip"
-                  # Fail LOUD on an empty/corrupt/brain-less zip. Without this, a 0-byte or
-                  # exit-0-but-broken backup would ship to R2 as a useless "success" — and this is
-                  # the ONLY backup of the PVC, so a silent bad backup is the worst outcome.
+                  # NOT piped (no `| tee`): a pipe hides hermes's exit code from `set -e`, so a non-zero
+                  # `hermes backup` would slip through and we'd validate a partial zip. Redirect instead.
+                  env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip" >/work/backup.log 2>&1
+                  cat /work/backup.log
+                  # Running as root avoids permission-skips; fail anyway if hermes hit a permission error
+                  # (an INCOMPLETE backup published as "success" is a silent DR loss).
+                  grep -qi "permission denied" /work/backup.log && { echo "FATAL: hermes backup hit permission errors (see log above)"; exit 1; } || true
                   [ -s "$zip" ] || { echo "FATAL: backup zip missing/empty"; exit 1; }
-                  /opt/hermes/.venv/bin/python -c "import zipfile,sys; z=zipfile.ZipFile(\"$zip\"); sys.exit(\"FATAL: corrupt zip\") if z.testzip() else (sys.exit(\"FATAL: .codex brain DB missing from backup\") if not any(n.startswith(\".codex/\") and n.endswith(\".sqlite\") for n in z.namelist()) else None)"
-                  chmod 640 "$zip"          # owner+group(10000); ship container reads via fsGroup, not root
+                  # Integrity + manifest. HARD-fail on always-present earned state (a corrupt/partial zip can
+                  # never pass as success); WARN-only on regeneratable files that may be legitimately absent
+                  # on a fresh/recovering PVC, so a not-yet-warmed pod still gets its daily backup.
+                  /opt/hermes/.venv/bin/python -c "import zipfile,sys,posixpath; z=zipfile.ZipFile(\"$zip\"); n=z.namelist(); sys.exit(\"FATAL: corrupt zip\") if z.testzip() else None; base={posixpath.basename(x) for x in n}; hard=[f for f in (\"state.db\",\"auth.json\") if f not in base]; sys.exit(\"FATAL: backup missing critical file(s): \"+\", \".join(hard)) if hard else None; soft=[f for f in (\".env\",) if f not in base]+([\".codex/*.sqlite\"] if not any(x.endswith(\".sqlite\") and \"/.codex/\" in \"/\"+x for x in n) else []); print(\"WARNING: backup missing (regeneratable): \"+\", \".join(soft), file=sys.stderr) if soft else None"
+                  chmod 600 "$zip"          # root-owned; the ship container (rclone, root) reads it
+                  rm -f /work/backup.log
                   ls -la /work
               env:
                 - { name: HERMES_HOME, value: /opt/data }
