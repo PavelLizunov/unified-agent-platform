@@ -16,6 +16,17 @@ Last updated: 2026-06-28
   the `static-checks` CI check (`.github/workflows/ci.yml`) is a **required (strict) status check** — direct push to
   `master` is **BLOCKED**. Deploys are PR-gated: branch → PR → green `static-checks` → merge → Flux reconciles `master`
   (`prune:true`). Human code review remains absent by design. See `docs/next-steps.md` (Platform hardening).
+- **Post-A4 hardening pass — DONE 2026-06-28** (against the Codex bug-hunt, `BUG-HUNT-CODEX-2026-06-28.md`).
+  8 items **merged** (each independently reviewed): secret-scan SOPS hole (structural `ENC[` check +
+  provider-token patterns + fixtures now run in CI), backup completeness (root dump, no pipe-masking,
+  expected-file manifest), this doc-set's drift, `hermes-legacy` **parked** + documented, `validate_iac`
+  orphan path-bug, `verify-local` `-Require` (false-green), `configure-github-flux.sh` ADR-026 alignment,
+  and a PV-`Retain` DR live-smoke (`tests/ops/check-pv-reclaim.ps1`). **Two pod-rolling PRs are OPEN
+  awaiting the owner's merge** (the merge rolls the live pod): **#35** pins the hermes-agent runtime
+  (image digest = v0.17.0, `codex@0.142.0`, `claude@2.1.193`, rclone digest) + hardens it (no-RBAC SA,
+  `automountServiceAccountToken:false`, seccomp RuntimeDefault, TCP probes); **#36** hardens
+  `singbox-egress-ha` (drop-all-caps, seccomp, no-RBAC SA, TCP probes). `runAsNonRoot`/cap-drop on the
+  agent pod are deferred + documented (s6 needs root; Codex runs danger-full-access).
 
 ## Proxmox
 
