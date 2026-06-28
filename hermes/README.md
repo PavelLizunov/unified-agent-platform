@@ -1,7 +1,27 @@
-# Hermes — the agent orchestrator (DEPLOYED)
+# Hermes — the agent orchestrator (PARKED — superseded)
 
-Hermes is UAP's **agent/orchestration layer**: it turns the plain chat backend (LiteLLM → subfleet →
-Claude) into a tool-using agent. It is the "agent" in unified-**agent**-platform.
+Hermes is UAP's original **agent/orchestration layer**: it turns the plain chat backend (LiteLLM →
+subfleet → Claude) into a tool-using agent. It is the "agent" in unified-**agent**-platform.
+
+> ## PARKED — not maintained (decision 2026-06-28)
+>
+> Hermes-legacy ("bespoke `hermes.py`") is **superseded by the external NousResearch hermes-agent**
+> (the active vibe-coding harness — see [docs/next-steps.md](../docs/next-steps.md) and
+> [docs/research/](../docs/research/)). It is kept only as a **fallback** and is **not maintained**.
+> The known issues below (from the 2026-06-28 Codex bug-hunt) are **accepted as parked-risk** and will
+> NOT be fixed unless this agent is un-parked. Do not build on it; do not expose it beyond the tailnet.
+>
+> - `hermes_trace` echoes raw `kube_logs` tool output back to the caller, so a read-scoped key can see
+>   more than the tool's summary intends — **accepted**: the NodePort is tailnet-only and `HERMES_KEY`-gated.
+> - The `hermes-code` ConfigMap can drift from `hermes/hermes.py` (the embedded source need not match the
+>   file) — **accepted**: re-render from the file if ever un-parked.
+> - `max_steps` is not enforced on the ReWOO path (only the ReAct loop honors it) — **accepted**: runs are
+>   still bounded by the model and the request timeout.
+> - `GET /tools` is unauthenticated (lists tool names/scopes; no execution) — **accepted**: low-sensitivity
+>   and tailnet-only.
+>
+> If this agent is ever revived, fix the above before relying on it. The deployment manifests stay in the
+> kustomization (Flux-reconciled) so it keeps running as a fallback; "DEPLOYED" below describes that state.
 
 ## Live
 
