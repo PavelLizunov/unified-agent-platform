@@ -24,11 +24,12 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
 - The backup is a **consistent** snapshot (`hermes backup` uses `sqlite3.backup()`), so it is safe to run
   against the live gateway. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
 - **Completeness is enforced** (this was a silent gap — the old check only verified one `.codex/*.sqlite`):
-  the dump container runs as **root** (`runAsUser: 0`) so no `/opt/data` file is skipped on permissions; the
-  job **fails** on a permission error, an empty/corrupt zip, or a missing **hard-required** file
-  (`state.db`, `auth.json` — always-present earned state). It **warns but does not fail** when a
-  *regeneratable* file is absent (`.env`, `.codex/*.sqlite`), because those can legitimately be missing on a
-  fresh or just-restored PVC and a false-fail would mean **no backup that day** — worse than an incomplete one.
+  a manifest check **fails** the job on an empty/corrupt zip or a missing **hard-required** file
+  (`state.db`, `auth.json` — always-present, owned by uid 10000). NOTE `hermes backup` runs as its service
+  uid **10000** internally (even though the dump container is root), so a few **root-owned, regeneratable**
+  files (claude global config, `.codex/config.toml` seeded from the ConfigMap, stray demo session logs) are
+  **skipped with a WARNING, not a failure** — failing on those would leave **no backup**, worse than an
+  incomplete one. The critical earned state is 10000-owned and always captured.
 
 The upload goes **direct to Cloudflare R2** (the CronJob sets no `HTTPS_PROXY`), so it is **independent of
 the LLM egress proxy** — backups keep working even when the German VLESS exit is down.
