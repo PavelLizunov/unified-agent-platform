@@ -33,7 +33,7 @@ spec:
           initContainers:
             # 1) produce the FULL backup zip into a shared emptyDir (reads the PVC; no writes to it).
             - name: dump
-              image: nousresearch/hermes-agent:latest
+              image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest 2026-06-28
               command: ["/bin/sh", "-c"]
               securityContext:
                 runAsUser: 0       # read ALL of /opt/data (some files are root-owned) so nothing is skipped
@@ -70,7 +70,7 @@ spec:
           containers:
             # 2) ship to R2 (direct to Cloudflare, NOT through the LLM egress proxy) + retention.
             - name: ship
-              image: rclone/rclone:latest
+              image: rclone/rclone@sha256:623378ad0ff3ebd5cebf77720843c0e02edfe46e2d5b5ac6bed54c6371780dfb  # rclone:latest pinned by digest 2026-06-28
               command: ["/bin/sh", "-c"]
               args:
                 - |

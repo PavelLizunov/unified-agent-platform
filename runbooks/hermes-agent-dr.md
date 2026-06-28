@@ -33,6 +33,24 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
 The upload goes **direct to Cloudflare R2** (the CronJob sets no `HTTPS_PROXY`), so it is **independent of
 the LLM egress proxy** — backups keep working even when the German VLESS exit is down.
 
+## Pinned runtime (verify after a roll)
+
+The hermes-agent image, the backup images, and the Codex/Claude CLIs are pinned (by digest / version)
+so the deployed worker matches the self-tested one. After a `hermes-agent` roll, confirm the runtime:
+
+```bash
+kubectl -n uap-system get deploy hermes-agent -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+# -> nousresearch/hermes-agent@sha256:39fcfcd3...   (v0.17.0)
+POD=$(kubectl -n uap-system get pods -l app=hermes-agent -o name | grep -v backup | head -1)
+kubectl -n uap-system exec "$POD" -c gateway -- sh -lc \
+  '/opt/hermes/.venv/bin/hermes --version; /opt/data/.local/bin/codex --version; /opt/data/.local/bin/claude --version'
+# expected: Hermes Agent v0.17.0 ; codex-cli 0.142.0 ; 2.1.193 (Claude Code)
+```
+
+The CLIs are seed-if-absent on the PVC, so bumping the pinned `npm i -g ...@version` in
+`clusters/prod/infra/hermes-agent.yaml` only takes effect on a fresh PVC (or after deleting the old
+binary). Bump deliberately and re-verify here.
+
 ## PV reclaim policy (run once)
 
 local-path PVs default to `reclaimPolicy: Delete`, so an accidental `PVC` delete drops the bytes. Flip the
