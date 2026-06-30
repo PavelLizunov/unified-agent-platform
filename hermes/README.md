@@ -19,6 +19,10 @@ subfleet → Claude) into a tool-using agent. It is the "agent" in unified-**age
 >   still bounded by the model and the request timeout.
 > - `GET /tools` is unauthenticated (lists tool names/scopes; no execution) — **accepted**: low-sensitivity
 >   and tailnet-only.
+> - `_summarize`'s prompt doesn't restate that tool/log evidence is untrusted, so a malicious fetched page
+>   or log line could try to inject instructions into the final answer — **accepted**: the summarizer cannot
+>   call tools itself, so the blast radius is a bad answer, not further action; tracked in
+>   `CODE-REVIEW-CODEX-2026-06-28.md`.
 >
 > If this agent is ever revived, fix the above before relying on it. The deployment manifests stay in the
 > kustomization (Flux-reconciled) so it keeps running as a fallback; "DEPLOYED" below describes that state.
