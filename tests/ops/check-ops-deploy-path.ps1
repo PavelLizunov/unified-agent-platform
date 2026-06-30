@@ -35,10 +35,18 @@ $remoteCommand = $remoteCommand.Replace("__USER__", $User)
 $remoteCommand = $remoteCommand.Replace("__SERVER_HOST__", $ServerHostName)
 $remoteCommand = $remoteCommand.Replace("__AGENT_HOST__", $AgentHostName)
 
+# Send the script base64-encoded: piping a string to a native command's stdin under PS 5.1 can prepend
+# a UTF-8 BOM that lands on the first line ("set: command not found"). base64 transport is BOM-proof
+# and ASCII-clean; ops-1 (Debian) has coreutils base64. Strip CR too: if git ever checks this file out
+# as CRLF (core.autocrlf on Windows), the here-string bakes in "`r", which corrupts the remote bash
+# parse ("set: -<CR>: invalid option") even though the file looks fine in an editor.
+$remoteCommand = $remoteCommand -replace "`r", ""
+$b64 = [Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes($remoteCommand))
+
 $previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
 try {
-  $output = $remoteCommand | ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new $target "bash -s" 2>&1
+  $output = ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new $target "echo $b64 | base64 -d | bash" 2>&1
   $exitCode = $LASTEXITCODE
 }
 finally {

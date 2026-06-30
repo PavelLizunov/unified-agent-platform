@@ -21,14 +21,13 @@ project decisions in `DECISIONS.md`.
 
 If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask the owner before changing direction.
 
-## Current Bug-Hunt Handoff (2026-06-28)
+## 2026-06-28 Bug-Hunt + Code-Review — RESOLVED
 
-**CLAUDE CODE: read [BUG-HUNT-CODEX-2026-06-28.md](BUG-HUNT-CODEX-2026-06-28.md) before starting post-A4 hardening work.**
-
-That file is the current actionable bug-hunt handoff from Codex. It flags stale source-of-truth docs, the ADR-026
-bootstrap mismatch, hermes-agent runtime pinning, pod-boundary hardening, missing probes, and the `validate_iac.py`
-kustomization-orphan path bug. Treat the bug-hunt file as newer than stale sections below until those sections are
-cleaned up.
+The 2026-06-28 Codex bug-hunt and independent code-review are actioned: see `STATUS.md` → "Post-A4 hardening
+pass" for the merged-PR list. The original reports are kept for historical record (not required reading):
+[BUG-HUNT-CODEX-2026-06-28.md](BUG-HUNT-CODEX-2026-06-28.md), [CODE-REVIEW-CODEX-2026-06-28.md](CODE-REVIEW-CODEX-2026-06-28.md),
+[READONLY-INFRA-AUDIT-2026-06-28.md](READONLY-INFRA-AUDIT-2026-06-28.md). Two pod-rolling PRs (#35, #36) remain
+**owner-gated** — do not merge them yourself; see `STATUS.md`.
 
 ## Current State
 

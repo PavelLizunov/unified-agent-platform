@@ -17,6 +17,15 @@ spec:
     requests:
       storage: 5Gi
 ---
+# Dedicated no-permission ServiceAccount (2026-06-28 hardening): the gateway never calls the
+# Kubernetes API. No RoleBinding is created, so this SA has zero RBAC; its token is not mounted either.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hermes-agent
+  namespace: uap-system
+automountServiceAccountToken: false
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -34,27 +43,41 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v7-claude-worker"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v9-ponytail"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
         kubernetes.io/hostname: uap-home-2
+      # Hardening (2026-06-28): the gateway does NOT use the Kubernetes API, so its SA token is not
+      # mounted and it runs under a dedicated no-permission SA. The aggressive container hardening
+      # (runAsNonRoot, capabilities.drop:[ALL]) is INTENTIONALLY NOT applied: s6-overlay (PID 1) starts
+      # as root and needs CAP_SETUID/SETGID to drop the services to uid 10000, and the Codex worker runs
+      # sandbox_mode=danger-full-access. seccompProfile RuntimeDefault is the compatible tightening; the
+      # rest is the documented, accepted pod boundary. (allowPrivilegeEscalation:false is a safe future
+      # add -- it blocks gaining privs, not the setuid() drop -- pending a check for any suid helper.)
+      automountServiceAccountToken: false
+      serviceAccountName: hermes-agent
       securityContext:
         fsGroup: 10000        # PVC group-owned by hermes so the uid-10000 services can write
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: bootstrap
-          image: nousresearch/hermes-agent:latest
+          image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest (was :latest) 2026-06-28
           command: ["/bin/sh", "-c"]
           args:
             - |
               set -eu
               # 1) coding CLIs onto the PVC (land in /opt/data/.local/bin, already on the image PATH)
               export npm_config_prefix=/opt/data/.local
+              # CLI versions PINNED (was unpinned): a fresh PVC re-installs the exact tested versions,
+              # so the deployed worker matches the one the self-test gate validated. Seed-if-absent, so
+              # the running PVC is untouched; bump these deliberately.
               if [ ! -x /opt/data/.local/bin/codex ]; then
-                npm i -g @openai/codex
+                npm i -g @openai/codex@0.142.0
               fi
               if [ ! -x /opt/data/.local/bin/claude ]; then
-                npm i -g @anthropic-ai/claude-code
+                npm i -g @anthropic-ai/claude-code@2.1.193
               fi
               # 2) Soft config + codex sandbox config from the ConfigMap, SEED-IF-ABSENT so the
               #    dashboard/CLI can own them on the PVC across restarts. The BRAIN is pinned
@@ -93,6 +116,18 @@ spec:
               # 3c) seed the user profile (memories/USER.md) once; the agent enriches it via chat
               mkdir -p /opt/data/memories
               [ -f /opt/data/memories/USER.md ] || cp /config/user-profile /opt/data/memories/USER.md
+              # 3d) Ponytail (anti-overengineering coding skill for the claude -p / codex exec
+              #     workers) -- seed-if-absent like the CLIs above. Lands on the PVC under
+              #     HERMES_HOME so it persists across restarts and rides the existing daily
+              #     backup. This initContainer has no env: block (unlike the gateway container
+              #     below), so the egress proxy is exported inline for the install's git clone.
+              if [ ! -d /opt/data/plugins/ponytail ]; then
+                HOME=/opt/data HERMES_HOME=/opt/data \
+                HTTPS_PROXY=http://singbox-egress-ha.uap-system.svc:12080 \
+                HTTP_PROXY=http://singbox-egress-ha.uap-system.svc:12080 \
+                NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10 \
+                  /opt/hermes/.venv/bin/hermes plugins install DietrichGebert/ponytail --enable
+              fi
               # 4) ownership for the uid-10000 hermes services
               chown -R 10000:10000 /opt/data
           volumeMounts:
@@ -102,7 +137,7 @@ spec:
             - { name: telegram-seed, mountPath: /telegram, readOnly: true }
       containers:
         - name: gateway
-          image: nousresearch/hermes-agent:latest
+          image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest (was :latest) 2026-06-28
           args: ["gateway", "run"]
           env:
             - { name: HERMES_HOME, value: /opt/data }
@@ -125,6 +160,23 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-claude, key: oauth-token } }
           ports:
             - { name: dashboard, containerPort: 9119 }
+          # Probes (2026-06-28): a TCP connect to the dashboard port proves the gateway is actually
+          # listening (Ready != merely "process running"). The dashboard requires basic auth, so an
+          # HTTP GET would 401 -- TCP is the safe, auth-free signal. startupProbe gives the gateway's
+          # own start ~5 min before liveness engages. (The initContainer's CLI install runs to
+          # completion BEFORE this container starts and is not gated by these probes.)
+          startupProbe:
+            tcpSocket: { port: 9119 }
+            periodSeconds: 10
+            failureThreshold: 30      # up to ~5 min for the gateway to bind 9119
+          readinessProbe:
+            tcpSocket: { port: 9119 }
+            periodSeconds: 15
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: { port: 9119 }
+            periodSeconds: 20
+            failureThreshold: 5       # ~100s before restarting a single-replica Recreate agent (margin for a transient listener blip)
           volumeMounts:
             - { name: data, mountPath: /opt/data }
             # managed scope: loaded LAST with override into os.environ, authoritative for

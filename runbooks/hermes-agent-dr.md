@@ -24,14 +24,33 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
 - The backup is a **consistent** snapshot (`hermes backup` uses `sqlite3.backup()`), so it is safe to run
   against the live gateway. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
 - **Completeness is enforced** (this was a silent gap — the old check only verified one `.codex/*.sqlite`):
-  the dump container runs as **root** (`runAsUser: 0`) so no `/opt/data` file is skipped on permissions; the
-  job **fails** on a permission error, an empty/corrupt zip, or a missing **hard-required** file
-  (`state.db`, `auth.json` — always-present earned state). It **warns but does not fail** when a
-  *regeneratable* file is absent (`.env`, `.codex/*.sqlite`), because those can legitimately be missing on a
-  fresh or just-restored PVC and a false-fail would mean **no backup that day** — worse than an incomplete one.
+  a manifest check **fails** the job on an empty/corrupt zip or a missing **hard-required** file
+  (`state.db`, `auth.json` — always-present, owned by uid 10000). NOTE `hermes backup` runs as its service
+  uid **10000** internally (even though the dump container is root), so a few **root-owned, regeneratable**
+  files (claude global config, `.codex/config.toml` seeded from the ConfigMap, stray demo session logs) are
+  **skipped with a WARNING, not a failure** — failing on those would leave **no backup**, worse than an
+  incomplete one. The critical earned state is 10000-owned and always captured.
 
 The upload goes **direct to Cloudflare R2** (the CronJob sets no `HTTPS_PROXY`), so it is **independent of
 the LLM egress proxy** — backups keep working even when the German VLESS exit is down.
+
+## Pinned runtime (verify after a roll)
+
+The hermes-agent image, the backup images, and the Codex/Claude CLIs are pinned (by digest / version)
+so the deployed worker matches the self-tested one. After a `hermes-agent` roll, confirm the runtime:
+
+```bash
+kubectl -n uap-system get deploy hermes-agent -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+# -> nousresearch/hermes-agent@sha256:39fcfcd3...   (v0.17.0)
+POD=$(kubectl -n uap-system get pods -l app=hermes-agent -o name | grep -v backup | head -1)
+kubectl -n uap-system exec "$POD" -c gateway -- sh -lc \
+  '/opt/hermes/.venv/bin/hermes --version; /opt/data/.local/bin/codex --version; /opt/data/.local/bin/claude --version'
+# expected: Hermes Agent v0.17.0 ; codex-cli 0.142.0 ; 2.1.193 (Claude Code)
+```
+
+The CLIs are seed-if-absent on the PVC, so bumping the pinned `npm i -g ...@version` in
+`clusters/prod/infra/hermes-agent.yaml` only takes effect on a fresh PVC (or after deleting the old
+binary). Bump deliberately and re-verify here.
 
 ## PV reclaim policy (run once)
 
