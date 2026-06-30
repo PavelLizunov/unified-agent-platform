@@ -21,12 +21,12 @@ Last updated: 2026-06-30
   provider-token patterns + fixtures now run in CI), backup completeness (root dump, no pipe-masking,
   expected-file manifest), this doc-set's drift, `hermes-legacy` **parked** + documented, `validate_iac`
   orphan path-bug, `verify-local` `-Require` (false-green), `configure-github-flux.sh` ADR-026 alignment,
-  and a PV-`Retain` DR live-smoke (`tests/ops/check-pv-reclaim.ps1`). **Two pod-rolling PRs are OPEN
-  awaiting the owner's merge** (the merge rolls the live pod): **#35** pins the hermes-agent runtime
-  (image digest = v0.17.0, `codex@0.142.0`, `claude@2.1.193`, rclone digest) + hardens it (no-RBAC SA,
-  `automountServiceAccountToken:false`, seccomp RuntimeDefault, TCP probes); **#36** hardens
-  `singbox-egress-ha` (drop-all-caps, seccomp, no-RBAC SA, TCP probes). `runAsNonRoot`/cap-drop on the
-  agent pod are deferred + documented (s6 needs root; Codex runs danger-full-access).
+  and a PV-`Retain` DR live-smoke (`tests/ops/check-pv-reclaim.ps1`). **#35** (pin hermes-agent runtime —
+  image digest = v0.17.0, `codex@0.142.0`, `claude@2.1.193`, rclone digest — + harden: no-RBAC SA,
+  `automountServiceAccountToken:false`, seccomp RuntimeDefault, TCP probes) and **#36** (harden
+  `singbox-egress-ha`: drop-all-caps, seccomp, no-RBAC SA, TCP probes) are **MERGED + live** (owner-merged
+  2026-06-30, rolled and verified — see the follow-up below). `runAsNonRoot`/cap-drop on the agent pod
+  remain deferred + documented (s6 needs root; Codex runs danger-full-access).
 - **2026-06-30 follow-up:** caught and fixed a real regression before the owner could hit it — PR #35 was
   branched before #38 merged and reverted #38's warn-not-fatal backup fix back to FATAL ("root avoids
   skips" is false: `hermes backup` drops to uid 10000 internally regardless of dump-container privileges).
@@ -40,7 +40,26 @@ Last updated: 2026-06-30
   `check-ops-deploy-path.ps1`, and in the process found it had also silently broken the already-merged
   `check-pv-reclaim.ps1`: `.gitattributes` forces `*.ps1` to CRLF on a Windows checkout, and the stray
   `\r` corrupts the remote bash parse. Fixed all three by stripping CR before base64-encoding (PR #40,
-  merged). Dependabot #1-4 (SHA-pin Actions) still open; not yet actioned.
+  merged). Also added (owner-approved): seed-if-absent install of the
+  [ponytail](https://github.com/DietrichGebert/ponytail) anti-overengineering coding skill (native Hermes
+  plugin, `full` mode) into hermes-agent's boot initContainer — bundled into PR #35 rather than a
+  competing PR on the same file. Dependabot #1-4 (SHA-pin Actions) still open; not yet actioned.
+- **2026-06-30 PR #35/#36 merged + rolled — post-roll verify DONE.** `hermes-agent`: pod 1/1 Running,
+  `hermes --version`/`codex --version`/`claude --version` match the pins exactly, dedicated SA +
+  `automountServiceAccountToken:false` live, `tests/ops/check-pv-reclaim.ps1 -Require` →
+  `pv-reclaim-ok`, ponytail installed at `/opt/data/plugins/ponytail` and **enabled** on first real boot
+  (`hermes plugins list` confirms). `claude -p` verified working end-to-end. `singbox-egress-ha`: pod
+  1/1 Running, `sing-box check` valid, reachability confirmed from inside hermes-agent (telegram=302,
+  chatgpt=403 — the expected signature). **Found (pre-existing, NOT caused by this roll): the Codex
+  brain's OAuth token is expired/invalid** (`Codex authentication failed`) — matches the
+  already-documented "shared single-use refresh-token lineage" caveat in
+  `runbooks/hermes-agent-codex-brain.md` (the owner's own desktop Codex CLI usage can invalidate the
+  in-cluster copy). `auth.json` is unchanged since 2026-06-24; `claude -p` (separate OAuth mechanism)
+  is unaffected, and egress/network reachability to chatgpt.com is confirmed fine — isolates the failure
+  to the token itself. **Needs owner action:** re-run `codex login`, re-encrypt `codex-auth.sops.yaml`
+  (see the runbook's "Create / rotate" section) — note the initContainer's seed-ONCE logic means the
+  stale `/opt/data/auth.json` on the PVC will NOT auto-replace itself; re-seeding needs that file removed
+  first (or a direct imperative write), which is itself an owner-gated live mutation.
 
 ## Proxmox
 
