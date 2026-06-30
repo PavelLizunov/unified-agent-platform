@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-28
+Last updated: 2026-06-30
 
 ## Phase
 
@@ -16,6 +16,31 @@ Last updated: 2026-06-28
   the `static-checks` CI check (`.github/workflows/ci.yml`) is a **required (strict) status check** — direct push to
   `master` is **BLOCKED**. Deploys are PR-gated: branch → PR → green `static-checks` → merge → Flux reconciles `master`
   (`prune:true`). Human code review remains absent by design. See `docs/next-steps.md` (Platform hardening).
+- **Post-A4 hardening pass — DONE 2026-06-28** (against the Codex bug-hunt, `BUG-HUNT-CODEX-2026-06-28.md`).
+  8 items **merged** (each independently reviewed): secret-scan SOPS hole (structural `ENC[` check +
+  provider-token patterns + fixtures now run in CI), backup completeness (root dump, no pipe-masking,
+  expected-file manifest), this doc-set's drift, `hermes-legacy` **parked** + documented, `validate_iac`
+  orphan path-bug, `verify-local` `-Require` (false-green), `configure-github-flux.sh` ADR-026 alignment,
+  and a PV-`Retain` DR live-smoke (`tests/ops/check-pv-reclaim.ps1`). **Two pod-rolling PRs are OPEN
+  awaiting the owner's merge** (the merge rolls the live pod): **#35** pins the hermes-agent runtime
+  (image digest = v0.17.0, `codex@0.142.0`, `claude@2.1.193`, rclone digest) + hardens it (no-RBAC SA,
+  `automountServiceAccountToken:false`, seccomp RuntimeDefault, TCP probes); **#36** hardens
+  `singbox-egress-ha` (drop-all-caps, seccomp, no-RBAC SA, TCP probes). `runAsNonRoot`/cap-drop on the
+  agent pod are deferred + documented (s6 needs root; Codex runs danger-full-access).
+- **2026-06-30 follow-up:** caught and fixed a real regression before the owner could hit it — PR #35 was
+  branched before #38 merged and reverted #38's warn-not-fatal backup fix back to FATAL ("root avoids
+  skips" is false: `hermes backup` drops to uid 10000 internally regardless of dump-container privileges).
+  GitHub's mergeable check was stale (computed pre-#38); a local rebase surfaced the real conflict. Pushed
+  a correction onto `chore/pin-harden-hermes-agent` (commit `dafa3f9`) that keeps #38's logic and only the
+  legitimate digest pins — **PR #35 is now MERGEABLE + green, still owner-gated.** PR #36 was unaffected
+  (no file overlap). Also committed the 3 local-only Codex audit docs that never made it into git (PR #39,
+  merged) and closed the doc gaps they exposed: a stale CLAUDE.md bug-hunt pointer, and a 5th hermes-legacy
+  finding (summarizer drops the untrusted-tool-result boundary) missing from `hermes/README.md`'s
+  accepted-as-parked-risk list. Ported the BOM-proof base64 SSH transport to `check-ops-node.ps1` /
+  `check-ops-deploy-path.ps1`, and in the process found it had also silently broken the already-merged
+  `check-pv-reclaim.ps1`: `.gitattributes` forces `*.ps1` to CRLF on a Windows checkout, and the stray
+  `\r` corrupts the remote bash parse. Fixed all three by stripping CR before base64-encoding (PR #40,
+  merged). Dependabot #1-4 (SHA-pin Actions) still open; not yet actioned.
 
 ## Proxmox
 
