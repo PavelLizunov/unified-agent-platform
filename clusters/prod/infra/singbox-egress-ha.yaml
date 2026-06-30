@@ -25,6 +25,14 @@ spec:
       port: 12080
       targetPort: 12080
 ---
+# Dedicated no-permission ServiceAccount (2026-06-28 hardening): sing-box never calls the K8s API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: singbox-egress-ha
+  namespace: uap-system
+automountServiceAccountToken: false
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,12 +50,39 @@ spec:
       annotations:
         singbox-egress-ha/config-rev: "v2-6servers"   # bump when regenerating the config secret so Flux rolls the pod (sing-box reads its config only at startup)
     spec:
+      # Hardening (2026-06-28): sing-box is a userspace outbound proxy -- it needs no Linux caps and
+      # never calls the K8s API. Drop the SA token + all caps + block priv-escalation + seccomp. Kept
+      # as root (runAsNonRoot deferred: the upstream image's cache/ownership under a non-root uid is
+      # unverified, and a broken egress pod takes the Codex brain + Telegram offline).
+      automountServiceAccountToken: false
+      serviceAccountName: singbox-egress-ha
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: sing-box
           image: ghcr.io/sagernet/sing-box:v1.13.13
           args: ["run", "-c", "/etc/sing-box/config.json"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 12080
+          # Probe (2026-06-28): a TCP connect to the proxy port confirms sing-box is actually listening
+          # (Ready != merely process-running). config is read only at startup, so a small budget.
+          startupProbe:
+            tcpSocket: { port: 12080 }
+            periodSeconds: 5
+            failureThreshold: 12      # ~60s to come up
+          readinessProbe:
+            tcpSocket: { port: 12080 }
+            periodSeconds: 15
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket: { port: 12080 }
+            periodSeconds: 20
+            failureThreshold: 5
           volumeMounts:
             - name: config
               mountPath: /etc/sing-box
