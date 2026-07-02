@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: bootstrap
-          image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest (was :latest) 2026-06-28
+          image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -137,7 +137,7 @@ spec:
             - { name: telegram-seed, mountPath: /telegram, readOnly: true }
       containers:
         - name: gateway
-          image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest (was :latest) 2026-06-28
+          image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
           args: ["gateway", "run"]
           env:
             - { name: HERMES_HOME, value: /opt/data }
