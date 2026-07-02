@@ -18,12 +18,14 @@ metadata:
   name: singbox-egress-ha
   namespace: uap-system
 spec:
+  type: NodePort              # LAN hosts (build VM) use <node-ip>:30880 as an HTTP proxy to reach the VLESS exit
   selector:
     app: singbox-egress-ha
   ports:
     - name: proxy
       port: 12080
       targetPort: 12080
+      nodePort: 30880
 ---
 # Dedicated no-permission ServiceAccount (2026-06-28 hardening): sing-box never calls the K8s API.
 apiVersion: v1
