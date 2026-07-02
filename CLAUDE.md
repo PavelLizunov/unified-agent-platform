@@ -167,6 +167,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `tests/ops/check-ops-deploy-path.ps1`: verifies `uap-ops-1` can reach the cluster with kubectl and SSH.
 - `clusters/prod/flux-system/gotk-components.yaml`: pinned Flux runtime.
 - `clusters/prod/infra/sops-smoke.sops.yaml`: encrypted SOPS smoke fixture.
+- `runbooks/hermes-access.md`: how to talk to Hermes from any device (REPL `hermes` per-OS, dashboard `/login`, Telegram).
 
 ## Safe Next Tasks
 
