@@ -128,6 +128,13 @@ spec:
                 NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10 \
                   /opt/hermes/.venv/bin/hermes plugins install DietrichGebert/ponytail --enable
               fi
+              # 4a) durable ssh for the AGENT: root-owned /root/.ssh (shared emptyDir with the gateway)
+              #     so bare `ssh build-1` from the agent bash -lc survives pod rolls (the ephemeral
+              #     in-pod fix kept getting wiped). config resolves the build-1 alias; key stays on PVC.
+              mkdir -p /root/.ssh; chmod 700 /root/.ssh
+              [ -f /opt/data/.ssh/config ] && cp /opt/data/.ssh/config /root/.ssh/config && chmod 600 /root/.ssh/config || true
+              [ -f /opt/data/.ssh/known_hosts ] && cp /opt/data/.ssh/known_hosts /root/.ssh/known_hosts || true
+              chown -R 0:0 /root/.ssh
               # 4) ownership for the uid-10000 hermes services
               chown -R 10000:10000 /opt/data
           volumeMounts:
@@ -135,6 +142,7 @@ spec:
             - { name: config, mountPath: /config, readOnly: true }
             - { name: codex-seed, mountPath: /seed, readOnly: true }
             - { name: telegram-seed, mountPath: /telegram, readOnly: true }
+            - { name: root-ssh, mountPath: /root/.ssh }
       containers:
         - name: gateway
           image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
@@ -183,6 +191,7 @@ spec:
             # every profile + subprocess (codex spawn = os.environ.copy()). This is how the
             # Telegram adapter AND the gateway-driven codex brain reach the egress proxy —
             # the per-profile os.environ is isolated and does NOT see /opt/data/.env.
+            - { name: root-ssh, mountPath: /root/.ssh }
             - { name: config, mountPath: /etc/hermes/.env, subPath: managed-env, readOnly: true }
             # managed CONFIG overlay: pins the BRAIN (model.*) per-leaf OVER the PVC config.yaml.
             - { name: config, mountPath: /etc/hermes/config.yaml, subPath: managed-config, readOnly: true }
@@ -202,6 +211,8 @@ spec:
         - name: telegram-seed
           secret:
             secretName: hermes-agent-telegram
+        - name: root-ssh
+          emptyDir: {}
 ---
 # Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
 # tailscale-serve proxy can't reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy
