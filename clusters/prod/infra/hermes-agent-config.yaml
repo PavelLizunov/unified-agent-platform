@@ -29,6 +29,10 @@ data:
     # itself is the security boundary, so disable codex's sandbox.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
+
+    [mcp_servers.build1]
+    command = "/opt/hermes/.venv/bin/python"
+    args = ["/opt/data/mcp/build1_mcp.py"]
   # claude -p worker settings -> seeded to /opt/data/.claude/settings.json. Deny-first rules are
   # DEFENSE-IN-DEPTH against ACCIDENTAL secret reads (e.g. a task that greps config files), NOT an
   # exfil boundary: Bash is unconstrained, so the POD is the real boundary and the worker is the
@@ -115,3 +119,82 @@ data:
     - Любой поиск/чтение — узко: конкретные файлы, `--max-count`, `head`, а не рекурсия по большим деревьям.
     - Тяжёлое исследование/сборку кода гоняй на build-1 (`/opt/data/.local/bin/build1 "..."`), не тащи
       большой вывод обратно в чат — возвращай только итог.
+  build1-mcp: |
+    #!/usr/bin/env python3
+    """MCP server exposing build-1 coding tools to the codex brain.
+
+    Registered via /opt/data/.codex/config.toml [mcp_servers.build1]. Makes `claude -p`
+    on build-1 a FIRST-CLASS codex tool so the model picks it by schema instead of
+    substituting its own apply_patch. See runbooks/claude-routing-goal.md (R1).
+    """
+    import subprocess
+    import shlex
+    from mcp.server.fastmcp import FastMCP
+
+    mcp = FastMCP("build1")
+
+    # ssh -F /opt/data/.ssh/config resolves the uap-build-1 alias + key (durable, root-owned /root/.ssh too).
+    SSH = [
+        "ssh", "-F", "/opt/data/.ssh/config",
+        "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "uap-build-1",
+    ]
+
+
+    def _run(remote_cmd: str, timeout: int = 900) -> str:
+        try:
+            r = subprocess.run(
+                SSH + [remote_cmd],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            out = r.stdout or ""
+            if r.stderr and r.stderr.strip():
+                out += "\n[stderr]\n" + r.stderr
+            return ("[exit %d]\n%s" % (r.returncode, out)).strip()
+        except subprocess.TimeoutExpired:
+            return "[timeout after %ds]" % timeout
+
+
+    @mcp.tool()
+    def claude_code(repo: str, task: str, extra_args: str = "") -> str:
+        """Delegate a code change to Claude Code running on the build host (build-1, 8 cores).
+
+        ALWAYS use this for ANY repository code edit, and WHENEVER the user mentions
+        'claude' / 'клод'. Do NOT edit repository files yourself with apply_patch or
+        shell -- those run in the tiny 2-core pod without the git token and cannot reach GitHub.
+
+        repo: absolute path of the repo on build-1 (e.g. /home/uap/vpnctl).
+        task: the natural-language instruction for Claude Code.
+        extra_args: optional extra flags for `claude` (e.g. "--max-turns 20").
+        """
+        cmd = "cd %s && claude -p %s --permission-mode acceptEdits --output-format json %s" % (
+            shlex.quote(repo), shlex.quote(task), extra_args,
+        )
+        return _run(cmd)
+
+
+    @mcp.tool()
+    def build1_shell(command: str, workdir: str = "") -> str:
+        """Run a shell command on the build host (build-1, 8 cores) where repos, the git
+        token, gh, and rust/cargo live. Use for git/gh/cargo/build/test on repositories.
+
+        command: the shell command. workdir: optional absolute path to cd into first.
+        """
+        cmd = command if not workdir else "cd %s && %s" % (shlex.quote(workdir), command)
+        return _run(cmd)
+
+
+    if __name__ == "__main__":
+        mcp.run()
+  agents-md: |
+    # Operating rules (codex brain)
+
+    - You run in a tiny 2-core orchestration pod. Repository CODE and BUILDS live on the
+      build host **build-1** (8 cores), which has the git token, gh, and rust/cargo.
+    - **NEVER edit repository files locally** — not with `apply_patch`, not with shell.
+      Your local edits are allowed ONLY under `/opt/data` (your own skills / config / memory).
+    - For **ANY repository code change**, use the **`claude_code`** tool (it runs Claude Code
+      on build-1). Do not reproduce its work yourself with apply_patch.
+    - If the user mentions **"claude" / "клод"**, you MUST use the **`claude_code`** tool.
+    - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool.
+    - The git token lives ONLY on build-1 — edits/commits/pushes done anywhere else cannot
+      reach GitHub, and the pod is ephemeral (2 cores). Route all repo work to build-1.
