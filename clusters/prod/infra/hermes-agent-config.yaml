@@ -80,3 +80,38 @@ data:
       поэтому агент обязан САМ тестировать (самопроверка = гейт качества).
     - Инфраструктура: k3s (Flux GitOps + SOPS); мозг = Codex (ChatGPT Plus) через
       egress-прокси (хост в РФ — прямой доступ к OpenAI/Anthropic закрыт).
+
+    ## Флот и где что делать
+    ### ЖЁСТКОЕ ПРАВИЛО: вся работа с кодом — ТОЛЬКО на build-1
+    Клонирование репо, правки кода, `claude -p`, `git`, `gh`, сборки — ВСЕГДА через
+    `/opt/data/.local/bin/build1 "..."`. НИКОГДА не клонируй и не редактируй репозитории в ЭТОМ поде
+    (cwd `/opt/hermes`): здесь НЕТ git-токена (push не сработает) и всё ЭФЕМЕРНО (слетит при рестарте).
+    Клонируй в `~/` на build-1, дальше каждый вызов = `build1 "cd ~/<repo> && <команды>"` (каждый build1 —
+    отдельная ssh-сессия, поэтому `cd` в репо в каждом вызове).
+
+    - **uap-build-1** (8 ядер / 16 GB; tailnet 100.85.56.31 / LAN 192.168.0.99) — выделенная build/dev-машина.
+      Достучаться из этого пода командой-обёрткой (используй АБСОЛЮТНЫЙ путь — короткого `build1` может не быть
+      в PATH bash-тула): `/opt/data/.local/bin/build1 "<команда>"` (например `/opt/data/.local/bin/build1 "hostname"`).
+      ВАЖНО: прямой `ssh uap-build-1` НЕ работает (ssh ищет конфиг в /root/.ssh, а ключ+конфиг в /opt/data/.ssh);
+      обёртка = `ssh -F /opt/data/.ssh/config uap-build-1`.
+      На ней стоят claude-code (claude -p) и rust/cargo, есть egress наружу через VLESS-прокси.
+      ВАЖНО: тяжёлый кодинг и сборки гоняй ТАМ (8 ядер), а не в этом крошечном поде (2 ядра).
+      Кодинг на ней: `/opt/data/.local/bin/build1 "cd <repo> && CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.claude-oauth-token) claude -p '<задача>' --permission-mode acceptEdits"`
+      Сборка: `/opt/data/.local/bin/build1 "cd <repo> && cargo build"`
+      **GitHub на build-1 настроен** (git+gh, авторизован как PavelLizunov, доступ ко ВСЕМ репо). В самом поде
+      токена НЕТ by design — вся работа с git/PR идёт ЧЕРЕЗ build1. Полный цикл:
+      `/opt/data/.local/bin/build1 "cd ~/ && git clone https://github.com/<owner>/<repo> && cd <repo> && git checkout -b <ветка>"`
+      → правки через `claude -p` → `... git add -A && git commit -m '...' && git push -u origin <ветка> && gh pr create --fill"`
+      → статус CI: `gh pr checks <N>` → мёрж по зелёному: `gh pr merge --auto --squash <N>`.
+    - Остальной флот: uap-home-1 (k3s server+etcd), этот под = uap-home-2 (k3s agent), uap-ops-1 (git push + kubectl),
+      desktop (GPU, не всегда включён). Все на tailnet (100.x).
+    - Egress наружу (Anthropic/OpenAI/crates.io/github) — только через VLESS-прокси (хост в РФ, прямой доступ закрыт).
+
+    ## Гигиена контекста (ВАЖНО — был инцидент: 564K токенов за один промт)
+    - НЕ грепай и не ищи по своему исходнику `/opt/hermes` — это огромный монорепо, поиск возвращает
+      мегабайты (file:line дампы) и мгновенно переполняет контекст. Именно это раздуло сессию до 564K.
+    - Для «что настроено / статус / конфиг» используй `hermes status`, `hermes doctor`, `hermes config show`,
+      `cat /opt/data/config.yaml` — а НЕ рекурсивный поиск по коду.
+    - Любой поиск/чтение — узко: конкретные файлы, `--max-count`, `head`, а не рекурсия по большим деревьям.
+    - Тяжёлое исследование/сборку кода гоняй на build-1 (`/opt/data/.local/bin/build1 "..."`), не тащи
+      большой вывод обратно в чат — возвращай только итог.
