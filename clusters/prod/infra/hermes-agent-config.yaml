@@ -67,14 +67,6 @@ data:
     HTTP_PROXY=http://singbox-egress-ha.uap-system.svc:12080
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
     TELEGRAM_ALLOWED_USERS=729937253
-    # Terminal backend = SSH to build-1: the agent shell + coding run natively ON build-1
-    # (8 cores, git token, claude/gh/rust) instead of this 2-core pod. Collapses the dual-context
-    # so hostname/self-description/work are all build-1 (see runbooks/vibe-coding-acceptance.md).
-    TERMINAL_ENV=ssh
-    TERMINAL_SSH_HOST=192.168.0.99
-    TERMINAL_SSH_USER=uap
-    TERMINAL_SSH_KEY=/opt/data/.ssh/id_ed25519
-    TERMINAL_SSH_PORT=22
     # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the
     # fallback IPs add redundant connection targets through the proxy). The occasional reconnects are
     # egress-stability noise; they self-heal and Telegram re-delivers queued updates, so no message loss.
