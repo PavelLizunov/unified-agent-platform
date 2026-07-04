@@ -1,0 +1,6 @@
+{
+ "content": "The function `average(xs)` uses the floor division operator `//` instead of the true division operator `/`. In Python, `//` performs floor division, which rounds the result down to the nearest integer. For example, if the input is `[1, 2]`, the sum is `3` and the length is `2`. The true average is `1.5`, but the function will return `3 // 2 = 1`. \n\nAdditionally, the function does not handle the edge case of an empty list (`xs = []`). In this case, `len(xs)` is `0`, which would result in a `ZeroDivisionError` when attempting to divide by zero. \n\nBecause the function returns incorrect results for lists where the sum is not perfectly divisible by the length, and it fails on empty lists, it contains bugs that the provided tests fail to catch.\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}

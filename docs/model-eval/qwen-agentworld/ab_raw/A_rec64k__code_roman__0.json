@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef to_roman(n):\n    if not isinstance(n, int) or not (1 <= n <= 3999):\n        raise ValueError(\"Argument must be integer between 1 and 3999\")\n    vals = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]\n    syms = [\"M\", \"CM\", \"D\", \"CD\", \"C\", \"XC\", \"L\", \"XL\", \"X\", \"IX\", \"V\", \"IV\", \"I\"]\n    res = []\n    for i in range(len(vals)):\n        while n >= vals[i]:\n            res.append(syms[i])\n            n -= vals[i]\n    return \"\".join(res)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

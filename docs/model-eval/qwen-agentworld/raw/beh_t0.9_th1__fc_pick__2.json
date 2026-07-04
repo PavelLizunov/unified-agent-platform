@@ -1,0 +1,24 @@
+{
+ "cell": "beh_t0.9_th1",
+ "task": "fc_pick",
+ "i": 2,
+ "res": {
+  "content": "",
+  "reasoning": "The user wants me to add 41 and 59 using a tool.\nI have a tool called `add` that takes two integers `a` and `b`.\nI will call the `add` tool with `a = 41` and `b = 59`.\n\nCalculation: 41 + 59 = 100.\n\nLet's call the tool.\n",
+  "tool_calls": [
+   {
+    "type": "function",
+    "function": {
+     "name": "add",
+     "arguments": "{\"a\":41,\"b\":59}"
+    },
+    "id": "TapZ5fp8qrwa6BBwznL2l1NUPinhU5PQ"
+   }
+  ]
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.9,
+  "think": 1
+ }
+}

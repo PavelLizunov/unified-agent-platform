@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef merge_sorted(a, b):\n    merged = []\n    i, j = 0, 0\n    while i < len(a) and j < len(b):\n        if a[i] < b[j]:\n            merged.append(a[i])\n            i += 1\n        else:\n            merged.append(b[j])\n            j += 1\n    merged.extend(a[i:])\n    merged.extend(b[j:])\n    return merged\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef caesar(s, k):\n    def shift(c):\n        if c.isalpha():\n            start = ord('a') if c.islower() else ord('A')\n            return chr(start + (ord(c) - start + k) % 26)\n        return c\n    return ''.join(shift(c) for c in s)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

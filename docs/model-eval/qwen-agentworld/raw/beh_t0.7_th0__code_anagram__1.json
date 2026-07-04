@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "code_anagram",
+ "i": 1,
+ "res": {
+  "content": "```python\ndef is_anagram(a, b):\n    def clean(s):\n        return sorted([c.lower() for c in s if c.isalpha()])\n    return clean(a) == clean(b)\n```",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

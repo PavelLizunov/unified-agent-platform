@@ -1,0 +1,17 @@
+{
+ "cell": "c96k_q4_0_th0",
+ "task": "niah_north",
+ "i": 1,
+ "res": {
+  "content": "709395",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 98304,
+  "kv": "q4_0",
+  "ncm": 12,
+  "think": 0
+ }
+}

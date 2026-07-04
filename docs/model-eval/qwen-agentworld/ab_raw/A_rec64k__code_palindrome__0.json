@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef is_palindrome(s: str) -> bool:\n    import re\n    s = re.sub(r'[^A-Za-z0-9]', '', s).lower()\n    return s == s[::-1]\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

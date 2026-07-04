@@ -1,0 +1,24 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_simple",
+ "i": 0,
+ "res": {
+  "content": "",
+  "reasoning": "",
+  "tool_calls": [
+   {
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"city\":\"Berlin\"}"
+    },
+    "id": "ZvzoEnsgxpMuB6v9S1RvrfnvV59w7YoR"
+   }
+  ]
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

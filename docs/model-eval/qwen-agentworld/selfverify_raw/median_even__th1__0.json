@@ -1,0 +1,6 @@
+{
+ "content": "The function `median(xs)` sorts the list and returns the element at index `len(xs)//2`. This works correctly for lists with an odd number of elements, where the median is the middle element. For example, for a list of length 3, `len(xs)//2` is `1`, which correctly points to the second (middle) element.\n\nHowever, the function fails for lists with an even number of elements. By standard mathematical and statistical definition (and Python's built-in `statistics.median` function), the median of a list with an even number of elements is the average of the two middle elements. \n\nFor example, if we pass `[1, 2, 3, 4]`:\n- The sorted list is `[1, 2, 3, 4]`.\n- `len(xs)` is 4, so `len(xs)//2` is `2`.\n- The function returns `xs[2]`, which is `3`.\n- But the correct median of `[1, 2, 3, 4]` is `(2 + 3) / 2 = 2.5`.\n\nSimilarly, for `[1, 10]`, the function returns `10`, whereas the correct median is `5.5`. \n\nThe provided tests only check lists of length 3 (odd lengths) and thus fail to catch this bug for even-length lists.\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}

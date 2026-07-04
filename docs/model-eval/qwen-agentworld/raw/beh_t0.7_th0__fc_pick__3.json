@@ -1,0 +1,24 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_pick",
+ "i": 3,
+ "res": {
+  "content": "",
+  "reasoning": "",
+  "tool_calls": [
+   {
+    "type": "function",
+    "function": {
+     "name": "add",
+     "arguments": "{\"a\":41,\"b\":59}"
+    },
+    "id": "xQRHJe5EwXS6SIrWmfNyvOcAYlKkyXBV"
+   }
+  ]
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

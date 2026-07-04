@@ -1,0 +1,14 @@
+{
+ "content": "",
+ "tool_calls": [
+  {
+   "type": "function",
+   "function": {
+    "name": "get_weather",
+    "arguments": "{\"city\":\"Paris\",\"units\":\"c\"}"
+   },
+   "id": "NFdVKqeT17l5st3OWWlv1cmg0VyM6GHj"
+  }
+ ],
+ "reasoning": ""
+}

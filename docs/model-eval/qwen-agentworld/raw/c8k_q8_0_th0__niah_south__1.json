@@ -1,0 +1,17 @@
+{
+ "cell": "c8k_q8_0_th0",
+ "task": "niah_south",
+ "i": 1,
+ "res": {
+  "content": "843600",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 8192,
+  "kv": "q8_0",
+  "ncm": 12,
+  "think": 0
+ }
+}

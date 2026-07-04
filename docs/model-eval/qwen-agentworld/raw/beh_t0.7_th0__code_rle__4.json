@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "code_rle",
+ "i": 4,
+ "res": {
+  "content": "```python\ndef rle_encode(s: str) -> str:\n    if not s:\n        return \"\"\n    \n    encoded = []\n    count = 1\n    prev_char = s[0]\n    \n    for char in s[1:]:\n        if char == prev_char:\n            count += 1\n        else:\n            encoded.append(f\"{prev_char}{count}\")\n            prev_char = char\n            count = 1\n    encoded.append(f\"{prev_char}{count}\")\n    \n    return \"\".join(encoded)\n\nprint(rle_encode('aaabb'))\n```",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

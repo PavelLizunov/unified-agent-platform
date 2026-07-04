@@ -1,0 +1,6 @@
+{
+ "content": "The function `average(xs)` uses integer floor division (`//`) instead of true division (`/`). In Python 3, the `/` operator performs true division and returns a float, which is the standard behavior for an arithmetic mean. However, the `//` operator performs floor division, which truncates the result to the nearest lower integer. \n\nFor example, if we call `average([1, 2])`, the sum is `3` and the length is `2`. The true average is `1.5`, but the function will return `3 // 2`, which is `1`. This is incorrect for any list of numbers where the sum is not perfectly divisible by the length of the list. \n\nAdditionally, if an empty list `[]` is passed as input, the function will raise a `ZeroDivisionError` because `len([])` is `0`, and division by zero is not allowed. While an empty list might be considered an invalid input for an average function, the use of `//` instead of `/` is a definitive bug for valid non-empty inputs where the average is not an integer.\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}

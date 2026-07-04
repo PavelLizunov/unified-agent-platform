@@ -1,0 +1,17 @@
+{
+ "cell": "c128k_f16_th0",
+ "task": "niah_north",
+ "i": 1,
+ "res": {
+  "content": "183818",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 131072,
+  "kv": "f16",
+  "ncm": 20,
+  "think": 0
+ }
+}

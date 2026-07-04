@@ -1,0 +1,17 @@
+{
+ "cell": "c128k_q8_0_th0",
+ "task": "hop",
+ "i": 0,
+ "res": {
+  "content": "6384",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 131072,
+  "kv": "q8_0",
+  "ncm": 16,
+  "think": 0
+ }
+}

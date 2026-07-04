@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef primes_upto(n):\n    if n < 2:\n        return []\n    sieve = [True] * (n + 1)\n    sieve[0] = sieve[1] = False\n    for p in range(2, int(n**0.5) + 1):\n        if sieve[p]:\n            for i in range(p * p, n + 1, p):\n                sieve[i] = False\n    return [p for p, is_prime in enumerate(sieve) if is_prime]\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

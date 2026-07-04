@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_abstain",
+ "i": 2,
+ "res": {
+  "content": "Silver threads fall from the gray,\nWashing the world clean, day by day.",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

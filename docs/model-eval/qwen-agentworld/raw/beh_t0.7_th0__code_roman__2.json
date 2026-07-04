@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "code_roman",
+ "i": 2,
+ "res": {
+  "content": "```python\ndef to_roman(n):\n    if not isinstance(n, int) or not (1 <= n <= 3999):\n        raise ValueError(\"Input must be an integer between 1 and 3999.\")\n    \n    val = [\n        1000, 900, 500, 400,\n        100, 90, 50, 40,\n        10, 9, 5, 4,\n        1\n    ]\n    syms = [\n        \"M\", \"CM\", \"D\", \"CD\",\n        \"C\", \"XC\", \"L\", \"XL\",\n        \"X\", \"IX\", \"V\", \"IV\",\n        \"I\"\n    ]\n    \n    roman_num = ''\n    for i in range(len(val)):\n        while n >= val[i]:\n            roman_num += syms[i]\n            n -= val[i]\n    return roman_num\n```",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "cell": "c8k_q5_1_th0",
+ "task": "hop",
+ "i": 1,
+ "res": {
+  "content": "9502",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 8192,
+  "kv": "q5_1",
+  "ncm": 12,
+  "think": 0
+ }
+}

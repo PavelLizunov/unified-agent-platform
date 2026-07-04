@@ -1,0 +1,24 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_enum",
+ "i": 3,
+ "res": {
+  "content": "",
+  "reasoning": "",
+  "tool_calls": [
+   {
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"city\":\"Paris\",\"units\":\"c\"}"
+    },
+    "id": "WIJo7lnFLVuU1nnqVdplJi99yviZ83cQ"
+   }
+  ]
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

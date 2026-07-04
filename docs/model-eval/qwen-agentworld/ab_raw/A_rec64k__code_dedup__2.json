@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef dedup(lst):\n    seen = set()\n    result = []\n    for item in lst:\n        if item not in seen:\n            seen.add(item)\n            result.append(item)\n    return result\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

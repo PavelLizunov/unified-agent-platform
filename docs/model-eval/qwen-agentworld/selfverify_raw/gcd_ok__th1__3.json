@@ -1,0 +1,6 @@
+{
+ "content": "The provided `gcd` function implements the Euclidean algorithm using the modulo operator. While it works correctly for positive integers (as shown in the tests), it fails to handle negative integers correctly. \n\nBy mathematical definition, the greatest common divisor (GCD) of two integers is always a non-negative integer. However, the given function does not take the absolute value of the inputs or the result. \n\nFor example:\n- `gcd(-5, 0)` will skip the `while b:` loop (since `b=0` is falsy) and directly return `a`, which is `-5`. The correct GCD should be `5`.\n- `gcd(48, -36)` will enter the loop and perform modulo operations with negative numbers. In Python, the result of the modulo operator `%` takes the sign of the divisor, leading to negative remainders. This causes the function to eventually return `-12` instead of the correct `12`.\n\nSince the function fails for negative integer inputs, it is not correct for all valid inputs (integers).\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "CORRECT",
+ "finish": "stop"
+}

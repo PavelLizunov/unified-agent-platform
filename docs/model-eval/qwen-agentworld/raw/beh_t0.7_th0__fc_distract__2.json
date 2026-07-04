@@ -1,0 +1,24 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_distract",
+ "i": 2,
+ "res": {
+  "content": "",
+  "reasoning": "",
+  "tool_calls": [
+   {
+    "type": "function",
+    "function": {
+     "name": "get_weather",
+     "arguments": "{\"city\":\"Tokyo\"}"
+    },
+    "id": "TZ6WKRwYxUvChV8nOHYUsrV8m2ge87K5"
+   }
+  ]
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

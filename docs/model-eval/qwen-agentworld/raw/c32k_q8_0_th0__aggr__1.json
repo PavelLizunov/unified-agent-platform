@@ -1,0 +1,17 @@
+{
+ "cell": "c32k_q8_0_th0",
+ "task": "aggr",
+ "i": 1,
+ "res": {
+  "content": "2",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 32768,
+  "kv": "q8_0",
+  "ncm": 12,
+  "think": 0
+ }
+}

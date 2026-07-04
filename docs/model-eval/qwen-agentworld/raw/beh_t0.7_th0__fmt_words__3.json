@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fmt_words",
+ "i": 3,
+ "res": {
+  "content": "Sunlight scatters in atmosphere, making sky blue.",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

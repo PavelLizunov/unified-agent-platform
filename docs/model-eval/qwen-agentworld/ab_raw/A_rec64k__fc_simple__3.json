@@ -1,0 +1,14 @@
+{
+ "content": "",
+ "tool_calls": [
+  {
+   "type": "function",
+   "function": {
+    "name": "get_weather",
+    "arguments": "{\"city\":\"Berlin\"}"
+   },
+   "id": "1vjmDUDXLnQTZr5J0Ii59FzUMkHVvTOr"
+  }
+ ],
+ "reasoning": ""
+}

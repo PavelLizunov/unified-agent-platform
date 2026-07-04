@@ -1,0 +1,6 @@
+{
+ "content": "The function `average(xs)` uses the floor division operator `//` instead of the true division operator `/`. While this works correctly for lists where the sum is perfectly divisible by the length (like `[2, 4, 6]`), it fails for lists where the average is not an integer. For example, `average([1, 2])` would return `1` (since `3 // 2 == 1`) instead of the correct average of `1.5`. \n\nAdditionally, the function does not handle the edge case of an empty list `[]`. Calling `average([])` would result in a `ZeroDivisionError` because `len([])` is `0`, and division by zero is not allowed. \n\nA correct implementation for computing the average of a non-empty list of numbers would be:\n```python\ndef average(xs):\n    return sum(xs) / len(xs)\n```\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}
