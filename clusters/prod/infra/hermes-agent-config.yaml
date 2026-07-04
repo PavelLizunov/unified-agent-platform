@@ -29,6 +29,7 @@ data:
     # itself is the security boundary, so disable codex's sandbox.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
+    tool_output_token_limit = 10000
 
     [mcp_servers.build1]
     command = "/opt/hermes/.venv/bin/python"
