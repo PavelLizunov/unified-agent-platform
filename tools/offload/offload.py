@@ -88,7 +88,7 @@ def extract(files, questions, force, json_in):
     claims = None
     for attempt in (1, 2):  # one retry: reasoning model occasionally emits unparseable output
         body = {"model": "local", "messages": [{"role": "system", "content": SYS}, {"role": "user", "content": user}],
-                "temperature": 0.0 if attempt == 1 else 0.4, "max_tokens": 4000}
+                "temperature": 0.0 if attempt == 1 else 0.4, "max_tokens": 12000}
         try:
             r = _post("/chat/completions", body, timeout=to)
         except Exception as e:

@@ -55,27 +55,34 @@ QUESTIONS = [
     ("docs", "What is the owner's bank card number in the docs?", "not_found"),
 ]
 
+CHUNK = 2  # questions per offload call — the thinking model truncates JSON past ~3 answers (max_tokens)
+
+
 def run_corpus(name, blob, questions):
     tf = tempfile.NamedTemporaryFile("w", suffix="_%s.txt" % name, delete=False, encoding="utf-8")
     tf.write(blob); tf.close()
     qs = [q for (c, q, e) in questions if c == name]
-    args = [sys.executable, OFFLOAD, "extract", tf.name, "--json-in"]
-    for q in qs:
-        args += ["-q", q]
     t0 = time.time()
+    all_claims, rcs = [], []
     try:
-        r = subprocess.run(args, capture_output=True, text=True, timeout=900)
-    except subprocess.TimeoutExpired:
-        return {"error": "timeout", "dt": time.time() - t0}
+        for i in range(0, len(qs), CHUNK):
+            args = [sys.executable, OFFLOAD, "extract", tf.name, "--json-in"]
+            for q in qs[i:i + CHUNK]:
+                args += ["-q", q]
+            try:
+                r = subprocess.run(args, capture_output=True, text=True, timeout=900)
+            except subprocess.TimeoutExpired:
+                rcs.append(124); continue
+            rcs.append(r.returncode)
+            try:
+                all_claims += json.loads(r.stdout or "[]")
+            except Exception:
+                pass
     finally:
         try: os.unlink(tf.name)
         except Exception: pass
-    dt = time.time() - t0
-    try:
-        claims = json.loads(r.stdout or "[]")
-    except Exception:
-        return {"error": "unparseable", "rc": r.returncode, "stderr": r.stderr[-300:], "dt": dt}
-    return {"claims": claims, "rc": r.returncode, "bytes": len(blob.encode("utf-8", "ignore")), "dt": dt, "nq": len(qs)}
+    return {"claims": all_claims, "rcs": rcs, "bytes": len(blob.encode("utf-8", "ignore")),
+            "dt": round(time.time() - t0, 1), "nq": len(qs)}
 
 def main():
     if subprocess.run([sys.executable, OFFLOAD, "health"], capture_output=True, text=True).stdout.strip() != "up":
