@@ -10,7 +10,8 @@ See docs/model-eval/qwen-agentworld/V3_SOAK_GOAL.md.
 import subprocess, sys, os, time, argparse, json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TRACKS = [("A_offload", "track_a.py"), ("C_retrieval_injection", "track_c.py")]
+TRACKS = [("A_offload", "track_a.py"), ("B_coding", "track_b.py"),
+          ("C_retrieval_injection", "track_c.py"), ("D_function_calling", "track_d.py")]
 
 
 def run_track(script):
