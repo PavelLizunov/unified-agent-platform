@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef rle_encode(s):\n    if not s:\n        return \"\"\n    encoded = []\n    count = 1\n    for i in range(1, len(s)):\n        if s[i] == s[i-1]:\n            count += 1\n        else:\n            encoded.append(s[i-1] + str(count))\n            count = 1\n    encoded.append(s[-1] + str(count))\n    return \"\".join(encoded)\n\nprint(rle_encode('aaabb'))  # Output: a3b2\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

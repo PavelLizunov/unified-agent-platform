@@ -1,0 +1,6 @@
+{
+ "content": "The function `add(a, b)` is intended to add two numbers, but its implementation returns `a - b`, which performs subtraction instead of addition. For the given test `add(2, 3)`, the function would return `2 - 3 = -1`, but the test expects `5` (since `2 + 3 = 5`). Even if the test suite reportedly passes (which may be due to an error in the test reporting or a mismatch between the test and the function as presented), the function itself is clearly buggy because it does not perform addition. \n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}

@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef flatten(lst):\n    result = []\n    for item in lst:\n        if isinstance(item, list):\n            result.extend(flatten(item))\n        else:\n            result.append(item)\n    return result\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

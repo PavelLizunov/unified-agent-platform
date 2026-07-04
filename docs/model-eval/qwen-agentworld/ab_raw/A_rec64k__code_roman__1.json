@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef to_roman(n):\n    if not isinstance(n, int) or not (1 <= n <= 3999):\n        raise ValueError(\"Input must be an integer between 1 and 3999 inclusive.\")\n    \n    roman_numerals = {\n        1000: 'M', 900: 'CM', 500: 'D', 400: 'CD',\n        100: 'C', 90: 'XC', 50: 'L', 40: 'XL',\n        10: 'X', 9: 'IX', 5: 'V', 4: 'IV', 1: 'I'\n    }\n    \n    result = []\n    for value, numeral in roman_numerals.items():\n        while n >= value:\n            result.append(numeral)\n            n -= value\n    return ''.join(result)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

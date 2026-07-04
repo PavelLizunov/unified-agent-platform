@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef caesar(s, k):\n    k = k % 26\n    res = []\n    for c in s:\n        if 'a' <= c <= 'z':\n            res.append(chr((ord(c) - ord('a') + k) % 26 + ord('a')))\n        elif 'A' <= c <= 'Z':\n            res.append(chr((ord(c) - ord('A') + k) % 26 + ord('A')))\n        else:\n            res.append(c)\n    return \"\".join(res)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

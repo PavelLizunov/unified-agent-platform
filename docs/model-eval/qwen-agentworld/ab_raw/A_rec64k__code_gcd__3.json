@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef my_gcd(a, b):\n    while b:\n        a, b = b, a % b\n    return abs(a)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

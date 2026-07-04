@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef most_frequent(lst):\n    return max(set(lst), key=lst.count)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

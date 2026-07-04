@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef is_anagram(a, b):\n    return sorted([c.lower() for c in a if c.isalpha()]) == sorted([c.lower() for c in b if c.isalpha()])\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

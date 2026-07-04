@@ -1,0 +1,17 @@
+{
+ "cell": "c16k_q4_0_th0",
+ "task": "hop",
+ "i": 1,
+ "res": {
+  "content": "8692",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 16384,
+  "kv": "q4_0",
+  "ncm": 12,
+  "think": 0
+ }
+}

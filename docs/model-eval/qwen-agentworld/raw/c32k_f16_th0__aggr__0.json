@@ -1,0 +1,17 @@
+{
+ "cell": "c32k_f16_th0",
+ "task": "aggr",
+ "i": 0,
+ "res": {
+  "content": "3",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 32768,
+  "kv": "f16",
+  "ncm": 12,
+  "think": 0
+ }
+}

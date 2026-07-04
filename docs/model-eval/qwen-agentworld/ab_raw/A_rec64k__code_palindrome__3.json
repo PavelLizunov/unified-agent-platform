@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef is_palindrome(s: str) -> bool:\n    cleaned = ''.join(c.lower() for c in s if c.isalnum())\n    return cleaned == cleaned[::-1]\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

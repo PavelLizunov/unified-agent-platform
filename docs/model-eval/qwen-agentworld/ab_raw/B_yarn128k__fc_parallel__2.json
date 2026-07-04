@@ -1,0 +1,22 @@
+{
+ "content": "",
+ "tool_calls": [
+  {
+   "type": "function",
+   "function": {
+    "name": "get_weather",
+    "arguments": "{\"city\":\"Paris\"}"
+   },
+   "id": "BI67E6QbYZO4uqqdqbswbwIlPx4Yok5z"
+  },
+  {
+   "type": "function",
+   "function": {
+    "name": "get_weather",
+    "arguments": "{\"city\":\"Tokyo\"}"
+   },
+   "id": "8UedUfMOKtv8j5emESmmcLtWbmcET7Nv"
+  }
+ ],
+ "reasoning": ""
+}

@@ -1,0 +1,6 @@
+{
+ "content": "The function `bsearch(a, t)` implements a binary search to check if `t` is present in the sorted list `a`. However, it fails to handle the edge case where the input list `a` is empty. \n\nIf `a = []`, then `len(a) - 1` evaluates to `-1`, so `lo = 0` and `hi = -1`. The `while lo < hi:` condition (`0 < -1`) is `False`, so the loop is skipped. The function then attempts to execute `return a[lo] == t`, which translates to `a[0] == t`. Since `a` is empty, accessing `a[0]` raises an `IndexError: list index out of range`. A correct binary search function should handle an empty list gracefully by returning `False` (since the target cannot be in an empty list).\n\nBecause the function crashes on an empty list input, it is not correct for all valid inputs.\n\nVERDICT: BUGGY",
+ "verdict": "BUGGY",
+ "gt": "BUGGY",
+ "finish": "stop"
+}

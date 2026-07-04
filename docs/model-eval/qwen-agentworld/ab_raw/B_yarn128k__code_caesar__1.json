@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef caesar(s, k):\n    res = []\n    for c in s:\n        if c.isalpha():\n            base = ord('A') if c.isupper() else ord('a')\n            res.append(chr((ord(c) - base + k) % 26 + base))\n        else:\n            res.append(c)\n    return \"\".join(res)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

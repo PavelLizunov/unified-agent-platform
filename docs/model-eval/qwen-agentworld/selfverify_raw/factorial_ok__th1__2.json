@@ -1,0 +1,6 @@
+{
+ "content": "The function `fact(n)` computes the factorial of a non-negative integer `n`. Let's analyze its behavior for all valid inputs (non-negative integers `n >= 0`):\n\n- For `n = 0`: `range(2, 1)` is an empty range, so the loop does not execute. The function returns `r = 1`, which is correct since `0! = 1`.\n- For `n = 1`: `range(2, 2)` is an empty range, so the loop does not execute. The function returns `r = 1`, which is correct since `1! = 1`.\n- For `n >= 2`: The loop runs for `i` in `range(2, n+1)`, which generates the sequence `2, 3, ..., n`. The variable `r` is multiplied by each of these integers, correctly computing `n",
+ "verdict": "CORRECT",
+ "gt": "CORRECT",
+ "finish": "length"
+}

@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_abstain",
+ "i": 0,
+ "res": {
+  "content": "Silver threads descend from gray,\nWaking dreams in every ray.",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

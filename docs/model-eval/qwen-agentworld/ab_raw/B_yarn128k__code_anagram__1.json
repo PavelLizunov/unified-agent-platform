@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef is_anagram(a, b)->bool:\n    a = a.replace(\" \", \"\").lower()\n    b = b.replace(\" \", \"\").lower()\n    return sorted(a) == sorted(b)\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

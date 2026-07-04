@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_abstain",
+ "i": 3,
+ "res": {
+  "content": "Raindrops dance upon the glass,\nA symphony that nature's tasked to pass.",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}

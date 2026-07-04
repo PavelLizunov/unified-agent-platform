@@ -1,0 +1,14 @@
+{
+ "content": "",
+ "tool_calls": [
+  {
+   "type": "function",
+   "function": {
+    "name": "add",
+    "arguments": "{\"a\":41,\"b\":59}"
+   },
+   "id": "lGSlS0mfDzeGQcZ8gbOS1FqBEqxeCwRX"
+  }
+ ],
+ "reasoning": ""
+}

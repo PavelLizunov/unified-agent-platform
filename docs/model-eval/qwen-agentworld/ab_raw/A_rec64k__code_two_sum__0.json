@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef two_sum(nums, target):\n    num_to_index = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in num_to_index:\n            return [num_to_index[complement], i]\n        num_to_index[num] = i\n    return []\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

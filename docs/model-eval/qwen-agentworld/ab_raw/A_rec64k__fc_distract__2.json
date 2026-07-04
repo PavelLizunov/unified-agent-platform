@@ -1,0 +1,14 @@
+{
+ "content": "",
+ "tool_calls": [
+  {
+   "type": "function",
+   "function": {
+    "name": "get_weather",
+    "arguments": "{\"city\":\"Tokyo\"}"
+   },
+   "id": "34nrb1LWBjUHE7iVuxqAxjLdIWRd2q2Y"
+  }
+ ],
+ "reasoning": ""
+}

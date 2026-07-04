@@ -1,0 +1,17 @@
+{
+ "cell": "c128k_q8_0_th0",
+ "task": "niah_west",
+ "i": 1,
+ "res": {
+  "content": "131902",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "ctx",
+  "ctx": 131072,
+  "kv": "q8_0",
+  "ncm": 16,
+  "think": 0
+ }
+}

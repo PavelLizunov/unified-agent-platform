@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef two_sum(nums, target):\n    seen = {}\n    for i, num in enumerate(nums):\n        complement = target - num\n        if complement in seen:\n            return [seen[complement], i]\n        seen[num] = i\n    return []\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

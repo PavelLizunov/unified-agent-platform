@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef fib(n):\n    a, b = 0, 1\n    for _ in range(n):\n        a, b = b, a + b\n    return a\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

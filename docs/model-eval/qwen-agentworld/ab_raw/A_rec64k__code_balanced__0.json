@@ -1,0 +1,5 @@
+{
+ "content": "```python\ndef is_balanced(s: str) -> bool:\n    stack = []\n    mapping = {')': '(', ']': '[', '}': '{'}\n    \n    for char in s:\n        if char in mapping:\n            top_element = stack.pop() if stack else '#'\n            if mapping[char] != top_element:\n                return False\n        else:\n            stack.append(char)\n            \n    return not stack\n```",
+ "tool_calls": null,
+ "reasoning": ""
+}

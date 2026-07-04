@@ -1,0 +1,15 @@
+{
+ "cell": "beh_t0.7_th0",
+ "task": "fc_abstain",
+ "i": 1,
+ "res": {
+  "content": "Soft drops dance upon the glass,\nA silver song the clouds have passed.",
+  "reasoning": "",
+  "tool_calls": null
+ },
+ "extra": {
+  "track": "beh",
+  "temp": 0.7,
+  "think": 0
+ }
+}
