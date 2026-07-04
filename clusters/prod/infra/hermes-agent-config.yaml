@@ -198,3 +198,13 @@ data:
     - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool.
     - The git token lives ONLY on build-1 — edits/commits/pushes done anywhere else cannot
       reach GitHub, and the pod is ephemeral (2 cores). Route all repo work to build-1.
+
+    ## Context hygiene (CRITICAL — your #1 footgun)
+
+    - **NEVER** run `grep` / `rg` / `find` over `/opt/hermes` (your own ~50 MB source tree). A single
+      broad search dumps ~1 MB into your context and triggers a compaction storm (real incident: 25K -> 298K
+      tokens in ONE command, then repeated compaction). Do not do it.
+    - To introspect yourself (config, where data is saved, status), use `hermes status`, `hermes doctor`,
+      `hermes config show`, or read a specific KNOWN file — never a broad source search.
+    - Your full dialog history is ALREADY saved in `/opt/data/state.db` (sessions + messages, PVC-backed +
+      daily R2 backup). You never need to search your source to "find where history is saved" — it just is.
