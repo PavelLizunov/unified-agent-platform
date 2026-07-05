@@ -12,7 +12,9 @@ Env:  OFFLOAD_URL (default http://127.0.0.1:8080/v1)
 import argparse, json, os, re, sys, urllib.request, urllib.error
 
 URL = os.environ.get("OFFLOAD_URL", "http://127.0.0.1:8080/v1").rstrip("/")
-MIN_BYTES, MAX_BYTES = 40_000, 420_000
+MODEL = os.environ.get("OFFLOAD_MODEL", "local")  # llama.cpp ignores it; mlx_lm.server needs the exact id
+MIN_BYTES = 40_000
+MAX_BYTES = int(os.environ.get("OFFLOAD_MAX_BYTES", 420_000))  # per-backend cap; 16GB mac OOMs above ~180KB fp16 KV
 # proxy immunity: hermes pod exports HTTP_PROXY (VLESS egress); Python ignores NO_PROXY CIDR -> force no proxy
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -49,17 +51,20 @@ def number_lines(text):
     return "\n".join(f"{i+1}: {ln}" for i, ln in enumerate(text.split("\n")))
 
 def norm(s):
-    return re.sub(r"\s+", " ", (s or "")).strip().lower()
+    s = re.sub(r"[*`]", "", s or "")  # models often drop markdown bold/code markers when quoting prose -> normalize both sides
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 def verify_quote(quote, ln, src_lines, raw):
     """True iff the (verbatim) quote appears near its claimed line, else anywhere in source. Mechanical, no LLM."""
     quote = re.sub(r"^\s*\d+:\s*", "", quote or "")  # model copies the "N: " line-number prefix; strip it
-    nq = norm(quote)
+    nq = norm(quote).strip(" .…")  # models add leading/trailing ellipsis to mark truncation; not load-bearing for grounding
     if not nq:
         return False
     lo, hi = max(0, ln - 4), min(len(src_lines), ln + 3)
     if nq in norm(" ".join(src_lines[lo:hi])):
         return True
+    # ponytail: substring test — a 1-word quote of a common token ("the","k3s") can match; acceptable because
+    # the model must still pair it with a claim, and a length/word floor would reject legit short quotes.
     return nq in norm(raw)  # line number off but quote real -> still grounded
 
 SENT = "<<<INPUT_DATA>>>"
@@ -87,8 +92,9 @@ def extract(files, questions, force, json_in):
     to = 180 + nbytes / 400.0  # ctx-scaled timeout: prefill dominates on big inputs
     claims = None
     for attempt in (1, 2):  # one retry: reasoning model occasionally emits unparseable output
-        body = {"model": "local", "messages": [{"role": "system", "content": SYS}, {"role": "user", "content": user}],
-                "temperature": 0.0 if attempt == 1 else 0.4, "max_tokens": 12000}
+        body = {"model": MODEL, "messages": [{"role": "system", "content": SYS}, {"role": "user", "content": user}],
+                "temperature": 0.0 if attempt == 1 else 0.4,
+                "max_tokens": int(os.environ.get("OFFLOAD_MAX_TOKENS", 12000))}  # cap KV growth; 16GB mac OOMs when ctx+gen nears ~48k tok
         try:
             r = _post("/chat/completions", body, timeout=to)
         except Exception as e:

@@ -21,6 +21,18 @@ def run_track(script):
             "tail": (r.stdout or "")[-1500:], "err": (r.stderr or "")[-400:]}
 
 
+def wait_health(cap=180):
+    """Block until the server is back (the mac auto-restart loop reloads in ~30s after an OOM),
+    so a crash mid-round costs one recovery wait instead of a spin-storm of empty rounds."""
+    import _llm, time as _t
+    t0 = _t.time()
+    while _t.time() - t0 < cap:
+        if _llm.health():
+            return True
+        _t.sleep(5)
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--hours", type=float, default=4.0)
@@ -39,6 +51,9 @@ def main():
         print("\n########## ROUND %d  (%.2f h left) ##########" % (round_n, remaining))
         for name, script in TRACKS:
             print("---- %s ----" % name)
+            if not wait_health():
+                print("server did not recover in 180s; skipping %s" % name)
+                log.append({"round": round_n, "track": name, "rc": -1, "dt": 0.0}); continue
             res = run_track(script)
             print(res["tail"])
             log.append({"round": round_n, "track": name, **{k: res[k] for k in ("rc", "dt")}})
