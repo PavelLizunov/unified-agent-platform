@@ -15,6 +15,7 @@ import subprocess, sys, os, glob, json, tempfile, time
 
 ROOT = os.getcwd()
 OFFLOAD = os.path.join("tools", "offload", "offload.py")
+MAX_BYTES = int(os.environ.get("OFFLOAD_MAX_BYTES", 420_000))  # truncate corpora to the backend's fp16 KV ceiling
 
 # --- corpora: real repo subsets, concatenated (each must clear offload's MIN_BYTES floor) ---
 def _read(patterns):
@@ -59,6 +60,8 @@ CHUNK = 2  # questions per offload call — the thinking model truncates JSON pa
 
 
 def run_corpus(name, blob, questions):
+    if len(blob.encode("utf-8", "ignore")) > MAX_BYTES:  # keep under the backend's context ceiling
+        blob = blob.encode("utf-8", "ignore")[:MAX_BYTES - 1000].decode("utf-8", "ignore")
     tf = tempfile.NamedTemporaryFile("w", suffix="_%s.txt" % name, delete=False, encoding="utf-8")
     tf.write(blob); tf.close()
     qs = [q for (c, q, e) in questions if c == name]
@@ -102,13 +105,20 @@ def main():
     verified = sum(1 for r in results.values() for c in r.get("claims", []) if c.get("status") == "verified")
     unver    = sum(1 for r in results.values() for c in r.get("claims", []) if c.get("status") == "UNVERIFIED")
     nf       = sum(1 for r in results.values() for c in r.get("claims", []) if c.get("status") == "not_found")
+    all_rcs  = [rc for r in results.values() for rc in r.get("rcs", [])]
+    bad_rcs  = sum(1 for rc in all_rcs if rc != 0)
+    # a run where every offload call failed (server down / timeout) yields 0 claims -> the PASS heuristic below
+    # would read UNVERIFIED==0 as green. Surface rc health so an empty-but-"green" run can't be misread.
+    degraded = bad_rcs > 0 or (verified + unver + nf) == 0
     total_q  = sum(1 for (c, q, e) in QUESTIONS)
     found_q  = sum(1 for (c, q, e) in QUESTIONS if e == "found")
     nf_q     = total_q - found_q
     print("\n=== TRACK A SUMMARY ===")
     print("questions: %d (found=%d, not_found-controls=%d)" % (total_q, found_q, nf_q))
+    print("offload calls: %d ok / %d failed  rcs=%s%s" % (len(all_rcs) - bad_rcs, bad_rcs, all_rcs,
+          "   <-- DEGRADED RUN: numbers below are NOT trustworthy" if degraded else ""))
     print("claims verified=%d  UNVERIFIED(hallucinated quote, grep-caught)=%d  not_found=%d" % (verified, unver, nf))
-    print("PASS heuristic: UNVERIFIED==0 (no hallucinated quotes) AND not_found>=%d (honest on controls)" % nf_q)
+    print("PASS heuristic (valid only on a non-degraded run): UNVERIFIED==0 (no hallucinated quotes) AND not_found>=%d (honest on controls)" % nf_q)
     print("NOTE: manual claim<->question mapping needed for exact per-question grade; this is the aggregate signal.")
     out = os.path.join("tools", "offload", "soak", "track_a_result.json")
     json.dump({"results": results, "verified": verified, "unverified": unver, "not_found": nf}, open(out, "w"), ensure_ascii=False, indent=1)
