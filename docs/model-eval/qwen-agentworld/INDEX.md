@@ -4,6 +4,7 @@ Local model eval on the RTX 5060 Ti workstation via llama.cpp. Not infra — ref
 
 ## START HERE
 - **V2_REPORT.md** — the honest consolidated verdict (A/B/C: proven / unknown / not-tested, with CIs). Read this first.
+- **V3_REALDATA_REPORT.md** — 2026-07-05 REAL-DATA soak (offload on the actual repo/logs/docs, coding, retrieval, FC; **4.34h / 9 rounds, 0 crashes**, deterministic graders, Wilson CIs). Confirms V2 on real data: offload grounding 99.3% + **100% of hallucinations grep-caught** (1/134), retrieval 100%, FC 100%, coding 75% (deterministic `gcd` edge-case fail), **injection ~87% (V2 hole confirmed)**, stable under 4h load.
 
 ## v2 phase reports (honest, Wilson CIs, after Fable's adversarial review)
 - **RESULTS.md** — infra tuning + overnight matrix, v2-corrected (long-context/coding/format claims demoted).
