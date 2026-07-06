@@ -58,9 +58,13 @@ class H(BaseHTTPRequestHandler):
         except Exception:
             pass  # not JSON -> forward as-is to the default backend
         try:
-            conn = http.client.HTTPConnection(urllib.parse.urlparse(url).netloc, timeout=1200)
+            # short CONNECT timeout: if a backend box is off (e.g. desktop stopped to free the GPU), fail fast
+            # with a 502 so the caller's fallback chain kicks in instead of hanging on a dead host...
+            conn = http.client.HTTPConnection(urllib.parse.urlparse(url).netloc, timeout=10)
             conn.request("POST", self.path, body=raw,
                          headers={"Content-Type": "application/json", "Content-Length": str(len(raw))})
+            if conn.sock:
+                conn.sock.settimeout(1200)  # ...but once connected, allow a slow thinking-model generation
             resp = conn.getresponse()
             self.send_response(resp.status)
             for k, v in resp.getheaders():
