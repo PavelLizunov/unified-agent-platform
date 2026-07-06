@@ -4,6 +4,8 @@ Endpoint = OFFLOAD_URL (default http://127.0.0.1:8080/v1). Server is desktop-onl
 import json, os, urllib.request
 
 URL = os.environ.get("OFFLOAD_URL", "http://127.0.0.1:8080/v1").rstrip("/")
+# llama.cpp ignores the model field (default "local"); mlx_lm.server needs the exact repo id.
+MODEL = os.environ.get("OFFLOAD_MODEL", "local")
 
 
 def health():
@@ -19,7 +21,7 @@ def health():
 
 
 def chat(messages, temperature=0.0, max_tokens=2000, timeout=600):
-    body = {"model": "local", "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
+    body = {"model": MODEL, "messages": messages, "temperature": temperature, "max_tokens": max_tokens}
     req = urllib.request.Request(URL + "/chat/completions", data=json.dumps(body).encode(),
                                 headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:

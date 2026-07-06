@@ -26,8 +26,11 @@ SPECS = [
 
 def build1(cmd, timeout=200):
     b = base64.b64encode(cmd.encode()).decode()
-    full = ("ssh -o ConnectTimeout=20 %s \"ssh -o ConnectTimeout=15 %s 'echo %s | base64 -d | bash'\""
-            % (OPS, B1, b))
+    if OPS:  # workstation: hop through ops-1 to reach build-1
+        full = ("ssh -o ConnectTimeout=20 %s \"ssh -o ConnectTimeout=15 %s 'echo %s | base64 -d | bash'\""
+                % (OPS, B1, b))
+    else:    # already on ops-1 (OPS_SSH=""): ssh build-1 directly, no self-hop
+        full = "ssh -o ConnectTimeout=15 %s 'echo %s | base64 -d | bash'" % (B1, b)
     try:
         r = subprocess.run(full, shell=True, capture_output=True, text=True, timeout=timeout)
         return r.returncode, r.stdout, r.stderr
