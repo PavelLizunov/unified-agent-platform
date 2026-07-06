@@ -1,8 +1,9 @@
 # hermes-agent (Track A2) — non-secret config, mounted by the bootstrap initContainer.
 #  - config.yaml      -> /opt/data/config.yaml (HERMES_HOME)
 #  - codex-config.toml -> /opt/data/.codex/config.toml (CODEX_HOME)
-# Brain = Codex (owner's ChatGPT Plus) via the codex_app_server runtime. WHY these exact
-# values is proven + explained in runbooks/hermes-agent-codex-brain.md.
+# Brain = LOCAL qwen-35b via the ops-1 router (paid Claude/Codex limits ran out; 2026-07-06). See the
+# `managed-config` block below + runbooks/local-models-router.md. Codex-brain recipe kept in
+# runbooks/hermes-agent-codex-brain.md for when limits reset (revert the managed-config model block).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -58,10 +59,22 @@ data:
   # loud "managed by your administrator". Keeps the BRAIN GitOps-owned while the dashboard owns
   # every other (soft) config key. Proof + verify: runbooks/hermes-agent-codex-brain.md.
   managed-config: |
+    # Brain = LOCAL qwen-35b via the ops-1 router (paid Claude/Codex limits exhausted). The router
+    # (runbooks/local-models-router.md) reaches the desktop llama.cpp; NO_PROXY covers 100.64.0.0/10 so
+    # the gateway's httpx hits it directly. FC is native (llama.cpp --jinja). fallback -> ornith-9b (mac,
+    # always-on) when the desktop is off. `default` + `model` both set (router defaults non-'ornith' -> qwen).
     model:
-      provider: openai-codex
-      openai_runtime: codex_app_server
-      model: gpt-5.5
+      provider: custom
+      base_url: http://100.82.241.121:8090/v1
+      default: qwen-35b
+      model: qwen-35b
+      api_key: local
+    fallback_providers:
+      - provider: custom
+        base_url: http://100.82.241.121:8090/v1
+        default: ornith-9b
+        model: ornith-9b
+        api_key: local
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram
