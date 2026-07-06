@@ -100,8 +100,8 @@ data:
     - Язык: русский. Стиль: кратко — результат + следующий шаг, без воды.
     - Рабочий поток — вайб-кодинг: даёт идеи и инфраструктуру; код НЕ ревьюит,
       поэтому агент обязан САМ тестировать (самопроверка = гейт качества).
-    - Инфраструктура: k3s (Flux GitOps + SOPS); мозг = Codex (ChatGPT Plus) через
-      egress-прокси (хост в РФ — прямой доступ к OpenAI/Anthropic закрыт).
+    - Инфраструктура: k3s (Flux GitOps + SOPS); мозг = локальный qwen-35b (llama.cpp на десктопе
+      через ops-1 роутер; лимиты Claude/Codex кончились), fallback = ornith-9b (мак, always-on).
 
     ## Флот и где что делать
     ### ЖЁСТКОЕ ПРАВИЛО: вся работа с кодом — ТОЛЬКО на build-1
@@ -118,8 +118,13 @@ data:
       обёртка = `ssh -F /opt/data/.ssh/config uap-build-1`.
       На ней стоят claude-code (claude -p) и rust/cargo, есть egress наружу через VLESS-прокси.
       ВАЖНО: тяжёлый кодинг и сборки гоняй ТАМ (8 ядер), а не в этом крошечном поде (2 ядра).
-      Кодинг на ней: `/opt/data/.local/bin/build1 "cd <repo> && CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.claude-oauth-token) claude -p '<задача>' --permission-mode acceptEdits"`
-      Сборка: `/opt/data/.local/bin/build1 "cd <repo> && cargo build"`
+      **КОДЕР = ornith-9b** (`claude -p` / `codex` — лимиты кончились, НЕ используй их). Генерацию кода делай
+      локальной моделью-кодером: `/opt/data/.local/bin/ornith "<что написать: функция/файл/фикс + контекст>"`
+      -> вернёт готовый код. Дальше примени его САМ: запиши в файл на build-1 (`build1 "cd <repo> && cat > <файл> <<'EOF'
+      ...код... EOF"`) и собери/протестируй ТАМ, либо `execute_code` для быстрой проверки в поде. ornith-9b —
+      сильнейший локальный кодер (100% на наших cargo-тестах, включая edge-cases). Итерируй: не собралось -> отдай
+      ошибку обратно в `ornith "<та же задача> ; ошибка: <лог>"`.
+      Сборка/тесты: `/opt/data/.local/bin/build1 "cd <repo> && cargo build && cargo test"`
       **GitHub на build-1 настроен** (git+gh, авторизован как PavelLizunov, доступ ко ВСЕМ репо). В самом поде
       токена НЕТ by design — вся работа с git/PR идёт ЧЕРЕЗ build1. Полный цикл:
       `/opt/data/.local/bin/build1 "cd ~/ && git clone https://github.com/<owner>/<repo> && cd <repo> && git checkout -b <ветка>"`
@@ -137,6 +142,38 @@ data:
     - Любой поиск/чтение — узко: конкретные файлы, `--max-count`, `head`, а не рекурсия по большим деревьям.
     - Тяжёлое исследование/сборку кода гоняй на build-1 (`/opt/data/.local/bin/build1 "..."`), не тащи
       большой вывод обратно в чат — возвращай только итог.
+  # The `ornith` coder wrapper -> /opt/data/.local/bin/ornith (seeded+refreshed by the initContainer).
+  # `ornith "<task>"` returns code from ornith-9b (the strongest local coder) via the ops-1 router.
+  ornith-wrapper: |
+    #!/opt/hermes/.venv/bin/python
+    # ornith "<task>" -> code from ornith-9b via the ops-1 router. The qwen brain delegates code GENERATION
+    # here (claude -p / codex limits are out). Forces no-proxy: the router (100.82.241.121) is local, else
+    # urllib would send it through singbox egress (and httpx-style ignores the tailnet CIDR in NO_PROXY).
+    import sys, json, urllib.request
+    task = " ".join(sys.argv[1:]).strip()
+    if not task:
+        sys.stderr.write("usage: ornith '<coding task>'\n"); sys.exit(2)
+    body = json.dumps({
+        "model": "ornith-9b",
+        "messages": [
+            {"role": "system", "content": "You are an expert software engineer. Output ONLY the code that solves the task: complete, runnable, production-quality. No prose, no markdown fences unless the file format itself needs them."},
+            {"role": "user", "content": task}],
+        "temperature": 0.2, "max_tokens": 6000}).encode()
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    req = urllib.request.Request("http://100.82.241.121:8090/v1/chat/completions", data=body,
+                                 headers={"Content-Type": "application/json"})
+    try:
+        d = json.loads(opener.open(req, timeout=600).read())
+        m = d["choices"][0]["message"]
+        out = (m.get("content") or "").strip() or (m.get("reasoning_content") or "").strip()
+        if out.startswith("```"):  # strip a single surrounding markdown code fence -> clean, file-ready code
+            ls = out.splitlines()
+            if ls and ls[0].startswith("```"): ls = ls[1:]
+            if ls and ls[-1].strip() == "```": ls = ls[:-1]
+            out = "\n".join(ls).strip()
+        sys.stdout.write((out or "(ornith returned empty)") + "\n")
+    except Exception as e:
+        sys.stderr.write("ornith error: %s\n" % e); sys.exit(1)
   build1-mcp: |
     #!/usr/bin/env python3
     """MCP server exposing build-1 coding tools to the codex brain.
