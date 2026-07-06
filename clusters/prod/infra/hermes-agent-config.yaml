@@ -83,7 +83,9 @@ data:
   managed-env: |
     HTTPS_PROXY=http://singbox-egress-ha.uap-system.svc:12080
     HTTP_PROXY=http://singbox-egress-ha.uap-system.svc:12080
-    NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10
+    # 100.82.241.121 (ops-1 local-model router) listed as an EXACT IP on purpose: httpx does NOT match
+    # the tailnet CIDR 100.64.0.0/10 here, so a CIDR-only entry sends the brain call through singbox -> 502.
+    NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10,100.82.241.121
     TELEGRAM_ALLOWED_USERS=729937253
     # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the
     # fallback IPs add redundant connection targets through the proxy). The occasional reconnects are
