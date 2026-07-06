@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v14-lan-noproxy"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v15-ornith-coder"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -87,6 +87,10 @@ spec:
               [ -f /opt/data/.codex/config.toml ] || cp /config/codex-config.toml /opt/data/.codex/config.toml
               mkdir -p /opt/data/mcp
               [ -f /opt/data/mcp/build1_mcp.py ] || cp /config/build1-mcp /opt/data/mcp/build1_mcp.py
+              # ornith coder wrapper (qwen brain delegates code generation here). Copy ALWAYS (not seed-if-absent)
+              # so a ConfigMap edit propagates on the next roll.
+              mkdir -p /opt/data/.local/bin
+              cp /config/ornith-wrapper /opt/data/.local/bin/ornith && chmod +x /opt/data/.local/bin/ornith
               [ -f /opt/data/.codex/AGENTS.md ] || cp /config/agents-md /opt/data/.codex/AGENTS.md
               # 2a) claude -p worker: seed deny-first settings (defense-in-depth vs accidental secret reads;
               #     Bash is unconstrained, so the pod itself is the real boundary)
