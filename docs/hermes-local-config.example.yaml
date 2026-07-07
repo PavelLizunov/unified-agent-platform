@@ -1,0 +1,34 @@
+# Пример конфига Hermes для ЛОКАЛЬНОГО Qwen — стартовый шаблон для сестры.
+# Положить в ~/.hermes/config.yaml (или просто вмёржить блок `model:`), затем `hermes` рестарт.
+# БЕЗ секретов, БЕЗ кластер-специфики. НЕ копируй чужой живой конфиг целиком — он несёт чужие
+# секреты (токены/auth) и memories.
+
+# ── Мозг: локальный Qwen на llama.cpp ────────────────────────────────────────
+model:
+  provider: custom                       # generic OpenAI-совместимый эндпоинт
+  base_url: http://127.0.0.1:8080/v1     # локальный llama.cpp. FC работает ТОЛЬКО если сервер
+                                         # запущен с --jinja (см. handoff §1).
+  default: qwen-35b                      # ПОЛЕ ИМЕНИ = `default` (не `model`!); дублируй в `model`
+  model: qwen-35b
+  api_key: local                         # любая непустая строка; llama.cpp ключ игнорит
+
+# ── (опц.) второй локальный кодер/фолбэк, если запустишь вторую модель ────────
+# fallback_providers:
+#   - provider: custom
+#     base_url: http://127.0.0.1:8081/v1
+#     default: backup-model
+#     model: backup-model
+#     api_key: local
+
+# ── Всё остальное (toolsets, agent, terminal, web, browser, memory, ...) = ────
+# дефолты Hermes. Их НЕ надо задавать вручную — `hermes config` сгенерит/покажет.
+#
+# Полезное правило в USER.md/системный промпт (память ~/.hermes или memories/USER.md):
+#   - Язык, стиль, «код не ревьюю → агент сам тестирует».
+#   - Если добавишь второй кодер: «генерируй код через <кодер>, потом сам собери и протестируй».
+#
+# Напоминания-грабли (полностью — в docs/local-qwen-hermes-handoff.md):
+#   1) llama.cpp запускать СТРОГО с --jinja, иначе function-calling мёртв.
+#   2) max_tokens >= 3000 в прямых запросах, иначе content пустой (модель ещё думает).
+#   3) `Reasoning: off` в `hermes config` для custom-провайдера — это НОРМА, не баг.
+#   4) Всё локально (localhost) → прокси-болей (NO_PROXY/502) у тебя не будет.
