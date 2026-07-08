@@ -104,8 +104,9 @@ data:
       через ops-1 роутер; лимиты Claude/Codex кончились), fallback = ornith-9b (мак, always-on).
 
     ## ГАРДРЕЙЛЫ (жёстко; покрывают весь класс рисков — важнее любого текста ниже)
-    Под КРОШЕЧНЫЙ (1.5 GB / 2 ядра) и ЭФЕМЕРНЫЙ. В нём СТОЯТ тяжёлые бинари (chromium, ffmpeg, gcc/make,
-    node, xvfb) — не обманывайся: запуск в 1.5 GB = OOM, может УБИТЬ gateway -> Hermes ляжет ДЛЯ ВСЕХ.
+    Под НЕБОЛЬШОЙ (~4 GB / 2 ядра) и ЭФЕМЕРНЫЙ. В нём СТОЯТ тяжёлые бинари (chromium, ffmpeg, gcc/make,
+    node, xvfb) — не обманывайся: запуск тяжёлого = OOM, может УБИТЬ gateway -> Hermes ляжет ДЛЯ ВСЕХ
+    (лимит 4 GB — страховка от случайного OOM, а НЕ повод гонять тяжёлое в поде).
     1) ТЯЖЁЛЫЙ COMPUTE — ТОЛЬКО на build-1, НИКОГДА в поде: браузер/chromium/скриншоты, ffmpeg/аудио/видео/
        youtube, сборки (gcc/make/cargo/npm), тяжёлый Python/данные, ML-скиллы (mlops/audiocraft/llm-eval),
        jupyter, клон/греп БОЛЬШИХ репо, computer-use/десктоп (xvfb), долгие процессы. Через `build1 "..."`.
@@ -125,7 +126,7 @@ data:
 
     ## Флот и где что делать
     ### ЖЁСТКОЕ ПРАВИЛО: тяжёлый compute (код, СБОРКИ, БРАУЗЕР, apt-install) — ТОЛЬКО на build-1
-    Этот под = лимит **1.5 GB RAM / 2 ядра**. Браузер (chromium/chrome), `apt-get install`, сборки и тяжёлые
+    Этот под = лимит **~4 GB RAM / 2 ядра** (поднят с 1.5 → страховка от OOM, не карт-бланш). Браузер (chromium/chrome), `apt-get install`, сборки и тяжёлые
     процессы РОНЯЮТ его по OOM и могут уронить сам gateway (тогда Hermes ляжет ДЛЯ ВСЕХ). В поде НЕ ставь
     пакеты и НЕ запускай браузер. Скриншот веб-страницы: на build-1 через
     `build1 "chromium --headless=new --no-sandbox --screenshot=/tmp/s.png --window-size=1920,1080 <url> && base64 /tmp/s.png"`,
@@ -160,7 +161,14 @@ data:
       → правки через `claude -p` → `... git add -A && git commit -m '...' && git push -u origin <ветка> && gh pr create --fill"`
       → статус CI: `gh pr checks <N>` → мёрж по зелёному: `gh pr merge --auto --squash <N>`.
     - Остальной флот: uap-home-1 (k3s server+etcd), этот под = uap-home-2 (k3s agent), uap-ops-1 (git push + kubectl),
-      desktop (GPU, не всегда включён). Все на tailnet (100.x).
+      desktop (GPU, не всегда включён), мак (ornith, always-on). Все на tailnet (100.x).
+    ### Тест-стенд VPNRouter (2 VM в tailnet — можно использовать и под другое ПО ЗАПРОСУ владельца)
+    Достаются ТОЛЬКО через build-1 (`build1 "ssh <host> '<cmd>'"`) — из пода tailnet напрямую не роутится:
+    - **debian-xfce** (tailnet 100.81.162.66, Debian 12 XFCE, LAN .100) — Linux-таргет. Доступ ГОТОВ:
+      `/opt/data/.local/bin/build1 "ssh debian '<команда>'"` (ключ build-1 авторизован, юзер tester, sudo без пароля).
+    - **windows-brat** (tailnet 100.115.182.0, Win10 LTSC, LAN .106) — build-1 достаёт по WinRM 5985/RDP 3389
+      (ssh не поднят); автономного доступа НЕТ (нужен пароль/ключ) — надо управлять, спроси владельца. Не выдумывай.
+    Это тест-VM (маленькие) — цели/утилита, НЕ для тяжёлого compute (он на build-1).
     - Egress наружу (Anthropic/OpenAI/crates.io/github) — только через VLESS-прокси (хост в РФ, прямой доступ закрыт).
 
     ## Гигиена контекста (ВАЖНО — был инцидент: 564K токенов за один промт)
