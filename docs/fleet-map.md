@@ -20,7 +20,7 @@
 |---|---|---|---|---|---|
 | **DEV BOX** ×2 роли | `desktop-m922ij2` | это ЖЕ GPU-машина, Win | по вкл. | код `C:\Project\VPNRouter`, сборка, тулинг `C:\vmsetup\`, DPAPI-креды | локально |
 | **windows-brat** | Proxmox VMID **100**, pve-ninitux | Win10 LTSC 2019 | по вкл. | ГЛАВНЫЙ таргет: packaged-app + live + UI-verify | RDP 3389 / WinRM 5985, LAN `192.168.0.106` |
-| **debian-xfce** | Proxmox VMID **101**, pve-ninitux | Debian 12 + XFCE | по вкл. | Linux (.deb) таргет, guest-agent есть | pve-guest-exec / ssh (ключ `C:\vmsetup\testvm_key`), LAN DHCP |
+| **debian-xfce** | Proxmox VMID **101**, pve-ninitux | Debian 12 + XFCE | по вкл. | Linux (.deb) таргет, guest-agent есть | pve-guest-exec / ssh (ключ `C:\vmsetup\testvm_key`), LAN `192.168.0.100` |
 | **МАК** ×2 роли | `mm4.local` (= UAP МАК) | M4/16GB | да | DMG-билды (`build-mac.sh`), + **Android** по USB (`adb` serial 54499112209) | ssh `slovn@100.116.97.112` (⚠ `zsh -lc`, не `bash -lc`) |
 
 Потоки VPNRouter: **DEV BOX** (код/сборка Win+Linux пакетов) → **МАК** (DMG-билд + Android) → билды тянутся
@@ -33,11 +33,10 @@
 - **МАК `mm4.local` / `pavels-mac-mini` (`100.116.97.112`)**: UAP `Ornith-9B` **И** VPNRouter DMG-билд + Android-хост.
   Одна машина. (В tailnet напрямую только она; тест-VM VPNRouter достаются через мак-туннель или мак как subnet-router.)
 
-## ⚠️ Конфликт IP — развести
-**`uap-build-1` (Ubuntu, always-on) и `debian-xfce` (Debian, on-demand) оба на `192.168.0.99`.** build-1 сейчас
-держит .99; debian-xfce берёт IP по DHCP → при его старте либо получит другой адрес, либо конфликт. Починка:
-дать build-1 статику вне DHCP-пула, ИЛИ закрепить debian-xfce на другом адресе. Пока debian-xfce выключен —
-не мешает, но полагаться на «.99 = debian-xfce» нельзя (это адрес build-1).
+## LAN-адреса тест-VM (DHCP, могут дрейфовать)
+- `uap-build-1` = **`192.168.0.99`** (Ubuntu, always-on).
+- `windows-brat` = **`192.168.0.106`**, `debian-xfce` = **`192.168.0.100`**. Конфликта нет (в хендоффе стоял
+  устаревший `.99` для debian — это адрес build-1; актуальный — `.100`). Обе на DHCP → адреса могут меняться.
 
 ## Proxmox-хосты (гипервизоры)
 - **pve-ninitux** (`192.168.0.169`) — держит ЯДРО (uap-home-1) + VPNRouter тест-VM (windows-brat, debian-xfce).
