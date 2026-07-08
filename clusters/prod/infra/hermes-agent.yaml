@@ -203,8 +203,10 @@ spec:
             # managed CONFIG overlay: pins the BRAIN (model.*) per-leaf OVER the PVC config.yaml.
             - { name: config, mountPath: /etc/hermes/config.yaml, subPath: managed-config, readOnly: true }
           resources:
-            requests: { cpu: 100m, memory: 512Mi }
-            limits: { memory: 1536Mi }
+            # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod
+            # fits (agent ~1.1GB + chromium ~2GB) instead of OOM-killing the gateway. Norm is still heavy->build-1.
+            requests: { cpu: 250m, memory: 1Gi }
+            limits: { memory: 4Gi }
       volumes:
         - name: data
           persistentVolumeClaim:
