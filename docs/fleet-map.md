@@ -10,7 +10,7 @@
 | `uap-home-2` | **ВОРКЕР** | 6c / 8 GB (VM) | да | **Hermes-агент** (мозг, лимит 4Gi), subfleet-мост, бэкапы | `100.94.228.67` |
 | `uap-ops-1` | **ОПЕРАТОР** | 2c / 2 GB (VM) | да | git-push + gh + kubectl, **роутер моделей**, SOPS | `100.82.241.121` |
 | `uap-build-1` | **СТРОЙКА** | 8c / 16 GB (VM) | да | сборки, кодинг, git-работа с репо, тяжёлый compute | `100.85.56.31` |
-| `desktop-m922ij2` | **GPU** | RTX 5060 Ti 16 GB, Win | **НЕТ** | **Qwen-35B** (llama.cpp), Claude Code | `100.114.172.40` |
+| `desktop-m922ij2` | **GPU** | RTX 5060 Ti 16 GB, Win | **НЕТ** | **Qwen-35B** (llama.cpp) — единственный мозг платформы | `100.114.172.40` |
 | `pavels-mac-mini` | **МАК** | M4 / 16 GB | да | **Ornith-9B** (mlx), локальный кодер | `100.116.97.112` |
 
 _Под VM крутятся на Proxmox-хостах (pve-ninitux / pve-ninitux3) — это «железный» слой под ними._
