@@ -19,8 +19,8 @@
 | Роль | Хост | Железо | Питание | Что держит | Доступ |
 |---|---|---|---|---|---|
 | **DEV BOX** ×2 роли | `desktop-m922ij2` | это ЖЕ GPU-машина, Win | по вкл. | код `C:\Project\VPNRouter`, сборка, тулинг `C:\vmsetup\`, DPAPI-креды | локально |
-| **windows-brat** | Proxmox VMID **100**, pve-ninitux | Win10 LTSC 2019 | по вкл. | ГЛАВНЫЙ таргет: packaged-app + live + UI-verify | RDP 3389 / WinRM 5985, LAN `192.168.0.106` |
-| **debian-xfce** | Proxmox VMID **101**, pve-ninitux | Debian 12 + XFCE | по вкл. | Linux (.deb) таргет, guest-agent есть | pve-guest-exec / ssh (ключ `C:\vmsetup\testvm_key`), LAN `192.168.0.100` |
+| **windows-brat** | Proxmox VMID **100**, pve-ninitux | Win10 LTSC 2019 | по вкл. | ГЛАВНЫЙ таргет: packaged-app + live + UI-verify | **tailnet `100.115.182.0`**, RDP 3389 / WinRM 5985, LAN `192.168.0.106` |
+| **debian-xfce** | Proxmox VMID **101**, pve-ninitux | Debian 12 + XFCE | по вкл. | Linux (.deb) таргет, guest-agent есть | **tailnet `100.81.162.66`** (через VLESS-прокси, см. ниже), pve-guest-exec / ssh (ключ `C:\vmsetup\testvm_key`), LAN `192.168.0.100` |
 | **МАК** ×2 роли | `mm4.local` (= UAP МАК) | M4/16GB | да | DMG-билды (`build-mac.sh`), + **Android** по USB (`adb` serial 54499112209) | ssh `slovn@100.116.97.112` (⚠ `zsh -lc`, не `bash -lc`) |
 
 Потоки VPNRouter: **DEV BOX** (код/сборка Win+Linux пакетов) → **МАК** (DMG-билд + Android) → билды тянутся
@@ -31,7 +31,14 @@
 - **GPU-десктоп `desktop-m922ij2`**: UAP `Qwen-35B` (мозг) **И** VPNRouter dev box (код + сборка + тулинг) **И**
   Claude Code. Одна физическая машина, три шляпы. Не always-on.
 - **МАК `mm4.local` / `pavels-mac-mini` (`100.116.97.112`)**: UAP `Ornith-9B` **И** VPNRouter DMG-билд + Android-хост.
-  Одна машина. (В tailnet напрямую только она; тест-VM VPNRouter достаются через мак-туннель или мак как subnet-router.)
+  Одна машина.
+
+## Тест-VM теперь в tailnet напрямую (2026-07-08)
+`windows-brat` и `debian-xfce` заведены в тайлнет со своими IP — доступ такой же прямой, как к остальным нодам
+(больше не нужен мак-туннель / subnet-router).
+- Ставили через **apt-репо `pkgs.tailscale.com`** (маркетинговый `tailscale.com` в RU заблокирован = 000, а репо пакетов = 200); Windows MSI = `pkgs.tailscale.com/stable/tailscale-setup-1.98.8-amd64.msi`. `tailscale up --accept-dns=false` — не трогаем DNS тест-VM.
+- ⚠️ **`debian-xfce` держится только через VLESS-прокси.** RU-DPI душит Cloudflare-фронтованный трафик до ~1 КБ/с после ~24 КБ, а `controlplane.tailscale.com` за Cloudflare → свежая нода не могла докачать начальный netmap за 120с и падала в offline (уже-синканные ноды выживают на мелких инкрементах). Фикс — tailscaled ходит через `192.168.0.202:30880` (тот же VLESS-egress, что у build-1 для cargo), systemd drop-in `/etc/systemd/system/tailscaled.service.d/proxy.conf` (`HTTPS_PROXY` + `NO_PROXY=192.168.0.0/16,100.64.0.0/10`). Детали — память `uap-tailnet-cloudflare-throttle`.
+- `windows-brat` пока держится БЕЗ прокси (Connected). Если начнёт отваливаться — тот же `HTTPS_PROXY`-фикс.
 
 ## LAN-адреса тест-VM (DHCP, могут дрейфовать)
 - `uap-build-1` = **`192.168.0.99`** (Ubuntu, always-on).
