@@ -20,6 +20,7 @@ import os
 import re
 import sqlite3
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -264,15 +265,17 @@ def cmd_sync(args):
             audit(con, "sync", "doc_updated", rel, {"version": row[2] + 1, "chunks": len(chunks), "redactions": n_red})
         else:
             con.execute("INSERT INTO documents(path, project, source_type, sha256, mtime, redactions, indexed_at) VALUES (?,?,?,?,?,?,?)",
-                        (rel, args.project, "repo_file", sha, p.stat().st_mtime, n_red,
+                        (rel, args.project, args.source_type, sha, p.stat().st_mtime, n_red,
                          dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")))
             added += 1
             audit(con, "sync", "doc_added", rel, {"chunks": len(chunks), "redactions": n_red})
         replace_chunks(con, "doc", rel, chunks, args.project, "active", "active", rel)
         con.commit()
-    # mark deleted files' docs superseded (keep chunks out of default retrieval)
+    # mark deleted files' docs superseded (keep chunks out of default retrieval);
+    # scoped by source_type so a repo sync never buries drive/github docs of the same project
     gone = 0
-    for (rel,) in con.execute("SELECT path FROM documents WHERE status='active' AND project=?", (args.project,)):
+    for (rel,) in con.execute("SELECT path FROM documents WHERE status='active' AND project=? AND source_type=?",
+                              (args.project, args.source_type)):
         if rel not in seen:
             con.execute("UPDATE documents SET status='superseded' WHERE path=?", (rel,))
             con.execute("UPDATE chunks SET retrieval_scope='archive', status='superseded' WHERE kind='doc' AND ref=?", (rel,))
@@ -280,6 +283,145 @@ def cmd_sync(args):
             gone += 1
     con.commit()
     print(f"sync done: +{added} added, ~{updated} updated, ={skipped} unchanged, x{blocked} blocked(secrets), -{gone} gone")
+
+
+# -------------------------------------------------------------- github sync --
+def gh_api(path, params=""):
+    """gh CLI is already authenticated on build-1; it handles tokens+proxy itself."""
+    out = subprocess.run(["gh", "api", "--paginate", path + params],
+                         capture_output=True, text=True, timeout=180)
+    if out.returncode != 0:
+        sys.exit(f"gh api {path} failed: {out.stderr.strip()[:300]}")
+    # --paginate concatenates JSON arrays; normalize
+    txt = out.stdout.replace("]\n[", ",")
+    return json.loads(txt) if txt.strip() else []
+
+
+def cmd_sync_github(args):
+    """Ingest issues + PRs (title/body/labels/comments) as documents. Change detection via updated_at."""
+    con = db_connect()
+    dim = len(embed_texts(["probe"])[0])
+    db_init(con, dim)
+    items = gh_api(f"repos/{args.repo}/issues", "?state=all&per_page=100")
+    added = updated = skipped = 0
+    for it in items:
+        kind = "pr" if "pull_request" in it else "issue"
+        num = it["number"]
+        key = f"gh:{args.repo}#{kind}/{num}"
+        # cheap change detection: compare stored mtime with updated_at epoch
+        upd = dt.datetime.fromisoformat(it["updated_at"].replace("Z", "+00:00")).timestamp()
+        row = con.execute("SELECT id, mtime, version FROM documents WHERE path=?", (key,)).fetchone()
+        if row and abs(row[1] - upd) < 1:
+            skipped += 1
+            continue
+        comments = []
+        if it.get("comments", 0):
+            comments = gh_api(f"repos/{args.repo}/issues/{num}/comments", "?per_page=100")
+        md = f"# [{kind.upper()} #{num}] {it['title']}\n\n"
+        md += f"state: {it['state']} | labels: {', '.join(l['name'] for l in it.get('labels', []))} | updated: {it['updated_at']}\n\n"
+        md += (it.get("body") or "") + "\n"
+        for c in comments:
+            md += f"\n## comment by {c['user']['login']} ({c['created_at']})\n{c.get('body') or ''}\n"
+        if is_blocked(md):
+            audit(con, "sync-github", "blocked_secret_item", key)
+            continue
+        text, n_red = redact(md)
+        sha = hashlib.sha256(text.encode()).hexdigest()
+        now = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
+        st = "github_pr" if kind == "pr" else "github_issue"
+        if row:
+            con.execute("UPDATE documents SET sha256=?, version=?, mtime=?, redactions=?, status='active', indexed_at=? WHERE path=?",
+                        (sha, row[2] + 1, upd, n_red, now, key))
+            updated += 1
+        else:
+            con.execute("INSERT INTO documents(path, project, source_type, sha256, mtime, redactions, indexed_at) VALUES (?,?,?,?,?,?,?)",
+                        (key, args.project, st, sha, upd, n_red, now))
+            added += 1
+        replace_chunks(con, "doc", key, chunk_markdown(text, key), args.project, "active", "active",
+                       f"{kind.upper()} #{num}: {it['title'][:80]}")
+        audit(con, "sync-github", "doc_added" if not row else "doc_updated", key, {"redactions": n_red})
+        con.commit()
+    print(f"sync-github done: +{added} added, ~{updated} updated, ={skipped} unchanged (repo {args.repo})")
+
+
+# ------------------------------------------------------------------ curator --
+def cmd_curate(args):
+    """Weekly hygiene report (doc section 10). Proposes only — NEVER deletes."""
+    import yaml
+    con = db_connect()
+    now = dt.datetime.now(dt.timezone.utc)
+    lines = [f"# Curator report — {now.date()}", ""]
+
+    lines.append("## Near-duplicate record candidates (KNN distance < 8)")
+    pairs = set()
+    for rid, in con.execute("SELECT id FROM records WHERE retrieval_scope='active'"):
+        row = con.execute("SELECT id FROM chunks WHERE kind='record' AND ref=? LIMIT 1", (rid,)).fetchone()
+        if not row:
+            continue
+        emb = con.execute("SELECT embedding FROM vec_chunks WHERE rowid=?", (row[0],)).fetchone()
+        if not emb:
+            continue
+        for cid, d in con.execute("SELECT rowid, distance FROM vec_chunks WHERE embedding MATCH ? AND k = 6", (emb[0],)):
+            other = con.execute("SELECT ref FROM chunks WHERE id=? AND kind='record'", (cid,)).fetchone()
+            if other and other[0] != rid and d < 8:
+                pairs.add(tuple(sorted([rid, other[0]])) + (round(d, 2),))
+    lines += [f"- {a} <-> {b} (d={d})" for a, b, d in sorted(pairs)] or ["- none"]
+
+    lines.append("\n## Active records without evidence")
+    n = 0
+    for rid, y in con.execute("SELECT id, yaml FROM records WHERE retrieval_scope='active'"):
+        if not (yaml.safe_load(y).get("evidence") or []):
+            lines.append(f"- {rid}")
+            n += 1
+    if not n:
+        lines.append("- none")
+
+    lines.append(f"\n## Stale active records (updated > {args.stale_days}d ago)")
+    cutoff = (now - dt.timedelta(days=args.stale_days)).isoformat(timespec="seconds")
+    stale = con.execute("SELECT id, updated_at FROM records WHERE retrieval_scope='active' AND updated_at < ?",
+                        (cutoff,)).fetchall()
+    lines += [f"- {r} (updated {u})" for r, u in stale] or ["- none"]
+
+    lines.append("\n## Low-confidence active findings (< 0.5)")
+    low = con.execute("SELECT id, confidence FROM records WHERE retrieval_scope='active' AND confidence < 0.5").fetchall()
+    lines += [f"- {r} (confidence {c})" for r, c in low] or ["- none"]
+
+    lines.append("\n## Orphan chunks (ref no longer exists)")
+    orph = con.execute("""
+      SELECT c.id, c.kind, c.ref FROM chunks c
+      LEFT JOIN documents d ON c.kind='doc' AND c.ref=d.path
+      LEFT JOIN records r ON c.kind='record' AND c.ref=r.id
+      WHERE d.id IS NULL AND r.id IS NULL""").fetchall()
+    lines += [f"- chunk {i} ({k}:{ref})" for i, k, ref in orph] or ["- none"]
+
+    report = "\n".join(lines) + "\n\nCurator proposes only; cleanup/merges require human approval.\n"
+    rp = HOME / "reports"
+    rp.mkdir(exist_ok=True)
+    out = rp / f"curator-{now.strftime('%Y%m%d')}.md"
+    out.write_text(report, encoding="utf-8")
+    audit(con, "curator", "report", str(out),
+          {"dups": len(pairs), "no_evidence": n, "stale": len(stale), "low_conf": len(low), "orphans": len(orph)})
+    con.commit()
+    print(report)
+    print(f"[saved: {out}]")
+
+
+# ------------------------------------------------------------------- doctor --
+def cmd_doctor(_):
+    ok = True
+    print(f"home: {HOME}  db: {'OK' if DB_PATH.exists() else 'MISSING'} ({DB_PATH.stat().st_size // 1024 if DB_PATH.exists() else 0} KB)")
+    models = list((HOME / "models").rglob("*.onnx")) if (HOME / "models").exists() else []
+    print(f"model cache: {'OK' if models else 'MISSING'} ({MODEL_NAME})")
+    try:
+        con = db_connect()
+        last = con.execute("SELECT ts, actor, action FROM audit ORDER BY id DESC LIMIT 1").fetchone()
+        print(f"db open: OK; last audit: {last}")
+    except Exception as e:
+        ok = False
+        print(f"db open: FAIL {e}")
+    gh = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
+    print(f"gh auth: {'OK' if gh.returncode == 0 else 'FAIL (github sync unavailable)'}")
+    sys.exit(0 if ok else 1)
 
 
 # -------------------------------------------------------------------- query --
@@ -454,7 +596,20 @@ def main():
     s = sub.add_parser("sync", help="scan+ingest a markdown corpus (idempotent)")
     s.add_argument("--repo", required=True)
     s.add_argument("--project", default="uap")
+    s.add_argument("--source-type", default="repo_file",
+                   choices=["repo_file", "google_drive_doc", "local_markdown", "chat_export"])
     s.set_defaults(fn=cmd_sync)
+
+    g = sub.add_parser("sync-github", help="ingest issues+PRs via gh CLI (change-detect on updated_at)")
+    g.add_argument("--repo", default="PavelLizunov/unified-agent-platform")
+    g.add_argument("--project", default="uap")
+    g.set_defaults(fn=cmd_sync_github)
+
+    c = sub.add_parser("curate", help="weekly hygiene report (proposes only, never deletes)")
+    c.add_argument("--stale-days", type=int, default=30)
+    c.set_defaults(fn=cmd_curate)
+
+    sub.add_parser("doctor", help="environment/health check").set_defaults(fn=cmd_doctor)
 
     s = sub.add_parser("query", help="semantic search with lifecycle filters")
     s.add_argument("text")
