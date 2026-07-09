@@ -1,0 +1,6 @@
+# knowledge-system ingestion excludes (gitignore-style globs, matched against repo-relative paths)
+# secrets are ALSO caught by the redactor/blocker in tools/knowledge/knowledge.py — this file is for noise, not safety
+.git/*
+node_modules/*
+*.sops.yaml
+tools/offload/soak/*
