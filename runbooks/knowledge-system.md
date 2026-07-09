@@ -64,9 +64,11 @@ $K stats ; $K reindex   # reindex = полное пере-эмбеддинова
 
 ## Доступ для Hermes (сейчас, без плагина)
 
-Из пода / kanban-воркеров — через build1-обёртку:
-`/opt/data/.local/bin/build1 "~/knowledge/.venv/bin/python ~/knowledge/bin/knowledge.py query '<вопрос>' -k 5"`
-Плагин `hermes_knowledge` (tools: knowledge.search/get_record/propose_record/...) — Week-1 задача.
+- На build-1 (kanban-воркеры, локальные сессии): просто **`knowledge query "<вопрос>" -k 5`** —
+  враппер `~/.local/bin/knowledge` в системном PATH (`/etc/environment`), работает и в non-interactive ssh.
+- Из прод-пода: `/opt/data/.local/bin/build1 "knowledge query '<вопрос>' -k 5"`.
+- ⚠️ Урок SIM-1: слабые модели коверкают длинные команды → и шебанг на venv, и короткий враппер, и
+  упрощённые SOUL-инструкции обязательны (invocation-proof). Плагин `hermes_knowledge` — Month-1, если надо.
 
 ## Week-1 — СДЕЛАНО 2026-07-09
 
