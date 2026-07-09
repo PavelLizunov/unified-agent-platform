@@ -68,12 +68,33 @@ $K stats ; $K reindex   # reindex = полное пере-эмбеддинова
 `/opt/data/.local/bin/build1 "~/knowledge/.venv/bin/python ~/knowledge/bin/knowledge.py query '<вопрос>' -k 5"`
 Плагин `hermes_knowledge` (tools: knowledge.search/get_record/propose_record/...) — Week-1 задача.
 
-## План дальше (по доку; НЕ начато)
+## Week-1 — СДЕЛАНО 2026-07-09
 
-- **Week-1:** Drive-sync (export docs→md), GitHub issues/PR как source_type, scheduler (cron на build-1:
-  15-min детект + nightly sync), Hermes-plugin tools, curator-отчёт (дубликаты/противоречия/stale).
-- **Month-1:** regression hunter на PR (retrieval по affected_files из resolved/regression_watch),
-  CI-интеграция, approval-очередь в UI, опционально graph-слой и Postgres/Qdrant при росте.
+- **GitHub ingestion:** `sync-github` — issues+PR (title/body/labels/comments) через авторизованный `gh`
+  на build-1; change-detect по `updated_at`; ключи документов `gh:<owner/repo>#issue/N | #pr/N`.
+  Живьём: +95 items, ретривал проверен (запрос про singbox-фикс вернул именно PR #19/#36).
+- **Scheduler (cron, uap@build-1):** nightly 03:30 `~/knowledge/bin/nightly.sh` (git pull → sync repo →
+  sync-github → drive-mirror если есть; лог `~/knowledge/logs/nightly-YYYYMMDD.log`); weekly Пн 04:10
+  `weekly.sh` (curate → `~/knowledge/reports/`). Cron-путь проверен прогоном в `env -i`.
+- **Curator:** `curate` — near-duplicates (KNN d<8), записи без evidence, stale (>30d), low-confidence,
+  orphan-чанки. ТОЛЬКО предлагает — не удаляет (правило дока).
+- **Doctor:** `doctor` — db/модель/gh-auth/последний audit (для отладки cron).
+- **Validation-шаблон:** [docs/templates/validation-report.md](../docs/templates/validation-report.md)
+  (+ анти-false-resolved чек-лист из секции 9 дока).
+- **Hermes-интеграция (ladder вместо плагина):** блок «База знаний» добавлен в SOUL.md всех 5 профилей
+  роя на build-1 (воркеры зовут CLI напрямую — они локальны) и в USER.md прод-пода (live + сид;
+  из пода — через `build1 "..."`). Полноценный plugin (tools knowledge.search/...) — Month-1, если
+  скилл-подход окажется недостаточным.
+- **Drive-sync:** `~/knowledge/bin/drive-sync.sh` готов (rclone → `~/knowledge/drive-mirror` →
+  `sync --source-type google_drive_doc`), но **BLOCKED на one-time owner OAuth**:
+  на build-1 выполнить `rclone config` → new remote, имя `drive`, тип `drive`, scope `drive.readonly`
+  (headless-флоу даст ссылку для браузера). После этого nightly сам подхватит зеркало.
+  Папка по умолчанию «AI Notes» (`DRIVE_FOLDER` env, чтобы сменить).
+
+## План дальше (Month-1; НЕ начато)
+
+- Regression hunter на PR (retrieval по affected_files из resolved/regression_watch), CI-интеграция,
+  approval-очередь в UI, hermes_knowledge-плагин, опционально graph-слой и Postgres/Qdrant при росте.
 
 ## Первая каноническая запись
 
