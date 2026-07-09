@@ -91,6 +91,21 @@ $K stats ; $K reindex   # reindex = полное пере-эмбеддинова
   (headless-флоу даст ссылку для браузера). После этого nightly сам подхватит зеркало.
   Папка по умолчанию «AI Notes» (`DRIVE_FOLDER` env, чтобы сменить).
 
+## Веб-просмотр базы (добавлено 2026-07-09)
+
+**http://100.85.56.31:8100** (tailnet-only) — datasette read-only поверх `knowledge.db` (WAL → живые данные,
+ночной sync не конфликтует). Systemd `knowledge-web.service` (enable --now, Restart=on-failure), sqlite-vec
+подгружается через `--load-extension`. Готовые выборки (canned queries) на главной: активные записи / все
+записи / документы по источникам / аудит / кто-что-искал / кандидаты в устаревшие / самые объёмные документы.
+Всё это же доступно как JSON: `…/knowledge/active_records.json?_shape=array` (можно дёргать из скриптов/Hermes).
+Записи через UI НЕ делаются (истина меняется только через CLI с audit + --approve) — это окно, не редактор.
+
+**Как «удалять» ненужное (управление памятью):** hard-delete НЕ используется (принцип дока) —
+- запись устарела/неверна → `record set-status <id> obsolete|rejected --approve` → уходит в archive,
+  из default-поиска исчезает, история остаётся;
+- документ не нужен в базе → добавить путь в `.ragignore` → следующий sync уводит его в archive;
+- кандидатов на чистку раз в неделю приносит curator (`~/knowledge/reports/`), решение — за человеком.
+
 ## План дальше (Month-1; НЕ начато)
 
 - Regression hunter на PR (retrieval по affected_files из resolved/regression_watch), CI-интеграция,
