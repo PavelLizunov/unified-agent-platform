@@ -5,7 +5,11 @@ project decisions in `DECISIONS.md`.
 
 ## Read First
 
-1. `AGENTS.md`
+This mirrors the **canonical read-order in `AGENTS.md` → TL;DR** (both files list the same sequence and the
+same two orientation indexes — `runbooks/README.md` and `tools/README.md`). `STATUS.md` is the source of truth
+for current facts; if this handoff and `STATUS.md` disagree, `STATUS.md` wins.
+
+1. `AGENTS.md` (its TL;DR has the layer-status table + this exact read-order)
 2. `README.md`
 3. `DECISIONS.md`
 4. `BUILD-PLAN.md`
@@ -16,8 +20,13 @@ project decisions in `DECISIONS.md`.
 
 7. `docs/infrastructure.md` — consolidated fleet + what-runs-where + target architecture
 8. `docs/next-steps.md` — the hermes-agent pilot plan + the still-open foundation work
-9. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` — why hermes-agent, and why **Codex (not Claude)** is the brain
+9. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` — why hermes-agent; the original "brain = Codex" is now the **local-models router** (`qwen-35b`, fallback `ornith-9b`), cloud tier OFF — see `STATUS.md`
 10. `hermes/README.md` + `hermes/docs/claude-code-autonomous-reference.md` — the parked bespoke agent + the Claude Code headless reference
+
+**Top-down orientation indexes (read to find the right procedure/tool fast):**
+
+11. `runbooks/README.md` — table of every runbook (purpose + when-to-use trigger)
+12. `tools/README.md` — the `tools/` subsystems (purpose | entrypoint | owning runbook | self-test)
 
 If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask the owner before changing direction.
 

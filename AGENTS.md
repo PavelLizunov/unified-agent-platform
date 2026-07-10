@@ -1,5 +1,32 @@
 # Инструкция агенту-исполнителю (Codex)
 
+## TL;DR (для нового агента)
+
+UAP — self-hosted AI-платформа в k3s-хоумлабе (в РФ, LLM-egress через VLESS-прокси). **North star —
+вайб-кодинг:** владелец даёт идею + инфраструктуру и **код не ревьюит** → self-test агента + CI **и есть**
+гейт качества. Твоя правка должна быть корректной и самодостаточной. Деплой — **только через PR** (прямой
+push в master блокируется ruleset'ом; нужен зелёный `static-checks`). `STATUS.md` — источник истины по
+фактам; этот файл — правила и границы. Секреты — никогда в файлы; ссылайся на расположение.
+
+### Статус слоёв (сверять со `STATUS.md`)
+
+| Слой | Состояние |
+|---|---|
+| **Infra** | k3s 2-node, **НЕ HA** (server `uap-home-1` + agent `uap-home-2` = один etcd-член; `uap-home-2` = 6 vCPU / 8 GB). Flux GitOps + SOPS/age; etcd→R2 DR. **LIVE.** |
+| **Model** | `subfleet` v0.3.1 (Claude-подписка как OpenAI-совместимый gateway) **LIVE + healthy**; DE-exit ротирован на живой ninitux. LiteLLM. Два egress-сервиса: `singbox-egress` (pinned VLESS, subfleet OAuth — **НИКОГДА не ротировать**) + `singbox-egress-ha` (urltest-failover, hermes + build-1). **LIVE.** |
+| **Agent** | hermes-agent в k3s (`uap-system`, `uap-home-2`). **Мозг = локальный router** (`http://100.82.241.121:8090/v1`, `qwen-35b`, fallback `ornith-9b`); cloud-tier (Codex/Claude) **OFF** — платные лимиты исчерпаны, revert-путь в ConfigMap. **Codex — только coding-engine.** **LIVE.** |
+| **Tools** | На `uap-build-1` (VMID 102, 8c/16GB, tailnet `100.85.56.31`; всё systemd, **НЕ k3s, НЕ GitOps**): knowledge-система, Kanban-рой, ai-search, hermes-workspace `:3000`. `local-models`-router — systemd на ops-1. Индекс: [tools/README.md](tools/README.md). **LIVE.** |
+
+### Канонический порядок чтения
+
+1. `AGENTS.md` (этот файл) → `README.md` → `DECISIONS.md` → `STATUS.md` (факты) → `RISKS.md`
+2. `docs/infrastructure.md` (флот + что-где) → `docs/next-steps.md` (план hermes-agent + открытый фундамент)
+3. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` (почему hermes-agent; исходное «мозг = Codex» — теперь локальный router, см. `STATUS.md`)
+4. Индексы: [runbooks/README.md](runbooks/README.md) (все runbook'и) + [tools/README.md](tools/README.md) (подсистемы `tools/`)
+5. Гейты: `runbooks/validation-matrix.md` (инфра) + `runbooks/vibe-coding-acceptance.md` (сквозной цикл)
+
+---
+
 Ты получил спецификацию платформы. **Инфра/ADR-решения — закрыты:** реализуй, не перепроектируй. **НО
 модельный/агентный слой и харнесс — в активной переработке** (2026-06 пивот на вайб-кодинг + внешний
 NousResearch hermes-agent, ADR-022..026): здесь предлагай через ADR и действуй с согласия владельца, и **не
