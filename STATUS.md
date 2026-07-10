@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-06-30
+Last updated: 2026-07-10
 
 ## Phase
 
@@ -60,6 +60,21 @@ Last updated: 2026-06-30
   (see the runbook's "Create / rotate" section) — note the initContainer's seed-ONCE logic means the
   stale `/opt/data/auth.json` on the PVC will NOT auto-replace itself; re-seeding needs that file removed
   first (or a direct imperative write), which is itself an owner-gated live mutation.
+- **Egress ops hardening — DONE 2026-07-10** (the vpnrouter-gateway goal, `docs/research/vpnrouter-gateway-egress-goal.md` §10).
+  Phase 0 verdict (#107): `vpnrouter-gateway` is a TUN/L3 LAN gateway — it cannot render our HTTP-CONNECT-proxy
+  egress (no `mixed`/`:12080` inbound, no `urltest`, always emits `direct`), so Level 1/2 adoption = no-go; the
+  dependency-free alternative was adopted instead. Shipped: **SNI pre-flight gate** in
+  `infra/sops/gen-singbox-failover.py` (#108) — `--against <deployed>` diffs fresh-vs-deployed servers keyed by
+  `(host, port)` (the subscription renames nodes), FAILS CLOSED (exit 3) on any REALITY `server_name` change or
+  pool add/remove; ack = `--allow-sni-drift` / `ALLOW_SNI_DRIFT=1`; regression test in CI (`tests/static/`).
+  **Decrypt-verify guard** in the regen runbook (#109) — the freshly-encrypted `.sops.yaml` is piped into
+  `sops -d` on `uap-home-1` BEFORE the PR, so a transport-corrupted secret fails locally instead of as Flux
+  "no identity matched" post-merge. **First real rotation through the new pipeline (#110):** the gate caught the
+  deployed pool lagging the subscription (+United States VLESS), acked → 7-server secret + `config-rev`
+  v3-7servers → Flux rolled the pod → verified live from build-1 through the new pod (telegram=302,
+  anthropic=401, exit IP non-RU); hermes Telegram long-poll auto-reconnected with no escalation. The 2026-07-09
+  incident class (silent SNI drift, corrupted secret transport, blind config edit) is now surfaced/blocked at
+  authoring time.
 
 ## Proxmox
 

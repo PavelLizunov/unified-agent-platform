@@ -3,8 +3,9 @@
 Date: 2026-07-09
 Status: **Phase 0 COMPLETE (2026-07-10)** — repo read in full + read-only pilot run live against the real
 ninitux subscription on build-1. Decision gate answered: **Level 1 not feasible as-is, Level 2 is a topology
-mismatch; a read-only "Level 0" pre-flight is the real low-risk win.** Full evidence + verdict in §10. No
-secrets/subscription tokens stored here.
+mismatch; a read-only "Level 0" pre-flight is the real low-risk win.** Full evidence + verdict in §10; the adopted
+path is SHIPPED and demonstrated live (#108 gate, #109 decrypt-verify, #110 gated rotation — see the end of §10).
+No secrets/subscription tokens stored here.
 Scope: evaluate + pilot the owner's own `vpnrouter-gateway` (github.com/PavelLizunov/vpnrouter-gateway) as a
 replacement for UAP's hand-managed in-cluster sing-box egress, with a dual benefit — better egress ops for the
 platform AND real-world dogfooding of the product on always-on infra under RU-DPI.
@@ -215,3 +216,20 @@ BOTH our Services — a real dogfood roadmap, but net-new work on the product, n
 
 **Exit gate met:** §4 fully answered with live evidence; Level 1 = no-go, Level 2 = out-of-scope, Level 0 = viable.
 Phases 1–3 as written are superseded by the Level 0 / dependency-free choice above — both are owner-gated (§8).
+
+### Follow-through executed (2026-07-10, owner picked the dependency-free path)
+
+- **#108** — SNI pre-flight gate in `gen-singbox-failover.py`: `--against <deployed-config.json>`, servers keyed
+  by `(host, port)` — the live subscription had ALREADY renamed every node (`~vpnctld` → `~main-brat`), so
+  name-keying would have false-alarmed; fail-closed exit 3; ack `--allow-sni-drift`/`ALLOW_SNI_DRIFT=1`;
+  regression test in CI.
+- **#109** — decrypt-verify guard in `runbooks/llm-egress-vless.md`: pipe the encrypted secret into `sops -d` on
+  uap-home-1 pre-PR (MAC check) — closes root cause (b), the corrupted-transport class.
+- **#110** — first REAL rotation through the new pipeline: the gate caught the deployed pool lagging the
+  subscription (+United States VLESS), the drift was reviewed + acked, `sing-box check` + decrypt-verify passed
+  pre-PR, Flux rolled `v3-7servers`, and egress verified live through the new pod (telegram 302, anthropic 401,
+  non-RU exit; hermes auto-reconnected). The 2026-07-09 scenario is now a previewed, validated, reversible PR.
+
+**Goal outcome:** the Phase 2 success criterion (changes previewed + validated; no more blind SOPS edits /
+corrupted-transport class) is met and demonstrated on the real egress. Remaining (optional, product roadmap,
+owner-gated): upstream `mixed` inbound + urltest group + no-`direct` proxy mode would make Level 1 adoptable.
