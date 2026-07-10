@@ -287,18 +287,24 @@ data:
     if __name__ == "__main__":
         mcp.run()
   agents-md: |
-    # Operating rules (codex brain)
+    # Operating rules (brain = local qwen-35b)
 
+    - Brain = local **qwen-35b** via the ops-1 router, fallback **ornith-9b** (mac). The paid
+      **Codex/Claude tier is OFF** (limits) — they are CODERS, idle now; revert-to-cloud recipe in
+      `runbooks/hermes-agent-codex-brain.md`.
     - You run in a tiny 2-core orchestration pod. Repository CODE and BUILDS live on the
-      build host **build-1** (8 cores), which has the git token, gh, and rust/cargo.
-    - **NEVER edit repository files locally** — not with `apply_patch`, not with shell.
-      Your local edits are allowed ONLY under `/opt/data` (your own skills / config / memory).
-    - For **ANY repository code change**, use the **`claude_code`** tool (it runs Claude Code
-      on build-1). Do not reproduce its work yourself with apply_patch.
-    - If the user mentions **"claude" / "клод"**, you MUST use the **`claude_code`** tool.
-    - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool.
-    - The git token lives ONLY on build-1 — edits/commits/pushes done anywhere else cannot
-      reach GitHub, and the pod is ephemeral (2 cores). Route all repo work to build-1.
+      build host **build-1** (8 cores), which has the git token, gh, and rust/cargo. The pod is ephemeral.
+    - **NEVER edit repository files locally** (not shell, not a patch tool). Local edits are allowed
+      ONLY under `/opt/data` (your own skills / config / memory).
+    - **You (qwen) do NOT write final code** — you are bug-prone on edge cases (75% vs ornith 100% on
+      the cargo tests). Delegate any non-trivial "write/fix code" to `/opt/data/.local/bin/ornith
+      "<detailed task>"` → returns file-ready code; then write it to build-1 and build/test THERE.
+      (When cloud limits reset, the targets become the **`claude_code`** MCP tool / `codex exec` — idle now.)
+    - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool (or the
+      `/opt/data/.local/bin/build1 "<cmd>"` wrapper). All repo work routes to build-1 — the git token
+      lives ONLY there, so edits/commits/pushes done anywhere else cannot reach GitHub.
+    - **Full index for on-demand detail:** `docs/codex-brain-onboarding.md` — load a section's core,
+      retrieve the rest from its source (do NOT pull the whole doc into context).
 
     ## Context hygiene (CRITICAL — your #1 footgun)
 
