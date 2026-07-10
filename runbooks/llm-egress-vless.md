@@ -231,6 +231,12 @@ kubectl create secret generic singbox-egress-ha-config -n uap-system \
   --from-file=config.json=/tmp/config.json --dry-run=client -o yaml \
   > clusters/prod/infra/singbox-egress-ha-config.sops.yaml
 sops -e -i clusters/prod/infra/singbox-egress-ha-config.sops.yaml
+# DECRYPT-VERIFY (the 2026-07-09 corrupted-transport guard): prove the encrypted file actually
+# decrypts (sops verifies its MAC) BEFORE it reaches a PR. A transport/hand-copy-corrupted secret
+# otherwise surfaces only as Flux "no identity matched" AFTER merge. The age private key lives
+# ONLY on uap-home-1, so pipe the file there (the file never leaves the checkout):
+ssh uap@100.106.223.120 'sops -d --input-type yaml --output-type yaml /dev/stdin >/dev/null' \
+  < clusters/prod/infra/singbox-egress-ha-config.sops.yaml && echo DECRYPT-VERIFY-OK
 shred -u /tmp/sub.dat /tmp/config.json /tmp/deployed.json
 # BUMP singbox-egress-ha/config-rev in singbox-egress-ha.yaml so Flux ROLLS the pod (sing-box reads
 # its config only at startup; a Secret change alone does NOT restart it).
