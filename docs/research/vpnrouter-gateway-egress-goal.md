@@ -232,4 +232,5 @@ Phases 1–3 as written are superseded by the Level 0 / dependency-free choice a
 
 **Goal outcome:** the Phase 2 success criterion (changes previewed + validated; no more blind SOPS edits /
 corrupted-transport class) is met and demonstrated on the real egress. Remaining (optional, product roadmap,
-owner-gated): upstream `mixed` inbound + urltest group + no-`direct` proxy mode would make Level 1 adoptable.
+owner-gated): upstream `mixed` inbound + urltest group + no-`direct` proxy mode would make Level 1 adoptable. Ready-to-hand-over
+implementation spec: `docs/research/vpnrouter-gateway-proxy-mode-spec.md`.
