@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the UAP platform healthcheck every 20 minutes
+
+[Timer]
+OnCalendar=*:0/20
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
