@@ -1,5 +1,16 @@
 # hermes-agent in k3s with the Codex brain (Track A2)
 
+> **SUPERSEDED — the live brain is NOT Codex.** Since 2026-07-06 the paid Claude/Codex limits ran out, so
+> the hermes-agent **brain was switched to the fully-local `local-models-router`** (`provider: custom` →
+> `http://100.82.241.121:8090/v1`, **`qwen-35b` primary / `ornith-9b` fallback**) — see
+> [local-models-router.md](local-models-router.md). Everything in this runbook **up to** "Coding workers"
+> describes the *former* Codex-as-brain wiring and is now **historical**. **Codex applies only to the
+> coding-workers section below** (and even that is idle today — limits out; the qwen brain delegates code
+> generation to the local `ornith` coder). **Nothing here is deleted:** this recipe is the documented
+> **revert-to-cloud** path — when the limits reset, restore the `model` block in the `managed-config`
+> overlay of `../clusters/prod/infra/hermes-agent-config.yaml` per the steps below. Live state:
+> [../STATUS.md](../STATUS.md).
+
 > Deploy the external **NousResearch hermes-agent** gateway as a Flux-managed k3s workload, with its
 > brain = the **Codex / ChatGPT-Plus subscription** (`codex_app_server` runtime) reached through the
 > in-cluster `singbox-egress`. This is **Phase A2** of [docs/next-steps.md](../docs/next-steps.md).

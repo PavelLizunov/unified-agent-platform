@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Phase
 
@@ -11,6 +11,14 @@ Last updated: 2026-07-10
 - HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
   independent server + a failover drill are still required.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
+- **Brain reality (current, since 2026-07-06):** the live hermes-agent brain is the **local `qwen-35b`** (llama.cpp on
+  the desktop RTX) with **`ornith-9b`** (mac, always-on) as fallback, both served through the **ops-1
+  local-models-router** at `http://100.82.241.121:8090/v1` (`provider: custom`, model `qwen-35b`; pinned by the
+  `managed-config` overlay in `clusters/prod/infra/hermes-agent-config.yaml`). The paid **cloud brain tier
+  (Codex/Claude) is OFF** — the paid limits ran out; **Codex is demoted from brain to a coding-engine-only role**, and
+  with the cloud coders off the live coder is `ornith-9b`. **Documented revert path:** when limits reset, restore the
+  managed-config `model.*` block per `runbooks/hermes-agent-codex-brain.md` (the Codex-brain recipe is kept intact).
+  See `runbooks/local-models-router.md` + `docs/local-qwen-hermes-handoff.md`.
 - ✅ **Quality gate is ENFORCED.** The owner does not review code; the agent's self-test + CI **is** the gate, and it
   is now enforced. The repo is **public**, the GitHub ruleset `protect-master` is **active**, a PR is **required**, and
   the `static-checks` CI check (`.github/workflows/ci.yml`) is a **required (strict) status check** — direct push to
@@ -50,16 +58,12 @@ Last updated: 2026-07-10
   `pv-reclaim-ok`, ponytail installed at `/opt/data/plugins/ponytail` and **enabled** on first real boot
   (`hermes plugins list` confirms). `claude -p` verified working end-to-end. `singbox-egress-ha`: pod
   1/1 Running, `sing-box check` valid, reachability confirmed from inside hermes-agent (telegram=302,
-  chatgpt=403 — the expected signature). **Found (pre-existing, NOT caused by this roll): the Codex
-  brain's OAuth token is expired/invalid** (`Codex authentication failed`) — matches the
-  already-documented "shared single-use refresh-token lineage" caveat in
-  `runbooks/hermes-agent-codex-brain.md` (the owner's own desktop Codex CLI usage can invalidate the
-  in-cluster copy). `auth.json` is unchanged since 2026-06-24; `claude -p` (separate OAuth mechanism)
-  is unaffected, and egress/network reachability to chatgpt.com is confirmed fine — isolates the failure
-  to the token itself. **Needs owner action:** re-run `codex login`, re-encrypt `codex-auth.sops.yaml`
-  (see the runbook's "Create / rotate" section) — note the initContainer's seed-ONCE logic means the
-  stale `/opt/data/auth.json` on the PVC will NOT auto-replace itself; re-seeding needs that file removed
-  first (or a direct imperative write), which is itself an owner-gated live mutation.
+  chatgpt=403 — the expected signature). **Note (superseded 2026-07-06):** at roll time the Codex brain's
+  OAuth token was found expired/invalid (`Codex authentication failed` — the documented "shared single-use
+  refresh-token lineage" caveat). This is now **moot**: the brain no longer points at Codex — it runs on the local
+  `qwen-35b`/`ornith-9b` router (see "Brain reality" in Phase). Re-seeding the Codex token is only needed if the owner
+  **reverts** the brain to the cloud tier per `runbooks/hermes-agent-codex-brain.md`. (`claude -p` used a separate OAuth
+  mechanism and was unaffected.)
 - **Egress ops hardening — DONE 2026-07-10** (the vpnrouter-gateway goal, `docs/research/vpnrouter-gateway-egress-goal.md` §10).
   Phase 0 verdict (#107): `vpnrouter-gateway` is a TUN/L3 LAN gateway — it cannot render our HTTP-CONNECT-proxy
   egress (no `mixed`/`:12080` inbound, no `urltest`, always emits `direct`), so Level 1/2 adoption = no-go; the
@@ -94,8 +98,12 @@ Last updated: 2026-07-10
 | VMID | Name | Proxmox node | IP | Resources | Status |
 |---|---|---|---|---|---|
 | 201 | `uap-home-1` | `pve-ninitux` | `192.168.0.201` | 4 vCPU, 8 GB RAM, 80 GB disk | running |
-| 202 | `uap-home-2` | `pve-ninitux3` | `192.168.0.202` | 2 vCPU, 4 GB RAM, 32 GB disk | running |
+| 202 | `uap-home-2` | `pve-ninitux3` | `192.168.0.202` | 6 vCPU, 8 GB RAM, 32 GB disk | running |
 | 203 | `uap-ops-1` | `pve-ninitux` | `192.168.0.203` | 2 vCPU, 2 GB RAM, 30 GB disk | running |
+| 102 | `uap-build-1` | `pve-ninitux3` | `192.168.0.99` | 8 vCPU, 16 GB RAM, 100 GB disk | running |
+
+`uap-home-2` was resized to 6 vCPU / 8 GB (#86/#87). `uap-build-1` (VMID 102) is an **always-on Ubuntu 22.04 dev/build
+VM** — **not a k3s node and not in GitOps**; it hosts the build-1 track services (see "Build-1 track" below).
 
 ## Tailnet
 
@@ -104,6 +112,7 @@ Last updated: 2026-07-10
 | `uap-home-1` | `uap-home-1.tail9fd337.ts.net` | `100.106.223.120` |
 | `uap-home-2` | `uap-home-2.tail9fd337.ts.net` | `100.94.228.67` |
 | `uap-ops-1` | `uap-ops-1.tail9fd337.ts.net` | `100.82.241.121` |
+| `uap-build-1` | `uap-build-1.tail9fd337.ts.net` | `100.85.56.31` |
 | Windows | `desktop-m922ij2.tail9fd337.ts.net` | `100.114.172.40` |
 | Mac | `pavels-mac-mini.tail9fd337.ts.net` | `100.116.97.112` |
 
@@ -192,7 +201,8 @@ LiteLLM/Hermes and the hermes-agent stack are now *running + verified* **and** *
 Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain on the RTX, no cloud egress.
 
 - **Host:** `desktop-m922ij2` (RTX 5060 Ti 16 GB, Blackwell sm_120, driver 610.62 / CUDA 13.3); **not always-on**, so
-  this brain is **opportunistic** (durable brain is Codex, A5).
+  this brain is **opportunistic** (the live durable brain is now the ops-1 local-models-router — `qwen-35b`/`ornith-9b`;
+  see "Brain reality" in Phase).
 - **Stack:** **Ollama 0.16.1** (native Windows) serving **`gpt-oss:20b`** — already on disk, so **no model download
   over the RU network**. Chosen over a fresh Hermes/Qwen pull for that reason; `--tool-call-parser hermes` (vLLM) /
   `--jinja` (llama.cpp) are the equivalents if a Hermes/Qwen GGUF is swapped in. **WSL2/Docker are NOT installed**, so
@@ -212,6 +222,13 @@ Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain o
 Phase A2: the external NousResearch **hermes-agent** gateway as a Flux-managed k3s workload, brain = the **Codex /
 ChatGPT-Plus subscription** (`codex_app_server`) reached through `singbox-egress`. Owner chose the GitOps/k3s path
 over bare Docker.
+
+> **Superseded 2026-07-06 — the brain is now local (Codex-brain framing below is historical).** The A2/A5 record that
+> follows documents the *original* Codex-brain bring-up. The **live** brain is the local `qwen-35b`/`ornith-9b` router
+> (`provider: custom`, `http://100.82.241.121:8090/v1`); the cloud tier (Codex/Claude) is **OFF** (paid limits
+> exhausted); **Codex is demoted from brain to a coding-engine-only role** (and with the cloud coders off the live coder
+> is `ornith-9b`). Revert path kept in `runbooks/hermes-agent-codex-brain.md`. See "Brain reality" in Phase +
+> `runbooks/local-models-router.md`, `docs/local-qwen-hermes-handoff.md`.
 
 - **Proven in the real image (2026-06-24):** running `nousresearch/hermes-agent:latest` (v0.17.0) in-cluster,
   `hermes chat -q` drove the Codex brain (gpt-5.5) to **execute a tool end-to-end** (wrote a `BRAIN-OK` file). The
@@ -262,9 +279,12 @@ over bare Docker.
   `sing-box check` valid + 12/12 live reachability (telegram 302 / chatgpt 403) pre-deploy; in-cluster the **brain
   round-trip wrote `BRAIN-OK`** and Telegram reconnected. Per-server probe: Iceland rock-solid, Germany good, Netherlands
   dead (urltest excludes it). Independently reviewed (the split fixed a subfleet IP-pin blocker).
-- **subfleet egress note:** subfleet's `singbox-egress` still points at its original (now-dead) German exit. Restoring
-  subfleet needs the owner to repoint it to a live server AND re-run `claude setup-token` from that exit IP (changing the
-  IP breaks the existing pin) — a separate, owner-gated task. Do NOT fold subfleet onto the rotating HA egress.
+- **subfleet egress note (updated 2026-07-09):** subfleet is **LIVE + healthy** (v0.3.1; bridge + token pods 1/1
+  Running; served `claude-opus-4-8` on 2026-07-09 through the pinned `singbox-egress`). Its dead German exit was
+  **rotated to a live ninitux server** (#103/#104). subfleet stays on the **single-fixed `singbox-egress`** (NOT the
+  rotating HA egress) because its Claude OAuth is IP-pinned. **Only genuinely-open caveat:** the exit-IP change means the
+  IP-pinned OAuth pin may need re-validation (re-run `claude setup-token` from the new exit IP) if it starts failing —
+  verify on the next auth error rather than pre-emptively. Do NOT fold subfleet onto the rotating HA egress.
 - **A4 (claude -p coding worker) DONE 2026-06-26 (PR #23):** Anthropic's `claude` CLI runs as an autonomous
   `claude -p` worker INSIDE the hermes-agent pod, alongside the Codex brain. Claude Max OAuth (a portable 1-year
   `claude setup-token`) was obtained via a **server-side device-flow** (run in the pod under a PTY through the egress;
@@ -284,6 +304,25 @@ over bare Docker.
   is the quality gate, not human review. (This run was orchestrated — task chosen + worker invoked via `kubectl exec`
   + the patch bridged to ops-1 for the push. The remaining AUTOMATION is wiring a phone message → hermes → worker →
   ops-1 push so the whole loop runs unattended from the phone.)
+
+## Build-1 track (post-2026-06-30)
+
+`uap-build-1` (VMID 102, `pve-ninitux3`, Ubuntu 22.04, 8c/16 GB/100 GB, LAN `192.168.0.99`, tailnet `100.85.56.31`) is
+an **always-on dev/build VM** running a stack of agent services as **systemd units — NOT k3s, NOT in GitOps**, so they
+are absent from the cluster sections above. Landed after the 2026-06-30 hardening pass:
+
+- **local-models-router (#71)** — the ops-1 router that made `qwen-35b`/`ornith-9b` the live brain (see "Brain reality"
+  in Phase); `runbooks/local-models-router.md` + `docs/local-qwen-hermes-handoff.md`.
+- **Knowledge system (#95/#96/#97)** — SQLite `knowledge.db` engineering-knowledge registry + local e5-large
+  embeddings + a 12-status lifecycle with `--approve` gates; `runbooks/knowledge-system.md`.
+- **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
+  synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
+- **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
+- **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
+  file); `runbooks/ai-search.md`.
+- **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through
+  the new pipeline (also summarised in the "Egress ops hardening — DONE 2026-07-10" bullet under Phase).
+- **Proxy-mode spec (#112)** — the vpnrouter-gateway proxy-mode handoff spec (`docs/research/`).
 
 ## Repeatable Bootstrap
 
@@ -336,7 +375,11 @@ over bare Docker.
 
 ## Git Remote Readiness
 
-- GitHub `origin` configured (private repo, read-only SSH deploy key for Flux); `master` pushed; `gh` authed on `uap-ops-1`.
+- GitHub `origin` configured (**public** repo `PavelLizunov/unified-agent-platform`; read-only SSH deploy key for Flux,
+  plus a repo-scoped read-WRITE deploy key for pushes — both live on `uap-ops-1`); `master` pushed; `gh` authed on
+  `uap-ops-1`. Direct push to `master` is blocked by the `protect-master` ruleset — deploys are PR-based (see Phase).
+- The Windows workstation has a **read-only** `origin` (the public GitHub URL, added when the repo went public) for
+  `git fetch`/sync only; pushes still route via `uap-ops-1` (the write deploy key lives there).
 - `infra/ops/configure-github-flux.sh` was run on `uap-ops-1` to create the repo, push, add the deploy key, and create the Flux git-auth secret.
 - Local Windows SSH public key exists:
   - fingerprint: `SHA256:YLFbDMRbeUldpLQW8dmMihAQbRgCVBhmQGTW98rgm9c`
