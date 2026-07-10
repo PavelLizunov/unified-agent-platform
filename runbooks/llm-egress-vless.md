@@ -218,13 +218,20 @@ sing-box config + Secret with `infra/sops/gen-singbox-failover.py` (on uap-ops-1
 
 ```bash
 curl -sL "$SUB_URL" -o /tmp/sub.dat
-python3 infra/sops/gen-singbox-failover.py /tmp/sub.dat /tmp/config.json   # prints a SECRET-MASKED summary
+# SNI pre-flight gate: fetch the CURRENTLY-DEPLOYED config and diff the fresh servers against it
+# BEFORE regenerating. A changed REALITY server_name (the 2026-07-09 subfleet bricker) or a pool
+# add/remove FAILS CLOSED (exit 3) so `set -e` stops this chain before sops/PR. The report is
+# host-masked; SNIs are shown (that IS the signal). Servers are matched by (host,port), not name.
+kubectl get secret singbox-egress-ha-config -n uap-system \
+  -o jsonpath='{.data.config\.json}' | base64 -d > /tmp/deployed.json
+python3 infra/sops/gen-singbox-failover.py /tmp/sub.dat /tmp/config.json \
+  --against /tmp/deployed.json          # a legitimate change? re-run adding --allow-sni-drift to confirm
 sing-box check -c /tmp/config.json                                         # must validate
 kubectl create secret generic singbox-egress-ha-config -n uap-system \
   --from-file=config.json=/tmp/config.json --dry-run=client -o yaml \
   > clusters/prod/infra/singbox-egress-ha-config.sops.yaml
 sops -e -i clusters/prod/infra/singbox-egress-ha-config.sops.yaml
-shred -u /tmp/sub.dat /tmp/config.json
+shred -u /tmp/sub.dat /tmp/config.json /tmp/deployed.json
 # BUMP singbox-egress-ha/config-rev in singbox-egress-ha.yaml so Flux ROLLS the pod (sing-box reads
 # its config only at startup; a Secret change alone does NOT restart it).
 # commit via a PR (uap-commit-push); Flux applies the secret + rolls singbox-egress-ha onto the new config.
@@ -233,6 +240,13 @@ shred -u /tmp/sub.dat /tmp/config.json
 The generator fails loudly if a server is missing REALITY params and emits NO plaintext/`direct`
 outbound. A dead server in the pool is harmless — urltest excludes it within ~30s (it re-joins
 automatically if it recovers).
+
+The `--against` gate is the pre-flight that would have made the 2026-07-09 SNI drift
+(`microsoft.com` → `yahoo.com`) visible *before* it bricked subfleet, instead of after. It also
+catches pool changes: e.g. a first run after the subscription added a US VLESS server reports
+`pool +added [United States VLESS @ 130.*.*.*]` and stops for review — confirm with
+`--allow-sni-drift`. Without `--against` the generator keeps its original 2-arg behaviour (no gate).
+Regression test: `python tests/static/test_gen_singbox_failover.py` (also in CI `static-checks`).
 
 ### Verify
 
