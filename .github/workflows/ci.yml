@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4            # TODO: SHA-pin
         with:
           fetch-depth: 0                     # full history so gitleaks can scan the PR commit range (base^..head)
-      - uses: actions/setup-python@v5        # TODO: SHA-pin
+      - uses: actions/setup-python@v6        # TODO: SHA-pin
         with:
           python-version: '3.11'
       - name: Install Python deps
