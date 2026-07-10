@@ -44,10 +44,17 @@ spec:
                   zip="/work/hermes-backup-$ts.zip"
                   # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). hermes uses
                   # sqlite3.backup() for a consistent copy, so this is safe while the gateway runs.
-                  # NOT piped (no `| tee`): a pipe hides hermes's exit code from `set -e`, so a non-zero
-                  # `hermes backup` would slip through and we'd validate a partial zip. Redirect instead.
-                  env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip" >/work/backup.log 2>&1
+                  # Redirect (not `| tee`) so the full log is on disk for the checks below. hermes's
+                  # exit code is captured into $rc and deliberately TOLERATED under `set -e`: hermes
+                  # returns non-zero when it soft-skips a permission-denied file (a few root-owned,
+                  # regeneratable files — see NOTE below), which is BENIGN. Letting `set -e` abort here
+                  # killed a real Job mid-run and the R2 ship never fired. The ship-vs-fatal decision
+                  # is the zip-content/manifest check below (empty zip + state.db/auth.json presence),
+                  # NOT hermes's exit code: a truly failed backup = missing/empty/partial zip, caught there.
+                  rc=0
+                  env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip" >/work/backup.log 2>&1 || rc=$?
                   cat /work/backup.log
+                  [ "$rc" -ne 0 ] && echo "NOTE: hermes backup exited $rc (non-fatal; validated by zip-content check below)" || true
                   # NOTE: `hermes backup` drops to its service uid 10000 internally even though this
                   # container is root, so a few ROOT-owned, REGENERATABLE files (claude global config,
                   # .codex/config.toml seeded from the ConfigMap, stray demo session logs) get skipped.
