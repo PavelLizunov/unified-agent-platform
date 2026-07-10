@@ -29,6 +29,14 @@ def deployed_with_sni(sni):
                            "server_port": 443, "tls": {"server_name": sni}}]}
 
 
+def deployed_hy2_with_sni(sni):
+    """Deployed pool where the node at 203.0.113.7:443 is a hysteria2 outbound (as
+    vpnrouter-gateway renders it). Same host:port as the fresh vless node, so the
+    gate must key it and compare its tls.server_name -- not skip it by type."""
+    return {"outbounds": [{"type": "hysteria2", "tag": "Test DE hy2", "server": "203.0.113.7",
+                           "server_port": 443, "tls": {"server_name": sni}}]}
+
+
 def run(sub, deployed, *flags, env=None):
     with tempfile.TemporaryDirectory() as d:
         sp, dp, op = (os.path.join(d, f) for f in ("sub.json", "dep.json", "out.json"))
@@ -61,4 +69,19 @@ r = run(fresh, deployed_with_sni("yahoo.com"))
 assert r.returncode == 0, f"no-drift must pass, got {r.returncode}\nERR:{r.stderr}"
 assert "no drift vs deployed" in r.stdout
 
-print("test_gen_singbox_failover: OK (drift->exit3, flag-ack->pass, env-ack->pass, no-drift->pass)")
+# 5. deployed node is HYSTERIA2 with an OLD sni -> its server_name is now indexed,
+#    so the drift MUST fail closed (before the fix the hy2 node was invisible and
+#    this looked like a harmless pool +add, letting the SNI drift slip through).
+r = run(fresh, deployed_hy2_with_sni("microsoft.com"))
+assert r.returncode == 3, f"hy2 drift must exit 3, got {r.returncode}\nOUT:{r.stdout}\nERR:{r.stderr}"
+assert "SNI DRIFT" in r.stdout, f"hy2 drift must report a drift line (not a pool add):\n{r.stdout}"
+assert "microsoft.com -> yahoo.com" in r.stdout, f"expected hy2 old->new report:\n{r.stdout}"
+assert "203.*.*.*" in r.stdout, f"hy2 host must be masked in the report:\n{r.stdout}"
+
+# 6. deployed HYSTERIA2 node already on the new sni -> no drift, MUST pass without
+#    an ack (proves an hy2 node is matched by (host,port)+SNI, not false-alarmed).
+r = run(fresh, deployed_hy2_with_sni("yahoo.com"))
+assert r.returncode == 0, f"hy2 no-drift must pass, got {r.returncode}\nOUT:{r.stdout}\nERR:{r.stderr}"
+assert "no drift vs deployed" in r.stdout
+
+print("test_gen_singbox_failover: OK (vless drift/ack/env/no-drift + hy2 drift->exit3, hy2 no-drift->pass)")
