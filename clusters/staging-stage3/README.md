@@ -1,3 +1,9 @@
+> **ARCHIVED — superseded by `clusters/prod/infra/`. Kept for history only; NOT in any Flux path.**
+> These Stage 3 manifests were review-only scaffolding. They have since been promoted and are LIVE
+> under `clusters/prod/infra/` (`subfleet.yaml`, `subfleet-egress.yaml`, `litellm.yaml`, and the
+> `singbox-egress*` Services/Secrets, all wired into `clusters/prod/infra/kustomization.yaml`). Edit
+> the prod copies, never these. This directory is retained solely as a design record.
+
 # Stage 3 scaffolding — REVIEW ONLY (do NOT apply yet)
 
 LiteLLM model gateway + an **in-cluster egress** (the `singbox-egress` Service that

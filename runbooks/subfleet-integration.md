@@ -1,12 +1,19 @@
 # subfleet Integration (model backend for LiteLLM)
 
+> **Status (2026-07): LIVE + healthy on v0.3.1.** bridge + token-service pods `1/1 Running`; served
+> `claude-opus-4-8` on 2026-07-09 through the pinned `singbox-egress` (DE exit rotated to a live
+> ninitux server in #103/#104). Deployed by Flux from `clusters/prod/infra/subfleet.yaml` — **images
+> are pulled from GHCR**, no local build. Sections below marked "one-time seed" are historical setup
+> notes; the live invariants are the **Caveats** and the **Pinned-egress repoint + re-pin** section.
+
 subfleet (`reserch/subfleet`, Rust `bridge` + `token-service`) is UAP's model backend: an
 OpenAI-compatible gateway over a Claude Code (and, after subfleet Phase C, Codex) **subscription**.
 LiteLLM points at the subfleet **bridge**; subfleet handles the RU egress and OAuth refresh.
 
-See also the contract record in `clusters/staging-stage3/` and memory `uap-subfleet-integration`.
-This runbook is the deploy path for the **Claude** path (Codex is additive — same bridge, just more
-model groups, once subfleet `#2/#3` land).
+See also the promoted manifests in `clusters/prod/infra/` (`subfleet.yaml`, `subfleet-egress.yaml`,
+`litellm.yaml`) and memory `uap-subfleet-integration`. The old `clusters/staging-stage3/` scaffolding
+is **archived** (see its README). This runbook is the deploy path for the **Claude** path (Codex is
+additive — same bridge, just more model groups, once subfleet `#2/#3` land).
 
 ## Contract (from subfleet's integration delta)
 
@@ -53,7 +60,7 @@ podman run -it --rm --network=host --userns=keep-id \
   -e HTTPS_PROXY=http://127.0.0.1:12081 -e HTTP_PROXY=http://127.0.0.1:12081 \
   -e ALL_PROXY=socks5://127.0.0.1:12081 \
   -v ~/claude-seed:/home/bridge/.claude:U \
-  --entrypoint /usr/local/bin/claude ghcr.io/<owner>/subfleet-bridge:v0.2.0
+  --entrypoint /usr/local/bin/claude ghcr.io/pavellizunov/subfleet-bridge:v0.3.1
 # in the REPL run /login -> open the printed URL in ANY browser -> authorize ->
 # paste the returned code back. Writes ~/claude-seed/.credentials.json (access+refresh).
 ```
@@ -79,36 +86,39 @@ Create a SOPS-encrypted Secret (in `clusters/prod/infra`) holding:
 `BRIDGE_SECRET` (`openssl rand -hex 24`), `ADMIN_TOKEN` (`openssl rand -hex 24`), and the seeded
 `credentials.json`. The same `BRIDGE_SECRET` value goes to LiteLLM as `SUBFLEET_KEY`.
 
-## Step 3 — build + import images (registry-less k3s)
+## Step 3 — images (GHCR pull, NOT local build/import)
 
-The chart has no registry integration; build the two images and import into each node's containerd.
+**Prod pulls the two images from GHCR** — no more `docker compose build` + `k3s ctr images import`.
+The images are published as:
 
-```bash
-cd reserch/subfleet
-docker compose build          # builds *-bridge (debian+bundled claude CLI) and *-token (musl/scratch)
-docker save subfleet-bridge:<tag> | gzip > /tmp/sf-bridge.tgz
-docker save subfleet-token:<tag>  | gzip > /tmp/sf-token.tgz
-# copy to each k3s node, then on each:
-sudo k3s ctr images import /tmp/sf-bridge.tgz
-sudo k3s ctr images import /tmp/sf-token.tgz
-```
+- `ghcr.io/pavellizunov/subfleet-bridge:v0.3.1` (debian + bundled claude CLI)
+- `ghcr.io/pavellizunov/subfleet-token:v0.3.1` (musl/scratch)
 
-Pin the Helm `image.*.tag` to that tag (never `latest`).
+Nodes pull them with the `ghcr-pull` imagePullSecret (`clusters/prod/infra/ghcr-pull.sops.yaml`),
+which the HelmRelease passes via `values.imagePullSecrets`. Pin the tag (never `latest`); the live
+pin is `v0.3.1` in `clusters/prod/infra/subfleet.yaml`. To ship a new subfleet version, publish the
+GHCR tag from the subfleet repo, then bump both `image.bridge.tag` / `image.tokenService.tag` **and**
+the `GitRepository` `ref.tag` in that manifest via a PR.
 
 ## Step 4 — deploy subfleet via Flux
 
-Add a `HelmRelease` (chart `subfleet/deploy/helm/claude2api`, sourced via a `GitRepository` to subfleet
-or a vendored copy) under `clusters/prod/infra`, referencing the SOPS Secret (existing-secret mode).
-Key values: `token-service` `replicas:1 + Recreate` (single-writer invariant); bridge `extraEnv`
-`BRIDGE_MAX_CONCURRENT=<cap>`; egress — set token-service `PROXY_URL` **and** bridge `CLI_HTTPS_PROXY`
-to the **same** exit (the in-cluster `singbox-egress` Service or the ops-1 sing-box). Egress-IP-pin:
-keep both pointing at one exit (and matching the `setup-token` IP).
+This is **already live** in `clusters/prod/infra/subfleet.yaml`: a `GitRepository` (`ref.tag: v0.3.1`,
+chart `deploy/helm/claude2api`, pulled with the `subfleet-git-auth` deploy key) + a `HelmRelease`
+referencing the SOPS Secret in existing-secret mode. Key values already set there:
+`tokenService.replicas: 1` + `store.backend: file` (single-writer invariant); bridge
+`BRIDGE_MAX_CONCURRENT=6` + `UNSUPPORTED_PARAMS_MODE=warn`; egress — both `tokenService.proxyUrl` and
+`bridge.cliProxy` point at the **same** exit (`http://singbox-egress.uap-system.svc:12080`). Egress-IP
+pin: keep both on one exit that matches the exit the credential was authorized through. To change the
+version, edit that manifest (see Step 3) via a PR and let Flux reconcile.
 
 ## Step 5 — wire LiteLLM
 
-Promote `clusters/staging-stage3/litellm.yaml`: it already points all cloud groups at the bridge
-`api_base` with `api_key: os.environ/SUBFLEET_KEY` and forwards `reasoning_effort`. Fill `SUBFLEET_KEY`
-(= `BRIDGE_SECRET`) and `LITELLM_MASTER_KEY` from SOPS; set the real bridge Service DNS + Ollama IP.
+Already promoted to `clusters/prod/infra/litellm.yaml`: it points the cloud groups at the bridge
+`api_base` with `api_key: os.environ/SUBFLEET_KEY` and forwards `reasoning_effort`. `SUBFLEET_KEY`
+(= `BRIDGE_SECRET`) and `LITELLM_MASTER_KEY` come from `litellm-keys.sops.yaml`. (Note: the LIVE
+hermes-agent brain no longer routes through this LiteLLM — it uses the ops-1 local-models-router at
+`http://100.82.241.121:8090/v1`, model `qwen-35b`; subfleet/LiteLLM is retained for the owner's other
+subscription consumers. See memory `uap-local-models-router`.)
 
 ## Step 6 — smoke tests
 
@@ -130,8 +140,47 @@ Verify also:
 - **Backpressure** — burst > `BRIDGE_MAX_CONCURRENT` ⇒ `429`; LiteLLM retries.
 - **Fallback** — kill the subscription path ⇒ requests fall to `cheap-local` (Ollama).
 
+## Pinned-egress repoint + re-pin (owner-gated)
+
+subfleet's exit is a **single fixed** VLESS+REALITY server, NOT the rotating `singbox-egress-ha`
+urltest pool — the OAuth credential is geo/IP-pinned, so the exit must stay stable. When the pinned
+exit dies (or its REALITY `server_name`/IP changes — the 2026-07-09 bricker), repoint by hand:
+
+- **There is NO generator for this config.** `infra/sops/gen-singbox-failover.py` only builds the HA
+  urltest pool (`singbox-egress-ha-config.sops.yaml`). The pinned single-exit config
+  (`clusters/prod/infra/singbox-egress-config.sops.yaml`) is **hand-maintained SOPS** — decrypt, edit
+  the one outbound to the live DE server, re-encrypt.
+- **Because the exit IP changes, you MUST re-seed the credential** (Step 1) through the NEW exit so
+  the DE-authorized OAuth pin stays plausible, then re-encrypt `subfleet-secrets.sops.yaml`. Reusing
+  the old credential from a new-IP exit is exactly the RU-origin anomaly the pin guards against.
+
+```bash
+# 1. edit the pinned exit (SOPS; age key lives on uap-home-1). Point the single outbound at a LIVE
+#    DE (ninitux) server — host/port/uuid/reality server_name+public_key+short_id:
+sops clusters/prod/infra/singbox-egress-config.sops.yaml
+# 2. re-seed a DE-authorized credential through the NEW exit (Step 1: /login --import), then
+#    re-encrypt the Secret that carries credentials.json:
+sops clusters/prod/infra/subfleet-secrets.sops.yaml
+# 3. PR both (uap-commit-push); Flux applies the Secrets. sing-box reads its config only at startup
+#    and subfleet-egress.yaml has NO config-rev annotation, so ROLL the egress pod after reconcile,
+#    then roll subfleet's bridge + token-service deployments so they re-egress + re-read the credential
+#    (use the actual deploy names from `kubectl -n uap-system get deploy`):
+kubectl -n uap-system rollout restart deploy/singbox-egress
+# 4. verify the exit country, then a real completion:
+kubectl -n uap-system exec deploy/singbox-egress -- \
+  sh -c 'wget -qO- -e use_proxy=yes -e https_proxy=http://127.0.0.1:12080 https://ifconfig.co/country'
+#   expect DE. Then a live chat.completions through the bridge:
+curl -H "Authorization: Bearer $BRIDGE_SECRET" http://<bridge>:18902/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"claude-opus-4-8","messages":[{"role":"user","content":"ping"}]}'   # expect 200 + reply
+```
+
 ## Caveats
 
+- **Static token today (refresh dormant):** the live token-service loaded a static long-lived
+  credential (expires ~2036, ~10y) and its refresh loop is not firing, so the single-writer rule is
+  currently DORMANT. `replicas:1` is kept as a defensive guard; it becomes load-bearing again the
+  moment a re-seed installs a short-lived `/login` access+refresh pair.
 - **Single-writer:** never run two token-service refreshers per credential (`replicas:1 + Recreate`,
   or a lease backend). Two refreshers burn the rotating `refresh_token`.
 - **Egress-IP pinning:** `setup-token` IP == token-service `PROXY_URL` exit == bridge `CLI_HTTPS_PROXY`

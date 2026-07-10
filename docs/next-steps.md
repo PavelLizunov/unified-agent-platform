@@ -7,7 +7,7 @@
 >
 > Context: [docs/infrastructure.md](infrastructure.md). Decisions: [DECISIONS.md](../DECISIONS.md).
 > This doc **references** [BUILD-PLAN.md](../BUILD-PLAN.md) and [REVIEW-CODEX.md](../REVIEW-CODEX.md)
-> rather than restating their detail. Last reviewed: 2026-06-23.
+> rather than restating their detail. Last reviewed: 2026-07-11.
 
 ---
 
@@ -42,8 +42,8 @@ every tool goes dark). Detail + citations in the two research docs.
 - Raise context to **>= 64k** (hermes-agent rejects smaller at startup; Ollama defaults are far too low).
 - **Done when:** a trivial hermes-agent run actually **invokes a tool** (file write / shell) against the
   local model — structured `tool_calls`, not text.
-- *Caveat:* the desktop is **not always-on**, so this brain is opportunistic; the durable brain is Codex
-  (A5).
+- *Caveat:* the desktop is **not always-on**, so this brain is opportunistic; the durable brain was Codex
+  (A5) — **now superseded**: the live brain is the fully-local `qwen-35b`/`ornith-9b` router (see A5).
 
 > **Result (2026-06-23):** proven via **Ollama 0.16.1 + `gpt-oss:20b`** (native Windows; already on disk → no model
 > download over the RU network). `/v1/chat/completions` with a `tools` array returns a **structured `tool_calls`**
@@ -103,7 +103,7 @@ every tool goes dark). Detail + citations in the two research docs.
   shipped it through the enforced CI gate (**north-star demo PASSED, PR #25**). The agent's self-test +
   the now-enforced CI was the gate.
 
-### Phase A5 — Codex brain + redundancy — `codex exec` + worktree isolation ✅ DONE (PR #24)
+### Phase A5 — Codex brain + redundancy — `codex exec` + worktree isolation ✅ DONE (PR #24) — ⚠ brain SUPERSEDED (fully-local qwen/ornith, 2026-07-06; see below)
 
 - Switch the durable brain to the **ChatGPT/Codex** subscription via the **`codex_app_server`** runtime
   (`model.openai_runtime: codex_app_server`, provider `openai-codex`) — native FC, **no API key**, OAuth
@@ -115,6 +115,16 @@ every tool goes dark). Detail + citations in the two research docs.
   online (enable SSH) as a second worker / small local model host.
 - **Done when:** the agent runs with the Codex brain by default, fails over to the local brain when
   egress/subscription is unavailable, and either coding engine can take a task.
+
+> **⚠ Brain superseded (2026-07-06) — now FULLY LOCAL, not Codex.** The paid Claude/Codex limits ran out,
+> so the durable brain moved off the cloud tier onto the **`local-models-router`** on `uap-ops-1`:
+> **`qwen-35b`** (llama.cpp on the RTX desktop) primary, **`ornith-9b`** (mlx on the **always-on** Mac)
+> fallback — one OpenAI-compatible endpoint `http://100.82.241.121:8090/v1`, native FC (PR #71 router;
+> brain repoint PR #72/#74). **Codex is demoted to a coding engine only** (and currently idle — limits
+> out; the qwen brain delegates code generation to the local `ornith` coder). The Codex-brain path is
+> **not removed** — it is the documented **revert-to-cloud** route (restore the `managed-config` `model`
+> block per [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md) when limits
+> reset). Live brain setup: [runbooks/local-models-router.md](../runbooks/local-models-router.md).
 
 > **Do NOT** point hermes-agent's brain at the subfleet endpoint at any phase — it is FC-less. subfleet
 > stays the backend for the owner's **other** projects (Telegram bot + web sessions), not the coding path.

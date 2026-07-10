@@ -62,7 +62,12 @@ spec:
         backend: file
     providers:
       claude:
+        # credentials.json is a seeded static long-lived token (the live token-service loaded a
+        # credential expiring ~2036, ~10y) and NO refresh loop is firing, so the rotating-refresh /
+        # single-writer invariant below is DORMANT. replicas:1 is kept as a defensive guard, not a
+        # live need — if a future re-seed uses a short-lived /login access+refresh pair, the refresh
+        # loop wakes up and the single-writer rule becomes load-bearing again.
         enabled: true
-        bootstrapExistingSecret: subfleet-secrets   # credentials.json (seeded, static 1y token)
+        bootstrapExistingSecret: subfleet-secrets   # credentials.json (seeded static long-lived token, ~2036)
       codex:
         enabled: false

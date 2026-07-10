@@ -36,6 +36,9 @@ jobs:
       - name: Static fixture tests (regression tests for validate_iac/secret_scan logic)
         run: |
           for t in tests/static/test_*.py; do echo "== $t =="; python "$t" || exit 1; done
+      - name: Tools unit tests (discover + run every tools/**/test_*.py; stdlib-only, assert-based, run directly)
+        run: |
+          for t in $(find tools -name 'test_*.py' | sort); do echo "== $t =="; python "$t" || exit 1; done
       - name: Install kustomize
         uses: imranismail/setup-kustomize@v2   # TODO: SHA-pin
       - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
