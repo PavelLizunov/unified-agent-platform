@@ -6,7 +6,7 @@
 > Target architecture and the 2026-06 pivot are tracked in [docs/next-steps.md](next-steps.md) and
 > the research notes under [docs/research/](research/).
 >
-> Last reviewed: 2026-06-23.
+> Last reviewed: 2026-07-11.
 
 ## TL;DR
 
@@ -21,9 +21,14 @@
   proxy (ADR-018), because Anthropic/OpenAI/OpenRouter are unreachable directly from RU.
 - **Model backend today:** subfleet (the Claude subscription wrapped as an OpenAI-compatible **chat**
   API) behind a LiteLLM gateway, plus the bespoke single-file `hermes.py` agent.
-- **Where we're going:** adopt the external **NousResearch hermes-agent** as the vibe-coding harness —
-  brain = Codex (ChatGPT) subscription or a local FC model on the RTX; coding = `claude -p` + `codex exec`
-  as skills; phone control via Telegram. The bespoke Hermes is parked as a fallback.
+- **The harness is now LIVE:** the external **NousResearch hermes-agent** is the vibe-coding harness —
+  phone control via Telegram, coding via `claude -p` + `codex exec` skills. The bespoke Hermes is parked
+  as a fallback.
+- **Brain today (2026-07-06):** the paid Claude/Codex limits ran out, so the hermes-agent brain runs
+  **fully local** via the `local-models-router` on `uap-ops-1` — **`qwen-35b`** (RTX desktop, llama.cpp)
+  primary, **`ornith-9b`** (always-on Mac, mlx) fallback, one endpoint `http://100.82.241.121:8090/v1`.
+  Codex/Claude are demoted to (currently idle) coding engines; the Codex-brain path is the documented
+  revert route. See [runbooks/local-models-router.md](../runbooks/local-models-router.md).
 
 ---
 
@@ -34,16 +39,19 @@ shown intermittent resets (see [CLAUDE.md](../CLAUDE.md)).
 
 | Machine | Tailnet IP | OS | CPU / RAM / GPU | Role | Always-on |
 |---|---|---|---|---|---|
-| `uap-home-1` | `100.106.223.120` | Debian 12 | 4 vCPU / 8 GB / no GPU | k3s **server**, embedded etcd (control plane) | **Yes** |
-| `uap-home-2` | `100.94.228.67` | Debian 12 | 2 vCPU / 4 GB / no GPU | k3s **agent** (worker only) | **Yes** |
-| `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; holds git `origin` + push key, runs `kubectl` | **Yes** |
-| `desktop-m922ij2` | (tailnet) | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation; future agent-worker + **local LLM host** | **No** |
-| `pavels-mac-mini` | (tailnet) | macOS (Apple Silicon) | — / RAM unknown / Apple GPU | future agent-worker + small local LLM; **SSH currently off** | **No** |
+| `uap-home-1` | `100.106.223.120` | Debian 12 | 4 vCPU / 8 GB / no GPU | k3s **server**, embedded etcd (control plane); LiteLLM; in-cluster VLESS egress | **Yes** |
+| `uap-home-2` | `100.94.228.67` | Debian 12 | 6 vCPU / 8 GB / no GPU | k3s **agent** (worker only); runs the **hermes-agent** brain pod + subfleet bridge (resized 6c/8G in #86/#87) | **Yes** |
+| `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** systemd service (the live brain endpoint `:8090`) | **Yes** |
+| `uap-build-1` | `100.85.56.31` | Ubuntu 22.04 | 8 vCPU / 16 GB / no GPU | always-on build/dev VM — **not** a k3s node, **not** in GitOps; runs the knowledge system, the Hermes Kanban swarm, ai-search, and the hermes-workspace webcenter (`:3000`) — all systemd | **Yes** |
+| `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; serves **`qwen-35b`** (llama.cpp) — the **primary local brain** | **No** |
+| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | serves **`ornith-9b`** (mlx) — the local **coder / fallback brain** | **Yes** |
 
 Notes:
-- The two always-on workers with real compute (`uap-home-1`, `uap-home-2`) have **no GPU**. The only
-  GPU in the fleet is on the **not-always-on** Windows desktop — so a local-model brain on the RTX is
-  only available when the desktop is on. This is the single most important placement fact.
+- The k3s nodes (`uap-home-1`, `uap-home-2`) and `uap-ops-1` have **no GPU**. The only **discrete/CUDA**
+  GPU in the fleet is the RTX on the **not-always-on** Windows desktop — so `qwen-35b` (the primary brain)
+  is only available when the desktop is on. The **always-on Mac mini** (Apple GPU) serves `ornith-9b`, the
+  fallback brain / local coder that keeps working when the desktop is off. This brain topology is served
+  through the `local-models-router` on `uap-ops-1` (see §3 and `runbooks/local-models-router.md`).
 - `uap-ops-1` runs on the **same physical Proxmox node** as `uap-home-1`, so it shares a failure
   domain with the control plane (see Track B in [next-steps.md](next-steps.md)).
 - Windows-to-`uap-ops-1` tailnet SSH has intermittently timed out after enrollment; workstation→ops
@@ -51,13 +59,18 @@ Notes:
 - The Windows workstation does **not** run sshd (TCP 22 closed) and has **no** git `origin`; all pushes
   go through `uap-ops-1`.
 
-### Proxmox host
+### Proxmox hosts
 
-| VMID | VM | Resources |
-|---|---|---|
-| 201 | `uap-home-1` | 4 vCPU / 8 GB / 80 GB |
-| 202 | `uap-home-2` | 2 vCPU / 4 GB / 32 GB |
-| 203 | `uap-ops-1` | 2 vCPU / 2 GB / 30 GB |
+Two hypervisors: `pve-ninitux` holds `uap-home-1` (+ `uap-ops-1` shares this host, and the VPNRouter
+test VMs); `pve-ninitux3` holds `uap-home-2` + `uap-build-1` (so build-1's 16 GB constrains how far
+`uap-home-2` can grow). Full map: [fleet-map.md](fleet-map.md).
+
+| VMID | VM | Host | Resources |
+|---|---|---|---|
+| 201 | `uap-home-1` | pve-ninitux | 4 vCPU / 8 GB / 80 GB |
+| 202 | `uap-home-2` | pve-ninitux3 | 6 vCPU / 8 GB / 32 GB (resized #86/#87) |
+| 203 | `uap-ops-1` | pve-ninitux | 2 vCPU / 2 GB / 30 GB |
+| 102 | `uap-build-1` | pve-ninitux3 | 8 vCPU / 16 GB / 100 GB (Ubuntu 22.04) |
 
 Proxmox endpoint is LAN-only. **Proxmox VM backups are still pending** (k3s/etcd DR is in R2; the VMs
 themselves are not yet backed up).
@@ -121,19 +134,46 @@ exactly what the hermes-agent pilot reuses.
 | **subfleet** | Rust gateway wrapping the **Claude subscription** as an OpenAI-compatible **chat** API; spawns the real `claude` CLI per request. Drops `tools`/`tool_calls` — chat passthrough only. | `subfleet-bridge.uap-system.svc:18902/v1` | **Flux** |
 | **LiteLLM** (v1.89.0) | The OpenAI-compatible gateway devices/agents hit; routes model groups to subfleet. Groups: `smart-cloud` (opus), `smart-cloud-think`, `balanced-cloud` (sonnet), `cheap-cloud` (haiku), `smart-cloud-pinned` (`claude-opus-4-8`). Reached from tailnet via `tailscale serve` on `uap-home-1`; master key via SOPS `litellm-keys`. | `litellm.uap-system.svc:4000` | **Flux** |
 | **Hermes (bespoke, "Hermes-legacy")** | Single-file stdlib `hermes/hermes.py`; turns the chat backend into a **prompt-based ReAct/ReWOO** tool-using agent (native FC is infeasible through the subfleet CLI). Read-only kube tools, SSRF-guarded HTTP, per-tool scopes. 41 unit + 8 integration tests. **PARKED.** | NodePort `:30890` (in-cluster `:8900`) | **Flux** |
+| **hermes-agent** | The **live** external NousResearch hermes-agent (vibe-coding harness). **Brain today = local `qwen-35b`/`ornith-9b` via the ops-1 router** (paid limits ran out; the Codex-brain path in `runbooks/hermes-agent-codex-brain.md` is parked as the revert route). Coding via `claude -p`/`codex exec` skills; Telegram phone control. | pod on `uap-home-2` (Telegram outbound long-poll) | **Flux** |
 
 ### Operator VM (`uap-ops-1`) — ad-hoc, outside GitOps
 
 - The deploy/control machine: git `origin` (SSH, repo-scoped read-WRITE deploy key), `kubectl`, full
   toolchain (`tofu`, `ansible`, `flux`, `sops`, `age`, `gh`, `tailscale`, `jq`).
-- Also runs **ad-hoc, NOT in GitOps:** host-local **sing-box** egress and **Vaultwarden**. A daily
-  age-encrypted `ops-backup` timer ships Vaultwarden + `~/.secrets` + units to R2.
+- Also runs **ad-hoc, NOT in GitOps:** host-local **sing-box** egress and **Vaultwarden**; the
+  **`local-models-router`** systemd service (`local-model-router`) — the OpenAI-compatible endpoint
+  (`:8090`) that is the hermes-agent's **live brain** (routes `qwen-35b`→RTX desktop, `ornith-9b`→Mac; it
+  lives here because in-cluster pods can't reach the tailnet `100.x` model boxes, but ops-1 can). See
+  `runbooks/local-models-router.md`. A daily age-encrypted `ops-backup` timer ships Vaultwarden +
+  `~/.secrets` + units to R2.
 - This VM's **concentration of secrets + capabilities is the dominant open risk** — see
   [REVIEW-CODEX.md](../REVIEW-CODEX.md) and Track B of [next-steps.md](next-steps.md).
+
+### Build/dev VM (`uap-build-1`) — always-on, NOT in GitOps
+
+Always-on Ubuntu 22.04 VM (8 vCPU / 16 GB, `100.85.56.31` / LAN `192.168.0.99`) for heavy build/dev +
+repo work. Runs, all as **systemd** (not k3s, not Flux):
+
+- the **knowledge system** — SQLite `knowledge.db` + local RU/EN embeddings; `tools/knowledge/`
+  (`runbooks/knowledge-system.md`),
+- the **Hermes Kanban swarm** — the native multi-agent orchestration pilot
+  (`runbooks/hermes-kanban-swarm-pilot.md`),
+- **ai-search** — a zero-key web-search CLI over the VLESS egress (`runbooks/ai-search.md`),
+- the **hermes-workspace webcenter** (`:3000`, tailnet) — the owner+sister user-facing UI
+  (`runbooks/hermes-workspace-webcenter.md`).
+
+crates.io + rust-lang.org are RU-blocked, so cargo builds go through the VLESS egress
+(`192.168.0.202:30880`); GitHub is wired via a fine-grained PAT on the box.
 
 ---
 
 ## 4. Subscriptions (the brains and the coders)
+
+> **Current state (2026-07-06):** the paid limits ran out, so **neither subscription is the live brain
+> right now** — the hermes-agent brain runs **fully local** (`qwen-35b`/`ornith-9b` via the ops-1 router,
+> [runbooks/local-models-router.md](../runbooks/local-models-router.md)). The table below is the
+> **subscription design** and the revert-to-cloud target; Codex-as-brain + the `claude -p`/`codex exec`
+> coders resume when the limits reset.
 
 | Subscription | Count | Used for | Notes |
 |---|---|---|---|
@@ -178,6 +218,12 @@ SQLite/FTS memory, subagents, cron, checkpoints/rollback, git worktrees, 20+ mes
       egress proxy             local, no egress         egress proxy        egress proxy
    (non-RU, ADR-018)                                  (reuses subfleet creds)
 ```
+
+> **Live today:** the **local FC** brain tier is what is actually running — `qwen-35b`/`ornith-9b` behind
+> the `local-models-router` on `uap-ops-1` — because the paid limits ran out, so the Codex brain and the
+> `claude -p`/`codex exec` coders are currently idle. Restoring them is the documented revert path. See
+> [runbooks/local-models-router.md](../runbooks/local-models-router.md) and
+> [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md).
 
 **Hard constraints:**
 - hermes-agent **requires native function-calling** with **no** prompt-based fallback. A FC-less

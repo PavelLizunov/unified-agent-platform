@@ -203,7 +203,8 @@ concerns apart:
 
 - **`singbox-egress`** (`subfleet-egress.yaml`) — a SINGLE fixed VLESS+REALITY exit, consumed by
   **subfleet** (`subfleet.yaml`). subfleet's OAuth token is IP-pinned to one exit, so this Service
-  must NOT rotate exits (see the warning in `clusters/staging-stage3/singbox-egress.yaml`).
+  must NOT rotate exits (see the warning in `clusters/prod/infra/subfleet-egress.yaml`; the
+  `clusters/staging-stage3/` copy is archived).
 - **`singbox-egress-ha`** (`singbox-egress-ha.yaml`) — VLESS+REALITY with a **`urltest`** outbound
   that AUTO-FAILS-OVER across the owner's subscription servers (probe every 30s, route the fastest
   live one, migrate in-flight connections off a dead one). Consumed by **hermes-agent** (Codex
@@ -263,10 +264,14 @@ curl -x http://singbox-egress-ha.uap-system.svc:12080 -sS -o /dev/null -w '%{htt
 # the brain round-trip is the real proof: see runbooks/hermes-agent-codex-brain.md (CLI round-trip).
 ```
 
-> subfleet note: `singbox-egress` (subfleet's) still points at its original fixed exit. If that exit
-> is dead, subfleet stays down until the owner repoints it to a live server AND re-runs
-> `claude setup-token` from the new exit IP (changing the exit IP breaks the existing pin). That is a
-> separate, owner-gated task — do NOT fold subfleet onto the rotating HA egress.
+> subfleet note: `singbox-egress` (subfleet's fixed exit) is **LIVE**. Its DE exit was rotated to a
+> live ninitux server (#103/#104) and subfleet served a real `chat.completions` (`claude-opus-4-8`)
+> through it on 2026-07-09 — it is NOT pointing at a dead German exit. The one genuinely-open caveat:
+> changing that exit's IP invalidates subfleet's IP/geo-pinned OAuth credential, so any repoint MUST
+> re-seed + re-validate the DE-authorized credential from the new exit IP (owner-gated; full procedure
+> in `runbooks/subfleet-integration.md`). Still do **NOT** fold subfleet onto the rotating
+> `singbox-egress-ha` urltest — the pin needs ONE stable exit, and there is no generator for the
+> pinned single-exit config (it is hand-maintained SOPS).
 
 ## Do Not
 
