@@ -156,5 +156,46 @@ def main():
     a = ap.parse_args()
     a.fn(a)
 
+def _selfcheck():
+    """No-network contract check: canned provider JSON -> normalized {provider,mode,answer,sources[],warnings}."""
+    keys = {"provider", "mode", "answer", "sources", "warnings"}
+    # out() is the normalizer — verify shape + defaults.
+    r = out("x", "raw_search")
+    assert set(r) == keys and r["sources"] == [] and r["warnings"] == [], r
+
+    # Stub the two network helpers with canned payloads, then drive the REAL provider parsers
+    # (the field-mapping list comprehensions are the logic under test). Names resolve from module
+    # globals at call time, so reassigning them here monkeypatches the parsers without any network.
+    g = globals()
+    os.environ["EXA_API_KEY"] = os.environ["TAVILY_API_KEY"] = os.environ["BRAVE_API_KEY"] = "x"
+
+    # exa answer-mode: citations -> sources[], answer carried through; contract shape intact.
+    g["_post_json"] = lambda *a, **k: {"answer": "42", "citations":
+        [{"title": "T", "url": "u", "text": "body", "publishedDate": "2026"}]}
+    r = exa_search("q", 3, True)
+    assert set(r) == keys and r["provider"] == "exa" and r["mode"] == "answer" and r["answer"] == "42", r
+    assert r["sources"] == [{"title": "T", "url": "u", "snippet": "body", "published_at": "2026"}], r
+
+    # tavily: content -> snippet, published_date -> published_at, top-level answer passthrough.
+    g["_post_json"] = lambda *a, **k: {"answer": "yes", "results":
+        [{"title": "Tv", "url": "tu", "content": "c", "published_date": "d"}]}
+    r = tavily_search("q", 3)
+    assert r["provider"] == "tavily" and r["answer"] == "yes", r
+    assert r["sources"] == [{"title": "Tv", "url": "tu", "snippet": "c", "published_at": "d"}], r
+
+    # brave: web.results -> sources[], age -> published_at (via _get_json).
+    g["_get_json"] = lambda *a, **k: {"web": {"results":
+        [{"title": "B", "url": "bu", "description": "d", "age": "1d"}]}}
+    r = brave_search("q", 5, False)
+    assert set(r) == keys and r["sources"][0]["published_at"] == "1d", r
+
+    # key-gated provider with no key -> None (cmd_search turns this into a 'skipped' warning).
+    os.environ.pop("EXA_API_KEY", None)
+    assert exa_search("q", 3, False) is None
+    print("selfcheck ok")
+
+
 if __name__ == "__main__":
+    if "--selfcheck" in sys.argv:
+        _selfcheck(); sys.exit(0)
     main()

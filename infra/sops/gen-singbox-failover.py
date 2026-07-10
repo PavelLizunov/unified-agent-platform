@@ -28,12 +28,15 @@ import json, base64, sys, re, os, urllib.parse as up
 
 
 def sni_index(outbounds):
-    """(server, port) -> (tag, server_name) for every vless outbound. Keyed by
-    host+port (stable server identity) so a renamed node isn't a false add/remove."""
+    """(server, port) -> (tag, server_name) for every vless/hysteria2 outbound.
+    Keyed by host+port (stable server identity) so a renamed node isn't a false
+    add/remove. hysteria2 carries its SNI at the same tls.server_name path as
+    vless, so vpnrouter-gateway hy2 nodes in the failover pool are gated too --
+    an hy2 server_name drift would otherwise slip past silently."""
     return {
         (o.get("server"), o.get("server_port")): (o.get("tag"), o.get("tls", {}).get("server_name"))
         for o in outbounds
-        if o.get("type") == "vless"
+        if o.get("type") in ("vless", "hysteria2")
     }
 
 
