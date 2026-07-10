@@ -51,6 +51,22 @@ Suggested initial retention:
 
 Tune after actual storage size is known.
 
+## Off-cluster node state (build-1 + ops-1)
+
+Two always-on VMs hold earned state that is **not** a k3s node and **not** in GitOps, so
+neither the etcd→R2 snapshots nor the in-cluster `hermes-agent-backup` CronJob cover them:
+
+- **build-1** — the knowledge system SQLite registry `~/knowledge/knowledge.db` (canonical
+  records + audit + sqlite-vec index) is the one irreplaceable piece. Backed up nightly to
+  R2 (`uap-k3s-snapshots/knowledge/`) by `tools/backup/build1-knowledge-backup.sh` +
+  its systemd timer. Consistent snapshot via `sqlite3 .backup` (WAL-safe), tarred with the
+  small node-local config (`~/.config/ai-search.env`, `~/knowledge/bin/`). Install + **restore**
+  procedure: `tools/backup/README.md`. Mirrors the hermes CronJob (same bucket, retention style).
+- **ops-1** — the `local-model-router` config (Hermes brain endpoint
+  `http://100.82.241.121:8090/v1`). Its code `tools/local-models/route.py` is in git; only the
+  systemd unit is node-local — capture it out-of-band (see the ops-1 section of
+  `tools/backup/README.md`). A `ROUTER_KEY`, if set, is a secret → SOPS it, do not ship plaintext.
+
 ## Verification Schedule
 
 | Check | Frequency | Pass criteria |
@@ -58,6 +74,8 @@ Tune after actual storage size is known.
 | Local k3s snapshot list | daily/manual | recent snapshot listed |
 | S3 snapshot list | after S3 is configured, then weekly | recent snapshot listed in S3 |
 | k3s disposable restore | before claiming recovery readiness, then monthly | restored API answers |
+| build-1 knowledge backup list | weekly | recent `build1-knowledge-*.tar.gz` in R2 `knowledge/` |
+| build-1 knowledge restore | before relying on it, then quarterly | `PRAGMA integrity_check` = ok, `knowledge stats` sane |
 | Proxmox backup list | weekly | recent VM backups exist |
 | Proxmox clone restore | before relying on VM backups, then quarterly | restored clone boots and SSH works |
 

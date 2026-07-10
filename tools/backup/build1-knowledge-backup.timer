@@ -1,0 +1,13 @@
+[Unit]
+Description=Nightly build-1 knowledge system backup to R2
+
+[Timer]
+# 04:30 — after the knowledge nightly sync (03:30) and weekly curate (04:10), so the
+# backup captures the freshest post-sync state. Persistent catches a missed run after
+# the VM was off; the jitter avoids a thundering herd with the other nightly jobs.
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

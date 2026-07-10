@@ -1,0 +1,16 @@
+[Unit]
+Description=build-1 knowledge system backup to Cloudflare R2
+Documentation=https://github.com/PavelLizunov/unified-agent-platform/blob/master/tools/backup/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=uap
+# Operator sets the rclone R2 remote name here; it MUST exist in build-1's rclone.conf.
+# Optional overrides: R2_BUCKET, KEEP_DAYS, KN_HOME, KN_DB (see the script header).
+Environment=R2_REMOTE=r2
+ExecStart=/home/uap/knowledge/bin/build1-knowledge-backup.sh
+# Best-effort hardening; the script only reads state + ~/.config/rclone and writes to /tmp.
+Nice=10
+IOSchedulingClass=idle

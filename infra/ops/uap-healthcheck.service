@@ -1,0 +1,11 @@
+[Unit]
+Description=UAP platform healthcheck (backup freshness + brain router + egress + uap-system pods) -> Telegram alert
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# 0600 operator-created; NEVER committed. See runbooks/observability.md. `-` = don't fail if absent
+# (the script still runs; it just logs that it cannot alert).
+EnvironmentFile=-/etc/uap/healthcheck.env
+ExecStart=%h/bin/uap-healthcheck.sh
