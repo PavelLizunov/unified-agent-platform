@@ -11,11 +11,60 @@ clusters/staging-stage3/singbox-egress.yaml). No `direct` outbound is emitted, s
 misconfiguration can never exit clear from the RU origin IP.
 
 Usage: gen-singbox-failover.py <subscription.json> <out config.json>
+           [--against <deployed-config.json>] [--allow-sni-drift]
 Prints a SECRET-MASKED summary to stdout for review.
-"""
-import json, base64, sys, re, urllib.parse as up
 
-sub_path, out_path = sys.argv[1], sys.argv[2]
+SNI pre-flight gate (--against): diff the freshly-rendered servers against the
+CURRENTLY-DEPLOYED sing-box config (fetch it on ops-1 with
+`kubectl get secret singbox-egress-ha-config -n uap-system -o jsonpath='{.data.config\\.json}' | base64 -d`).
+A server whose REALITY/TLS `server_name` changed vs deployed is the 2026-07-09
+class that silently bricked subfleet — the gate FAILS CLOSED (exit 3) before
+writing output, so `set -e` stops the regen before sops/PR. Confirm a reviewed
+drift with --allow-sni-drift (or env ALLOW_SNI_DRIFT=1), mirroring the gateway's
+--allow-ssh-risk plan-before-apply ack. Servers are matched by (host, port), NOT
+display name: the subscription renames nodes, so name-matching would false-alarm.
+"""
+import json, base64, sys, re, os, urllib.parse as up
+
+
+def sni_index(outbounds):
+    """(server, port) -> (tag, server_name) for every vless outbound. Keyed by
+    host+port (stable server identity) so a renamed node isn't a false add/remove."""
+    return {
+        (o.get("server"), o.get("server_port")): (o.get("tag"), o.get("tls", {}).get("server_name"))
+        for o in outbounds
+        if o.get("type") == "vless"
+    }
+
+
+def mask_host(h):
+    """Show enough to identify the network, hide the exit. 104.194.156.93 -> 104.*.*.*"""
+    if not h:
+        return "?"
+    parts = h.split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return parts[0] + ".*.*.*"
+    return parts[0][:2] + "***." + parts[-1] if len(parts) > 1 else "***"
+
+
+# minimal flag parse (stdlib only): two positionals + optional gate flags/env.
+_args, _pos, against = sys.argv[1:], [], None
+ack = os.environ.get("ALLOW_SNI_DRIFT") == "1"
+_i = 0
+while _i < len(_args):
+    a = _args[_i]
+    if a == "--against":
+        _i += 1
+        against = _args[_i] if _i < len(_args) else sys.exit("--against needs a path")
+    elif a == "--allow-sni-drift":
+        ack = True
+    else:
+        _pos.append(a)
+    _i += 1
+if len(_pos) != 2:
+    sys.exit("usage: gen-singbox-failover.py <subscription.json> <out config.json> "
+             "[--against <deployed-config.json>] [--allow-sni-drift]")
+sub_path, out_path = _pos
 d = json.load(open(sub_path))
 raw = base64.b64decode(d["config"]).decode()
 uris = [u.strip() for u in raw.splitlines() if u.strip().startswith("vless://")]
@@ -80,6 +129,33 @@ config = {
     "outbounds": outbounds + [auto],   # NO `direct` outbound: every byte must exit via a VLESS tunnel
     "route": {"final": "auto"},
 }
+
+# SNI pre-flight gate: diff the freshly-rendered servers against the deployed
+# config. Fail closed (exit 3) on any SNI change / pool add / pool remove unless
+# the drift is acked -- the exact 2026-07-09 review-before-deploy that was missing.
+if against is not None:
+    dep = json.load(open(against))
+    new_idx, dep_idx = sni_index(config["outbounds"]), sni_index(dep.get("outbounds", []))
+    changed = [(t, mask_host(k[0]), dep_idx[k][1], sni)
+               for k, (t, sni) in new_idx.items() if k in dep_idx and dep_idx[k][1] != sni]
+    added = [(t, mask_host(k[0])) for k, (t, _) in new_idx.items() if k not in dep_idx]
+    removed = [(t, mask_host(k[0])) for k, (t, _) in dep_idx.items() if k not in new_idx]
+    print("=== SNI pre-flight vs deployed (host masked; SNI shown -- it is the signal) ===")
+    for t, h, old, new in changed:
+        print(f"  SNI DRIFT [{t} @ {h}]: {old} -> {new}")
+    for t, h in added:
+        print(f"  pool +added [{t} @ {h}]")
+    for t, h in removed:
+        print(f"  pool -removed [{t} @ {h}]")
+    print(f"  {len(new_idx) - len(changed) - len(added)} unchanged; "
+          f"{len(changed)} drifted, {len(added)} added, {len(removed)} removed")
+    if (changed or added or removed) and not ack:
+        print("SNI/pool DRIFT vs deployed config (see above). Review it, then re-run with "
+              "--allow-sni-drift (or ALLOW_SNI_DRIFT=1) to confirm and proceed.", file=sys.stderr)
+        sys.exit(3)
+    print("  CONFIRMED DRIFT (acked) -> proceeding" if (changed or added or removed)
+          else "  no drift vs deployed -> proceeding")
+
 json.dump(config, open(out_path, "w"), indent=2)
 
 # secret-masked review output
