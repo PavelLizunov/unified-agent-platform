@@ -125,6 +125,107 @@ The drill's read failure coincided with `k3s.service` failing to start cleanly, 
 **TODO before any DR claim:** re-run on a clean disposable node with a known **canary Secret**, restore from the R2
 snapshot + token only, and confirm the canary decrypts; only then state whether the separate encryption-config is
 required. An **in-place** restore on `uap-home-1` is unaffected (encryption-config already present).
+The exact verbatim procedure that settles this TODO is **Canary Secret-value restore drill** below.
+
+## Canary Secret-value restore drill (owner-gated, destructive-on-a-throwaway-node)
+
+**Purpose.** Prove that a Secret *value* (not just the Secret object) survives a cross-node restore from the R2
+snapshot, and **settle the standing TODO above**: observe whether the value decrypts with the snapshot + original
+server token **alone**, or whether a separate `encryption-config.json` is also required.
+
+**Owner-gated.** This is a destructive drill: it needs a **disposable k3s node the owner provisions**, and it
+touches prod (creates a throwaway Secret + takes a snapshot). Per repo boundaries (`CLAUDE.md` → "Things That Need
+Owner Input" → *any destructive test*), get explicit owner approval before running it. Nothing here should be run
+against a live server as a restore target — only against the disposable node.
+
+Run the prod-side steps from `uap-ops-1` (has `kubectl` + the R2 `rclone` remote). Reuse the **Restore on Disposable
+VM** and **S3 Restore Note** sections above for the actual `cluster-reset` restore mechanics — this drill only adds
+the canary Secret and the value read-back around them.
+
+### 0. Check whether secrets encryption at rest is even on
+
+This decides whether `encryption-config.json` is in scope at all.
+
+```bash
+# uap-home-1 — authoritative status + config + on-disk file
+ssh uap@100.106.223.120 'sudo k3s secrets-encrypt status || true'
+ssh uap@100.106.223.120 'grep -E "secrets-encryption|secrets-encrypt" /etc/rancher/k3s/config.yaml || echo "no secrets-encryption flag in config.yaml"'
+ssh uap@100.106.223.120 'sudo test -f /var/lib/rancher/k3s/server/cred/encryption-config.json && echo "encryption-config.json PRESENT" || echo "encryption-config.json absent"'
+```
+
+- **Encryption DISABLED** (status "Disabled", no flag, file absent): values are stored plaintext in etcd. The
+  restore in step 3 needs only snapshot + token; the read-back in step 4 will succeed with no encryption-config.
+  That itself answers the TODO for the current setup ("not required, because encryption is off").
+- **Encryption ENABLED** (status "Enabled", flag present, file present): proceed with the drill's core test —
+  restore with **only** snapshot + token (do **not** pre-place `encryption-config.json`) and see if the value still
+  decrypts (step 3/4).
+
+### 1. Create a throwaway canary Secret in prod with a known value
+
+```bash
+# uap-ops-1 — generate + RECORD this value locally (not committed); you compare against it in step 4
+CANARY_VALUE="dr-canary-$(date -u +%Y%m%dT%H%M%SZ)-$(head -c8 /dev/urandom | base64 | tr -dc 'a-z0-9')"
+echo "$CANARY_VALUE"                      # write it down / keep in the operator's temp notes
+kubectl create namespace dr-canary
+kubectl -n dr-canary create secret generic dr-canary --from-literal=value="$CANARY_VALUE"
+```
+
+The value is a throwaway random string, so recording it locally for the drill is fine; still do **not** commit it.
+
+### 2. Take an etcd snapshot to R2 (must be AFTER step 1 so it captures the canary)
+
+```bash
+# uap-home-1 — on-demand snapshot; prod config.yaml ships it to R2 (folder prod/)
+ssh uap@100.106.223.120 'SNAP=dr-canary-$(date -u +%Y%m%dT%H%M%SZ); sudo k3s etcd-snapshot save --name "$SNAP"; echo "$SNAP"'
+# uap-ops-1 — confirm it landed offsite; record the exact object name
+rclone ls r2:uap-k3s-snapshots/prod/ | grep dr-canary
+```
+
+Record the snapshot filename. Also stage the **original server token** exactly as in **Copy Snapshot and Token**
+above (`sudo cat /var/lib/rancher/k3s/server/token` → temp file outside git; delete after the drill).
+
+### 3. Restore on the CLEAN disposable node — snapshot + token ONLY
+
+On the disposable k3s node, run the **S3 Restore Note** `cluster-reset` command (restores directly from R2), passing
+the R2 flags + `--cluster-reset-restore-path=<the dr-canary snapshot>`, with the original token installed at
+`/var/lib/rancher/k3s/server/token`.
+
+**Do NOT pre-place `encryption-config.json`.** That omission is the whole point: it tests whether the snapshot's
+bootstrap data (protected by the token) already carries the encryption keys.
+
+### 4. Read back the canary VALUE and compare
+
+```bash
+# disposable node, after k3s comes up
+sudo k3s kubectl -n dr-canary get secret dr-canary -o jsonpath='{.data.value}' | base64 -d; echo
+```
+
+Interpretation (this is what settles the TODO):
+
+- Output **equals the recorded `CANARY_VALUE`** → snapshot + token **alone** suffice; a separate
+  `encryption-config.json` is **NOT** required. Update the caveat above to state this.
+- Output is `identity transformer tried to read encrypted data` (or similar decrypt error) → the separate
+  `encryption-config.json` **IS** required. Re-run: fetch `k3s-encryption-config.json.age` from R2 `dr/` (see
+  **Bootstrap Materials Offsite** below), age-decrypt it, install it at
+  `/var/lib/rancher/k3s/server/cred/encryption-config.json`, then repeat the `cluster-reset` restore and confirm the
+  value now matches.
+
+**Pass criterion:** the read-back value byte-for-byte matches the recorded `CANARY_VALUE` (in whichever of the two
+configurations turns out to be required). Record which one it was.
+
+### 5. Tear down
+
+```bash
+# uap-ops-1 — remove the prod canary
+kubectl delete namespace dr-canary
+# uap-ops-1 — optional: drop the throwaway snapshot so it is not mistaken for a routine backup
+#   rclone delete r2:uap-k3s-snapshots/prod/<the dr-canary snapshot>
+# operator machine — shred the staged token and the recorded canary value
+shred -u ./tmp/server-token 2>/dev/null || rm -f ./tmp/server-token
+```
+
+Destroy the disposable node or wipe `/var/lib/rancher/k3s` (per **Cleanup** above). Do not join it to the real
+cluster.
 
 ## Bootstrap Materials Offsite (R2 `dr/`)
 
