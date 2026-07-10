@@ -1,7 +1,10 @@
 # GOAL — Adopt `vpnrouter-gateway` as UAP's managed VLESS egress
 
 Date: 2026-07-09
-Status: research draft for staged execution. No secrets/subscription tokens stored here.
+Status: **Phase 0 COMPLETE (2026-07-10)** — repo read in full + read-only pilot run live against the real
+ninitux subscription on build-1. Decision gate answered: **Level 1 not feasible as-is, Level 2 is a topology
+mismatch; a read-only "Level 0" pre-flight is the real low-risk win.** Full evidence + verdict in §10. No
+secrets/subscription tokens stored here.
 Scope: evaluate + pilot the owner's own `vpnrouter-gateway` (github.com/PavelLizunov/vpnrouter-gateway) as a
 replacement for UAP's hand-managed in-cluster sing-box egress, with a dual benefit — better egress ops for the
 platform AND real-world dogfooding of the product on always-on infra under RU-DPI.
@@ -148,3 +151,67 @@ dogfood synergy), directly solves demonstrated ops pain.
   HTTP-proxy `:12080` reachable through it.
 - Phase 2: egress config changes are previewed + validated (no more blind SOPS edits / corrupted-transport class).
 - Phase 3: live egress on the host gateway, N days green, in-cluster egress retired.
+
+## 10. Phase 0 — RESULTS + decision gate (2026-07-10)
+
+Method: cloned `vpnrouter-gateway` @ `5dad591` (public), read every source file, then built it on **build-1**
+(Ubuntu 22.04, cargo 1.96.1) and ran the **read-only** commands live against the **real ninitux subscription**
+(`resolve-subscription`, `plan`, `doctor`, `explain`, broken-config gate). `cargo test` = **45/45 pass**. No
+`apply` was run (build-1 is load-bearing; `apply` mutates nftables + creates a TUN — owner-gated). All secret
+redaction held (subscription URL → `https://ninitux.com/…`, uuid/short_id → `***`).
+
+### §4 answered (code + live evidence)
+
+| # | Question | Verdict | Evidence |
+|---|----------|---------|----------|
+| 4.1 | HTTP/`mixed` inbound on `:12080`? | **NO — `tun` only** | Render hardcodes `{"type":"tun",…}` (`src/render.rs:74`, golden `tests/golden/sing-box.json:19`); architecture doc commits "TUN inbound stack:system" as a design contract (`docs/gateway-architecture.md:95`). No mixed/http/socks inbound in schema, code, or roadmap. |
+| 4.2 | Single-pinned outbound? | **YES** | `subscription.active` selects ONE outbound → retagged `vpn-out` → `route.final`. Live: pinned "Germany VLESS" → one reality outbound, `server_name` = the live SNI (**`yahoo.com` — the exact 2026-07-09 drift value**). |
+| 4.3 | `urltest` failover? | **NO** | Render emits only the one selected outbound + `direct`; no urltest/selector group. Explicitly deferred (`pinned_outbound`/`no_failover` — `docs/gateway-architecture.md:182,293,349`, `gateway-mvp.md:260`). |
+| 4.4 | Guarantee **no `direct`** outbound? | **NO — always emits `direct`** | `{"type":"direct","tag":"direct"}` always present; private-IP + management + direct-policies (+ split final) route to it (`src/render.rs:40,108`; golden `:51`). It's a LAN gateway — a direct path is intrinsic. Opposite of our no-leak invariant. |
+| 4.5 | Ninitux subscription ingestion? | **YES (vless) — parity + better surfacing** | Live: JSON-wrapper `{"config":base64}` → base64 `vless://` list → REALITY(pbk/sid/sni/fp)+flow+ws/grpc all parsed. **7 vless resolved; 6 hy2/naive SKIPPED and surfaced** as `skipped_unsupported` (our `gen-singbox-failover.py` also does vless-only, but drops the rest *silently*). |
+| 4.6 | Secret handling? | **Plaintext file, not SOPS** | URL in `/etc/vpnrouter/gateway.toml` (root 0600); resolved uuid cached in `/var/lib/vpnrouter` (root-only). Redacted in all output. For UAP the gateway.toml itself would need SOPS-encrypting — a different model than our SOPS Secret. |
+| 4.7 | Stable strict-JSON contract? | **YES** | One JSON envelope/command, `v:1`, stable machine `code`s, `ok`/`data`\|`code`/`message`/`safe_to_retry`. Drivable from a pipeline or a Hermes tool. |
+
+Live safety features observed: `plan` fired **`SSH_MAY_DROP`** against my own SSH client (100.114.172.40, not in
+`[management]`, routing.mode=full) — the SSH-guard works. `doctor` correctly flagged `ip_forward=0` and a missing
+LAN interface. Broken `active` → `ACTIVE_OUTBOUND_NOT_FOUND` (`ok:false`) listing valid names. A bad config
+refuses loudly; it cannot silently brick. Those invariants are real.
+
+### Decision gate
+
+- **Level 1 (config tooling only): NOT FEASIBLE as-is.** Hard blocker = §4.1: the render is a **TUN L3 gateway
+  config**, but **every** UAP egress consumer is a pure **HTTP CONNECT proxy** (`HTTPS_PROXY=…:12080` — verified
+  across `hermes-agent-config.yaml:84`, `hermes-agent.yaml:133,161`, build-1 NodePort `:30880`). A hardened
+  egress pod (drops ALL caps, no `/dev/net/tun`) can't even run a TUN config, and nothing would listen on `:12080`.
+  Compounded by §4.3 (no urltest → cannot reproduce `singbox-egress-ha`) and §4.4 (always emits `direct` → breaks
+  our no-RU-leak invariant). The render is **not** a drop-in for `gen-singbox-failover.py`.
+- **Level 2 (host gateway): topology mismatch, not just "higher risk".** The tool is a LAN L3/TUN/NAT gateway; UAP
+  consumers are **k8s pods egressing via HTTP proxy**, not LAN hosts behind the gateway's LAN NIC. Pointing the
+  cluster at an L3 host gateway means changing pod egress from `HTTPS_PROXY` to a routed default-route-through-a-box
+  — which pod networking doesn't do for an external LAN gateway. Out of scope for UAP's egress shape.
+- **Level 0 (NEW — the real low-risk win): read-only subscription pre-flight in front of the UNCHANGED pipeline.**
+  `resolve-subscription` fetches the live sub, lists resolvable vs skipped nodes, and surfaces the **current
+  per-server REALITY SNI** — which would have made the 2026-07-09 `microsoft.com→yahoo.com` drift *visible before*
+  it bricked subfleet. Zero infra change; it reads, it never writes our egress. This targets the exact pain the
+  goal opened with, without re-architecting anything load-bearing.
+
+### Recommendation (owner decision)
+
+The 2026-07-09 incident had three root causes: (a) no preview/diff of the config change, (b) SOPS base64 hand-
+corruption, (c) SNI drift was invisible until connections reset. `vpnrouter-gateway`'s render/runtime **cannot**
+drive our proxy egress (§4.1/4.3/4.4), so Levels 1–2 as framed are no-go. Two honest paths for (a)+(c) — (b) is a
+SOPS-transport problem orthogonal to either tool:
+
+1. **Dogfood Level 0:** run `vpnrouter-gateway resolve-subscription` (read-only) as a pre-flight/doctor before every
+   `singbox-egress-ha` regen. Real product dogfood; pulls in the Rust binary on ops-1.
+2. **Dependency-free:** teach `gen-singbox-failover.py` to print a masked per-server SNI/host pre-flight and diff it
+   against the currently-deployed secret. It already decodes every vless URI — this is ~15 lines, no new binary,
+   and solves (c) directly (ponytail rung 2: the data is already in hand).
+
+If the owner wants to make the product itself adoptable (Level 1), the concrete upstream changes are: a `mixed`
+inbound mode in `gateway.toml`, an optional `urltest` failover group over all resolved outbounds (the deferred
+`no_failover`), and a proxy mode that omits the `direct` outbound + nft NAT. With those three the tool could render
+BOTH our Services — a real dogfood roadmap, but net-new work on the product, not an ops adoption.
+
+**Exit gate met:** §4 fully answered with live evidence; Level 1 = no-go, Level 2 = out-of-scope, Level 0 = viable.
+Phases 1–3 as written are superseded by the Level 0 / dependency-free choice above — both are owner-gated (§8).
