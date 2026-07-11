@@ -17,6 +17,7 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 
 | Ref | Item | Note |
 |---|---|---|
+| #12 | **Execute the Hermes development-readiness GOAL** (`runbooks/hermes-development-readiness-goal.md`) | Read-only baseline first; repo writes, live failures and destructive tests remain owner-gated. |
 | #9 | **Execute the documented canary cross-node restore drill** — create a canary Secret on prod, snapshot, restore on a disposable node from R2 with snapshot + token only, confirm the value decrypts | Procedure landed in `runbooks/restore-drill.md` (#117), but the live drill still needs an owner-approved window. |
 | #11 | **kubeconfig `0644`->`0600` + tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | LIVE change on the single control-plane node + k3s restart + firewall = lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
 | #10 | **R2 lifecycle rule** for manual/on-demand snapshots (retention) | Blocked on #1 (do after the scoped token exists). |
