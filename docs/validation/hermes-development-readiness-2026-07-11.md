@@ -158,6 +158,34 @@ Required contract PRs, after the owner opens an external-write window:
 3. `suflyor`: reconcile `CONTRIBUTING.md` to the three-crate CI, canonical secret path and owner-only release rule.
 4. All four non-UAP pilots: enable default-branch enforcement before any autonomous write-cycle.
 
+#### Prepared locally; not pushed
+
+The three documentation fixes are already isolated as clean local commits on build-1. No remote branch exists:
+
+| Repository | Worktree | Local commit | Prepared change | Verification |
+|---|---|---|---|---|
+| `vpnctl` | `/home/uap/readiness-worktrees/vpnctl` | `85f4ed1` | new concise root `AGENTS.md` with build/test/target/secret/PR/deploy contract | `git diff --check`; required fields present; product gate NOT RUN (doc-only, no owner window) |
+| `VPNRouter` | `/home/uap/readiness-worktrees/VPNRouter` | `da50ff8` | branch -> PR -> CI replaces direct-main/autonomous-release and contradictory remote rules | `git diff --check`; readiness semantic checker PASS; platform gates NOT RUN |
+| `suflyor` | `/home/uap/readiness-worktrees/suflyor` | `7717986` | `CONTRIBUTING.md` aligned to three-crate CI, secret path and owner-only release | `git diff --check`; readiness semantic checker PASS; Windows gate NOT RUN |
+
+`vpnrouter-gateway` needs no instruction patch from this pass: its root contract is coherent and already owner-gates
+push/release. It still needs branch enforcement and a clean build-1 rerun.
+
+#### Proposed required checks for owner-window rulesets
+
+Use the same rule shape as UAP (`pull_request`, strict required checks, `non_fast_forward`, `deletion`, no bypass).
+The current workflow job contexts at the audited green default-branch SHAs are:
+
+| Repository | Required check contexts |
+|---|---|
+| `VPNRouter` | `test`, `grep` |
+| `vpnctl` | `cargo check`, `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo deny`, `gitleaks`, `e2e (testcontainers — Docker required)` |
+| `vpnrouter-gateway` | `gate`, `audit` |
+| `suflyor` | `gate`, `gitleaks`, `cargo-deny (overlay-backend)`, `cargo-deny (slint-experiment)`, `cargo-deny (suflyor-tts)` |
+
+Soft-fail/advisory jobs are intentionally not required. Re-read workflow job names immediately before creating each
+ruleset; a renamed context otherwise deadlocks every PR.
+
 ### Pilot default-branch enforcement
 
 | Repository | Default branch | Active repository ruleset | Baseline |
