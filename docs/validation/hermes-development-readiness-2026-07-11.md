@@ -23,7 +23,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 | M3 deterministic routing | **PARTIAL** | ops -> home-1/home-2/build-1 works; build-1 -> Debian works; Windows WinRM port is reachable; build-1 -> Mac stops at host-key verification; N>=3 behavioral routing not run |
 | M4 worktree isolation | **NOT RUN** | Existing historical evidence is not a new M4 run across five pilot repositories |
 | M5 tests/honesty | **NOT RUN** | Historical UAP acceptance exists; per-repo independent rerun + mutation evidence not collected |
-| M6 Git/PR/CI | **PARTIAL** | UAP `protect-master` and `static-checks` are enforced; pilot-repo branch protection and write-cycle not verified |
+| M6 Git/PR/CI | **FAIL** | Only UAP has an active default-branch ruleset; VPNRouter, vpnctl, vpnrouter-gateway and suflyor have none, so direct default-branch pushes are not mechanically blocked |
 | M7 prompt integrity | **FAIL** | Managed documentation claims `model.model` owns the brain, but v0.18 runtime uses `model.default`; full precedence/duplication audit pending |
 | M8 injection/secrets | **PARTIAL** | Historical UAP injection tests exist; current five-repo N>=3 corpus and output-redaction check not run |
 | M9 interface agreement | **FAIL** | Dashboard/status and TUI banner disagree on effective model; session resume/reconnect not tested |
@@ -90,12 +90,35 @@ The build-1 host-key failure is an actual readiness gap for Mac/Android target t
 |---|---:|---|---|
 | `unified-agent-platform@fca5122` | yes | `AGENTS.md`, `CLAUDE.md`, CI, validation/runbook indexes | available; current goal is its missing acceptance layer |
 | `VPNRouter@c45e385` | no | `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, many platform workflows | rich contract; target-command reconciliation pending |
-| `vpnctl@f37c134` | yes | `CLAUDE.md`, `README.md`, `justfile`, CI; **no `AGENTS.md`** | contract gap for Codex/Hermes onboarding |
+| `vpnctl@f37c134` | yes, but stale/dirty | `CLAUDE.md`, `README.md`, `justfile`, CI; **no `AGENTS.md`** | build-1 clone is at `33b823f`, has leftover untracked markers, and lacks the `just` command required by its documented local gate |
 | `vpnrouter-gateway@b595647` | no | `AGENTS.md`, `CLAUDE.md`, Cargo, CI | contract available; commands not independently rerun |
 | `suflyor@8f8e11c` | no | `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, Windows CI | contract available; Windows-only target route not exercised |
 
 Cloning missing pilot repos and all write tests are deferred until the owner-approved pilot phase. GitHub tree/API
 inspection was read-only.
+
+### Pilot default-branch enforcement
+
+| Repository | Default branch | Active repository ruleset | Baseline |
+|---|---|---|---|
+| `unified-agent-platform` | `master` | `protect-master` | PASS |
+| `VPNRouter` | `main` | none | FAIL |
+| `vpnctl` | `main` | none | FAIL |
+| `vpnrouter-gateway` | `main` | none | FAIL |
+| `suflyor` | `master` | none | FAIL |
+
+CI workflows existing in a repository do not make them mandatory. M6 remains FAIL until each maintained pilot
+default branch rejects a direct push and requires its relevant checks through a ruleset/branch protection policy.
+
+### vpnctl read-only canary
+
+- GitHub `main`: `f37c1345e0b82c9a3b3d792432a1d1eefb02a5ea`; five latest CI runs succeeded.
+- build-1 clone: `33b823f7bcbc1474d8294fe9cbc662bbefae8e9d`; branch `main`.
+- Worktree contains untracked `marker_a.txt` and `marker_b.txt` from historical concurrency testing.
+- `/usr/local/bin/cargo` and `rustc` symlinks exist; `just` is not installed.
+- Canonical commands are mechanically present in `justfile` and CI: check, fmt-check, clippy `-D warnings`,
+  workspace tests, cargo-deny, gitleaks and Docker-backed ignored SSH e2e tests.
+- No build/test was run because syncing/cleaning the stale clone and generating `target/` are outside Phase 0 read-only.
 
 ## GitHub repository inventory
 
@@ -158,3 +181,4 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 3. Start `vpnctl` read-only repo-contract reconciliation using its existing build-1 clone.
 4. Start desktop offload and run quote-gated extraction over the five repo contracts.
 5. Ask the owner to classify the 16 nonarchived nonpilot repositories before expansion.
+6. Owner action: enable default-branch rulesets on the four non-UAP pilot repositories before any autonomous write-cycle.
