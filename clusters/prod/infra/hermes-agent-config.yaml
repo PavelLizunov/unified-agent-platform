@@ -69,6 +69,19 @@ data:
       # Hermes v0.18 canonical model-id leaf. Do not use the legacy `model` alias:
       # an existing PVC `model.default` wins over it and silently bypasses GitOps.
       default: gpt-5.5
+    # Circuit-breaker for repeated tool failures/no-progress. Managed because a
+    # dashboard edit must not silently disable the safety boundary.
+    tool_loop_guardrails:
+      warnings_enabled: true
+      hard_stop_enabled: true
+      warn_after:
+        exact_failure: 2
+        same_tool_failure: 3
+        idempotent_no_progress: 2
+      hard_stop_after:
+        exact_failure: 5
+        same_tool_failure: 8
+        idempotent_no_progress: 5
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram

@@ -12,6 +12,7 @@ configmap = yaml.safe_load(
 )
 managed = yaml.safe_load(configmap["data"]["managed-config"])
 model = managed["model"]
+guardrails = managed["tool_loop_guardrails"]
 user_profile = configmap["data"]["user-profile"]
 agents = configmap["data"]["agents-md"]
 profile_migration = configmap["data"]["profile-migrate.py"]
@@ -19,6 +20,18 @@ profile_migration = configmap["data"]["profile-migrate.py"]
 assert model.get("provider"), "managed brain must pin model.provider"
 assert model.get("default"), "Hermes v0.18 managed brain must pin model.default"
 assert "model" not in model and "name" not in model, "legacy model-id aliases must not be used"
+assert guardrails["warnings_enabled"] is True
+assert guardrails["hard_stop_enabled"] is True
+assert guardrails["warn_after"] == {
+    "exact_failure": 2,
+    "same_tool_failure": 3,
+    "idempotent_no_progress": 2,
+}
+assert guardrails["hard_stop_after"] == {
+    "exact_failure": 5,
+    "same_tool_failure": 8,
+    "idempotent_no_progress": 5,
+}
 
 deployment = (ROOT / "clusters/prod/infra/hermes-agent.yaml").read_text(encoding="utf-8")
 assert '("provider","default")' in deployment, "bootstrap guard must require provider + default"
