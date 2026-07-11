@@ -69,6 +69,15 @@ def guardrail_verdict(config: dict) -> tuple[bool, str]:
     )
 
 
+def exec_failure_classifier_verdict(output: str) -> tuple[bool, str]:
+    try:
+        data = json.loads(output.splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return False, "exec_command failure-classifier probe did not return JSON"
+    failed = data.get("failed") is True
+    return failed, f"exec_command_[exit_1]_classified_failed={failed}"
+
+
 def contract_verdict(paths: set[str]) -> tuple[bool, str]:
     workflows = any(path.startswith(".github/workflows/") for path in paths)
     build_files = {
@@ -171,6 +180,19 @@ def check_runtime(rows: list[dict]) -> None:
     except (KeyError, UnboundLocalError):
         guard_ok, guard_detail = False, "managed guardrail probe unavailable"
     emit(rows, "M11", "runtime.tool_loop_guardrails", rc == 0 and guard_ok, guard_detail)
+
+    failure_probe = (
+        "import json;"
+        "from agent.tool_guardrails import classify_tool_failure;"
+        "failed,reason=classify_tool_failure('exec_command','[exit 1]\\n');"
+        "print(json.dumps({'failed':failed,'reason':reason}))"
+    )
+    rc3, failure_out = command(
+        ["kubectl", "-n", "uap-system", "exec", "deploy/hermes-agent", "--",
+         "/opt/hermes/.venv/bin/python", "-c", failure_probe]
+    )
+    classifier_ok, classifier_detail = exec_failure_classifier_verdict(failure_out)
+    emit(rows, "M11", "runtime.exec_failure_classification", rc3 == 0 and classifier_ok, classifier_detail)
 
 
 def check_dashboard(rows: list[dict]) -> None:

@@ -26,6 +26,8 @@ assert readiness.guardrail_verdict({
     "hard_stop_after": {"exact_failure": 5, "same_tool_failure": 8, "idempotent_no_progress": 5},
 })[0]
 assert not readiness.guardrail_verdict({"warnings_enabled": True, "hard_stop_enabled": False})[0]
+assert readiness.exec_failure_classifier_verdict('{"failed": true, "reason": " [exit 1]"}')[0]
+assert not readiness.exec_failure_classifier_verdict('{"failed": false, "reason": ""}')[0]
 assert "value" not in readiness.safe("Authorization: value")
 assert readiness.contract_verdict({"AGENTS.md", "Cargo.toml", ".github/workflows/ci.yml"})[0]
 assert not readiness.contract_verdict({"README.md", "Cargo.toml", ".github/workflows/ci.yml"})[0]
