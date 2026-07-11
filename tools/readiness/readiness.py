@@ -54,6 +54,21 @@ def model_verdict(managed: dict, user: dict, status_model: str) -> tuple[bool, s
     return ok, f"managed_default={expected!r} user_default={(user.get('model') or {}).get('default')!r} status={status_model!r} aliases={aliases}"
 
 
+def guardrail_verdict(config: dict) -> tuple[bool, str]:
+    expected_warn = {"exact_failure": 2, "same_tool_failure": 3, "idempotent_no_progress": 2}
+    expected_stop = {"exact_failure": 5, "same_tool_failure": 8, "idempotent_no_progress": 5}
+    ok = (
+        config.get("warnings_enabled") is True
+        and config.get("hard_stop_enabled") is True
+        and config.get("warn_after") == expected_warn
+        and config.get("hard_stop_after") == expected_stop
+    )
+    return ok, (
+        f"warnings={config.get('warnings_enabled')!r} hard_stop={config.get('hard_stop_enabled')!r} "
+        f"warn_after={config.get('warn_after')!r} hard_stop_after={config.get('hard_stop_after')!r}"
+    )
+
+
 def contract_verdict(paths: set[str]) -> tuple[bool, str]:
     workflows = any(path.startswith(".github/workflows/") for path in paths)
     build_files = {
@@ -136,7 +151,7 @@ def check_runtime(rows: list[dict]) -> None:
         "import json,yaml;"
         "m=yaml.safe_load(open('/etc/hermes/config.yaml')) or {};"
         "u=yaml.safe_load(open('/opt/data/config.yaml')) or {};"
-        "print(json.dumps({'managed':{'model':m.get('model',{})},'user':{'model':u.get('model',{})}}))"
+        "print(json.dumps({'managed':{'model':m.get('model',{}),'guardrails':m.get('tool_loop_guardrails',{})},'user':{'model':u.get('model',{})}}))"
     )
     rc, out = command(
         ["kubectl", "-n", "uap-system", "exec", "deploy/hermes-agent", "--", "/opt/hermes/.venv/bin/python", "-c", probe]
@@ -151,6 +166,11 @@ def check_runtime(rows: list[dict]) -> None:
     except (json.JSONDecodeError, KeyError, IndexError):
         ok, detail = False, f"model probe parse failed; status_model={match.group(1) if match else ''!r}"
     emit(rows, "M1", "runtime.effective_model", rc == 0 and rc2 == 0 and ok, detail)
+    try:
+        guard_ok, guard_detail = guardrail_verdict(configs["managed"]["guardrails"])
+    except (KeyError, UnboundLocalError):
+        guard_ok, guard_detail = False, "managed guardrail probe unavailable"
+    emit(rows, "M11", "runtime.tool_loop_guardrails", rc == 0 and guard_ok, guard_detail)
 
 
 def check_dashboard(rows: list[dict]) -> None:
@@ -244,6 +264,12 @@ def main() -> int:
     if args.self_check:
         assert model_verdict({"model": {"provider": "x", "default": "m"}}, {"model": {"default": "old"}}, "m")[0]
         assert not model_verdict({"model": {"provider": "x", "model": "m"}}, {"model": {"default": "old"}}, "old")[0]
+        assert guardrail_verdict({
+            "warnings_enabled": True,
+            "hard_stop_enabled": True,
+            "warn_after": {"exact_failure": 2, "same_tool_failure": 3, "idempotent_no_progress": 2},
+            "hard_stop_after": {"exact_failure": 5, "same_tool_failure": 8, "idempotent_no_progress": 5},
+        })[0]
         assert "topsecret" not in safe("token=topsecret")
         print("readiness-self-check-ok")
         return 0

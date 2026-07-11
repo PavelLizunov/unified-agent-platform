@@ -16,6 +16,28 @@ UAP rebind target for every model reference below:
   `ornith-9b` always-on-mac) as the manual fallback/local coding tier.
 Never rebind to her Codex/Nous/Ollama endpoints.
 
+## 2026-07-11 repository cross-check
+
+The original list came from a live-node snapshot. A second read-only pass checked the sanitized private
+repository `PavelLizunov/hermes-nastya@b8bb2f3` so documentation claims are not mistaken for working mechanisms.
+Secret scan passed; all 8 Python files compile and all 14 YAML files parse. The collector redaction functions
+mask representative Telegram/OpenAI/password values, and the `suflyor` manifest exactly matches its nine tool
+schemas. However, the repository has no CI, no test files, no PR history and only one snapshot commit.
+
+Material corrections:
+
+- **Profile ports are a rule, not an implementation.** None of the tracked profile configs sets
+  `platforms.api_server.port`, despite the docs claiming distinct `8642..8651` ports.
+- **The three-tier fallback is aspirational.** Root config has one Nous free-tier placeholder fallback; the
+  documented local Ollama tier is absent. Seven profiles select `gpt-5.6-sol`/`gpt-5.6-luna` while their local
+  `providers.openai-codex.models` lists only `gpt-5.5`/`gpt-5.4-mini`.
+- **Safety defaults remain weak.** `hard_stop_enabled: false` and `pre_update_backup: false` are current config,
+  not historical notes.
+- **Profile configs are full copies, not minimal overrides.** That duplication is the root of model/provider
+  drift and should not be copied into UAP.
+- The digest/chatlog code has useful redaction ordering and timestamp logic, but still hardcodes a personal
+  Windows/OneDrive path and writes sensitive conversational material. Reuse the mechanics only.
+
 ---
 
 ## ADOPT
@@ -150,6 +172,17 @@ Never rebind to her Codex/Nous/Ollama endpoints.
   a UTF-8 digest file, keep stdout ASCII-only, print the date used, parse in-record timestamps
   rather than mtimes. Schedule via Hermes cron or a systemd timer on build-1/ops-1.
 
+### 9. Computer-use action evidence contract (not the JetKVM feature)
+- **WHAT** - the `jetkvm_visible` implementation separates raw machine results from user-facing formatting,
+  returns structured `ok/error/blocker` state, bounds unlock attempts, captures after state-changing actions,
+  and tells the caller to stop rather than retry silently when a blocker remains.
+- **WHY** - this is useful for VPNRouter Windows/UI verification: a screenshot or click is not a PASS unless the
+  post-action state is captured and classified. It also supplies the missing evidence shape for M3/M9/M11.
+- **HOW (UAP)** - rebuild only a generic target-action envelope for approved test VMs:
+  `action`, `target`, `attempt`, `before_artifact`, `after_artifact`, `observed_state`, `blocker`, `verdict`.
+  Keep retries bounded and require a post-action artifact. Do not copy JetKVM URLs, Outlook flows, unlock macros,
+  proportional coordinates, corporate markers or the 1,152-line plugin.
+
 ---
 
 ## REJECT (do NOT harvest)
@@ -163,6 +196,8 @@ Never rebind to her Codex/Nous/Ollama endpoints.
 | **`hermes-achievements` gamification plugin** | Achievement/gamification layer. Noise for a vibe-coding platform. |
 | **Cleartext-secrets posture** (Telegram/OAuth tokens in `.env` + pasted into chat + FTS-indexed in state.db; `API_SERVER_KEY` reused everywhere) | Direct violation of UAP's no-committed-secrets + SOPS rules. Reference by location only; never replicate. |
 | **`HERMES_YOLO_MODE=1` + `HERMES_IGNORE_RULES=1`** | Unattended, unsandboxed shell/code-exec on a Telegram-reachable host. The opposite of UAP's deny-first, human-in-the-loop, gated posture. Never adopt. |
+| **Full root-config copies per profile** | Seven tracked profiles already drift between selected model and provider registry, while none implements the documented unique API port. Use minimal profile overrides plus a deterministic schema/drift check. |
+| **Conversation/desktop scraping as shared memory** | Even with regex redaction, generated chatlogs contain personal and project context and may preserve unknown secret shapes or prompt injection. UAP knowledge must stay source-scoped and explicitly curated. |
 
 ---
 
