@@ -6,7 +6,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `da5384da40b216e7c4046dfd32c0c76690cf9cd1` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `02be0b2848ddb6cbd2d86ad697d0ed70206e4887` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -63,6 +63,12 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
   and returned `WINBRAT`, `winbrat\\tester`, Windows `10.0.17763` and `WinRM=Running`. A controlled remote
   failure surfaced as a non-zero result. This closes command execution only; package install and GUI UAT remain
   separate because the WinRM account has a filtered non-elevated UAC token and no interactive desktop.
+- All Windows execution above targeted the separate `windows-brat` VM (`100.115.182.0`), never the owner's
+  `desktop-m922ij2` workstation (`100.114.172.40`). The owner workstation and Qwen are deny-by-default: even a
+  health check requires a new approval naming the specific agent and action.
+- On `windows-brat`, the installed VPNRouter GUI was observed and CLI status/doctor/profile dry-run completed.
+  A live tunnel start was not proven; rollback left the VPN stopped and relaunched the GUI. Package/live UAT is
+  therefore still incomplete, and no further VPNRouter product debugging belongs to the Hermes readiness route.
 
 The post-fix deterministic runner at `da5384d` emits 28 records: **28 PASS / 0 FAIL**. M3 cluster-read behavioral
 routing, M9 dashboard auth and M11 loop control are green. The broader migration verdict remains **NOT READY**
@@ -321,5 +327,5 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 
 1. In separate owner windows, run clean-browser/Telegram UAT, Windows target execution and M10 recovery gates.
 2. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots.
-3. Classify the 16 nonarchived nonpilot repositories before expanding the default Germes workflow.
+3. Classify the 16 nonarchived nonpilot repositories before expanding the default Hermes workflow.
 4. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.

@@ -11,25 +11,26 @@
 | **ВОРКЕР** | `uap-home-2` | 6c/8GB (VM, pve-ninitux3) | да | **Hermes-агент** (Codex brain, лимит 4Gi), subfleet-мост, бэкапы | `100.94.228.67` |
 | **ОПЕРАТОР** | `uap-ops-1` | 2c/2GB (VM) | да | git-push + gh + kubectl, **fallback-роутер моделей**, SOPS | `100.82.241.121` |
 | **СТРОЙКА** | `uap-build-1` | 8c/16GB (VM, pve-ninitux3, **Ubuntu 22.04**, LAN `192.168.0.99`) | да | UAP-сборки (cargo/make), кодинг, репо-работа, тяжёлый compute | `100.85.56.31` |
-| **GPU** ×2 роли | `desktop-m922ij2` | RTX 5060 Ti 16GB, Win | **НЕТ** | **Qwen-35B** - локальный fallback brain | `100.114.172.40` |
+| **OWNER WORKSTATION** | `desktop-m922ij2` | RTX 5060 Ti 16GB, Win | **НЕТ** | рабочая машина владельца; Qwen только по адресному разрешению | `100.114.172.40` |
 | **МАК** ×2 роли | `pavels-mac-mini` (`mm4.local`) | M4/16GB | да | **Ornith-9B** (кодер / запасной мозг) | `100.116.97.112` |
 
 ## Разработка приложения VPNRouter (тест-стенд)
 
 | Роль | Хост | Железо | Питание | Что держит | Доступ |
 |---|---|---|---|---|---|
-| **DEV BOX** ×2 роли | `desktop-m922ij2` | это ЖЕ GPU-машина, Win | по вкл. | код `C:\Project\VPNRouter`, сборка, тулинг `C:\vmsetup\`, DPAPI-креды | локально |
+| **OWNER DEV BOX** | `desktop-m922ij2` | рабочая Windows владельца | по вкл. | код и локальный owner-tooling; **не Hermes target** | только владелец |
 | **windows-brat** | Proxmox VMID **100**, pve-ninitux | Win10 LTSC 2019 | по вкл. | ГЛАВНЫЙ таргет: packaged-app + live + UI-verify | **tailnet `100.115.182.0`**, RDP 3389 / WinRM 5985, LAN `192.168.0.106` |
 | **debian-xfce** | Proxmox VMID **101**, pve-ninitux | Debian 12 + XFCE | по вкл. | Linux (.deb) таргет, guest-agent есть | **tailnet `100.81.162.66`** (через VLESS-прокси, см. ниже), pve-guest-exec / ssh (ключ `C:\vmsetup\testvm_key`), LAN `192.168.0.100` |
 | **МАК** ×2 роли | `mm4.local` (= UAP МАК) | M4/16GB | да | DMG-билды (`build-mac.sh`), + **Android** по USB (`adb` serial 54499112209) | ssh `slovn@100.116.97.112` (⚠ `zsh -lc`, не `bash -lc`) |
 
-Потоки VPNRouter: **DEV BOX** (код/сборка Win+Linux пакетов) → **МАК** (DMG-билд + Android) → билды тянутся
-внутрь **windows-brat / debian-xfce** (VM сами PULL'ят ZIP из GitHub-релиза) → UI-verify там. Все тесты —
-ТОЛЬКО на тест-VM, НИКОГДА на dev box.
+Потоки VPNRouter: owner DEV BOX может готовить код/сборки вручную; Hermes ведёт repo-работу через build-1 и
+назначенные targets. Билды тянутся внутрь **windows-brat / debian-xfce** → UI-verify там. Все Windows/Linux
+live/UI-тесты — ТОЛЬКО на тест-VM, НИКОГДА на owner workstation.
 
 ## Общее железо (double-duty — вот что «дублировалось»)
-- **GPU-десктоп `desktop-m922ij2`**: UAP `Qwen-35B` (fallback brain) **И** VPNRouter dev box (код + сборка + тулинг) **И**
-  Claude Code. Одна физическая машина, три шляпы. Не always-on.
+- **Owner workstation `desktop-m922ij2`**: рабочая Windows владельца с Qwen и локальным dev-tooling. Она не входит
+  в доступный Hermes fleet. Даже Qwen health-check/call требует нового разрешения для конкретного агента и действия;
+  общее owner-window разрешение не подходит.
 - **МАК `mm4.local` / `pavels-mac-mini` (`100.116.97.112`)**: UAP `Ornith-9B` **И** VPNRouter DMG-билд + Android-хост.
   Одна машина.
 
@@ -60,7 +61,7 @@
 ## Почему так разнесено (логика UAP)
 1. **Критичность изолирована:** etcd + эгресс (уронят всё) — на стабильном ЯДРЕ; ВОРКЕР держит то, что может падать.
 2. **Деплой вне кластера:** write-ключ git только на ОПЕРАТОРЕ → сломается кластер, с него всё равно восстановишь; роутер там же (поды не достают tailnet-модели, а ОПЕРАТОР достаёт).
-3. **Ресурсы под задачу:** тяжёлое — на большой СТРОЙКЕ; модели — на железе с нужным кремнием (Qwen→GPU, Ornith→МАК).
+3. **Ресурсы под задачу:** тяжёлое — на большой СТРОЙКЕ; разрешённый ручной model fallback — Ornith на МАКе.
 
 ## Про имена
 Роль-ярлыки (ЯДРО/ВОРКЕР/…) — для понимания; реально хосты не переименованы (имена зашиты в ssh/tailnet/k3s/Flux/SOPS).
