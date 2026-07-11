@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v20-reconnect-luna"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v21-reconnect-session-key"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -108,6 +108,7 @@ spec:
               cp /opt/hermes/agent/tool_guardrails.py /runtime-compat/tool_guardrails.py
               cp /opt/hermes/agent/codex_runtime.py /runtime-compat/codex_runtime.py
               cp /opt/hermes/agent/transports/codex_event_projector.py /runtime-compat/codex_event_projector.py
+              cp /opt/hermes/tui_gateway/server.py /runtime-compat/server.py
               cp /opt/hermes/cli.py /runtime-compat/cli.py
               cp /opt/hermes/hermes_cli/dashboard_auth/middleware.py /runtime-compat/dashboard_auth_middleware.py
               cp /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js /runtime-compat/web_index.js
@@ -220,6 +221,7 @@ spec:
             - { name: runtime-compat, mountPath: /opt/hermes/agent/tool_guardrails.py, subPath: tool_guardrails.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/agent/codex_runtime.py, subPath: codex_runtime.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/agent/transports/codex_event_projector.py, subPath: codex_event_projector.py, readOnly: true }
+            - { name: runtime-compat, mountPath: /opt/hermes/tui_gateway/server.py, subPath: server.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/cli.py, subPath: cli.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/dashboard_auth/middleware.py, subPath: dashboard_auth_middleware.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js, subPath: web_index.js, readOnly: true }

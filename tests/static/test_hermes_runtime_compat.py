@@ -34,6 +34,9 @@ def main() -> None:
             '        if item_type == "userMessage":\n'
             "            return self._project_user_message(item)\n"
         )
+        (target / "server.py").write_text(
+            '    info: dict = {\n        "model": getattr(agent, "model", ""),\n'
+        )
         (target / "web_index.js").write_text(
             "if(n===`session.info`){let e=oq(a);e!==void 0&&i?.(e)}"
         )
@@ -60,9 +63,11 @@ def main() -> None:
         assert "Codex echoes the input item" in (
             target / "codex_event_projector.py"
         ).read_text()
+        assert '"session_id": session_key' in (target / "server.py").read_text()
         web = (target / "web_index.js").read_text()
         assert "searchParams.set(`resume`,e)" in web
         assert "history.replaceState" in web
+        assert "let e=a.session_id" in web
 
 
 if __name__ == "__main__":
