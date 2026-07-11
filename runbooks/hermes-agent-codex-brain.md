@@ -1,21 +1,16 @@
 # hermes-agent in k3s with the Codex brain (Track A2)
 
-> **SUPERSEDED — the live brain is NOT Codex.** Since 2026-07-06 the paid Claude/Codex limits ran out, so
-> the hermes-agent **brain was switched to the fully-local `local-models-router`** (`provider: custom` →
-> `http://100.82.241.121:8090/v1`, **`qwen-35b` primary / `ornith-9b` fallback**) — see
-> [local-models-router.md](local-models-router.md). Everything in this runbook **up to** "Coding workers"
-> describes the *former* Codex-as-brain wiring and is now **historical**. **Codex applies only to the
-> coding-workers section below** (and even that is idle today — limits out; the qwen brain delegates code
-> generation to the local `ornith` coder). **Nothing here is deleted:** this recipe is the documented
-> **revert-to-cloud** path — when the limits reset, restore the `model` block in the `managed-config`
-> overlay of `../clusters/prod/infra/hermes-agent-config.yaml` per the steps below. Live state:
+> **CURRENT again since 2026-07-11 (#119).** The owner restored the ChatGPT-Plus OAuth lineage with
+> device-auth, and Codex `gpt-5.5` via `codex_app_server` is the live brain. From 2026-07-06 through
+> 2026-07-11 the fully-local `qwen-35b`/`ornith-9b` router served as the brain; that path remains the
+> documented manual fallback in [local-models-router.md](local-models-router.md). Live state:
 > [../STATUS.md](../STATUS.md).
 
 > Deploy the external **NousResearch hermes-agent** gateway as a Flux-managed k3s workload, with its
 > brain = the **Codex / ChatGPT-Plus subscription** (`codex_app_server` runtime) reached through the
 > in-cluster `singbox-egress`. This is **Phase A2** of [docs/next-steps.md](../docs/next-steps.md).
 >
-> **Status: manifests authored + recipe proven in the real image (2026-06-24); first Flux deploy pending.**
+> **Status: deployed via Flux; Codex brain restored and verified in-pod on 2026-07-11.**
 > Why each setting is what it is was established by running the real `nousresearch/hermes-agent:latest`
 > (v0.17.0) image in-cluster until `hermes chat -q` drove the Codex brain to execute a tool end-to-end.
 
@@ -110,7 +105,7 @@ reverting on the next restart.
 
 | Tier | Where | Owner |
 |---|---|---|
-| Brain (`model.provider`/`openai_runtime`/`model`) | ConfigMap `managed-config` → `/etc/hermes/config.yaml` (RO) | **GitOps** (dashboard refused) |
+| Brain (`model.provider`/`openai_runtime`/`default`) | ConfigMap `managed-config` → `/etc/hermes/config.yaml` (RO) | **GitOps** (dashboard refused) |
 | Egress proxy + `TELEGRAM_ALLOWED_USERS` | ConfigMap `managed-env` → `/etc/hermes/.env` (RO) | **GitOps** (authz boundary) |
 | Telegram bot token | `/opt/data/.env`, the `TELEGRAM_BOT_TOKEN=` line replaced-in-place each boot from the SOPS secret | **GitOps** (rotate by rolling) |
 | Soft config (`display.*`, `agent.*`, platform toggles), other platform tokens (Discord/MCP), `/sethome` chat-IDs | `/opt/data/{config.yaml,.env}` | **dashboard** (persists across restarts) |
@@ -126,8 +121,8 @@ fallback on a fresh volume**.
   ConfigMap change alone is **not** enough — delete the PVC file first, then roll:
   `kubectl -n uap-system exec deploy/hermes-agent -- rm /opt/data/.codex/config.toml` (or `/opt/data/config.yaml`).
   The **brain is exempt** (it is the managed overlay, refreshed every boot).
-- The stale inline `model:` block left in an existing PVC `config.yaml` is harmless (the managed overlay wins
-  per-leaf); drop it once via exec+edit if you want `hermes config` to show the brain purely as managed-sourced.
+- An existing PVC `model.default` can stay: the managed overlay now owns the same canonical leaf and wins
+  per-leaf. Never pin the legacy `model.model` alias - Hermes v0.18 gives `model.default` precedence.
 
 Verify after rollout:
 ```bash

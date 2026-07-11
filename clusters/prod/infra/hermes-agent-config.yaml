@@ -67,7 +67,9 @@ data:
     model:
       provider: openai-codex
       openai_runtime: codex_app_server
-      model: gpt-5.5
+      # Hermes v0.18 canonical model-id leaf. Do not use the legacy `model` alias:
+      # an existing PVC `model.default` wins over it and silently bypasses GitOps.
+      default: gpt-5.5
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram

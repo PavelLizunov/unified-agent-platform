@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v16-ornith-coder-strong"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v17-model-default"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -101,7 +101,7 @@ spec:
               #     fail-OPEN, so a malformed overlay would silently un-pin the brain. Abort the boot
               #     (visible CrashLoop) instead. /config/managed-config = the bytes the gateway
               #     mounts at /etc/hermes/config.yaml.
-              /opt/hermes/.venv/bin/python -c 'import yaml,sys; d=yaml.safe_load(open("/config/managed-config")) or {}; sys.exit("FATAL: managed brain overlay missing model.provider") if not d.get("model",{}).get("provider") else None'
+              /opt/hermes/.venv/bin/python -c 'import yaml,sys; d=yaml.safe_load(open("/config/managed-config")) or {}; m=d.get("model",{}); sys.exit("FATAL: managed brain overlay missing model.provider/default") if not all(m.get(k) for k in ("provider","default")) else None'
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
               #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
               if [ ! -f /opt/data/auth.json ]; then
