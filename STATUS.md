@@ -11,14 +11,10 @@ Last updated: 2026-07-11
 - HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
   independent server + a failover drill are still required.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
-- **Brain reality (current, since 2026-07-06):** the live hermes-agent brain is the **local `qwen-35b`** (llama.cpp on
-  the desktop RTX) with **`ornith-9b`** (mac, always-on) as fallback, both served through the **ops-1
-  local-models-router** at `http://100.82.241.121:8090/v1` (`provider: custom`, model `qwen-35b`; pinned by the
-  `managed-config` overlay in `clusters/prod/infra/hermes-agent-config.yaml`). The paid **cloud brain tier
-  (Codex/Claude) is OFF** — the paid limits ran out; **Codex is demoted from brain to a coding-engine-only role**, and
-  with the cloud coders off the live coder is `ornith-9b`. **Documented revert path:** when limits reset, restore the
-  managed-config `model.*` block per `runbooks/hermes-agent-codex-brain.md` (the Codex-brain recipe is kept intact).
-  See `runbooks/local-models-router.md` + `docs/local-qwen-hermes-handoff.md`.
+- **Brain reality (current, since 2026-07-11):** the live hermes-agent brain is **Codex `gpt-5.5`** through
+  `codex_app_server` (`provider: openai-codex`). Owner device-auth restored the ChatGPT-Plus OAuth lineage and an
+  in-pod `codex exec` returned `PONG` (#119). The ops-1 `qwen-35b`/`ornith-9b` local-models-router, which served as
+  brain from 2026-07-06 through 2026-07-11, remains the documented manual fallback. Coding delegation stays on build-1.
 - ✅ **Quality gate is ENFORCED.** The owner does not review code; the agent's self-test + CI **is** the gate, and it
   is now enforced. The repo is **public**, the GitHub ruleset `protect-master` is **active**, a PR is **required**, and
   the `static-checks` CI check (`.github/workflows/ci.yml`) is a **required (strict) status check** — direct push to
@@ -58,12 +54,9 @@ Last updated: 2026-07-11
   `pv-reclaim-ok`, ponytail installed at `/opt/data/plugins/ponytail` and **enabled** on first real boot
   (`hermes plugins list` confirms). `claude -p` verified working end-to-end. `singbox-egress-ha`: pod
   1/1 Running, `sing-box check` valid, reachability confirmed from inside hermes-agent (telegram=302,
-  chatgpt=403 — the expected signature). **Note (superseded 2026-07-06):** at roll time the Codex brain's
-  OAuth token was found expired/invalid (`Codex authentication failed` — the documented "shared single-use
-  refresh-token lineage" caveat). This is now **moot**: the brain no longer points at Codex — it runs on the local
-  `qwen-35b`/`ornith-9b` router (see "Brain reality" in Phase). Re-seeding the Codex token is only needed if the owner
-  **reverts** the brain to the cloud tier per `runbooks/hermes-agent-codex-brain.md`. (`claude -p` used a separate OAuth
-  mechanism and was unaffected.)
+  chatgpt=403 — the expected signature). The Codex OAuth later expired because of its single-use refresh-token
+  lineage; the local router carried the brain from 2026-07-06 until owner device-auth restored Codex on 2026-07-11
+  (#119). `claude -p` uses separate OAuth and was unaffected.
 - **Egress ops hardening — DONE 2026-07-10** (the vpnrouter-gateway goal, `docs/research/vpnrouter-gateway-egress-goal.md` §10).
   Phase 0 verdict (#107): `vpnrouter-gateway` is a TUN/L3 LAN gateway — it cannot render our HTTP-CONNECT-proxy
   egress (no `mixed`/`:12080` inbound, no `urltest`, always emits `direct`), so Level 1/2 adoption = no-go; the
@@ -223,12 +216,9 @@ Phase A2: the external NousResearch **hermes-agent** gateway as a Flux-managed k
 ChatGPT-Plus subscription** (`codex_app_server`) reached through `singbox-egress`. Owner chose the GitOps/k3s path
 over bare Docker.
 
-> **Superseded 2026-07-06 — the brain is now local (Codex-brain framing below is historical).** The A2/A5 record that
-> follows documents the *original* Codex-brain bring-up. The **live** brain is the local `qwen-35b`/`ornith-9b` router
-> (`provider: custom`, `http://100.82.241.121:8090/v1`); the cloud tier (Codex/Claude) is **OFF** (paid limits
-> exhausted); **Codex is demoted from brain to a coding-engine-only role** (and with the cloud coders off the live coder
-> is `ornith-9b`). Revert path kept in `runbooks/hermes-agent-codex-brain.md`. See "Brain reality" in Phase +
-> `runbooks/local-models-router.md`, `docs/local-qwen-hermes-handoff.md`.
+> **Current again since 2026-07-11 (#119).** Codex `gpt-5.5` is the live brain after owner re-auth. The local
+> `qwen-35b`/`ornith-9b` interval (2026-07-06 through 2026-07-11) proved the manual fallback path; its router and
+> runbook remain available. See "Brain reality" above.
 
 - **Proven in the real image (2026-06-24):** running `nousresearch/hermes-agent:latest` (v0.17.0) in-cluster,
   `hermes chat -q` drove the Codex brain (gpt-5.5) to **execute a tool end-to-end** (wrote a `BRAIN-OK` file). The
@@ -311,8 +301,9 @@ over bare Docker.
 an **always-on dev/build VM** running a stack of agent services as **systemd units — NOT k3s, NOT in GitOps**, so they
 are absent from the cluster sections above. Landed after the 2026-06-30 hardening pass:
 
-- **local-models-router (#71)** — the ops-1 router that made `qwen-35b`/`ornith-9b` the live brain (see "Brain reality"
-  in Phase); `runbooks/local-models-router.md` + `docs/local-qwen-hermes-handoff.md`.
+- **local-models-router (#71)** — the ops-1 router that served `qwen-35b`/`ornith-9b` as the live brain from
+  2026-07-06 through 2026-07-11 and remains the manual fallback (see "Brain reality" in Phase);
+  `runbooks/local-models-router.md` + `docs/local-qwen-hermes-handoff.md`.
 - **Knowledge system (#95/#96/#97)** — SQLite `knowledge.db` engineering-knowledge registry + local e5-large
   embeddings + a 12-status lifecycle with `--approve` gates; `runbooks/knowledge-system.md`.
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
@@ -390,12 +381,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 
 ## Pending
 
-1. Add a third server node before claiming k3s HA.
-2. Decide whether the third node is a remote VPS or another independent failure domain.
-3. Stage 3 (LiteLLM): owner provides Anthropic/OpenRouter keys; route LiteLLM through the VLESS egress (now working).
-4. Investigate intermittent Windows-to-`uap-ops-1` tailnet SSH; LAN SSH is currently the verified workstation-to-ops path.
-5. Configure Proxmox VM backups. (DR materials complete in R2: etcd snapshots in `prod/` + age-encrypted server
-   token + `encryption-config.json` in `dr/`; cross-node restore drill passed 2026-06-19 — see `runbooks/restore-drill.md`.)
+Canonical list: `BACKLOG.md`. Highest-impact open items are the third independent k3s server + failover drill,
+bucket-scoped R2 credentials + lifecycle, off-homelab age-key escrow, execution of the documented canary Secret
+restore drill, tailnet-only API firewall hardening, and Proxmox VM backups.
 
 ## Plan Fact-Check (2026-06-18)
 
@@ -447,6 +435,6 @@ Done:
   owner retrieval (move to a password manager, then delete).
 
 Pending (owner action): rotate R2 token to a bucket-scoped key + R2 lifecycle rule; independent off-homelab age-key
-escrow (verify decrypt); foreign VPS (Stage 1 HA + Stage 3 egress); optional — revoke the old "GitHub CLI" OAuth grant
-in GitHub settings, and enable branch protection if upgrading to GitHub Pro. Pending (agent): canary cross-node
-Secret-restore drill; kubeconfig 0644->0600 + tailnet-only API firewall (needs restart).
+escrow (verify decrypt); foreign VPS (Stage 1 HA + Stage 3 egress); retrieve the staged Vaultwarden admin token;
+optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. Pending (agent with an approved window):
+execute the documented canary cross-node Secret restore drill; kubeconfig 0644->0600 + tailnet-only API firewall.

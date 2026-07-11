@@ -1,7 +1,7 @@
 # Backlog
 
-Tracked items that are **not** done yet, split by who must act. Source: the 2026-06-19 cross-review
-(`REVIEW-CODEX.md`) and `STATUS.md` -> Cross-Review Remediation. Done items live in STATUS.md, not here.
+Tracked items that are **not** done yet, split by who must act. Reality-synced against `master` on
+2026-07-11. Done items live in `STATUS.md`, not here.
 
 ## Owner action required (blocks nothing else from continuing)
 
@@ -11,30 +11,20 @@ Tracked items that are **not** done yet, split by who must act. Source: the 2026
 | #2 | **Independent off-homelab age-key escrow** + verify a decrypt with it (keystone DR) | Owner must place the master key in a vault outside the Proxmox homelab | Honest DR claim; #9 full proof |
 | #5 | **Foreign VPS** (adequately sized, not a 1 GB etcd box) | Owner procures/pays + grants SSH | Stage 1 HA (3rd node), Stage 3 egress Plan A, removes the ops-1 SPOF |
 | — | Retrieve the new Vaultwarden admin token from `~/vaultwarden/admin-token.NEW.txt` on ops-1, move to a password manager, then delete the file | Owner-only credential | — |
-| — | (optional) Revoke the old "GitHub CLI" OAuth grant in GitHub settings; enable branch protection if upgrading to GitHub Pro | Owner GitHub account | full invalidation of the removed token |
+| — | (optional) Revoke the old "GitHub CLI" OAuth grant in GitHub settings | Owner GitHub account | full invalidation of the token already removed from ops-1 |
 
 ## Agent-doable, but needs an owner "go" or a careful window
 
 | Ref | Item | Note |
 |---|---|---|
-| #9 | **Canary cross-node restore drill** — create a canary Secret on prod, snapshot, restore on a disposable node from R2 with snapshot + token only, confirm the canary decrypts | Settles whether `encryption-config.json` is required (REVIEW-CODEX.md #3). Touches prod (a throwaway test Secret) + spins a disposable k3s. |
+| #9 | **Execute the documented canary cross-node restore drill** — create a canary Secret on prod, snapshot, restore on a disposable node from R2 with snapshot + token only, confirm the value decrypts | Procedure landed in `runbooks/restore-drill.md` (#117), but the live drill still needs an owner-approved window. |
 | #11 | **kubeconfig `0644`->`0600` + tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | LIVE change on the single control-plane node + k3s restart + firewall = lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
 | #10 | **R2 lifecycle rule** for manual/on-demand snapshots (retention) | Blocked on #1 (do after the scoped token exists). |
-
-## Development inputs (to promote the staging scaffolding)
-
-| For | Input | Note |
-|---|---|---|
-| Stage 3-LITE | Claude Code subscription **OpenAI-compatible endpoint** (URL + auth + model name) | owner-provided; NOT a raw Anthropic API key — `smart-cloud` |
-| Stage 3-LITE | Codex subscription OpenAI-compatible endpoint (URL + auth + model name) | `cloud-fallback` |
-| Stage 3-LITE | Owner Ollama tailnet IP + model tag | `cheap-local` |
-| Stage 3 egress | SOPS egress Secret — ONLY if a backend is remote + RU-blocked | in-cluster sing-box config (else unused) |
 
 ## Notes
 
 - Stage 2 (`Postgres HA + Garage`) manifests may be **prepared and reviewed** now (review-only scaffolding), but
   must NOT be applied until the Stage 1 HA gate is green — see `BUILD-PLAN.md` Stage 2 and `clusters/staging-stage2/`.
-- Residual: ~~classic GitHub branch protection unavailable on a free private repo~~ → **CLOSED 2026-06-23**: the repo
-  was made **public** and a free `protect-master` ruleset now requires a PR + green `static-checks` (both classic
-  protection AND rulesets need Pro on a *private* repo — going public was the fix; see ADR-026). Still open:
-  single-region R2; ops-1 remains a SPOF until services migrate into the cluster.
+- The Codex subscription brain is live again as of 2026-07-11 (#119); the local Qwen/Ornith router remains the
+  documented fallback. No model credential currently blocks the vibe-coding pilot.
+- Still open: single-region R2; ops-1 remains a SPOF until services migrate or their restores are proven.
