@@ -11,10 +11,9 @@ is **rebuilt from the description here** against UAP infra — never lifted from
 dirs, never pointed at her models, never carrying her corporate coupling or her secrets.
 
 UAP rebind target for every model reference below:
-- **local-models-router** `http://100.82.241.121:8090/v1` (pick `qwen-35b` desktop-RTX or
-  `ornith-9b` always-on-mac by model name) — the durable local tier; OR
-- **Codex** as a *coding engine only* (the cloud brain tier is off — paid limits exhausted;
-  revert path noted in the hermes-agent ConfigMap).
+- **Codex `gpt-5.5`** through the managed `codex_app_server` brain (current since 2026-07-11); OR
+- **local-models-router** `http://100.82.241.121:8090/v1` (`qwen-35b` desktop-RTX or
+  `ornith-9b` always-on-mac) as the manual fallback/local coding tier.
 Never rebind to her Codex/Nous/Ollama endpoints.
 
 ---

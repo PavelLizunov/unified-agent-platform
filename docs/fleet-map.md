@@ -8,10 +8,10 @@
 | Роль | Хост | Железо | Always-on | Что держит | tailnet |
 |---|---|---|---|---|---|
 | **ЯДРО** | `uap-home-1` | 4c/8GB (VM, pve-ninitux) | да | k3s control-plane + etcd, Flux, LiteLLM, **VLESS-эгресс** | `100.106.223.120` |
-| **ВОРКЕР** | `uap-home-2` | 6c/8GB (VM, pve-ninitux3) | да | **Hermes-агент** (мозг, лимит 4Gi), subfleet-мост, бэкапы | `100.94.228.67` |
-| **ОПЕРАТОР** | `uap-ops-1` | 2c/2GB (VM) | да | git-push + gh + kubectl, **роутер моделей**, SOPS | `100.82.241.121` |
+| **ВОРКЕР** | `uap-home-2` | 6c/8GB (VM, pve-ninitux3) | да | **Hermes-агент** (Codex brain, лимит 4Gi), subfleet-мост, бэкапы | `100.94.228.67` |
+| **ОПЕРАТОР** | `uap-ops-1` | 2c/2GB (VM) | да | git-push + gh + kubectl, **fallback-роутер моделей**, SOPS | `100.82.241.121` |
 | **СТРОЙКА** | `uap-build-1` | 8c/16GB (VM, pve-ninitux3, **Ubuntu 22.04**, LAN `192.168.0.99`) | да | UAP-сборки (cargo/make), кодинг, репо-работа, тяжёлый compute | `100.85.56.31` |
-| **GPU** ×2 роли | `desktop-m922ij2` | RTX 5060 Ti 16GB, Win | **НЕТ** | **Qwen-35B** — единственный мозг платформы | `100.114.172.40` |
+| **GPU** ×2 роли | `desktop-m922ij2` | RTX 5060 Ti 16GB, Win | **НЕТ** | **Qwen-35B** - локальный fallback brain | `100.114.172.40` |
 | **МАК** ×2 роли | `pavels-mac-mini` (`mm4.local`) | M4/16GB | да | **Ornith-9B** (кодер / запасной мозг) | `100.116.97.112` |
 
 ## Разработка приложения VPNRouter (тест-стенд)
@@ -28,7 +28,7 @@
 ТОЛЬКО на тест-VM, НИКОГДА на dev box.
 
 ## Общее железо (double-duty — вот что «дублировалось»)
-- **GPU-десктоп `desktop-m922ij2`**: UAP `Qwen-35B` (мозг) **И** VPNRouter dev box (код + сборка + тулинг) **И**
+- **GPU-десктоп `desktop-m922ij2`**: UAP `Qwen-35B` (fallback brain) **И** VPNRouter dev box (код + сборка + тулинг) **И**
   Claude Code. Одна физическая машина, три шляпы. Не always-on.
 - **МАК `mm4.local` / `pavels-mac-mini` (`100.116.97.112`)**: UAP `Ornith-9B` **И** VPNRouter DMG-билд + Android-хост.
   Одна машина.

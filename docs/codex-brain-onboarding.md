@@ -4,8 +4,8 @@
 > gateway. Written **brain-agnostic** (the brain is one config line, ADR-025); the current brain is
 > stated in §4.
 >
-> **Filename is historical.** This started life as the Codex-brain onboarding; the brain is now
-> **local qwen-35b** (Codex/Claude demoted to coders — §4). Kept at this path so existing links resolve.
+> The live brain returned to **Codex `gpt-5.5`** on 2026-07-11 after owner device-auth (#119).
+> The local qwen/ornith router remains the manual fallback (§4).
 
 ## How to read this doc (LOAD DISCIPLINE — read §0 before anything)
 
@@ -72,19 +72,15 @@ The seven hard rules (full RU text in the `user-profile` key):
 - `pavels-mac-mini` `100.116.97.112` — M4, hosts **ornith-9b**. always-on.
 **Pointer:** `docs/fleet-map.md` (authoritative, incl. VPNRouter test-VMs & Proxmox hosts).
 
-## 4. Your brain & the model layer (CURRENT = qwen router)
+## 4. Your brain & the model layer (CURRENT = Codex)
 
-**Core.** **Brain today = local `qwen-35b`** via the ops-1 router `http://100.82.241.121:8090/v1`
-(`provider: custom`), **fallback `ornith-9b`** (mac, always-on) when the desktop/qwen is off. The paid
-**cloud brain tier (Codex/Claude) is OFF** — limits ran out 2026-07-06. The router (`local-model-router`
-systemd on ops-1) fans out to qwen (llama.cpp, desktop RTX — **not always-on**) and ornith (mlx_lm.server,
-mac). Native `tool_calls` pass through untouched. **Revert-to-cloud path:** revert the `model:` block in
-the `managed-config` key back to the Codex overlay — the Codex-brain recipe is preserved in
-`runbooks/hermes-agent-codex-brain.md` (do not delete it). **Gotcha:** the router IP `100.82.241.121`
-must be an **exact** `NO_PROXY` entry (httpx ignores the `100.64.0.0/10` CIDR) or the brain call goes
-through singbox egress → 502.
-**Pointer:** `runbooks/local-models-router.md`; brain overlay in `hermes-agent-config.yaml` (`managed-config`);
-Codex-era recipe in `runbooks/hermes-agent-codex-brain.md`; ADR-025 (`DECISIONS.md`).
+**Core.** **Brain today = Codex `gpt-5.5`** via `codex_app_server` and the ChatGPT-Plus OAuth store.
+Cloud traffic leaves through `singbox-egress-ha`; the owner re-authenticated the single-use token lineage
+on 2026-07-11. The ops-1 router remains the manual local fallback: `qwen-35b` on the not-always-on desktop,
+then `ornith-9b` on the always-on Mac. Switching is documented, not automatic. The router IP
+`100.82.241.121` must be an exact `NO_PROXY` entry when the local path is active.
+**Pointer:** `runbooks/hermes-agent-codex-brain.md`; fallback in `runbooks/local-models-router.md`; brain overlay
+in `hermes-agent-config.yaml` (`managed-config`); ADR-025 (`DECISIONS.md`).
 
 ## 5. Egress / the RU constraint
 
@@ -102,11 +98,9 @@ direct from RU (no proxy) → backups don't use the VLESS path.
 **Core.** **Hard rule: ALL repo work — clone, edit, `git`, `gh`, build, test — runs on build-1, never in
 this pod** (no git token here, everything ephemeral). Reach it via the wrapper
 `/opt/data/.local/bin/build1 "<cmd>"` (absolute path; each call = a fresh ssh session, so `cd` every time).
-**You (qwen) do NOT write final code** — you are bug-prone on edge cases (75% vs ornith 100% on the cargo
-tests). Delegate any non-trivial "write/fix code" to the coder: `/opt/data/.local/bin/ornith "<detailed
-task>"` → returns file-ready code; then you write it to build-1 and build/test **there**. When the paid
-coding limits reset, the delegation targets are the **`claude_code` MCP tool** (runs `claude -p` on build-1)
-and `codex exec` (see the `build1_mcp.py`/`agents-md` keys) — currently unused (limits out).
+**The brain does NOT edit repository files in the pod.** Delegate non-trivial code generation through the
+configured build-1 tools (`ornith` and, when available, `claude_code`/`codex exec`), then write, build and test
+in the repo worktree on build-1. Tool availability must be checked, not inferred from this document.
 **Pointer:** `hermes-agent-config.yaml` (`user-profile` "Флот и где что делать" + `ornith-wrapper` + `build1-mcp`);
 `runbooks/vibe-coding-acceptance.md` (the accepted end-to-end cycle, D4/D5/D7).
 
