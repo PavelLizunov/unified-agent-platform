@@ -6,29 +6,57 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `3722df012c87e10ae2a77b445925f95d00783769` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `5ee11eec51f015136a5b7e0502dab4267ce749ca` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
 - Image: `nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f`.
-- This pass was read-only for cluster, GitHub repositories and target machines.
-- No chat messages, secret values or environment dumps were read.
+- The initial pass was read-only. The owner opened a live/write window on 2026-07-11 for PR #125,
+  pilot contract PRs, rulesets, the Mac route and behavioral tests.
+- No pre-existing personal chat, secret values or environment dumps were read. Only the explicitly created
+  owner-window test sessions were queried for tool names, commands, exit results and bounded final text.
+
+## Owner-window update - 2026-07-11
+
+- PR #125 was merged and reconciled by Flux. Dashboard/status/managed config now resolve `gpt-5.5` through
+  OpenAI Codex, and the managed warning/hard-stop thresholds are present.
+- Behavioral session export found a stale Qwen/Ornith block still injected from the enriched PVC `USER.md`.
+  PR #136 added an exact idempotent migration for the live block; PR #137 added the missing Mac/Android target
+  route. Both were reconciled and the deployment was rolled successfully.
+- Contract PRs merged with green repository CI: `vpnctl#121`, `VPNRouter#34`, `suflyor#9`.
+  `vpnrouter-gateway` required no contract change.
+- Active no-bypass rulesets now protect all four non-UAP pilot default branches. Four real direct-push probes
+  were rejected and left the remote SHAs unchanged. VPNRouter's conflicting legacy branch protection was removed
+  only after the equivalent active ruleset was verified.
+- The stale dirty `/home/uap/vpnctl` clone was preserved as `/home/uap/vpnctl-baseline-20260711`; a clean current
+  clone replaced it and `just 1.56.0` was installed. The archived clone still contains its two historical markers.
+- Read-only behavioral routing with new CLI sessions: build-1 3/3, Debian target 3/3 and Mac target 3/3.
+  Mac returned `mm4.local` and `sw_vers 26.5.2` in every run.
+- Cluster-read routing is **FAIL 0/3**: build-1 cannot authenticate to ops-1/home-1. The agent reported the
+  blocker honestly but spent 24-28 tool calls per run before stopping.
+- Tool-loop mechanism test is **FAIL**: 14 identical `exec_command(false)` calls returned `[exit 1]` without a
+  hard stop. Hermes v0.18 classifies non-zero exits only for tool name `terminal`; Codex uses `exec_command`, so
+  its failure counter never increments. Fixing upstream runtime behavior or overlaying agent source requires an
+  owner-approved ADR, not another threshold change.
+
+The updated deterministic runner emits 26 records: **25 PASS / 1 FAIL**. The remaining deterministic failure is
+`M11 runtime.exec_failure_classification`; the separate behavioral cluster-route failure keeps M3 red as well.
+The current verdict therefore remains **NOT READY**.
 
 ## Execution progress
 
 - Phase 0 is complete: platform/runtime baseline, all 28 repositories, the five pilot refs, owner-gated
   boundaries and current M1-M12 verdicts are recorded below.
-- The known M1 schema-drift fix is ready in draft PR #125, with a regression test. It is intentionally not
-  merged because that would trigger a live Flux rollout outside an owner-approved window.
+- The M1 schema-drift fix and live prompt migrations were merged in PRs #125/#136; M1 is now PASS.
 - Fleet/onboarding documentation drift was corrected in PR #126. M2 remains incomplete until the prompt/skill
   audit and behavioral routing runs prove the same topology end to end.
 - PRs #128/#131/#134 added `tools/readiness/readiness.py`, a read-only JSONL evidence collector for M1/M2/M3/M6/M9/M11/M12,
   including known semantic contract conflicts and vpnctl build-host readiness.
   It cannot perform owner-gated write, failure-injection or authenticated-interface tests.
-- PR #134 also cross-checked the sister-node harvest against `hermes-nastya@b8bb2f3`; the only immediately
-  adopted mechanism is the managed tool-loop circuit breaker prepared in draft #125.
+- PR #134 also cross-checked the sister-node harvest against `hermes-nastya@b8bb2f3`; the managed circuit-breaker
+  configuration was adopted, but its Codex `exec_command` mechanism test now proves the v0.18 compatibility gap.
 
-### Deterministic harness run
+### Pre-owner-window deterministic harness run
 
 Latest command on ops-1 at `2026-07-11T10:13Z`:
 
