@@ -9,6 +9,59 @@ metadata:
   name: hermes-agent-config
   namespace: uap-system
 data:
+  # ADR-027: exact, fail-closed compatibility patch for the pinned v0.18 image.
+  # Receives a directory containing copies of the three upstream files and is safe to run twice.
+  runtime-compat.py: |
+    from pathlib import Path
+    import sys
+
+    root = Path(sys.argv[1])
+
+    def patch(name: str, old: str, new: str) -> None:
+        path = root / name
+        text = path.read_text()
+        if new in text:
+            return
+        if text.count(old) != 1:
+            raise SystemExit(f"FATAL: unexpected upstream source fingerprint: {name}")
+        path.write_text(text.replace(old, new))
+
+    failure_old = "\n".join((
+        "    if file_mutation_result_landed(tool_name, result):",
+        "        return False, \"\"",
+        "",
+    ))
+    failure_new = failure_old + "\n".join((
+        "    if tool_name == \"exec_command\" and result.startswith(\"[exit \"):",
+        "        try:",
+        "            exit_code = int(result[6:result.index(\"]\")])",
+        "        except (ValueError, IndexError):",
+        "            pass",
+        "        else:",
+        "            if exit_code != 0:",
+        "                return True, f\" [exit {exit_code}]\"",
+        "",
+        "",
+    ))
+    patch("display.py", failure_old + "\n    data = safe_json_loads(result)\n",
+          failure_new + "    data = safe_json_loads(result)\n")
+    patch("tool_guardrails.py", failure_old + "\n    if tool_name == \"terminal\":\n",
+          failure_new + "    if tool_name == \"terminal\":\n")
+
+    sso_old = "\n".join((
+        "    provider = providers[0]",
+        "    prefix = prefix_from_request(request)",
+        "",
+    ))
+    sso_new = "\n".join((
+        "    provider = providers[0]",
+        "    if getattr(provider, \"supports_password\", False):",
+        "        return None",
+        "    prefix = prefix_from_request(request)",
+        "",
+    ))
+    patch("dashboard_auth_middleware.py", sso_old, sso_new)
+
   config.yaml: |
     # Brain: the Codex subprocess (codex_app_server) owns the tool loop. The default
     # codex_responses mode does NOT work in-cluster — hermes's Python httpx cannot reach

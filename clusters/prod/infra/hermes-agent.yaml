@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v17-model-default"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v18-runtime-compat"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -103,6 +103,12 @@ spec:
               #     (visible CrashLoop) instead. /config/managed-config = the bytes the gateway
               #     mounts at /etc/hermes/config.yaml.
               /opt/hermes/.venv/bin/python -c 'import yaml,sys; d=yaml.safe_load(open("/config/managed-config")) or {}; m=d.get("model",{}); sys.exit("FATAL: managed brain overlay missing model.provider/default") if not all(m.get(k) for k in ("provider","default")) else None'
+              # 2c) ADR-027: patch exact known defects in the pinned upstream v0.18 sources.
+              # Work on emptyDir copies; the official image stays immutable. Unknown source = fail closed.
+              cp /opt/hermes/agent/display.py /runtime-compat/display.py
+              cp /opt/hermes/agent/tool_guardrails.py /runtime-compat/tool_guardrails.py
+              cp /opt/hermes/hermes_cli/dashboard_auth/middleware.py /runtime-compat/dashboard_auth_middleware.py
+              /opt/hermes/.venv/bin/python /config/runtime-compat.py /runtime-compat
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
               #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
               if [ ! -f /opt/data/auth.json ]; then
@@ -153,6 +159,7 @@ spec:
             - { name: codex-seed, mountPath: /seed, readOnly: true }
             - { name: telegram-seed, mountPath: /telegram, readOnly: true }
             - { name: root-ssh, mountPath: /root/.ssh }
+            - { name: runtime-compat, mountPath: /runtime-compat }
       containers:
         - name: gateway
           image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
@@ -205,6 +212,10 @@ spec:
             - { name: config, mountPath: /etc/hermes/.env, subPath: managed-env, readOnly: true }
             # managed CONFIG overlay: pins the BRAIN (model.*) per-leaf OVER the PVC config.yaml.
             - { name: config, mountPath: /etc/hermes/config.yaml, subPath: managed-config, readOnly: true }
+            # ADR-027 temporary overlays for the pinned upstream digest; bootstrap validates exact fingerprints.
+            - { name: runtime-compat, mountPath: /opt/hermes/agent/display.py, subPath: display.py, readOnly: true }
+            - { name: runtime-compat, mountPath: /opt/hermes/agent/tool_guardrails.py, subPath: tool_guardrails.py, readOnly: true }
+            - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/dashboard_auth/middleware.py, subPath: dashboard_auth_middleware.py, readOnly: true }
           resources:
             # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod
             # fits (agent ~1.1GB + chromium ~2GB) instead of OOM-killing the gateway. Norm is still heavy->build-1.
@@ -224,6 +235,8 @@ spec:
           secret:
             secretName: hermes-agent-telegram
         - name: root-ssh
+          emptyDir: {}
+        - name: runtime-compat
           emptyDir: {}
 ---
 # Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
