@@ -90,10 +90,45 @@ data:
         "        turn.interrupted = False",
         "        turn.error = None",
         "",
+        "    terminal_message = next((",
+        "        message for message in reversed(turn.projected_messages)",
+        "        if message.get(\"role\") in {\"assistant\", \"tool\"}",
+        "    ), None)",
+        "    if (",
+        "        terminal_message is None",
+        "        or terminal_message.get(\"role\") != \"assistant\"",
+        "        or not str(terminal_message.get(\"content\") or \"\").strip()",
+        "    ):",
+        "        failure_text = (",
+        "            \"Codex app-server turn ended after a tool result without a terminal \"",
+        "            \"assistant response; the session was retired.\"",
+        "        )",
+        "        turn.final_text = failure_text",
+        "        turn.projected_messages.append({\"role\": \"assistant\", \"content\": failure_text})",
+        "        turn.interrupted = True",
+        "        turn.error = failure_text",
+        "        turn.should_retire = True",
+        "",
         "    # If the turn signalled the underlying client is wedged (deadline",
         "",
     ))
     patch("codex_runtime.py", codex_result_old, codex_result_new)
+
+    cli_exit_old = "\n".join((
+        "                        if isinstance(result, dict) and result.get(\"failed\"):",
+        "                            _exit_code = 1",
+        "",
+    ))
+    cli_exit_new = "\n".join((
+        "                        if isinstance(result, dict) and (",
+        "                            result.get(\"failed\")",
+        "                            or result.get(\"partial\")",
+        "                            or result.get(\"completed\") is False",
+        "                        ):",
+        "                            _exit_code = 1",
+        "",
+    ))
+    patch("cli.py", cli_exit_old, cli_exit_new)
 
     sso_old = "\n".join((
         "    provider = providers[0]",

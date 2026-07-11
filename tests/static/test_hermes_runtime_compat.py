@@ -23,6 +23,10 @@ def main() -> None:
             "            # Bridge Codex app-server item/started notifications to Hermes\n"
             "\n    # If the turn signalled the underlying client is wedged (deadline\n"
         )
+        (target / "cli.py").write_text(
+            '                        if isinstance(result, dict) and result.get("failed"):\n'
+            "                            _exit_code = 1\n"
+        )
         (target / "dashboard_auth_middleware.py").write_text(
             "    provider = providers[0]\n    prefix = prefix_from_request(request)\n"
         )
@@ -38,6 +42,11 @@ def main() -> None:
         assert 'item.get("type") == "commandExecution"' in codex_runtime
         assert "session.request_interrupt()" in codex_runtime
         assert "_toolguard_controlled_halt_response" in codex_runtime
+        assert "terminal_message" in codex_runtime
+        assert "without a terminal" in codex_runtime
+        cli = (target / "cli.py").read_text()
+        assert 'result.get("partial")' in cli
+        assert 'result.get("completed") is False' in cli
         assert 'getattr(provider, "supports_password", False)' in (
             target / "dashboard_auth_middleware.py"
         ).read_text()
