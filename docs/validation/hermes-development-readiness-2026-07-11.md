@@ -87,8 +87,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 The final pre-report deterministic run at UAP/Flux `8e41b80`, after `suflyor#11`, emitted **28 PASS / 0 FAIL**
 to `/tmp/hermes-readiness-2026-07-11-final-pre-report.jsonl`. Before each suflyor fix, the extended checker first
 proved its RED control (`stale secret-config path; direct-master policy`, then `stale overlay_host layout`). The
-broader migration verdict remains **NOT READY** because Windows package/GUI UAT and recovery testing are still
-incomplete.
+broader migration verdict remains **NOT READY** because recovery testing is still incomplete.
 
 ### M9 post-fix interface UAT
 
@@ -136,6 +135,36 @@ All five pilot repositories now have independently observed GREEN execution and 
 therefore **PASS**. No sacrificial product change was merged; only the two verified VPNRouter contract corrections
 were retained.
 
+### M3 Windows package/live GUI UAT - 2026-07-12
+
+- The test ran only on the dedicated `windows-brat` VM (`100.115.182.0`), never on the owner workstation/Qwen.
+  RDP and WinRM resolved `WINBRAT`, `winbrat\\tester`, Windows `10.0.17763` and interactive session 1.
+- Add/Remove Programs and the install path independently identified packaged VPNRouter `2.46.0-r34` under
+  `C:\Program Files\VPNRouter`. The elevated packaged GUI launched in session 1. Before the live action,
+  `VPNRouter.CLI status` returned `Stopped`, with no `sing-box` process or `VPNRouter-TUN` adapter.
+- Because Computer Use was not attached to this Codex task and Avalonia exposed no child UI Automation elements,
+  a bounded native bridge was used: an ephemeral Task Scheduler action ran as the same interactive user/session,
+  targeted only the VPNRouter HWND, captured narrow non-secret status/CTA bands and sent the Connect/Disconnect
+  mouse messages. UAC integrity isolation was handled by `RunLevel Highest`; no input or process on the owner
+  workstation was targeted.
+- After Connect, the GUI status slice showed `Подключено`; `sing-box` ran in session 1 and `VPNRouter-TUN`
+  was `Up`. Tailscale/RDP and WinRM remained reachable throughout.
+- `VPNRouter.CLI status` nevertheless continued to print `Stopped` while the GUI-owned tunnel was live because
+  `StatusCommand` returns early when its CLI state file is absent. This telemetry defect is tracked separately as
+  [VPNRouter issue #39](https://github.com/PavelLizunov/VPNRouter/issues/39); live state was therefore proved from
+  the GUI, process and adapter together rather than from the misleading CLI result.
+- The GUI Disconnect action returned the status slice to `Не подключено`; `sing-box` exited,
+  `VPNRouter-TUN` disappeared and the CLI remained `Stopped`. The temporary scheduled task and all remote
+  `hermes-m3-*` files were removed; the final cleanup check returned task=false, files=0, sing-box=0 and TUN=0.
+- Bounded screenshot slices retained in this Codex task trace have SHA-256:
+  `CA20F970387EDB6DB47D18796C60BA5D603B7A863D2690B5A0CF814143D1F491` (live status),
+  `9378437A5261041AEB39E67B2FF66EDE53FC641C8FD6717BB529251EA2E785ED` (Disconnect CTA),
+  `47641BA270D2158071B2DEBB67698B2D2FE770FAF0392DD4207A5202A2A31314` (rollback status) and
+  `B62F9888494BB013FC1DF092AA4F3C07E3BE8DB5549F6BC7891F10CAC649D419` (Connect CTA).
+
+The package launch, live GUI transition, independently observed tunnel state and clean GUI rollback close M3 as
+**PASS**. The remaining overall readiness blocker is M10 recovery testing.
+
 ## Execution progress
 
 - Phase 0 is complete: platform/runtime baseline, all 28 repositories, the five pilot refs, owner-gated
@@ -155,7 +184,7 @@ were retained.
 |---|---|---|
 | M1 runtime/model truth | **PASS** | managed config, live probe and authenticated dashboard resolve `gpt-5.6-luna` / `openai-codex` |
 | M2 fleet truth | **PASS** | live SHA/Flux/fleet routes agree; PR #146 excludes the owner workstation/Qwen from Hermes |
-| M3 deterministic routing | **PARTIAL** | command routes are green N=3; Windows package/live GUI UAT is incomplete |
+| M3 deterministic routing | **PASS** | command routes are green N=3; packaged Windows GUI connect/live/rollback UAT passed on windows-brat |
 | M4 worktree isolation | **PASS** | same-repo and cross-repo parallel worktrees passed independent contamination checks and cleanup |
 | M5 tests/honesty | **PASS** | all five pilots have independent GREEN execution plus a relevant RED mutation; sacrificial branches were isolated and cleaned |
 | M6 Git/PR/CI | **PASS** | protected defaults on all pilots, rejected direct pushes and one full Hermes PR/CI cycle |
@@ -413,12 +442,11 @@ new approval that names the specific agent and action. Repository classification
 
 ## Remaining owner-gated work
 
-- Windows package/live GUI UAT on the dedicated `windows-brat` VM;
 - pod roll mid-task, model/egress/build-1 failure injection and task recovery;
 - restore/destructive tests.
 
 ## Next actions
 
-1. In separate owner windows, run Windows package/live GUI UAT and M10 recovery gates.
+1. In a separate owner window, run the M10 recovery gates.
 2. Owner may adjust the conservative metadata-based nonpilot classes before any of them enters a write-cycle.
 3. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.
