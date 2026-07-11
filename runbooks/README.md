@@ -37,3 +37,4 @@ Some runbooks are Russian, some English — the platform docs are bilingual; the
 | [uap-ops-services-backup.md](uap-ops-services-backup.md) | Daily backup + recovery for ops-1 non-GitOps services (Vaultwarden, etc.). | Protecting or restoring ops-1 stateful services. |
 | [validation-matrix.md](validation-matrix.md) | The checks required before marking bootstrap/stability work done (local gate + smoke). | Gating any infra change before handoff. |
 | [vibe-coding-acceptance.md](vibe-coding-acceptance.md) | GOAL: end-to-end vibe-coding acceptance test (idea → Hermes codes on build-1 → verify → push), objective scoring. | Proving the full agent user-cycle works. |
+| [remote-command-safety.md](remote-command-safety.md) | Safe-by-construction quoting/escaping/encoding patterns for layered remote commands (ssh -> kubectl -> sh -> python/git) | writing any nested/remote command, or hitting a quoting/encoding error |
