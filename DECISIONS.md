@@ -393,3 +393,19 @@
 - **Последствия:** **прямой `git push origin master` отклоняется** (включая deploy-key ops-1) — все изменения через
   PR (`ветка → push → gh pr create → CI → gh pr merge → Flux`); обновлён скилл `uap-commit-push`; закрыт residual
   «branch protection» в STATUS/BACKLOG. CI = `.github/workflows/ci.yml`.
+
+## ADR-027 — Временный fail-closed compatibility patch для pinned hermes-agent
+
+- **Контекст:** в закреплённом внешнем `NousResearch/hermes-agent` v0.18.0 подтверждены два дефекта интеграции:
+  password-only dashboard provider ошибочно запускает OAuth/SSO route (M9), а Codex `exec_command` с результатом
+  `[exit N]` не классифицируется как failure и не включает loop guardrail (M11).
+- **Решение:** сохранить официальный image digest и перед стартом gateway копировать три затронутых upstream-файла
+  в `emptyDir`, применять к копиям идемпотентный GitOps-owned patch и монтировать их обратно через `subPath`.
+  Patch обязан применяться только к точно известным исходным фрагментам и останавливать initContainer при любом
+  несовпадении; оба контракта покрываются hermetic mechanism-тестом. После появления upstream-исправления patch
+  удаляется одновременно с обновлением image digest.
+- **Обоснование:** это минимальный обратимый мост без форка, собственного image/registry и изменения s6 entrypoint.
+- **Отвергнуто:** оставить известные behavioral FAIL; лечить prompt/config; собирать постоянный fork; делать
+  непроверяемый runtime monkeypatch.
+- **Последствия:** обновление image digest требует сначала удалить patch либо подтвердить его fail-closed
+  fingerprint; до этого compatibility layer является явно учтённым временным долгом.
