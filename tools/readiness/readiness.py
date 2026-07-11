@@ -2,6 +2,7 @@
 """Read-only Hermes readiness evidence collector. Run on uap-ops-1."""
 
 import argparse
+import base64
 import json
 import re
 import subprocess
@@ -62,6 +63,34 @@ def contract_verdict(paths: set[str]) -> tuple[bool, str]:
     build = sorted(paths & build_files)
     ok = "AGENTS.md" in paths and workflows and bool(build)
     return ok, f"AGENTS={'AGENTS.md' in paths} CI={workflows} build={build}"
+
+
+def known_contract_conflicts(repo: str, files: dict[str, str]) -> tuple[bool, str]:
+    issues = []
+    agents = files.get("AGENTS.md", "")
+    contributing = files.get("CONTRIBUTING.md", "")
+    if repo == "VPNRouter":
+        if not agents:
+            issues.append("AGENTS.md unavailable")
+        direct_main = (
+            "git push github HEAD:main && git push origin HEAD:main",
+            "git push origin HEAD:main && git push forgejo HEAD:main",
+            "**Default = autonomous до stable.**",
+        )
+        if any(rule in agents for rule in direct_main):
+            issues.append("direct-main/autonomous-release policy")
+        if "НЕТ remote с именем `github`" in agents and "git push github HEAD:main" in agents:
+            issues.append("contradictory remote names")
+    elif repo == "suflyor":
+        if not contributing:
+            issues.append("CONTRIBUTING.md unavailable")
+        if "suflyor-tts/" not in contributing:
+            issues.append("CONTRIBUTING omits suflyor-tts")
+        if "%APPDATA%\\overlay-mvp\\config.json" in contributing:
+            issues.append("stale secret-config path")
+        if "gh release create" in contributing and "owner" not in contributing.lower():
+            issues.append("release authority conflict")
+    return not issues, "; ".join(issues) if issues else "no known semantic conflicts"
 
 
 def emit(rows: list[dict], gate: str, check: str, passed: bool, evidence: str) -> None:
@@ -169,6 +198,42 @@ def check_github(rows: list[dict]) -> None:
             paths = set()
         passed, detail = contract_verdict(paths)
         emit(rows, "M12", f"contract.{repo}.structure", rc == 0 and passed, detail)
+
+        if repo in {"VPNRouter", "suflyor"}:
+            files = {}
+            for path in ("AGENTS.md", "CONTRIBUTING.md"):
+                rc2, body = command(["gh", "api", f"repos/PavelLizunov/{repo}/contents/{path}"])
+                try:
+                    obj = json.loads(body)
+                    files[path] = base64.b64decode(obj["content"]).decode("utf-8") if rc2 == 0 else ""
+                except (json.JSONDecodeError, KeyError, ValueError, UnicodeDecodeError):
+                    files[path] = ""
+            semantic, detail = known_contract_conflicts(repo, files)
+            emit(rows, "M12", f"contract.{repo}.known_conflicts", semantic, detail)
+
+    rc, body = command(["gh", "api", "repos/PavelLizunov/vpnctl/commits/main"])
+    try:
+        remote_sha = json.loads(body)["sha"]
+    except (json.JSONDecodeError, KeyError):
+        remote_sha = ""
+    rc_head, local_sha = command(
+        ["ssh", "-o", "BatchMode=yes", "uap@100.85.56.31", "git", "-C", "/home/uap/vpnctl", "rev-parse", "HEAD"]
+    )
+    rc_dirty, dirty = command(
+        ["ssh", "-o", "BatchMode=yes", "uap@100.85.56.31", "git", "-C", "/home/uap/vpnctl", "status", "--porcelain"]
+    )
+    rc_just, _ = command(
+        ["ssh", "-o", "BatchMode=yes", "uap@100.85.56.31", "command", "-v", "just"]
+    )
+    local_sha = local_sha.strip()
+    ready = rc == rc_head == rc_dirty == 0 and local_sha == remote_sha and not dirty.strip() and rc_just == 0
+    emit(
+        rows,
+        "M12",
+        "contract.vpnctl.build1_ready",
+        ready,
+        f"head_matches={local_sha == remote_sha} clean={not bool(dirty.strip())} just={rc_just == 0}",
+    )
 
 
 def main() -> int:
