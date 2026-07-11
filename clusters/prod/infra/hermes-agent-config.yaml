@@ -162,7 +162,10 @@ data:
       → правки через `claude -p` → `... git add -A && git commit -m '...' && git push -u origin <ветка> && gh pr create --fill"`
       → статус CI: `gh pr checks <N>` → мёрж по зелёному: `gh pr merge --auto --squash <N>`.
     - Остальной флот: uap-home-1 (k3s server+etcd), этот под = uap-home-2 (k3s agent), uap-ops-1 (git push + kubectl),
-      desktop (GPU, не всегда включён), мак (ornith, always-on). Все на tailnet (100.x).
+      desktop (GPU, не всегда включён). Все на tailnet (100.x).
+    - **Mac target** `mm4.local` (tailnet 100.116.97.112) — macOS package/UI и подключённый Android; доступ
+      только через build-1: `build1 "ssh slovn@100.116.97.112 '<команда>'"`. Не запускай Mac/Android smoke
+      на build-1 вместо target и не считай Linux-сборку подтверждением macOS/Android.
     ### Тест-стенд VPNRouter (2 VM в tailnet — можно использовать и под другое ПО ЗАПРОСУ владельца)
     Достаются ТОЛЬКО через build-1 (`build1 "ssh <host> '<cmd>'"`) — из пода tailnet напрямую не роутится:
     - **debian-xfce** (tailnet 100.81.162.66, Debian 12 XFCE, LAN .100) — Linux-таргет. Доступ ГОТОВ:
@@ -336,6 +339,8 @@ data:
     - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool (or the
       `/opt/data/.local/bin/build1 "<cmd>"` wrapper). All repo work routes to build-1 — the git token
       lives ONLY there, so edits/commits/pushes done anywhere else cannot reach GitHub.
+    - macOS/Android target = **mm4.local** (`100.116.97.112`), reached only through build-1:
+      `build1 "ssh slovn@100.116.97.112 '<cmd>'"`. A build-1/Linux result does not prove target behavior.
     - **Full index for on-demand detail:** `docs/codex-brain-onboarding.md` — load a section's core,
       retrieve the rest from its source (do NOT pull the whole doc into context).
 

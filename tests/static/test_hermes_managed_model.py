@@ -40,6 +40,8 @@ assert "лимиты Claude/Codex кончились" not in user_profile
 assert "brain = local qwen-35b" not in agents.lower()
 assert "codex_app_server" in agents
 assert "gpt-5.5" not in agents, "model id must have one owner: managed config"
+assert "mm4.local" in agents and "100.116.97.112" in agents
+assert 'build1 "ssh slovn@100.116.97.112' in agents
 assert "cp /config/agents-md /opt/data/.codex/AGENTS.md" in deployment
 assert "[ -f /opt/data/.codex/AGENTS.md ] ||" not in deployment
 assert "/config/profile-migrate.py" in deployment
