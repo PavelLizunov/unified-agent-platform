@@ -399,7 +399,7 @@
 - **Контекст:** в закреплённом внешнем `NousResearch/hermes-agent` v0.18.0 подтверждены два дефекта интеграции:
   password-only dashboard provider ошибочно запускает OAuth/SSO route (M9), а Codex `exec_command` с результатом
   `[exit N]` не классифицируется как failure и не включает loop guardrail (M11).
-- **Решение:** сохранить официальный image digest и перед стартом gateway копировать три затронутых upstream-файла
+- **Решение:** сохранить официальный image digest и перед стартом gateway копировать затронутые upstream-файлы
   в `emptyDir`, применять к копиям идемпотентный GitOps-owned patch и монтировать их обратно через `subPath`.
   Patch обязан применяться только к точно известным исходным фрагментам и останавливать initContainer при любом
   несовпадении; оба контракта покрываются hermetic mechanism-тестом. После появления upstream-исправления patch
@@ -409,3 +409,5 @@
   непроверяемый runtime monkeypatch.
 - **Последствия:** обновление image digest требует сначала удалить patch либо подтвердить его fail-closed
   fingerprint; до этого compatibility layer является явно учтённым временным долгом.
+  Для `codex_app_server`, где внутренним tool loop владеет subprocess Codex, те же thresholds применяются к
+  `item/completed` событиям адаптера; при достижении порога активный Codex turn прерывается контролируемо.
