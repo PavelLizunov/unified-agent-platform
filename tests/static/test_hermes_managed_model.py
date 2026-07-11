@@ -65,4 +65,26 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "лимиты Claude/Codex кончились" not in once
     assert "claude_code" in once
 
+live_profile = """# owner
+## АКТУАЛЬНО 2026-07 (важнее любых старых строк выше)
+- Мозг = ЛОКАЛЬНЫЙ qwen-35b (НЕ Codex — платные лимиты кончились). Всё общение/reasoning/FC — им.
+- КОДЕР = ornith-9b. Генерацию кода делегируй: `/opt/data/.local/bin/ornith "<что написать + контекст>"`
+  -> вернёт готовый код; примени и протестируй сам. claude -p / codex НЕ используй (лимиты).
+- ⚠️ ТЯЖЁЛЫЙ COMPUTE — ТОЛЬКО на build-1.
+owner-live-sentinel
+"""
+with tempfile.TemporaryDirectory() as tmp:
+    profile = Path(tmp) / "USER.md"
+    profile.write_text(live_profile, encoding="utf-8")
+    migration = profile_migration.replace("/opt/data/memories/USER.md", str(profile))
+    exec(compile(migration, "profile-migrate.py", "exec"))
+    once = profile.read_text(encoding="utf-8")
+    exec(compile(migration, "profile-migrate.py", "exec"))
+    assert profile.read_text(encoding="utf-8") == once, "live profile migration must be idempotent"
+    assert "owner-live-sentinel" in once
+    assert "Мозг = ЛОКАЛЬНЫЙ qwen-35b" not in once
+    assert "КОДЕР = ornith-9b" not in once
+    assert "Runtime/model определяются managed config" in once
+    assert "claude_code" in once
+
 print("hermes-managed-model-ok")
