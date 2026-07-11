@@ -24,11 +24,10 @@
 - **The harness is now LIVE:** the external **NousResearch hermes-agent** is the vibe-coding harness —
   phone control via Telegram, coding via `claude -p` + `codex exec` skills. The bespoke Hermes is parked
   as a fallback.
-- **Brain today (2026-07-06):** the paid Claude/Codex limits ran out, so the hermes-agent brain runs
-  **fully local** via the `local-models-router` on `uap-ops-1` — **`qwen-35b`** (RTX desktop, llama.cpp)
-  primary, **`ornith-9b`** (always-on Mac, mlx) fallback, one endpoint `http://100.82.241.121:8090/v1`.
-  Codex/Claude are demoted to (currently idle) coding engines; the Codex-brain path is the documented
-  revert route. See [runbooks/local-models-router.md](../runbooks/local-models-router.md).
+- **Brain today (2026-07-11):** Codex `gpt-5.5` via `codex_app_server` is live after owner re-auth (#119).
+  The `local-models-router` on `uap-ops-1` remains the manual fallback over `qwen-35b` (RTX desktop) and
+  `ornith-9b` (always-on Mac). See [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md)
+  and [runbooks/local-models-router.md](../runbooks/local-models-router.md).
 
 ---
 
@@ -41,7 +40,7 @@ shown intermittent resets (see [CLAUDE.md](../CLAUDE.md)).
 |---|---|---|---|---|---|
 | `uap-home-1` | `100.106.223.120` | Debian 12 | 4 vCPU / 8 GB / no GPU | k3s **server**, embedded etcd (control plane); LiteLLM; in-cluster VLESS egress | **Yes** |
 | `uap-home-2` | `100.94.228.67` | Debian 12 | 6 vCPU / 8 GB / no GPU | k3s **agent** (worker only); runs the **hermes-agent** brain pod + subfleet bridge (resized 6c/8G in #86/#87) | **Yes** |
-| `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** systemd service (the live brain endpoint `:8090`) | **Yes** |
+| `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** fallback endpoint `:8090` | **Yes** |
 | `uap-build-1` | `100.85.56.31` | Ubuntu 22.04 | 8 vCPU / 16 GB / no GPU | always-on build/dev VM — **not** a k3s node, **not** in GitOps; runs the knowledge system, the Hermes Kanban swarm, ai-search, and the hermes-workspace webcenter (`:3000`) — all systemd | **Yes** |
 | `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; serves **`qwen-35b`** (llama.cpp) — the **primary local brain** | **No** |
 | `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | serves **`ornith-9b`** (mlx) — the local **coder / fallback brain** | **Yes** |
