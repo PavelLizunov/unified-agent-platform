@@ -78,6 +78,23 @@ def exec_failure_classifier_verdict(output: str) -> tuple[bool, str]:
     return failed, f"exec_command_[exit_1]_classified_failed={failed}"
 
 
+def dashboard_model_verdict(output: str) -> tuple[bool, str]:
+    try:
+        data = json.loads(output.splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return False, "authenticated dashboard probe did not return JSON"
+    ok = (
+        data.get("login_ok") is True
+        and data.get("model") == data.get("expected_model")
+        and data.get("provider") == data.get("expected_provider")
+    )
+    return ok, (
+        f"login_ok={data.get('login_ok')!r} model={data.get('model')!r} "
+        f"provider={data.get('provider')!r} expected_model={data.get('expected_model')!r} "
+        f"expected_provider={data.get('expected_provider')!r}"
+    )
+
+
 def contract_verdict(paths: set[str]) -> tuple[bool, str]:
     workflows = any(path.startswith(".github/workflows/") for path in paths)
     build_files = {
@@ -207,7 +224,38 @@ def check_dashboard(rows: list[dict]) -> None:
         code, location = exc.code, exc.headers.get("Location", "")
     except OSError as exc:
         code, location = 0, str(exc)
-    emit(rows, "M9", "dashboard.auth_redirect", code == 302 and location.startswith("/auth/login"), f"{code} {location}")
+    emit(rows, "M9", "dashboard.auth_redirect", code == 302 and location.startswith("/login?"), f"{code} {location}")
+
+    try:
+        page = urllib.request.urlopen("http://100.94.228.67:30911/login?next=%2Fchat", timeout=8)
+        login_code, login_body = page.status, page.read().decode("utf-8", "replace")
+    except (urllib.error.HTTPError, OSError) as exc:
+        login_code, login_body = 0, str(exc)
+    emit(
+        rows, "M9", "dashboard.password_login_page",
+        login_code == 200 and "/auth/password-login" in login_body,
+        f"status={login_code} password_form={'/auth/password-login' in login_body}",
+    )
+
+    probe = (
+        "import http.cookiejar,json,os,urllib.request,yaml;"
+        "base='http://127.0.0.1:9119';jar=http.cookiejar.CookieJar();"
+        "opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar));"
+        "managed=yaml.safe_load(open('/etc/hermes/config.yaml')) or {};"
+        "payload=json.dumps({'provider':'basic','username':os.environ['HERMES_DASHBOARD_BASIC_AUTH_USERNAME'],"
+        "'password':os.environ['HERMES_DASHBOARD_BASIC_AUTH_PASSWORD'],'next':'/chat'}).encode();"
+        "req=urllib.request.Request(base+'/auth/password-login',data=payload,headers={'Content-Type':'application/json'},method='POST');"
+        "login=json.loads(opener.open(req,timeout=8).read());"
+        "info=json.loads(opener.open(base+'/api/model/info',timeout=8).read());"
+        "print(json.dumps({'login_ok':login.get('ok'),'model':info.get('model'),'provider':info.get('provider'),"
+        "'expected_model':(managed.get('model') or {}).get('default'),'expected_provider':(managed.get('model') or {}).get('provider')}))"
+    )
+    rc, out = command(
+        ["kubectl", "-n", "uap-system", "exec", "deploy/hermes-agent", "--",
+         "/opt/hermes/.venv/bin/python", "-c", probe]
+    )
+    model_ok, model_detail = dashboard_model_verdict(out)
+    emit(rows, "M9", "dashboard.authenticated_model", rc == 0 and model_ok, model_detail)
 
 
 def check_fleet(rows: list[dict]) -> None:
