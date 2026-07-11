@@ -22,8 +22,8 @@
   "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
   design) — see Track A4 (DONE) and the platform-hardening items.
 - **Model+agent backend is fully in GitOps** (Track B0 DONE).
-- **Brain reality (2026-07-11):** Codex `gpt-5.5` via `codex_app_server` is live again after owner re-auth
-  (#119). The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
+- **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
+  explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
 
 ---
 
@@ -116,7 +116,7 @@ every tool goes dark). Detail + citations in the two research docs.
 - **Redundancy:** the local router combines RTX `qwen-35b` with always-on Mac `ornith-9b`; both the Codex
   and local brain paths are proven. Switching between them is documented but manual; no automatic brain failover claim.
 
-> **Current state (2026-07-11):** Codex `gpt-5.5` is again the live brain after owner device-auth restored
+> **Current state (2026-07-11):** Codex `gpt-5.6-luna` is the live brain after owner device-auth restored
 > the ChatGPT-Plus OAuth lineage (#119). From 2026-07-06 through 2026-07-11 the local
 > `qwen-35b`/`ornith-9b` router served as the brain; that path remains available as a manual fallback.
 > See [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md) and

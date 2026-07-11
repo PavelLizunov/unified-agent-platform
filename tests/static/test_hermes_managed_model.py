@@ -41,7 +41,7 @@ assert "brain = local qwen-35b" not in agents.lower()
 assert "qwen-35b" in agents and "do not probe or call it" in agents
 assert "approval naming the specific agent and action" in agents
 assert "codex_app_server" in agents
-assert "gpt-5.5" not in agents, "model id must have one owner: managed config"
+assert "gpt-5." not in agents, "model id must have one owner: managed config"
 assert "mm4.local" in agents and "100.116.97.112" in agents
 assert 'build1 "ssh slovn@100.116.97.112' in agents
 assert "cp /config/agents-md /opt/data/.codex/AGENTS.md" in deployment

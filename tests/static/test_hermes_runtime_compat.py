@@ -30,6 +30,13 @@ def main() -> None:
         (target / "dashboard_auth_middleware.py").write_text(
             "    provider = providers[0]\n    prefix = prefix_from_request(request)\n"
         )
+        (target / "codex_event_projector.py").write_text(
+            '        if item_type == "userMessage":\n'
+            "            return self._project_user_message(item)\n"
+        )
+        (target / "web_index.js").write_text(
+            "if(n===`session.info`){let e=oq(a);e!==void 0&&i?.(e)}"
+        )
         script_path = target / "patch.py"
         script_path.write_text(script)
 
@@ -50,6 +57,12 @@ def main() -> None:
         assert 'getattr(provider, "supports_password", False)' in (
             target / "dashboard_auth_middleware.py"
         ).read_text()
+        assert "Codex echoes the input item" in (
+            target / "codex_event_projector.py"
+        ).read_text()
+        web = (target / "web_index.js").read_text()
+        assert "searchParams.set(`resume`,e)" in web
+        assert "history.replaceState" in web
 
 
 if __name__ == "__main__":
