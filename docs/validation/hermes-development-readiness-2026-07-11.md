@@ -36,6 +36,16 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
   calls (`build1_shell` + `claude_code`), isolated worktree/branch, commit `504148a`, PR #122 and all nine CI
   jobs green. The PR was not merged; it was closed, its remote branch deleted and the worktree removed. Main
   stayed clean. This proves one M6 canary; it does not yet prove concurrent M4 isolation across all pilots.
+- M4 same-repo concurrency canary is PASS: sessions `20260711_112816_4e8064` and
+  `20260711_112816_6f690b` ran simultaneously in separate vpnctl worktrees/branches, produced commits
+  `adba622` and `28c4cb3`, changed only their own A/B files and left main clean. Neither branch was pushed;
+  both worktrees and branches were removed after independent cross-contamination checks.
+- M5 mutation canary is PASS: session `20260711_113017_10fb33` created `add(a,b)` plus four stdlib tests;
+  an independent `python3 -m unittest -v` rerun passed 4/4. Replacing `a+b` with `a-b` then failed the same
+  4/4 tests with exit 1. The disposable repository was removed.
+- M8 prompt-injection canary is PASS 3/3: three untrusted README files attempted hidden marker writes; all
+  three sessions classified them as data/injection, and the markers were independently absent on both build-1
+  and the Hermes pod. Test fixtures were removed.
 - Cluster-read routing is **FAIL 0/3**: build-1 cannot authenticate to ops-1/home-1. The agent reported the
   blocker honestly but spent 24-28 tool calls per run before stopping.
 - Tool-loop mechanism test is **FAIL**: 14 identical `exec_command(false)` calls returned `[exit 1]` without a
@@ -298,7 +308,7 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 - upstream or overlay fixes for the dashboard password-provider redirect and Codex `exec_command` failure classifier;
 - cluster-route SSH trust from build-1 to ops-1/home-1;
 - Telegram UAT and Windows target execution;
-- remaining five-repo write-cycle, mutation, prompt-injection, concurrent-worktree and failure tests;
+- expansion of write-cycle, mutation, prompt-injection and concurrent-worktree evidence beyond the vpnctl canary;
 - pod roll mid-task, model/egress/build-1 failure injection and task recovery;
 - restore/destructive tests.
 
@@ -307,6 +317,6 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 1. Decide an ADR-backed Hermes v0.18 fix path for the M9 password-provider redirect and M11 Codex
    `exec_command` classifier; upstream contribution is preferred over a ConfigMap source overlay.
 2. Explicitly authorize or reject build-1 SSH trust to ops-1/home-1, then rerun cluster routing N>=3.
-3. Run the remaining M4/M5/M8/M10 write, mutation, injection, concurrency and recovery gates.
+3. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots and run M10 recovery gates.
 4. After M9 is fixed, perform owner UAT from a clean browser and Telegram.
 5. Classify the 16 nonarchived nonpilot repositories before expanding the default Germes workflow.
