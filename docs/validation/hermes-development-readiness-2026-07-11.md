@@ -38,9 +38,14 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
   hard stop. Hermes v0.18 classifies non-zero exits only for tool name `terminal`; Codex uses `exec_command`, so
   its failure counter never increments. Fixing upstream runtime behavior or overlaying agent source requires an
   owner-approved ADR, not another threshold change.
+- Authenticated password login is PASS and `/api/model/info` agrees with managed config:
+  `gpt-5.5` / `openai-codex`. Clean-cookie navigation is **FAIL**: `/chat` redirects the single password provider
+  to the OAuth-only `/auth/login?provider=basic`, which raises `NotImplementedError` and returns HTTP 500 instead
+  of rendering `/login`.
 
-The updated deterministic runner emits 26 records: **25 PASS / 1 FAIL**. The remaining deterministic failure is
-`M11 runtime.exec_failure_classification`; the separate behavioral cluster-route failure keeps M3 red as well.
+The updated deterministic runner emits 28 records: **26 PASS / 2 FAIL**. The deterministic failures are
+`M9 dashboard.auth_redirect` and `M11 runtime.exec_failure_classification`; the separate behavioral cluster-route
+failure keeps M3 red as well.
 The current verdict therefore remains **NOT READY**.
 
 ## Execution progress
@@ -284,26 +289,20 @@ The desktop `uap-offload` endpoint was down during repo-contract extraction. The
 was not silently loaded into the paid context. Only narrow matching lines and GitHub tree metadata were inspected.
 Full quote-gated extraction remains pending after the desktop endpoint is started.
 
-## Owner-gated work not executed
+## Remaining owner-gated work
 
-- merge of any `clusters/prod` fix, because Flux would deploy it live;
-- authenticated dashboard/Telegram write-cycle;
-- cloning or modifying missing pilot repos on build-1;
-- sacrificial branches, PRs, mutation tests and target package installs;
-- pod roll mid-task, model/egress/build-1 failure injection;
-- Mac `known_hosts` modification;
+- upstream or overlay fixes for the dashboard password-provider redirect and Codex `exec_command` failure classifier;
+- cluster-route SSH trust from build-1 to ops-1/home-1;
+- Telegram UAT and Windows target execution;
+- remaining five-repo write-cycle, mutation, prompt-injection, concurrent-worktree and failure tests;
+- pod roll mid-task, model/egress/build-1 failure injection and task recovery;
 - restore/destructive tests.
 
 ## Next actions
 
-1. In an owner-approved live window, merge draft PR #125 and verify Flux, rollout, dashboard, banner,
-   `hermes status` and a new provider trace all resolve the same model.
-2. Complete the M2/M7 prompt, skill and precedence audit; add mechanism tests for every critical routing rule.
-3. Reconcile `vpnctl` on build-1 without destroying its dirty worktree, then add the missing repo-contract through
-   that repository's own PR/CI path.
-4. Start desktop offload and run quote-gated extraction over the five repo contracts.
-5. Ask the owner to classify the 16 nonarchived nonpilot repositories before expansion.
-6. Owner action: enable default-branch rulesets on the four non-UAP pilot repositories before any autonomous
-   write-cycle.
-7. Only after those preconditions, run the N>=3 behavioral, worktree, mutation, PR/CI, injection, interface,
-   failure and recovery tests required by M3-M12.
+1. Decide an ADR-backed Hermes v0.18 fix path for the M9 password-provider redirect and M11 Codex
+   `exec_command` classifier; upstream contribution is preferred over a ConfigMap source overlay.
+2. Explicitly authorize or reject build-1 SSH trust to ops-1/home-1, then rerun cluster routing N>=3.
+3. Run the remaining M4/M5/M8/M10 write, mutation, injection, concurrency and recovery gates.
+4. After M9 is fixed, perform owner UAT from a clean browser and Telegram.
+5. Classify the 16 nonarchived nonpilot repositories before expanding the default Germes workflow.
