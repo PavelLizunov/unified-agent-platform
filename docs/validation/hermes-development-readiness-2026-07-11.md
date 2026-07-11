@@ -60,7 +60,7 @@ full configs or raw status output. Its unit/self-check, secret scan, IaC static 
 | M9 interface agreement | **FAIL** | Dashboard/status and TUI banner disagree on effective model; session resume/reconnect not tested |
 | M10 durability/recovery | **PARTIAL** | Pod and scheduled backups are healthy; task restart and restore smoke for this goal not run |
 | M11 observability/limits | **PARTIAL** | Runtime/status and context limit artifacts exist; full task-to-PR trace and loop-stop test not run |
-| M12 shared understanding | **PARTIAL** | Four pilot repos expose `AGENTS.md`; `vpnctl` has no `AGENTS.md`; clean-session and second-agent handoff not run |
+| M12 shared understanding | **FAIL** | `vpnctl` has no `AGENTS.md`; VPNRouter and suflyor contain semantic instruction conflicts; clean-session and second-agent handoff not run |
 
 Any M1-M12 FAIL makes the current verdict `NOT READY` regardless of prior percentage-based acceptance.
 
@@ -127,6 +127,32 @@ The build-1 host-key failure is an actual readiness gap for Mac/Android target t
 
 Cloning missing pilot repos and all write tests are deferred until the owner-approved pilot phase. GitHub tree/API
 inspection was read-only.
+
+### Phase 2 read-only repo-contract reconciliation
+
+This pass compared the root agent instructions against the actual default branch, build entrypoints and CI at the
+refs above. A file being present is only a structural PASS; contradictory or unenforceable instructions are a
+semantic FAIL.
+
+| Repository | Structural | Semantic | Read-only evidence / remaining gap |
+|---|---|---|---|
+| `unified-agent-platform` | PASS | PASS for repository-local rules | `AGENTS.md`, skills, `tests/verify-local.ps1` and protected `master` agree on PR-only delivery; live Flux and failure paths remain owner-gated |
+| `VPNRouter` | PASS | **FAIL** | Root `AGENTS.md` instructs autonomous direct pushes/releases to `main`, while the Hermes acceptance contract requires branch -> PR -> CI and the branch has no protection; the same file contradicts itself about `origin`/`github`/`forgejo` remote names; target routing is written for a local Codex workstation rather than Hermes via build-1 |
+| `vpnctl` | **FAIL** | **FAIL** | No `AGENTS.md`; `README.md`, `justfile` and CI agree on the Rust gate, including Docker SSH e2e and secret scan, but do not provide the full Hermes repo-contract; build-1 lacks `just` and its clone is stale/dirty |
+| `vpnrouter-gateway` | PASS | PASS with owner gate | Root `AGENTS.md` states native-Linux build, deterministic gate, secret boundaries, destructive `apply` boundary, lab target and explicit owner approval before push/release; `main` still lacks mechanical protection and the gate has not been rerun in a clean build-1 worktree |
+| `suflyor` | PASS | **FAIL** | `AGENTS.md` and CI correctly require three Windows Rust crates, but `CONTRIBUTING.md` still describes two; they disagree on the live secret-config path and release authority; `master` has no ruleset and the Windows target gate has not been rerun through Hermes |
+
+CI at the audited refs was green for UAP, `vpnctl`, `vpnrouter-gateway`, `suflyor`, and VPNRouter's `dotnet test`
+workflow on `main`. Green CI does not repair the contract or branch-protection failures above.
+
+Required contract PRs, after the owner opens an external-write window:
+
+1. `VPNRouter`: replace direct-main/autonomous-release instructions with its chosen branch/PR policy, normalize
+   remote names, and document Hermes routes for Windows, Debian, Mac and Android targets.
+2. `vpnctl`: add a concise root `AGENTS.md` sourced from `README.md`, `justfile` and CI; state build-1 bootstrap,
+   Docker e2e, secret/generated boundaries, target requirements, PR policy and release/rollback ownership.
+3. `suflyor`: reconcile `CONTRIBUTING.md` to the three-crate CI, canonical secret path and owner-only release rule.
+4. All four non-UAP pilots: enable default-branch enforcement before any autonomous write-cycle.
 
 ### Pilot default-branch enforcement
 
