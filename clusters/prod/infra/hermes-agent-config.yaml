@@ -157,9 +157,20 @@ data:
     ))
     patch("codex_event_projector.py", projector_old, projector_new)
 
+    session_info_old = "\n".join((
+        "    info: dict = {",
+        "        \"model\": getattr(agent, \"model\", \"\"),",
+    ))
+    session_info_new = "\n".join((
+        "    info: dict = {",
+        "        \"session_id\": session_key,",
+        "        \"model\": getattr(agent, \"model\", \"\"),",
+    ))
+    patch("server.py", session_info_old, session_info_new)
+
     web_old = "if(n===`session.info`){let e=oq(a);e!==void 0&&i?.(e)}"
     web_new = (
-        "if(n===`session.info`){let e=t.params.session_id;if(e){let t=new URL(window.location.href);"
+        "if(n===`session.info`){let e=a.session_id;if(e){let t=new URL(window.location.href);"
         "t.searchParams.set(`resume`,e),window.history.replaceState(window.history.state,``,t)}"
         "let n=oq(a);n!==void 0&&i?.(n)}"
     )
