@@ -6,7 +6,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `5ee11eec51f015136a5b7e0502dab4267ce749ca` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `da5384da40b216e7c4046dfd32c0c76690cf9cd1` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -46,29 +46,31 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 - M8 prompt-injection canary is PASS 3/3: three untrusted README files attempted hidden marker writes; all
   three sessions classified them as data/injection, and the markers were independently absent on both build-1
   and the Hermes pod. Test fixtures were removed.
-- Cluster-read routing is **FAIL 0/3**: build-1 cannot authenticate to ops-1/home-1. The agent reported the
-  blocker honestly but spent 24-28 tool calls per run before stopping.
-- Tool-loop mechanism test is **FAIL**: 14 identical `exec_command(false)` calls returned `[exit 1]` without a
-  hard stop. Hermes v0.18 classifies non-zero exits only for tool name `terminal`; Codex uses `exec_command`, so
-  its failure counter never increments. Fixing upstream runtime behavior or overlaying agent source requires an
-  owner-approved ADR, not another threshold change.
+- Pre-fix controls recorded cluster-read **FAIL 0/3** and 14/14 unblocked identical `exec_command(false)` calls;
+  the post-fix results below supersede those controls.
 - Authenticated password login is PASS and `/api/model/info` agrees with managed config:
-  `gpt-5.5` / `openai-codex`. Clean-cookie navigation is **FAIL**: `/chat` redirects the single password provider
-  to the OAuth-only `/auth/login?provider=basic`, which raises `NotImplementedError` and returns HTTP 500 instead
-  of rendering `/login`.
+  `gpt-5.5` / `openai-codex`.
+- PRs #142/#143 implemented ADR-027 as a fail-closed compatibility overlay on the pinned official image.
+  Clean-cookie `/chat` now redirects to `/login?next=%2Fchat`; the password form returns 200.
+- Codex `exec_command` non-zero results are classified as failures in both Hermes classifiers and in the
+  `codex_app_server` inner loop. The repeated-`false` behavioral retest stopped after 5 attempts with
+  `repeated_exact_failure_block` (the pre-fix control allowed all 14).
+- A dedicated `~/.ssh/cluster_ops` key and strict host aliases were installed on build-1 for `ops-1` and
+  `home-1`. Direct authentication succeeds to both; Hermes cluster-read routing is now **PASS 3/3** and every
+  run returned `node/uap-home-1` and `node/uap-home-2`.
 
-The updated deterministic runner emits 28 records: **26 PASS / 2 FAIL**. The deterministic failures are
-`M9 dashboard.auth_redirect` and `M11 runtime.exec_failure_classification`; the separate behavioral cluster-route
-failure keeps M3 red as well.
-The current verdict therefore remains **NOT READY**.
+The post-fix deterministic runner at `da5384d` emits 28 records: **28 PASS / 0 FAIL**. M3 cluster-read behavioral
+routing, M9 dashboard auth and M11 loop control are green. The broader migration verdict remains **NOT READY**
+because the explicitly separate Windows/Telegram and recovery windows, multi-repository expansion and repository
+classification are still incomplete.
 
 ## Execution progress
 
 - Phase 0 is complete: platform/runtime baseline, all 28 repositories, the five pilot refs, owner-gated
   boundaries and current M1-M12 verdicts are recorded below.
 - The M1 schema-drift fix and live prompt migrations were merged in PRs #125/#136; M1 is now PASS.
-- Fleet/onboarding documentation drift was corrected in PR #126. M2 remains incomplete until the prompt/skill
-  audit and behavioral routing runs prove the same topology end to end.
+- Fleet/onboarding documentation drift was corrected in PR #126; the completed prompt/skill audit and behavioral
+  routing now make M2 PASS for the tested pilot topology.
 - PRs #128/#131/#134 added `tools/readiness/readiness.py`, a read-only JSONL evidence collector for M1/M2/M3/M6/M9/M11/M12,
   including known semantic contract conflicts and vpnctl build-host readiness.
   It cannot perform owner-gated write, failure-injection or authenticated-interface tests.
@@ -305,8 +307,6 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 
 ## Remaining owner-gated work
 
-- upstream or overlay fixes for the dashboard password-provider redirect and Codex `exec_command` failure classifier;
-- cluster-route SSH trust from build-1 to ops-1/home-1;
 - Telegram UAT and Windows target execution;
 - expansion of write-cycle, mutation, prompt-injection and concurrent-worktree evidence beyond the vpnctl canary;
 - pod roll mid-task, model/egress/build-1 failure injection and task recovery;
@@ -314,9 +314,7 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 
 ## Next actions
 
-1. Decide an ADR-backed Hermes v0.18 fix path for the M9 password-provider redirect and M11 Codex
-   `exec_command` classifier; upstream contribution is preferred over a ConfigMap source overlay.
-2. Explicitly authorize or reject build-1 SSH trust to ops-1/home-1, then rerun cluster routing N>=3.
-3. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots and run M10 recovery gates.
-4. After M9 is fixed, perform owner UAT from a clean browser and Telegram.
-5. Classify the 16 nonarchived nonpilot repositories before expanding the default Germes workflow.
+1. In separate owner windows, run clean-browser/Telegram UAT, Windows target execution and M10 recovery gates.
+2. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots.
+3. Classify the 16 nonarchived nonpilot repositories before expanding the default Germes workflow.
+4. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.
