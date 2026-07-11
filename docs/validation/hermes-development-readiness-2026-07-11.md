@@ -6,7 +6,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `8e41b801212ff836f69b7186eb949334c2b7ab61` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `0c61837e7ca50d3c824feba1a24a3b1a9c3e90f2` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -87,8 +87,25 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 The final pre-report deterministic run at UAP/Flux `8e41b80`, after `suflyor#11`, emitted **28 PASS / 0 FAIL**
 to `/tmp/hermes-readiness-2026-07-11-final-pre-report.jsonl`. Before each suflyor fix, the extended checker first
 proved its RED control (`stale secret-config path; direct-master policy`, then `stale overlay_host layout`). The
-broader migration verdict remains **NOT READY** because Windows package/GUI UAT, Telegram/reconnect, recovery and
+broader migration verdict remains **NOT READY** because Windows package/GUI UAT, recovery and
 multi-repository test expansion are still incomplete.
+
+### M9 post-fix interface UAT
+
+- PR #150 switched the managed default to `gpt-5.6-luna`, suppressed the duplicate Codex `userMessage` projection
+  and added dashboard resume support. Flux reconciled merge SHA `5f4330f9efcd4ff53b5cbd5af6eb70f3104aaacf`.
+- The first dashboard retest exposed that the compatibility patch persisted the ephemeral WebSocket id rather than
+  Hermes's durable session key. PR #151 corrected the server payload and client selection; Flux source and applied
+  revision both reached `0c61837e7ca50d3c824feba1a24a3b1a9c3e90f2`, and the replacement pod became Ready.
+- A clean live model probe returned exactly `LUNA-PROBE-OK`; the exported test session contained exactly one user
+  message and one assistant message, with `gpt-5.6-luna` recorded as the model.
+- Telegram inbound/outbound UAT returned exactly `TELEGRAM-UAT-OK` without tool use.
+- The owner refreshed the production dashboard with `Ctrl+R` and confirmed that the same chat resumed successfully.
+  This closes M9 as **PASS**.
+- A post-fix deterministic collector run emitted **24 PASS / 4 FAIL** to
+  `/tmp/hermes-readiness-post-m9.jsonl`. All four failures are caused by current SSH unavailability of `build-1`:
+  three M3 reachability checks and the dependent M12 checkout-readiness check. They do not contradict the completed
+  M9 UAT, but keep the overall verdict at **NOT READY**.
 
 ## Execution progress
 
@@ -107,7 +124,7 @@ multi-repository test expansion are still incomplete.
 
 | Gate | Current | Evidence / remaining proof |
 |---|---|---|
-| M1 runtime/model truth | **PASS** | managed config, runtime status and authenticated dashboard resolve `gpt-5.5` / `openai-codex` |
+| M1 runtime/model truth | **PASS** | managed config, live probe and authenticated dashboard resolve `gpt-5.6-luna` / `openai-codex` |
 | M2 fleet truth | **PASS** | live SHA/Flux/fleet routes agree; PR #146 excludes the owner workstation/Qwen from Hermes |
 | M3 deterministic routing | **PARTIAL** | command routes are green N=3; Windows package/live GUI UAT is incomplete |
 | M4 worktree isolation | **PASS** | same-repo and cross-repo parallel worktrees passed independent contamination checks and cleanup |
@@ -115,7 +132,7 @@ multi-repository test expansion are still incomplete.
 | M6 Git/PR/CI | **PASS** | protected defaults on all pilots, rejected direct pushes and one full Hermes PR/CI cycle |
 | M7 prompt integrity | **PASS** | precedence/drift fixes are deployed and covered by static/runtime mechanism checks |
 | M8 injection/secrets | **PASS** | prompt-injection N=3, marker absence and current secret scan are green |
-| M9 interface agreement | **PARTIAL** | CLI incomplete-turn false success is fixed and dashboard is green; Telegram/reconnect UAT remains |
+| M9 interface agreement | **PASS** | Telegram exact-response UAT, durable dashboard resume after `Ctrl+R`, Luna model truth and user-message deduplication are green |
 | M10 durability/recovery | **PARTIAL** | backups are healthy; mid-task roll and restore smoke remain owner-gated |
 | M11 observability/limits | **PASS** | failure/loop guards and terminal-response guard are deployed; controlled large-output retest ended honestly |
 | M12 shared understanding | **PASS** | fresh vpnctl, VPNRouter and suflyor sessions used current repo-contracts and agreed with independent checks |
@@ -367,14 +384,14 @@ new approval that names the specific agent and action. Repository classification
 
 ## Remaining owner-gated work
 
-- Telegram UAT and Windows target execution;
+- Windows package/live GUI UAT on the dedicated `windows-brat` VM;
 - expansion of write-cycle, mutation, prompt-injection and concurrent-worktree evidence beyond the vpnctl canary;
 - pod roll mid-task, model/egress/build-1 failure injection and task recovery;
 - restore/destructive tests.
 
 ## Next actions
 
-1. In separate owner windows, run clean-browser/Telegram UAT, Windows target execution and M10 recovery gates.
+1. In separate owner windows, run Windows package/live GUI UAT and M10 recovery gates.
 2. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots.
 3. Owner may adjust the conservative metadata-based nonpilot classes before any of them enters a write-cycle.
 4. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.
