@@ -110,6 +110,7 @@ def known_contract_conflicts(repo: str, files: dict[str, str]) -> tuple[bool, st
     issues = []
     agents = files.get("AGENTS.md", "")
     contributing = files.get("CONTRIBUTING.md", "")
+    readme = files.get("README.md", "")
     if repo == "VPNRouter":
         if not agents:
             issues.append("AGENTS.md unavailable")
@@ -127,8 +128,10 @@ def known_contract_conflicts(repo: str, files: dict[str, str]) -> tuple[bool, st
             issues.append("CONTRIBUTING.md unavailable")
         if "suflyor-tts/" not in contributing:
             issues.append("CONTRIBUTING omits suflyor-tts")
-        if "%APPDATA%\\overlay-mvp\\config.json" in contributing:
+        if "%APPDATA%\\overlay-mvp\\config.json" in contributing + readme:
             issues.append("stale secret-config path")
+        if "Pushing to master is allowed" in agents:
+            issues.append("direct-master policy")
         if "gh release create" in contributing and "owner" not in contributing.lower():
             issues.append("release authority conflict")
     return not issues, "; ".join(issues) if issues else "no known semantic conflicts"
@@ -291,7 +294,7 @@ def check_github(rows: list[dict]) -> None:
 
         if repo in {"VPNRouter", "suflyor"}:
             files = {}
-            for path in ("AGENTS.md", "CONTRIBUTING.md"):
+            for path in ("AGENTS.md", "CONTRIBUTING.md", "README.md"):
                 rc2, body = command(["gh", "api", f"repos/PavelLizunov/{repo}/contents/{path}"])
                 try:
                     obj = json.loads(body)
@@ -339,6 +342,16 @@ def main() -> int:
             "hard_stop_enabled": True,
             "warn_after": {"exact_failure": 2, "same_tool_failure": 3, "idempotent_no_progress": 2},
             "hard_stop_after": {"exact_failure": 5, "same_tool_failure": 8, "idempotent_no_progress": 5},
+        })[0]
+        assert not known_contract_conflicts("suflyor", {
+            "AGENTS.md": "Pushing to master is allowed only when requested",
+            "CONTRIBUTING.md": "suflyor-tts/ owner",
+            "README.md": "%APPDATA%\\overlay-mvp\\config.json",
+        })[0]
+        assert known_contract_conflicts("suflyor", {
+            "AGENTS.md": "Direct pushes to `master` are forbidden",
+            "CONTRIBUTING.md": "suflyor-tts/ owner %APPDATA%\\suflyor\\config.json",
+            "README.md": "%APPDATA%\\suflyor\\config.json",
         })[0]
         assert "topsecret" not in safe("token=topsecret")
         print("readiness-self-check-ok")
