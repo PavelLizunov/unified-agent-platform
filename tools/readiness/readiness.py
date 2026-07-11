@@ -132,6 +132,8 @@ def known_contract_conflicts(repo: str, files: dict[str, str]) -> tuple[bool, st
             issues.append("stale secret-config path")
         if "Pushing to master is allowed" in agents:
             issues.append("direct-master policy")
+        if "src/bin/overlay_host.rs # multi-window manager + all callback wiring" in contributing:
+            issues.append("stale overlay_host layout")
         if "gh release create" in contributing and "owner" not in contributing.lower():
             issues.append("release authority conflict")
     return not issues, "; ".join(issues) if issues else "no known semantic conflicts"
@@ -345,7 +347,7 @@ def main() -> int:
         })[0]
         assert not known_contract_conflicts("suflyor", {
             "AGENTS.md": "Pushing to master is allowed only when requested",
-            "CONTRIBUTING.md": "suflyor-tts/ owner",
+            "CONTRIBUTING.md": "suflyor-tts/ owner\nsrc/bin/overlay_host.rs # multi-window manager + all callback wiring",
             "README.md": "%APPDATA%\\overlay-mvp\\config.json",
         })[0]
         assert known_contract_conflicts("suflyor", {
