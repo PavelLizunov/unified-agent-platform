@@ -10,7 +10,7 @@ metadata:
   namespace: uap-system
 data:
   # ADR-027: exact, fail-closed compatibility patch for the pinned v0.18 image.
-  # Receives a directory containing copies of the three upstream files and is safe to run twice.
+  # Receives a directory containing copies of the affected upstream files and is safe to run twice.
   runtime-compat.py: |
     from pathlib import Path
     import sys
@@ -144,6 +144,27 @@ data:
     ))
     patch("dashboard_auth_middleware.py", sso_old, sso_new)
 
+    projector_old = "\n".join((
+        "        if item_type == \"userMessage\":",
+        "            return self._project_user_message(item)",
+        "",
+    ))
+    projector_new = "\n".join((
+        "        if item_type == \"userMessage\":",
+        "            # Codex echoes the input item; Hermes already persisted the real user turn.",
+        "            return ProjectionResult()",
+        "",
+    ))
+    patch("codex_event_projector.py", projector_old, projector_new)
+
+    web_old = "if(n===`session.info`){let e=oq(a);e!==void 0&&i?.(e)}"
+    web_new = (
+        "if(n===`session.info`){let e=t.params.session_id;if(e){let t=new URL(window.location.href);"
+        "t.searchParams.set(`resume`,e),window.history.replaceState(window.history.state,``,t)}"
+        "let n=oq(a);n!==void 0&&i?.(n)}"
+    )
+    patch("web_index.js", web_old, web_new)
+
   config.yaml: |
     # Brain: the Codex subprocess (codex_app_server) owns the tool loop. The default
     # codex_responses mode does NOT work in-cluster — hermes's Python httpx cannot reach
@@ -204,7 +225,7 @@ data:
       openai_runtime: codex_app_server
       # Hermes v0.18 canonical model-id leaf. Do not use the legacy `model` alias:
       # an existing PVC `model.default` wins over it and silently bypasses GitOps.
-      default: gpt-5.5
+      default: gpt-5.6-luna
     # Circuit-breaker for repeated tool failures/no-progress. Managed because a
     # dashboard edit must not silently disable the safety boundary.
     tool_loop_guardrails:

@@ -1,7 +1,8 @@
 # hermes-agent in k3s with the Codex brain (Track A2)
 
 > **CURRENT again since 2026-07-11 (#119).** The owner restored the ChatGPT-Plus OAuth lineage with
-> device-auth, and Codex `gpt-5.5` via `codex_app_server` is the live brain. From 2026-07-06 through
+> device-auth, and Codex `gpt-5.6-luna` via `codex_app_server` is the live brain (explicit in-pod
+> `LUNA-PROBE-OK`). From 2026-07-06 through
 > 2026-07-11 the fully-local `qwen-35b`/`ornith-9b` router served as the brain; that path remains the
 > documented manual fallback in [local-models-router.md](local-models-router.md). Live state:
 > [../STATUS.md](../STATUS.md).

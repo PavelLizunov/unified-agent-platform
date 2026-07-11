@@ -11,9 +11,9 @@ Last updated: 2026-07-11
 - HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
   independent server + a failover drill are still required.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
-- **Brain reality (current, since 2026-07-11):** the live hermes-agent brain is **Codex `gpt-5.5`** through
-  `codex_app_server` (`provider: openai-codex`). Owner device-auth restored the ChatGPT-Plus OAuth lineage and an
-  in-pod `codex exec` returned `PONG` (#119). The ops-1 `qwen-35b`/`ornith-9b` local-models-router, which served as
+- **Brain reality (current, since 2026-07-11):** the live hermes-agent brain is **Codex `gpt-5.6-luna`** through
+  `codex_app_server` (`provider: openai-codex`). Owner device-auth restored the ChatGPT-Plus OAuth lineage; an
+  explicit in-pod Luna probe returned `LUNA-PROBE-OK`. The ops-1 `qwen-35b`/`ornith-9b` local-models-router, which served as
   brain from 2026-07-06 through 2026-07-11, remains the documented manual fallback. Coding delegation stays on build-1.
 - ✅ **Quality gate is ENFORCED.** The owner does not review code; the agent's self-test + CI **is** the gate, and it
   is now enforced. The repo is **public**, the GitHub ruleset `protect-master` is **active**, a PR is **required**, and
@@ -216,7 +216,8 @@ Phase A2: the external NousResearch **hermes-agent** gateway as a Flux-managed k
 ChatGPT-Plus subscription** (`codex_app_server`) reached through `singbox-egress`. Owner chose the GitOps/k3s path
 over bare Docker.
 
-> **Current again since 2026-07-11 (#119).** Codex `gpt-5.5` is the live brain after owner re-auth. The local
+> **Current again since 2026-07-11 (#119).** Codex `gpt-5.6-luna` is the live brain after owner re-auth and the
+> owner's cost-sensitive model switch. The local
 > `qwen-35b`/`ornith-9b` interval (2026-07-06 through 2026-07-11) proved the manual fallback path; its router and
 > runbook remain available. See "Brain reality" above.
 
