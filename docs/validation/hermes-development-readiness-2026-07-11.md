@@ -6,7 +6,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `0c61837e7ca50d3c824feba1a24a3b1a9c3e90f2` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `11c3d34b644e095e8977b56e5d943245af0cd803` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -87,8 +87,8 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 The final pre-report deterministic run at UAP/Flux `8e41b80`, after `suflyor#11`, emitted **28 PASS / 0 FAIL**
 to `/tmp/hermes-readiness-2026-07-11-final-pre-report.jsonl`. Before each suflyor fix, the extended checker first
 proved its RED control (`stale secret-config path; direct-master policy`, then `stale overlay_host layout`). The
-broader migration verdict remains **NOT READY** because Windows package/GUI UAT, recovery and
-multi-repository test expansion are still incomplete.
+broader migration verdict remains **NOT READY** because Windows package/GUI UAT and recovery testing are still
+incomplete.
 
 ### M9 post-fix interface UAT
 
@@ -106,6 +106,35 @@ multi-repository test expansion are still incomplete.
   `/tmp/hermes-readiness-post-m9.jsonl`. All four failures are caused by current SSH unavailability of `build-1`:
   three M3 reachability checks and the dependent M12 checkout-readiness check. They do not contradict the completed
   M9 UAT, but keep the overall verdict at **NOT READY**.
+
+### M5 all-pilot test-honesty expansion - 2026-07-12
+
+- The existing `vpnctl` canary remains the first accepted GREEN/RED mutation proof.
+- UAP session `20260711_214457_3ef6a1` added focused `api_key` evidence redaction coverage. Independent
+  `readiness.py --self-check` and `test_readiness.py` reruns passed; removing the new token pattern produced the
+  expected assertion failure, and restoring it returned both checks to GREEN.
+- `vpnrouter-gateway` session `20260711_214129_878374` added a malformed-URL redaction case. The focused test
+  passed independently, removing the scheme guard failed the exact assertion with exit 1, and restoration passed
+  `fmt`, `clippy` and all 62 tests. The exact base SHA `b595647` also has green repository CI, including audit;
+  `cargo audit` was not installed locally on build-1.
+- VPNRouter onboarding exposed two contract regressions before testing: nonexistent zone `AGENTS.md` links and a
+  stale .NET 8 claim after the repository moved to SDK `10.0.301`. Hermes opened PRs #37 and #38; both passed the
+  required `grep` and .NET test checks and were merged. The accepted isolated Core canary then passed 35/35
+  `RoutingAppListEditorTests`, a one-line match-result mutation failed the exact new whitespace test with exit 1,
+  and restoration returned 35/35 GREEN.
+- Interrupting the first broad VPNRouter one-shot did not cancel its in-flight backend work. Reusing that worktree
+  for a retry allowed late writes from both sessions to mix. The contaminated worktree was quarantined and no
+  change was pushed; the accepted canary was reconstructed in a fresh worktree. M10 must explicitly test and
+  document cancellation/disconnect semantics before cutover.
+- `suflyor` GREEN PR #12 ran the canonical Windows gate: backend fmt/clippy/tests, Slint fmt/clippy/tests, TTS
+  fmt/clippy/tests, gitleaks and all three cargo-deny jobs passed. Independent mutation PR #13 retained the new
+  test while reverting the production trim: fmt/clippy passed, then exactly
+  `whitespace_only_title_reads_as_none` failed (`478 passed / 1 failed`, exit 1). Both sacrificial PRs and branches
+  were closed/deleted without merge after evidence capture.
+
+All five pilot repositories now have independently observed GREEN execution and a relevant RED mutation. M5 is
+therefore **PASS**. No sacrificial product change was merged; only the two verified VPNRouter contract corrections
+were retained.
 
 ## Execution progress
 
@@ -128,7 +157,7 @@ multi-repository test expansion are still incomplete.
 | M2 fleet truth | **PASS** | live SHA/Flux/fleet routes agree; PR #146 excludes the owner workstation/Qwen from Hermes |
 | M3 deterministic routing | **PARTIAL** | command routes are green N=3; Windows package/live GUI UAT is incomplete |
 | M4 worktree isolation | **PASS** | same-repo and cross-repo parallel worktrees passed independent contamination checks and cleanup |
-| M5 tests/honesty | **PARTIAL** | independent rerun + mutation canary passed; all-pilot expansion remains |
+| M5 tests/honesty | **PASS** | all five pilots have independent GREEN execution plus a relevant RED mutation; sacrificial branches were isolated and cleaned |
 | M6 Git/PR/CI | **PASS** | protected defaults on all pilots, rejected direct pushes and one full Hermes PR/CI cycle |
 | M7 prompt integrity | **PASS** | precedence/drift fixes are deployed and covered by static/runtime mechanism checks |
 | M8 injection/secrets | **PASS** | prompt-injection N=3, marker absence and current secret scan are green |
@@ -385,13 +414,11 @@ new approval that names the specific agent and action. Repository classification
 ## Remaining owner-gated work
 
 - Windows package/live GUI UAT on the dedicated `windows-brat` VM;
-- expansion of write-cycle, mutation, prompt-injection and concurrent-worktree evidence beyond the vpnctl canary;
 - pod roll mid-task, model/egress/build-1 failure injection and task recovery;
 - restore/destructive tests.
 
 ## Next actions
 
 1. In separate owner windows, run Windows package/live GUI UAT and M10 recovery gates.
-2. Expand the now-green vpnctl M4/M5/M6/M8 canaries to the remaining pilots.
-3. Owner may adjust the conservative metadata-based nonpilot classes before any of them enters a write-cycle.
-4. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.
+2. Owner may adjust the conservative metadata-based nonpilot classes before any of them enters a write-cycle.
+3. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.
