@@ -22,6 +22,8 @@
   "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
   design) — see Track A4 (DONE) and the platform-hardening items.
 - **Model+agent backend is fully in GitOps** (Track B0 DONE).
+- **Brain reality (2026-07-11):** Codex `gpt-5.5` via `codex_app_server` is live again after owner re-auth
+  (#119). The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
 
 ---
 
@@ -42,8 +44,8 @@ every tool goes dark). Detail + citations in the two research docs.
 - Raise context to **>= 64k** (hermes-agent rejects smaller at startup; Ollama defaults are far too low).
 - **Done when:** a trivial hermes-agent run actually **invokes a tool** (file write / shell) against the
   local model — structured `tool_calls`, not text.
-- *Caveat:* the desktop is **not always-on**, so this brain is opportunistic; the durable brain was Codex
-  (A5) — **now superseded**: the live brain is the fully-local `qwen-35b`/`ornith-9b` router (see A5).
+- *Caveat:* the desktop is **not always-on**. Codex is the durable brain; the local
+  `qwen-35b`/`ornith-9b` router is the manual fallback (see A5).
 
 > **Result (2026-06-23):** proven via **Ollama 0.16.1 + `gpt-oss:20b`** (native Windows; already on disk → no model
 > download over the RU network). `/v1/chat/completions` with a `tools` array returns a **structured `tool_calls`**
@@ -103,7 +105,7 @@ every tool goes dark). Detail + citations in the two research docs.
   shipped it through the enforced CI gate (**north-star demo PASSED, PR #25**). The agent's self-test +
   the now-enforced CI was the gate.
 
-### Phase A5 — Codex brain + redundancy — `codex exec` + worktree isolation ✅ DONE (PR #24) — ⚠ brain SUPERSEDED (fully-local qwen/ornith, 2026-07-06; see below)
+### Phase A5 — Codex brain + redundancy — ✅ DONE (PR #24; brain restored 2026-07-11 in #119)
 
 - Switch the durable brain to the **ChatGPT/Codex** subscription via the **`codex_app_server`** runtime
   (`model.openai_runtime: codex_app_server`, provider `openai-codex`) — native FC, **no API key**, OAuth
@@ -111,20 +113,14 @@ every tool goes dark). Detail + citations in the two research docs.
   rate-limit headroom. **DONE** (brain live, A2/A3).
 - Add **`codex exec`** as a second coding skill alongside `claude -p` to **split coding load**, with
   per-worker git worktree isolation. **DONE (PR #24).**
-- **Redundancy:** keep the **local RTX FC model** (A1) as a fallback brain; bring **`pavels-mac-mini`**
-  online (enable SSH) as a second worker / small local model host.
-- **Done when:** the agent runs with the Codex brain by default, fails over to the local brain when
-  egress/subscription is unavailable, and either coding engine can take a task.
+- **Redundancy:** the local router combines RTX `qwen-35b` with always-on Mac `ornith-9b`; both the Codex
+  and local brain paths are proven. Switching between them is documented but manual; no automatic brain failover claim.
 
-> **⚠ Brain superseded (2026-07-06) — now FULLY LOCAL, not Codex.** The paid Claude/Codex limits ran out,
-> so the durable brain moved off the cloud tier onto the **`local-models-router`** on `uap-ops-1`:
-> **`qwen-35b`** (llama.cpp on the RTX desktop) primary, **`ornith-9b`** (mlx on the **always-on** Mac)
-> fallback — one OpenAI-compatible endpoint `http://100.82.241.121:8090/v1`, native FC (PR #71 router;
-> brain repoint PR #72/#74). **Codex is demoted to a coding engine only** (and currently idle — limits
-> out; the qwen brain delegates code generation to the local `ornith` coder). The Codex-brain path is
-> **not removed** — it is the documented **revert-to-cloud** route (restore the `managed-config` `model`
-> block per [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md) when limits
-> reset). Live brain setup: [runbooks/local-models-router.md](../runbooks/local-models-router.md).
+> **Current state (2026-07-11):** Codex `gpt-5.5` is again the live brain after owner device-auth restored
+> the ChatGPT-Plus OAuth lineage (#119). From 2026-07-06 through 2026-07-11 the local
+> `qwen-35b`/`ornith-9b` router served as the brain; that path remains available as a manual fallback.
+> See [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md) and
+> [runbooks/local-models-router.md](../runbooks/local-models-router.md).
 
 > **Do NOT** point hermes-agent's brain at the subfleet endpoint at any phase — it is FC-less. subfleet
 > stays the backend for the owner's **other** projects (Telegram bot + web sessions), not the coding path.
@@ -146,12 +142,8 @@ Open infrastructure debt from [STATUS.md](../STATUS.md) and the 2026-06-19 cross
   SOPS file and in the kustomization** — Flux can reconcile Hermes. **DONE.**
 - `sops-smoke.sops.yaml` is likewise committed but intentionally **left out** (a decrypt smoke fixture) —
   keep it that way.
-- Add a `validate_iac.py` check that flags any `*.yaml` under `clusters/prod/**` not referenced by a
-  sibling kustomization (catches orphans like `litellm-keys.sops.yaml`).
-- **Note (post-pivot):** confirm with the owner whether the litellm/hermes (Hermes-legacy) layer is still
-  intended now that the direction is the external hermes-agent — it may be parked rather than GitOps-ified.
-- **Done when:** the kustomization references every running `uap-system` workload (and the Secrets they
-  need), or the exceptions are explicitly justified. Until then, do not claim full GitOps coverage.
+- `validate_iac.py` now rejects orphaned prod manifests; CI and the local gate enforce it. **DONE.**
+- Hermes-legacy is explicitly parked; the external hermes-agent is the active harness.
 
 ### B1 — Reach real HA: 3rd independent k3s server + failover drill (owner+agent)
 
@@ -176,13 +168,11 @@ Remaining:
 - (owner) **R2 least privilege:** rotate to a **bucket-scoped** R2 key (separate from interactive rclone)
   and add an R2 **lifecycle / Object Lock / versioning** policy — the bucket has none, so a compromise can
   overwrite/delete `prod/` and `dr/` (REVIEW-CODEX #1).
-- (owner) **GitHub→cluster takeover path:** enable a **master ruleset** (free; the modern replacement for
-  classic protection) requiring the CI check, since Flux follows mutable `master` with `prune:true` and
-  the kustomize-controller can do `*` on `*`.
-- (agent) **Migrate egress + Vaultwarden into the cluster** (an in-cluster `singbox-egress` already exists
-  for subfleet) or back them with **tested** recovery runbooks (REVIEW-CODEX #5).
-- **Done when:** ops-1 no longer holds an unscoped R2 key, the GitHub→cluster path requires review, and
-  egress+Vaultwarden are either in-cluster or recoverable from a tested runbook.
+- **GitHub→cluster takeover path: DONE.** `protect-master` requires PR + green `static-checks`; direct
+  master pushes are blocked.
+- (agent) **Prove recovery for ops-1 services.** Daily age-encrypted backup and health alerts are live
+  (#117), but restores for egress + Vaultwarden still need a tested runbook execution (or migrate them).
+- **Done when:** ops-1 no longer holds an unscoped R2 key and egress+Vaultwarden restores are proven.
 
 ### B3 — Finish and prove DR (owner+agent)
 
@@ -205,14 +195,14 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **Enforce the gate:** ✅ DONE — GitHub Actions CI (`static-checks`) runs on every push/PR, the repo is
   public, and the `protect-master` ruleset requires a PR + the `static-checks` check (strict), so direct
   push to master is blocked. (A PreToolUse commit secret-scan hook remains a nice-to-have defense-in-depth.)
-- **Bring hermes tests into the local gate** (`python -m unittest discover -s hermes/tests -p 'test_*.py'`).
+- **Hermes tests in CI: DONE.** The local `verify-local.ps1` wrapper still requires the documented explicit
+  unittest command for `hermes/` changes.
 - **Isolate coding workers:** docker backend (`--cap-drop ALL`, `no-new-privileges`, `--pids-limit`,
   capped tmpfs, repo bind-mounted, NO host secrets in env); deny-first `.claude/settings.json`
   (`**/*.sops.yaml`, `age-key.txt`, `~/.codex/auth.json`); `--max-turns` + `--max-budget-usd` per run.
-- **Per-worker git worktrees** before enabling concurrent subagents (replaces the prose file-ownership
-  rule in AGENTS.md).
-- **Attribution:** canonical per-executor git identity + SSH commit signing; agent+session commit trailers.
-- **Reproducible toolchain:** pinned `requirements-dev.txt`; `__pycache__/`/`*.pyc` in `.gitignore`.
+- **Per-worker git worktrees: DONE** for coding engines; AGENTS.md requires separate worktrees for parallel workers.
+- **Attribution: PARTIAL.** Canonical identity + trailers are enforced; SSH commit signing remains optional debt.
+- **Reproducible toolchain: DONE.** `requirements-dev.txt` is pinned and Python bytecode is ignored.
 
 ---
 
@@ -232,5 +222,3 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - R2 bucket-scoped key + lifecycle policy.
 - Off-homelab age-key escrow location.
 - Approval for destructive tests (node shutdown, restore-over-VM, k3s reset).
-- Confirmation that the 2x ChatGPT Plus accounts may be used for the Codex brain, and Claude Max for
-  `claude -p`; and (cleanest auth) whether one of the Plus accounts is the owner's own.
