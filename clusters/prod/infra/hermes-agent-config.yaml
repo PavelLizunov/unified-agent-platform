@@ -59,22 +59,15 @@ data:
   # loud "managed by your administrator". Keeps the BRAIN GitOps-owned while the dashboard owns
   # every other (soft) config key. Proof + verify: runbooks/hermes-agent-codex-brain.md.
   managed-config: |
-    # Brain = LOCAL qwen-35b via the ops-1 router (paid Claude/Codex limits exhausted). The router
-    # (runbooks/local-models-router.md) reaches the desktop llama.cpp; NO_PROXY covers 100.64.0.0/10 so
-    # the gateway's httpx hits it directly. FC is native (llama.cpp --jinja). fallback -> ornith-9b (mac,
-    # always-on) when the desktop is off. `default` + `model` both set (router defaults non-'ornith' -> qwen).
+    # Brain = Codex (ChatGPT-Plus subscription) via codex_app_server. Re-authed 2026-07-11 (device-auth).
+    # The codex CLI subprocess owns the tool loop (codex_responses mode cannot reach chatgpt.com through the
+    # singbox proxy). GOTCHA: ChatGPT OAuth is a single-use refresh-token lineage -- a `codex login` anywhere
+    # else (owner desktop) REVOKES this cluster token; re-seed via `codex login --device-auth` in the pod if it
+    # 401s. Revert to local qwen: restore this block per runbooks/local-models-router.md. Coding still routes to build-1.
     model:
-      provider: custom
-      base_url: http://100.82.241.121:8090/v1
-      default: qwen-35b
-      model: qwen-35b
-      api_key: local
-    fallback_providers:
-      - provider: custom
-        base_url: http://100.82.241.121:8090/v1
-        default: ornith-9b
-        model: ornith-9b
-        api_key: local
+      provider: openai-codex
+      openai_runtime: codex_app_server
+      model: gpt-5.5
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram
