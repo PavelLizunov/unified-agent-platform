@@ -6,7 +6,7 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `06c6f154f011446c759c23bd7bd9da0b01692756` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `3b9a5e2da7f428b6ca63c7bc38cce53f1f4dc513` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -22,25 +22,29 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
   merged because that would trigger a live Flux rollout outside an owner-approved window.
 - Fleet/onboarding documentation drift was corrected in PR #126. M2 remains incomplete until the prompt/skill
   audit and behavioral routing runs prove the same topology end to end.
-- PR #128 added `tools/readiness/readiness.py`, a read-only JSONL evidence collector for M1/M2/M3/M6/M9/M12.
+- PRs #128/#131 added `tools/readiness/readiness.py`, a read-only JSONL evidence collector for M1/M2/M3/M6/M9/M12,
+  including known semantic contract conflicts and vpnctl build-host readiness.
   It cannot perform owner-gated write, failure-injection or authenticated-interface tests.
 
 ### Deterministic harness run
 
-Command on ops-1 at `2026-07-11T09:26Z`:
+Latest command on ops-1 at `2026-07-11T09:45Z`:
 
 ```bash
 python3 tools/readiness/readiness.py --output /tmp/hermes-readiness-2026-07-11.jsonl
 ```
 
-The runner emitted exactly 21 records: **14 PASS / 7 FAIL**, and exited non-zero as required. Flux source and
-applied revisions matched `master@sha1:06c6f154f011446c759c23bd7bd9da0b01692756`. The seven failures were:
+The runner emitted exactly 24 records: **14 PASS / 10 FAIL**, and exited non-zero as required. Flux source and
+applied revisions matched `master@sha1:3b9a5e2da7f428b6ca63c7bc38cce53f1f4dc513`. The ten failures were:
 
 1. M1 effective model: managed config has no canonical `model.default`, while the PVC/runtime resolve
    `gpt-5.6-luna` and the legacy managed alias is still present;
 2. M3 build-1 -> Mac: SSH stops at host-key verification;
 3. M6: no active branch ruleset for `VPNRouter`, `vpnctl`, `vpnrouter-gateway` or `suflyor`;
-4. M12: `vpnctl` has CI/build entrypoints but no `AGENTS.md`.
+4. M12: `vpnctl` has CI/build entrypoints but no `AGENTS.md`;
+5. M12: VPNRouter still contains direct-main/autonomous-release and contradictory-remote instructions;
+6. M12: suflyor `CONTRIBUTING.md` omits `suflyor-tts`, has a stale secret path and conflicts on release authority;
+7. M12: the vpnctl build-1 clone does not match GitHub `main`, is dirty, and lacks `just`.
 
 The collector only reads model subtrees, redacts sensitive field patterns, truncates evidence and does not emit
 full configs or raw status output. Its unit/self-check, secret scan, IaC static gate and all 41 Hermes tests pass.
