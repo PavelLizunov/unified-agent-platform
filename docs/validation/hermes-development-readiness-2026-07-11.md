@@ -1,18 +1,49 @@
 # Hermes development readiness - baseline 2026-07-11
 
-Status: **Phase 0 IN PROGRESS**  
+Status: **Phase 0 COMPLETE; goal execution IN PROGRESS**
 Current verdict: **NOT READY**  
 Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `fca512289e25905bb18d289c2dba5fb88f8752bd` (`master`).
+- UAP source: `06c6f154f011446c759c23bd7bd9da0b01692756` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
 - Image: `nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f`.
 - This pass was read-only for cluster, GitHub repositories and target machines.
 - No chat messages, secret values or environment dumps were read.
+
+## Execution progress
+
+- Phase 0 is complete: platform/runtime baseline, all 28 repositories, the five pilot refs, owner-gated
+  boundaries and current M1-M12 verdicts are recorded below.
+- The known M1 schema-drift fix is ready in draft PR #125, with a regression test. It is intentionally not
+  merged because that would trigger a live Flux rollout outside an owner-approved window.
+- Fleet/onboarding documentation drift was corrected in PR #126. M2 remains incomplete until the prompt/skill
+  audit and behavioral routing runs prove the same topology end to end.
+- PR #128 added `tools/readiness/readiness.py`, a read-only JSONL evidence collector for M1/M2/M3/M6/M9/M12.
+  It cannot perform owner-gated write, failure-injection or authenticated-interface tests.
+
+### Deterministic harness run
+
+Command on ops-1 at `2026-07-11T09:26Z`:
+
+```bash
+python3 tools/readiness/readiness.py --output /tmp/hermes-readiness-2026-07-11.jsonl
+```
+
+The runner emitted exactly 21 records: **14 PASS / 7 FAIL**, and exited non-zero as required. Flux source and
+applied revisions matched `master@sha1:06c6f154f011446c759c23bd7bd9da0b01692756`. The seven failures were:
+
+1. M1 effective model: managed config has no canonical `model.default`, while the PVC/runtime resolve
+   `gpt-5.6-luna` and the legacy managed alias is still present;
+2. M3 build-1 -> Mac: SSH stops at host-key verification;
+3. M6: no active branch ruleset for `VPNRouter`, `vpnctl`, `vpnrouter-gateway` or `suflyor`;
+4. M12: `vpnctl` has CI/build entrypoints but no `AGENTS.md`.
+
+The collector only reads model subtrees, redacts sensitive field patterns, truncates evidence and does not emit
+full configs or raw status output. Its unit/self-check, secret scan, IaC static gate and all 41 Hermes tests pass.
 
 ## Baseline verdict by gate
 
@@ -176,9 +207,14 @@ Full quote-gated extraction remains pending after the desktop endpoint is starte
 
 ## Next actions
 
-1. Prepare the M1 fix and regression-test in a branch, but do not merge/deploy until the owner opens a live window.
-2. Prepare M2 documentation/prompt corrections; separate non-live docs from ConfigMap changes.
-3. Start `vpnctl` read-only repo-contract reconciliation using its existing build-1 clone.
+1. In an owner-approved live window, merge draft PR #125 and verify Flux, rollout, dashboard, banner,
+   `hermes status` and a new provider trace all resolve the same model.
+2. Complete the M2/M7 prompt, skill and precedence audit; add mechanism tests for every critical routing rule.
+3. Reconcile `vpnctl` on build-1 without destroying its dirty worktree, then add the missing repo-contract through
+   that repository's own PR/CI path.
 4. Start desktop offload and run quote-gated extraction over the five repo contracts.
 5. Ask the owner to classify the 16 nonarchived nonpilot repositories before expansion.
-6. Owner action: enable default-branch rulesets on the four non-UAP pilot repositories before any autonomous write-cycle.
+6. Owner action: enable default-branch rulesets on the four non-UAP pilot repositories before any autonomous
+   write-cycle.
+7. Only after those preconditions, run the N>=3 behavioral, worktree, mutation, PR/CI, injection, interface,
+   failure and recovery tests required by M3-M12.
