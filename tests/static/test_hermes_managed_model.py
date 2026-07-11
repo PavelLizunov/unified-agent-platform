@@ -38,6 +38,8 @@ assert '("provider","default")' in deployment, "bootstrap guard must require pro
 assert "мозг = локальный qwen-35b" not in user_profile
 assert "лимиты Claude/Codex кончились" not in user_profile
 assert "brain = local qwen-35b" not in agents.lower()
+assert "qwen-35b" in agents and "do not probe or call it" in agents
+assert "approval naming the specific agent and action" in agents
 assert "codex_app_server" in agents
 assert "gpt-5.5" not in agents, "model id must have one owner: managed config"
 assert "mm4.local" in agents and "100.116.97.112" in agents
@@ -88,5 +90,6 @@ with tempfile.TemporaryDirectory() as tmp:
     assert "КОДЕР = ornith-9b" not in once
     assert "Runtime/model определяются managed config" in once
     assert "claude_code" in once
+    assert "Qwen на рабочей" in once and "конкретного агента и действия" in once
 
 print("hermes-managed-model-ok")

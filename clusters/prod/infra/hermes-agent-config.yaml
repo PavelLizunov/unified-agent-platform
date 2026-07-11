@@ -1,7 +1,7 @@
 # hermes-agent (Track A2) — non-secret config, mounted by the bootstrap initContainer.
 #  - config.yaml      -> /opt/data/config.yaml (HERMES_HOME)
 #  - codex-config.toml -> /opt/data/.codex/config.toml (CODEX_HOME)
-# Brain = Codex via codex_app_server; local qwen-35b/ornith-9b remain manual fallbacks. See the
+# Brain = Codex via codex_app_server; ornith-9b remains a manual fallback. The owner's Windows/Qwen is excluded. See the
 # `managed-config` block below and runbooks/hermes-agent-codex-brain.md.
 apiVersion: v1
 kind: ConfigMap
@@ -162,7 +162,8 @@ data:
     # The codex CLI subprocess owns the tool loop (codex_responses mode cannot reach chatgpt.com through the
     # singbox proxy). GOTCHA: ChatGPT OAuth is a single-use refresh-token lineage -- a `codex login` anywhere
     # else (owner desktop) REVOKES this cluster token; re-seed via `codex login --device-auth` in the pod if it
-    # 401s. Revert to local qwen: restore this block per runbooks/local-models-router.md. Coding still routes to build-1.
+    # 401s. Do not route to the owner's Windows/Qwen as a fallback: that host is owner-only and requires a new,
+    # per-agent, per-action approval. Coding still routes to build-1.
     model:
       provider: openai-codex
       openai_runtime: codex_app_server
@@ -252,8 +253,10 @@ data:
       обёртка = `ssh -F /opt/data/.ssh/config uap-build-1`.
       На ней стоят claude-code (claude -p) и rust/cargo, есть egress наружу через VLESS-прокси.
       ВАЖНО: тяжёлый кодинг и сборки гоняй ТАМ (8 ядер), а не в этом крошечном поде (2 ядра).
-      Реализацию делегируй через `claude_code`/`codex exec` на build-1 согласно repo-contract; локальные
-      `qwen-35b`/`ornith-9b` — только явно выбранный fallback. Любой результат независимо собирай и тестируй
+      Реализацию делегируй через `claude_code`/`codex exec` на build-1 согласно repo-contract. `qwen-35b` на
+      `desktop-m922ij2` не является fallback Hermes: не проверяй его доступность и не вызывай без нового
+      разрешения владельца, которое называет конкретного агента и действие. `ornith-9b` — ручной fallback.
+      Любой результат независимо собирай и тестируй
       на build-1 или назначенном target; текст модели сам по себе не является PASS.
       Сборка/тесты: `/opt/data/.local/bin/build1 "cd <repo> && cargo build && cargo test"`
       **GitHub на build-1 настроен** (git+gh, авторизован как PavelLizunov, доступ ко ВСЕМ репо). В самом поде
@@ -314,24 +317,26 @@ data:
         "  -> вернёт готовый код; примени и протестируй сам. claude -p / codex НЕ используй (лимиты).\n",
         "## АКТУАЛЬНО 2026-07 (важнее любых старых строк выше)\n"
         "- Runtime/model определяются managed config и проверяются по `hermes status`; профиль не переопределяет их.\n"
-        "- Кодинг выполняется на build-1 через `claude_code`/`codex exec` по repo-contract; локальные модели —\n"
-        "  только явно выбранный fallback. Результат независимо собирается и тестируется на назначенном target.\n",
+        "- Кодинг выполняется на build-1 через `claude_code`/`codex exec` по repo-contract. Qwen на рабочей\n"
+        "  Windows владельца недоступен Hermes без нового разрешения для конкретного агента и действия.\n"
+        "  Результат независимо собирается и тестируется на назначенном target.\n",
     )
     text = re.sub(
         r"(?ms)^      \*\*КОДЕР = ornith-9b\..*?^      \(`claude -p` / `codex` НЕ используй — лимиты кончились\.\)\n?",
-        "      Реализацию делегируй через `claude_code`/`codex exec` на build-1 согласно repo-contract; локальные\n"
-        "      `qwen-35b`/`ornith-9b` — только явно выбранный fallback. Любой результат независимо собирай и тестируй\n"
+        "      Реализацию делегируй через `claude_code`/`codex exec` на build-1 согласно repo-contract. `qwen-35b`\n"
+        "      на рабочей Windows владельца недоступен Hermes без нового разрешения для конкретного агента и действия.\n"
+        "      `ornith-9b` остаётся ручным fallback. Любой результат независимо собирай и тестируй\n"
         "      на build-1 или назначенном target; текст модели сам по себе не является PASS.\n",
         text,
     )
     if text != original:
         path.write_text(text, encoding="utf-8")
   # The `ornith` coder wrapper -> /opt/data/.local/bin/ornith (seeded+refreshed by the initContainer).
-  # `ornith "<task>"` returns code from ornith-9b (the strongest local coder) via the ops-1 router.
+  # `ornith "<task>"` returns code from ornith-9b via the ops-1 router. This does not authorize Qwen/desktop use.
   ornith-wrapper: |
     #!/opt/hermes/.venv/bin/python
-    # ornith "<task>" -> code from ornith-9b via the ops-1 router. The qwen brain delegates code GENERATION
-    # here (claude -p / codex limits are out). Forces no-proxy: the router (100.82.241.121) is local, else
+    # ornith "<task>" -> code from ornith-9b via the ops-1 router. Forces no-proxy: the router
+    # (100.82.241.121) is local, else
     # urllib would send it through singbox egress (and httpx-style ignores the tailnet CIDR in NO_PROXY).
     import sys, json, urllib.request
     task = " ".join(sys.argv[1:]).strip()
@@ -428,7 +433,8 @@ data:
     # Operating rules (brain = managed Codex via codex_app_server)
 
     - Brain = managed **Codex** via `codex_app_server`. The exact model id belongs only to managed config.
-      Local **qwen-35b** and **ornith-9b** remain manual fallbacks; verify effective config/status.
+      **qwen-35b** on `desktop-m922ij2` is not available to Hermes: do not probe or call it without a new owner
+      approval naming the specific agent and action. **ornith-9b** remains a manual fallback.
     - You run in a tiny 2-core orchestration pod. Repository CODE and BUILDS live on the
       build host **build-1** (8 cores), which has the git token, gh, and rust/cargo. The pod is ephemeral.
     - **NEVER edit repository files locally** (not shell, not a patch tool). Local edits are allowed
