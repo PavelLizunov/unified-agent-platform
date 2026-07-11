@@ -1,0 +1,160 @@
+# Hermes development readiness - baseline 2026-07-11
+
+Status: **Phase 0 IN PROGRESS**  
+Current verdict: **NOT READY**  
+Goal: `runbooks/hermes-development-readiness-goal.md`
+
+## Evidence boundary
+
+- UAP source: `fca512289e25905bb18d289c2dba5fb88f8752bd` (`master`).
+- Flux `GitRepository/uap-platform`: Ready at the same SHA.
+- Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
+- Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
+- Image: `nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f`.
+- This pass was read-only for cluster, GitHub repositories and target machines.
+- No chat messages, secret values or environment dumps were read.
+
+## Baseline verdict by gate
+
+| Gate | Baseline | Evidence / missing proof |
+|---|---|---|
+| M1 runtime/model truth | **FAIL** | PVC has `model.default: gpt-5.6-luna`; managed config pins stale `model.model: gpt-5.5`; Hermes v0.18 canonicalizes to `model.default`; dashboard and `hermes status` show `gpt-5.6-luna`, while banner shows `gpt-5.5` |
+| M2 fleet truth | **FAIL** | `docs/fleet-map.md` still calls Qwen the only brain; `docs/templates/harvest-from-hermes-nastya.md` says Codex brain is off, contradicting #119/current runtime |
+| M3 deterministic routing | **PARTIAL** | ops -> home-1/home-2/build-1 works; build-1 -> Debian works; Windows WinRM port is reachable; build-1 -> Mac stops at host-key verification; N>=3 behavioral routing not run |
+| M4 worktree isolation | **NOT RUN** | Existing historical evidence is not a new M4 run across five pilot repositories |
+| M5 tests/honesty | **NOT RUN** | Historical UAP acceptance exists; per-repo independent rerun + mutation evidence not collected |
+| M6 Git/PR/CI | **PARTIAL** | UAP `protect-master` and `static-checks` are enforced; pilot-repo branch protection and write-cycle not verified |
+| M7 prompt integrity | **FAIL** | Managed documentation claims `model.model` owns the brain, but v0.18 runtime uses `model.default`; full precedence/duplication audit pending |
+| M8 injection/secrets | **PARTIAL** | Historical UAP injection tests exist; current five-repo N>=3 corpus and output-redaction check not run |
+| M9 interface agreement | **FAIL** | Dashboard/status and TUI banner disagree on effective model; session resume/reconnect not tested |
+| M10 durability/recovery | **PARTIAL** | Pod and scheduled backups are healthy; task restart and restore smoke for this goal not run |
+| M11 observability/limits | **PARTIAL** | Runtime/status and context limit artifacts exist; full task-to-PR trace and loop-stop test not run |
+| M12 shared understanding | **PARTIAL** | Four pilot repos expose `AGENTS.md`; `vpnctl` has no `AGENTS.md`; clean-session and second-agent handoff not run |
+
+Any M1-M12 FAIL makes the current verdict `NOT READY` regardless of prior percentage-based acceptance.
+
+## Live platform snapshot
+
+### Cluster
+
+- `hermes-agent`: 1/1 Running on `uap-home-2`, zero restarts for the current pod.
+- `hermes-agent-backup`: the last three scheduled jobs completed.
+- `hermes`, `litellm`, both sing-box egress deployments and subfleet deployments are Available.
+- Dashboard `/chat` returns HTTP 302 to the basic-auth login flow, proving reachability but not authenticated UI behavior.
+
+### Model/config split (M1 reproducer)
+
+Managed `/etc/hermes/config.yaml`:
+
+```json
+{"provider":"openai-codex","openai_runtime":"codex_app_server","model":"gpt-5.5"}
+```
+
+PVC `/opt/data/config.yaml`:
+
+```json
+{"default":"gpt-5.6-luna"}
+```
+
+`hermes config show` reports both leaves in one model object. Installed v0.18 `_normalize_root_model_keys`
+documents `default > model > name` and states that the runtime resolver reads `model.default`. Therefore
+the GitOps leaf does not override the PVC leaf. This is a schema-drift bug, not a visual-only dashboard issue.
+
+Required proof after a fix:
+
+1. static regression rejects managed `model.model` for Hermes v0.18;
+2. managed config uses `model.default`;
+3. dashboard, `hermes status`, banner and merged config agree;
+4. a new session/provider trace records the same model;
+5. Flux is Ready at the fix SHA and the workload rollout is healthy.
+
+## Fleet reachability baseline
+
+| Path | Result | Evidence |
+|---|---|---|
+| workstation -> ops-1 | PASS | SSH over tailnet |
+| ops-1 -> home-1 | PASS | hostname `uap-home-1` |
+| ops-1 -> home-2 | PASS | hostname `uap-home-2` |
+| ops-1 -> build-1 by IP | PASS | hostname `uap-build-1` |
+| ops-1 -> alias `uap-build-1` | FAIL | alias is not defined on ops-1; Hermes has its own `/opt/data/.ssh/config` alias |
+| build-1 -> Debian target | PASS | hostname `debian-xfce` |
+| build-1 -> Windows target | PASS (transport only) | TCP 5985 reachable; no WinRM command executed |
+| build-1 -> Mac target | FAIL | host-key verification stops SSH before authentication |
+
+The direct ops-1 -> Mac failure is not itself a product defect because the documented route is via build-1.
+The build-1 host-key failure is an actual readiness gap for Mac/Android target testing.
+
+## Pilot repo-contract inventory
+
+| Repo/ref | On build-1 | Contract sources | Baseline |
+|---|---:|---|---|
+| `unified-agent-platform@fca5122` | yes | `AGENTS.md`, `CLAUDE.md`, CI, validation/runbook indexes | available; current goal is its missing acceptance layer |
+| `VPNRouter@c45e385` | no | `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, many platform workflows | rich contract; target-command reconciliation pending |
+| `vpnctl@f37c134` | yes | `CLAUDE.md`, `README.md`, `justfile`, CI; **no `AGENTS.md`** | contract gap for Codex/Hermes onboarding |
+| `vpnrouter-gateway@b595647` | no | `AGENTS.md`, `CLAUDE.md`, Cargo, CI | contract available; commands not independently rerun |
+| `suflyor@8f8e11c` | no | `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, Windows CI | contract available; Windows-only target route not exercised |
+
+Cloning missing pilot repos and all write tests are deferred until the owner-approved pilot phase. GitHub tree/API
+inspection was read-only.
+
+## GitHub repository inventory
+
+`classify` means nonarchived but not yet assigned `active-maintained`, `support-only`, `research`,
+`mirror/fork`, `release-only` or `private-sensitive`.
+
+| Repository | Visibility | Archived | Updated | Scope |
+|---|---|---:|---|---|
+| `PavelLizunov/unified-agent-platform` | public | no | 2026-07-11 | pilot |
+| `PavelLizunov/suflyor` | public | no | 2026-07-11 | pilot |
+| `PavelLizunov/VPNRouter` | public | no | 2026-07-11 | pilot |
+| `PavelLizunov/vpnctl` | public | no | 2026-07-11 | pilot |
+| `PavelLizunov/boosty_api_rs` | public | no | 2026-06-15 | classify |
+| `PavelLizunov/vpnrouter-gateway` | public | no | 2026-07-10 | pilot |
+| `PavelLizunov/hermes-nastya` | private | no | 2026-07-10 | classify |
+| `PavelLizunov/subfleet` | private | no | 2026-07-09 | classify |
+| `PavelLizunov/homebrew-vpnrouter` | public | no | 2026-07-09 | classify |
+| `PavelLizunov/ninitux-landing` | public | no | 2026-04-28 | classify |
+| `PavelLizunov/test_methodology-toolkit` | private | no | 2026-06-24 | classify |
+| `PavelLizunov/wgturn-core` | public | no | 2026-06-18 | classify |
+| `PavelLizunov/whitelist-bypass-research` | private | no | 2026-06-17 | classify |
+| `PavelLizunov/slipstream-rust` | public | no | 2026-06-14 | classify |
+| `PavelLizunov/dns-tunnel-research` | private | no | 2026-06-08 | classify |
+| `PavelLizunov/wb-price-scheduler` | private | no | 2026-06-08 | classify |
+| `PavelLizunov/sing-box` | public | no | 2026-05-22 | classify |
+| `PavelLizunov/edu` | public | no | 2026-05-21 | classify |
+| `PavelLizunov/wgturn-server` | private | no | 2026-05-07 | classify |
+| `PavelLizunov/vk-turn-releases` | public | no | 2026-04-02 | classify |
+| `PavelLizunov/vpnrouter-android` | public | yes | 2026-07-01 | excluded |
+| `PavelLizunov/TorrentMax` | public | no | 2026-02-24 | classify |
+| `PavelLizunov/hytale-party-plugin` | public | yes | 2026-07-08 | excluded |
+| `PavelLizunov/hytale-server-docker` | public | yes | 2026-07-08 | excluded |
+| `PavelLizunov/mc-scripts` | public | yes | 2026-04-19 | excluded |
+| `PavelLizunov/combine_project` | public | yes | 2026-05-11 | excluded |
+| `PavelLizunov/fc-auto-installer` | public | yes | 2026-05-11 | excluded |
+| `PavelLizunov/dbt-etlcraft-rebuild` | public | yes | 2024-09-21 | excluded |
+
+Summary: 28 repositories, 21 nonarchived, 7 archived, 5 in the pilot wave.
+
+## Tooling limitation observed
+
+The desktop `uap-offload` endpoint was down during repo-contract extraction. The 269 KB instruction/CI corpus
+was not silently loaded into the paid context. Only narrow matching lines and GitHub tree metadata were inspected.
+Full quote-gated extraction remains pending after the desktop endpoint is started.
+
+## Owner-gated work not executed
+
+- merge of any `clusters/prod` fix, because Flux would deploy it live;
+- authenticated dashboard/Telegram write-cycle;
+- cloning or modifying missing pilot repos on build-1;
+- sacrificial branches, PRs, mutation tests and target package installs;
+- pod roll mid-task, model/egress/build-1 failure injection;
+- Mac `known_hosts` modification;
+- restore/destructive tests.
+
+## Next actions
+
+1. Prepare the M1 fix and regression-test in a branch, but do not merge/deploy until the owner opens a live window.
+2. Prepare M2 documentation/prompt corrections; separate non-live docs from ConfigMap changes.
+3. Start `vpnctl` read-only repo-contract reconciliation using its existing build-1 clone.
+4. Start desktop offload and run quote-gated extraction over the five repo contracts.
+5. Ask the owner to classify the 16 nonarchived nonpilot repositories before expansion.
