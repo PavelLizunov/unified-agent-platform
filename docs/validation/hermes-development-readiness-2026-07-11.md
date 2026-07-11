@@ -58,10 +58,15 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 - A dedicated `~/.ssh/cluster_ops` key and strict host aliases were installed on build-1 for `ops-1` and
   `home-1`. Direct authentication succeeds to both; Hermes cluster-read routing is now **PASS 3/3** and every
   run returned `node/uap-home-1` and `node/uap-home-2`.
+- Windows command routing is **PASS 3/3** in sessions `20260711_153759_1ce8fb`,
+  `20260711_153829_f31ef7` and `20260711_154101_326acb`. Hermes used `build1_shell` → `windows-brat` → WinRM
+  and returned `WINBRAT`, `winbrat\\tester`, Windows `10.0.17763` and `WinRM=Running`. A controlled remote
+  failure surfaced as a non-zero result. This closes command execution only; package install and GUI UAT remain
+  separate because the WinRM account has a filtered non-elevated UAC token and no interactive desktop.
 
 The post-fix deterministic runner at `da5384d` emits 28 records: **28 PASS / 0 FAIL**. M3 cluster-read behavioral
 routing, M9 dashboard auth and M11 loop control are green. The broader migration verdict remains **NOT READY**
-because the explicitly separate Windows/Telegram and recovery windows, multi-repository expansion and repository
+because Windows package/GUI UAT, Telegram and recovery windows, multi-repository expansion and repository
 classification are still incomplete.
 
 ## Execution progress

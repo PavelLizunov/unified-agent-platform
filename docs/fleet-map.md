@@ -44,6 +44,10 @@
 - `uap-build-1` = **`192.168.0.99`** (Ubuntu, always-on).
   Для read-only cluster routing на нём есть отдельный ключ `~/.ssh/cluster_ops` и strict-host aliases
   `ops-1` (`100.82.241.121`) / `home-1` (`100.106.223.120`); приватный ключ в git не хранится.
+- `windows-brat` вызывается с build-1 командой `windows-brat [PowerShell]` через NTLM/WinRM. Исходник:
+  `tools/windows/windows-brat`; credential-файл `~/.config/windows-brat.json` обязан быть `0600` и в git не
+  хранится. Без аргументов команда возвращает bounded health JSON. Это command route, не GUI-автоматизация:
+  WinRM не видит интерактивный RDP desktop, а удалённый токен `tester` не повышается через UAC.
 - `windows-brat` = **`192.168.0.106`**, `debian-xfce` = **`192.168.0.100`**. Конфликта нет (в хендоффе стоял
   устаревший `.99` для debian — это адрес build-1; актуальный — `.100`). Обе на DHCP → адреса могут меняться.
 
