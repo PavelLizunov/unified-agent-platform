@@ -18,6 +18,11 @@ def main() -> None:
         target = Path(tmp)
         (target / "display.py").write_text(failure + "\n    data = safe_json_loads(result)\n")
         (target / "tool_guardrails.py").write_text(failure + '\n    if tool_name == "terminal":\n')
+        (target / "codex_runtime.py").write_text(
+            "        def _on_codex_event(note: dict) -> None:\n"
+            "            # Bridge Codex app-server item/started notifications to Hermes\n"
+            "\n    # If the turn signalled the underlying client is wedged (deadline\n"
+        )
         (target / "dashboard_auth_middleware.py").write_text(
             "    provider = providers[0]\n    prefix = prefix_from_request(request)\n"
         )
@@ -29,6 +34,10 @@ def main() -> None:
 
         assert 'tool_name == "exec_command"' in (target / "display.py").read_text()
         assert 'tool_name == "exec_command"' in (target / "tool_guardrails.py").read_text()
+        codex_runtime = (target / "codex_runtime.py").read_text()
+        assert 'item.get("type") == "commandExecution"' in codex_runtime
+        assert "session.request_interrupt()" in codex_runtime
+        assert "_toolguard_controlled_halt_response" in codex_runtime
         assert 'getattr(provider, "supports_password", False)' in (
             target / "dashboard_auth_middleware.py"
         ).read_text()

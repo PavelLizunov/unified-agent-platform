@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v18-runtime-compat"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v19-codex-guardrail"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -107,6 +107,7 @@ spec:
               # Work on emptyDir copies; the official image stays immutable. Unknown source = fail closed.
               cp /opt/hermes/agent/display.py /runtime-compat/display.py
               cp /opt/hermes/agent/tool_guardrails.py /runtime-compat/tool_guardrails.py
+              cp /opt/hermes/agent/codex_runtime.py /runtime-compat/codex_runtime.py
               cp /opt/hermes/hermes_cli/dashboard_auth/middleware.py /runtime-compat/dashboard_auth_middleware.py
               /opt/hermes/.venv/bin/python /config/runtime-compat.py /runtime-compat
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
@@ -215,6 +216,7 @@ spec:
             # ADR-027 temporary overlays for the pinned upstream digest; bootstrap validates exact fingerprints.
             - { name: runtime-compat, mountPath: /opt/hermes/agent/display.py, subPath: display.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/agent/tool_guardrails.py, subPath: tool_guardrails.py, readOnly: true }
+            - { name: runtime-compat, mountPath: /opt/hermes/agent/codex_runtime.py, subPath: codex_runtime.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/dashboard_auth/middleware.py, subPath: dashboard_auth_middleware.py, readOnly: true }
           resources:
             # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod

@@ -48,6 +48,53 @@ data:
     patch("tool_guardrails.py", failure_old + "\n    if tool_name == \"terminal\":\n",
           failure_new + "    if tool_name == \"terminal\":\n")
 
+    codex_event_old = "\n".join((
+        "        def _on_codex_event(note: dict) -> None:",
+        "            # Bridge Codex app-server item/started notifications to Hermes",
+        "",
+    ))
+    codex_event_new = "\n".join((
+        "        def _on_codex_event(note: dict) -> None:",
+        "            # Codex owns this runtime's inner tool loop, so apply Hermes'",
+        "            # failure thresholds to completed command events and interrupt",
+        "            # the subprocess turn once the next identical call is blocked.",
+        "            item = (note.get(\"params\") or {}).get(\"item\") or {}",
+        "            if note.get(\"method\") == \"item/completed\" and item.get(\"type\") == \"commandExecution\":",
+        "                exit_code = item.get(\"exitCode\")",
+        "                if exit_code is not None and exit_code != 0:",
+        "                    args = {\"command\": item.get(\"command\") or \"\", \"cwd\": item.get(\"cwd\") or \"\"}",
+        "                    result = f\"[exit {exit_code}]\\\\n{item.get('aggregatedOutput') or ''}\"",
+        "                    decision = agent._tool_guardrails.after_call(",
+        "                        \"exec_command\", args, result, failed=True,",
+        "                    )",
+        "                    if not decision.should_halt:",
+        "                        decision = agent._tool_guardrails.before_call(\"exec_command\", args)",
+        "                    if decision.should_halt or not decision.allows_execution:",
+        "                        agent._set_tool_guardrail_halt(decision)",
+        "                        session = getattr(agent, \"_codex_session\", None)",
+        "                        if session is not None:",
+        "                            session.request_interrupt()",
+        "",
+        "            # Bridge Codex app-server item/started notifications to Hermes",
+        "",
+    ))
+    patch("codex_runtime.py", codex_event_old, codex_event_new)
+
+    codex_result_old = "    # If the turn signalled the underlying client is wedged (deadline\n"
+    codex_result_new = "\n".join((
+        "    guardrail_halt = getattr(agent, \"_tool_guardrail_halt_decision\", None)",
+        "    if guardrail_halt is not None:",
+        "        halt_text = agent._toolguard_controlled_halt_response(guardrail_halt)",
+        "        turn.final_text = halt_text",
+        "        turn.projected_messages.append({\"role\": \"assistant\", \"content\": halt_text})",
+        "        turn.interrupted = False",
+        "        turn.error = None",
+        "",
+        "    # If the turn signalled the underlying client is wedged (deadline",
+        "",
+    ))
+    patch("codex_runtime.py", codex_result_old, codex_result_new)
+
     sso_old = "\n".join((
         "    provider = providers[0]",
         "    prefix = prefix_from_request(request)",
