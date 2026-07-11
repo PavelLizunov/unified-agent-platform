@@ -32,6 +32,10 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
   clone replaced it and `just 1.56.0` was installed. The archived clone still contains its two historical markers.
 - Read-only behavioral routing with new CLI sessions: build-1 3/3, Debian target 3/3 and Mac target 3/3.
   Mac returned `mm4.local` and `sw_vers 26.5.2` in every run.
+- Hermes itself completed a sacrificial vpnctl write cycle in session `20260711_111850_752a15`: 11 real tool
+  calls (`build1_shell` + `claude_code`), isolated worktree/branch, commit `504148a`, PR #122 and all nine CI
+  jobs green. The PR was not merged; it was closed, its remote branch deleted and the worktree removed. Main
+  stayed clean. This proves one M6 canary; it does not yet prove concurrent M4 isolation across all pilots.
 - Cluster-read routing is **FAIL 0/3**: build-1 cannot authenticate to ops-1/home-1. The agent reported the
   blocker honestly but spent 24-28 tool calls per run before stopping.
 - Tool-loop mechanism test is **FAIL**: 14 identical `exec_command(false)` calls returned `[exit 1]` without a
