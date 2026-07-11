@@ -396,9 +396,11 @@
 
 ## ADR-027 — Временный fail-closed compatibility patch для pinned hermes-agent
 
-- **Контекст:** в закреплённом внешнем `NousResearch/hermes-agent` v0.18.0 подтверждены два дефекта интеграции:
+- **Контекст:** в закреплённом внешнем `NousResearch/hermes-agent` v0.18.0 подтверждены дефекты интеграции:
   password-only dashboard provider ошибочно запускает OAuth/SSO route (M9), а Codex `exec_command` с результатом
-  `[exit N]` не классифицируется как failure и не включает loop guardrail (M11).
+  `[exit N]` не классифицируется как failure и не включает loop guardrail (M11). Дополнительный behavioral-тест
+  показал, что `codex_app_server` принимает turn без terminal assistant response за success, а quiet CLI возвращает
+  exit 0 для `partial`/`completed=False` (M9/M11/M12).
 - **Решение:** сохранить официальный image digest и перед стартом gateway копировать затронутые upstream-файлы
   в `emptyDir`, применять к копиям идемпотентный GitOps-owned patch и монтировать их обратно через `subPath`.
   Patch обязан применяться только к точно известным исходным фрагментам и останавливать initContainer при любом
@@ -410,4 +412,6 @@
 - **Последствия:** обновление image digest требует сначала удалить patch либо подтвердить его fail-closed
   fingerprint; до этого compatibility layer является явно учтённым временным долгом.
   Для `codex_app_server`, где внутренним tool loop владеет subprocess Codex, те же thresholds применяются к
-  `item/completed` событиям адаптера; при достижении порога активный Codex turn прерывается контролируемо.
+  `item/completed` событиям адаптера; при достижении порога активный Codex turn прерывается контролируемо. Turn,
+  завершившийся после tool result без terminal assistant response, становится partial и retire-ит Codex session;
+  quiet CLI возвращает non-zero для failed, partial и incomplete results.
