@@ -308,6 +308,18 @@ def validate_k3s_s3_template(root: Path) -> None:
         fail(f"k3s S3 config template missing keys: {missing}")
 
 
+def validate_kubeconfig_mode(root: Path) -> None:
+    config_path = root / "infra" / "k3s" / "uap-home-1.config.yaml"
+    with config_path.open("r", encoding="utf-8") as handle:
+        config = yaml.safe_load(handle)
+    if config.get("write-kubeconfig-mode") != "0600":
+        fail("uap-home-1 kubeconfig mode must be the quoted string \"0600\"")
+
+    template = (root / "infra" / "ansible" / "templates" / "k3s-server.config.yaml.j2").read_text()
+    if 'write-kubeconfig-mode: "0600"' not in template:
+        fail("Ansible k3s server template must render quoted kubeconfig mode \"0600\"")
+
+
 def main() -> None:
     root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd()
     validate_required_paths(root)
@@ -319,6 +331,7 @@ def main() -> None:
     validate_smoke_scripts(root)
     validate_flux_examples_not_enabled(root)
     validate_k3s_s3_template(root)
+    validate_kubeconfig_mode(root)
     validate_kustomization_orphans(root)
     print("iac-static-ok")
 

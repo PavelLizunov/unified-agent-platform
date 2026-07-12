@@ -36,7 +36,7 @@ disable:
   - traefik
   - servicelb
 secrets-encryption: true
-write-kubeconfig-mode: "0644"
+write-kubeconfig-mode: "0600"
 etcd-snapshot-retention: 7
 ```
 
