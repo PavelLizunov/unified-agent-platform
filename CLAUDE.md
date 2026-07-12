@@ -163,7 +163,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 - `tests/verify-local.ps1`: local validation gate.
 - `runbooks/validation-matrix.md`: what to check and when.
 - `runbooks/restore-drill.md`: disposable k3s restore drill.
-- `runbooks/offsite-backups.md`: future S3/Proxmox backup plan.
+- `runbooks/offsite-backups.md`: live k3s/R2 and Proxmox backup/restore procedures.
 - `runbooks/flux-remote-git.md`: how to enable Flux Git sync after a real remote exists.
 - `runbooks/cloudflare-r2-k3s-snapshots.md`: Cloudflare R2 setup flow for k3s snapshots.
 - `runbooks/llm-egress-vless.md`: cloud LLM egress from RU via non-RU node or VLESS+REALITY (ADR-018).

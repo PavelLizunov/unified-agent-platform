@@ -9,7 +9,8 @@ Current state:
 - Local k3s etcd snapshots exist on `uap-home-1`.
 - k3s `etcd-s3` -> Cloudflare R2 (EU endpoint) is configured; a restore drill from R2 passed (2026-06-19).
 - Bootstrap DR materials (server token + `encryption-config.json`, age-encrypted) are in R2 `dr/` for cross-node restore.
-- Proxmox VM backups are not yet configured in this repository.
+- Proxmox VM backups run daily to a separate physical disk on `pve-ninitux2`; the 2026-07-13 VM203
+  canary archive passed an isolated restore and `qemu-img check`.
 
 ## k3s etcd Snapshots to S3
 
@@ -38,20 +39,72 @@ Provider-specific setup:
 
 ## Proxmox VM Backups
 
-Use Proxmox vzdump or Proxmox Backup Server for VM-level recovery:
+Live topology (2026-07-13):
 
-- Schedule backups for `uap-home-1` and `uap-home-2`.
-- Store backups outside the same physical host where possible.
-- Configure retention/prune.
-- Test restoring a VM clone, not only backup creation.
+- `pve-ninitux2` exports `/srv/pve-backups` from its local `/dev/sda1`.
+- Only `pve-ninitux` (`192.168.0.169`) and `pve-ninitux3` (`192.168.0.171`) may mount it.
+- Proxmox storage `backup-pve2` permits only `backup` content and explicitly excludes `pve-ninitux2`.
+- Job `uap-critical-daily` runs at `03:15` for VMIDs `102,201,202,203` in snapshot mode, capped at
+  50 MiB/s with one zstd thread and idle I/O priority.
+- Retention is `keep-last=2,keep-weekly=2,keep-monthly=1`. The protected VMs currently occupy about
+  62 GB before compression; the target has about 429 GB free.
 
-Suggested initial retention:
+This layout is intentional. Never target `nfs-share`: the UAP VM disks already live there, and a VM203
+backup to that same self-mounted export hung NFS and required a host reboot on 2026-07-12. Do not add
+`pve-ninitux2` to `backup-pve2`'s `nodes` list; an NFS server mounting its own export reintroduces the
+shutdown-hang class.
 
-- Keep last 3 daily.
-- Keep last 4 weekly.
-- Keep last 3 monthly.
+Rebuild the NFS target on `pve-ninitux2`:
 
-Tune after actual storage size is known.
+```bash
+apt-get install -y nfs-kernel-server
+install -d -m 0755 /etc/exports.d
+install -d -o nobody -g nogroup -m 0750 /srv/pve-backups
+printf '%s\n' '/srv/pve-backups 192.168.0.169(rw,sync,no_subtree_check,root_squash) 192.168.0.171(rw,sync,no_subtree_check,root_squash)' \
+  > /etc/exports.d/pve-backups.exports
+exportfs -ra
+systemctl enable --now nfs-server
+```
+
+Recreate the cluster storage and job from either allowed Proxmox node:
+
+```bash
+pvesm add nfs backup-pve2 \
+  --server 192.168.0.170 --export /srv/pve-backups --content backup \
+  --nodes pve-ninitux,pve-ninitux3 --options vers=4.2 \
+  --prune-backups keep-last=2,keep-weekly=2,keep-monthly=1
+
+pvesh create /cluster/backup \
+  --id uap-critical-daily --enabled 1 --schedule '03:15' \
+  --storage backup-pve2 --vmid '102,201,202,203' --mode snapshot \
+  --compress zstd --zstd 1 --bwlimit 51200 --ionice 8 --repeat-missed 0 \
+  --prune-backups keep-last=2,keep-weekly=2,keep-monthly=1 \
+  --notification-mode legacy-sendmail --mailnotification failure
+```
+
+The legacy notification mode avoids the default empty `mail-to-root` target. Add a real Proxmox
+notification recipient before switching back to `notification-system`.
+
+Weekly verification from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tests\ops\check-proxmox-backups.ps1 -Require
+```
+
+The 2026-07-13 restore proof used a disposable, never-started VMID on `pve-ninitux2`: `zstd -t` on the
+archive, `qmrestore --storage local --unique 1`, `qemu-img check` on the restored disk, then guarded
+`qm destroy`. Repeat quarterly with a fresh unused VMID. Never start the clone: its restored guest IP
+matches production even though `--unique` changes the MAC.
+
+Rollback (does not delete existing archives):
+
+```bash
+pvesh delete /cluster/backup/uap-critical-daily
+pvesm remove backup-pve2
+# On pve-ninitux2 only:
+rm /etc/exports.d/pve-backups.exports
+exportfs -ra
+```
 
 ## Off-cluster node state (build-1 + ops-1)
 
