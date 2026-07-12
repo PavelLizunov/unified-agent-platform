@@ -8,7 +8,6 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 | Ref | Item | Why it needs the owner | Unblocks |
 |---|---|---|---|
 | #2 | **Independent off-homelab age-key escrow** + verify a decrypt with it (keystone DR) | Owner must place the master key in a vault outside the Proxmox homelab | Homelab-loss recovery of age-encrypted DR material |
-| — | Retrieve the new Vaultwarden admin token from `~/vaultwarden/admin-token.NEW.txt` on ops-1, move to a password manager, then delete the file | Owner-only credential | — |
 | — | (optional) Revoke the old "GitHub CLI" OAuth grant in GitHub settings | Owner GitHub account | full invalidation of the token already removed from ops-1 |
 
 ## Notes
