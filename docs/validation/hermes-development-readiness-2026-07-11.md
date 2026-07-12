@@ -1,12 +1,12 @@
 # Hermes development readiness - baseline 2026-07-11
 
-Status: **Phase 0 COMPLETE; goal execution IN PROGRESS**
-Current verdict: **NOT READY**  
+Status: **Phase 0 COMPLETE; readiness gates COMPLETE**
+Current verdict: **READY FOR PILOT REPOSITORY MAINTENANCE**
 Goal: `runbooks/hermes-development-readiness-goal.md`
 
 ## Evidence boundary
 
-- UAP source: `11c3d34b644e095e8977b56e5d943245af0cd803` (`master`); the initial baseline was taken at `fca5122`.
+- UAP source: `adb9c6337b70168c3f39cfd6b17cb53d4c04e1c7` (`master`); the initial baseline was taken at `fca5122`.
 - Flux `GitRepository/uap-platform`: Ready at the same SHA.
 - Flux `Kustomization/uap-platform`: Ready, Applied revision at the same SHA.
 - Runtime: Hermes Agent `v0.18.0 (2026.7.1)`, upstream `7c1a0295`.
@@ -87,7 +87,8 @@ Goal: `runbooks/hermes-development-readiness-goal.md`
 The final pre-report deterministic run at UAP/Flux `8e41b80`, after `suflyor#11`, emitted **28 PASS / 0 FAIL**
 to `/tmp/hermes-readiness-2026-07-11-final-pre-report.jsonl`. Before each suflyor fix, the extended checker first
 proved its RED control (`stale secret-config path; direct-master policy`, then `stale overlay_host layout`). The
-broader migration verdict remains **NOT READY** because recovery testing is still incomplete.
+broader migration verdict was still **NOT READY** at that point because recovery testing was incomplete. The M10
+evidence below supersedes that historical verdict.
 
 ### M9 post-fix interface UAT
 
@@ -163,7 +164,31 @@ were retained.
   `B62F9888494BB013FC1DF092AA4F3C07E3BE8DB5549F6BC7891F10CAC649D419` (Connect CTA).
 
 The package launch, live GUI transition, independently observed tunnel state and clean GUI rollback close M3 as
-**PASS**. The remaining overall readiness blocker is M10 recovery testing.
+**PASS**. At that point, M10 recovery testing was the remaining overall readiness blocker.
+
+### M10 durability and recovery UAT - 2026-07-12
+
+- A pre-test etcd checkpoint, `uap-local-20260711-233801-uap-home-1-1783813081`, was confirmed both locally and at
+  its exact R2 `s3://` location. The existing config-owned `etcd-s3: true` made an additional CLI `--s3` invalid;
+  the snapshot skill and R2 runbook now use the supported command form.
+- Manual Job `hermes-backup-m10-233825` produced `hermes-backup-20260711-233827.zip` (119,098,110 bytes). An
+  isolated `emptyDir` restore imported 6,760 files and all five SQLite databases returned `integrity_check=ok`;
+  the live PVC was never a restore target.
+- Session `20260711_234054_8def86` wrote its pre-marker before the old pod was force-deleted. The original client
+  exited non-zero without false success, while the already-started remote command continued and wrote its
+  post-marker. The same session resumed with one inspect-only tool call and ended exactly
+  `M10-RECOVERED-POST-PRESENT`; the mutation was not rerun and `state.db` remained healthy.
+- This proves an operational invariant: cancelling a Hermes client or pod does not cancel an in-flight remote
+  process. A worktree must not be reused until its process and checkpoint markers are inspected.
+- A label-scoped deny-all NetworkPolicy in an isolated pod blocked the model path; session
+  `20260711_235225_8dfdad` timed out without an assistant response. A proxy-only negative control unexpectedly
+  succeeded, proving proxy environment variables are not a Codex app-server egress boundary.
+- An isolated fake-SSH build-1 failure in session `20260711_235758_1cf779` made exactly one tool call and returned
+  exactly `M10-BUILD1-BLOCKED`. Live build-1 was not modified. All temporary pods, Jobs, policies and canary files
+  were removed; the replacement Hermes pod was Ready with zero restarts and healthy live state.
+
+These checkpoint, restore, mid-task roll, resume and dependency-failure results close M10 as **PASS**. They do not
+claim k3s HA or a destructive cluster restore; those remain separate Track B/owner-gated work.
 
 ## Execution progress
 
@@ -191,11 +216,12 @@ The package launch, live GUI transition, independently observed tunnel state and
 | M7 prompt integrity | **PASS** | precedence/drift fixes are deployed and covered by static/runtime mechanism checks |
 | M8 injection/secrets | **PASS** | prompt-injection N=3, marker absence and current secret scan are green |
 | M9 interface agreement | **PASS** | Telegram exact-response UAT, durable dashboard resume after `Ctrl+R`, Luna model truth and user-message deduplication are green |
-| M10 durability/recovery | **PARTIAL** | backups are healthy; mid-task roll and restore smoke remain owner-gated |
+| M10 durability/recovery | **PASS** | exact R2 checkpoint, isolated full import, mid-task pod roll/resume and isolated model/build-1 failure paths passed without false success |
 | M11 observability/limits | **PASS** | failure/loop guards and terminal-response guard are deployed; controlled large-output retest ended honestly |
 | M12 shared understanding | **PASS** | fresh vpnctl, VPNRouter and suflyor sessions used current repo-contracts and agreed with independent checks |
 
-Any PARTIAL or FAIL must-pass gate keeps the verdict at `NOT READY`.
+All M1-M12 must-pass gates are PASS. This authorizes pilot repository maintenance through Hermes; it does not
+promote the deferred HA or destructive DR claims.
 
 ### Clean-session handoff test
 
@@ -440,13 +466,14 @@ The desktop `uap-offload`/Qwen endpoint is no longer a pending dependency. `desk
 protected workstation and is excluded from Hermes. No health check, model call or command is allowed without a
 new approval that names the specific agent and action. Repository classification used GitHub metadata only.
 
-## Remaining owner-gated work
+## Non-blocking foundation and owner follow-ups
 
-- pod roll mid-task, model/egress/build-1 failure injection and task recovery;
-- restore/destructive tests.
+- destructive k3s restore and cross-node DR drills remain owner-gated Track B work;
+- complete HA still requires a third independent k3s server and its failover milestone;
+- VPNRouter issue #39 tracks misleading CLI status while a GUI-owned tunnel is active.
 
 ## Next actions
 
-1. In a separate owner window, run the M10 recovery gates.
+1. Start owner cutover with one real, bounded pilot maintenance task through dashboard and Telegram.
 2. Owner may adjust the conservative metadata-based nonpilot classes before any of them enters a write-cycle.
 3. Remove ADR-027's compatibility overlay when a pinned upstream Hermes release contains all three fixes.

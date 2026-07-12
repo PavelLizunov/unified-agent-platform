@@ -75,14 +75,17 @@ Pass only those two S3 flags in k3s config. If other `etcd-s3-*` flags are set, 
 ## Verify
 
 ```powershell
-ssh uap@100.106.223.120 'SNAP=uap-s3-smoke-$(date -u +%Y%m%dT%H%M%SZ); sudo k3s etcd-snapshot save --name $SNAP --s3'
-ssh uap@100.106.223.120 "sudo k3s etcd-snapshot list --s3 | grep uap-s3-smoke-"
+ssh uap@100.106.223.120 'SNAP=uap-s3-smoke-$(date -u +%Y%m%dT%H%M%SZ); sudo k3s etcd-snapshot save --name $SNAP'
+ssh uap@100.106.223.120 "sudo k3s etcd-snapshot list | grep uap-s3-smoke-"
 ```
+
+Do not add `--s3` here: production `/etc/rancher/k3s/config.yaml` already enables S3, and current k3s rejects
+the duplicate form of the flag.
 
 Pass criteria:
 
 - snapshot save exits 0;
-- `etcd-snapshot list --s3` shows the new snapshot.
+- `etcd-snapshot list` shows the new snapshot at an `s3://` location.
 
 ## Restore Warning
 
