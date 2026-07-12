@@ -15,7 +15,7 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 
 | Ref | Item | Note |
 |---|---|---|
-| #11 | **kubeconfig `0644`->`0600` + tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | LIVE change on the single control-plane node + k3s restart + firewall = lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
+| #11 | **Tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | Firewall changes on the single control-plane node carry lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
 
 ## Notes
 

@@ -448,8 +448,11 @@ Done:
   owner retrieval (move to a password manager, then delete).
 - #9 cross-node Secret restore passed on 2026-07-12; snapshot + original token restored the exact canary value.
 - Owner accepted the current R2 credential scope and lifecycle as-is on 2026-07-12; do not rotate automatically.
+- #11 kubeconfig permissions hardened on 2026-07-12: the live unquoted `0644` value had been interpreted as mode
+  `0420`; the authoritative config is now the quoted string `"0600"`, the live kubeconfig is `root:root` mode `0600`,
+  and k3s plus both nodes remained healthy without a service restart. Static validation prevents regression.
 
 Pending (owner action): independent off-homelab age-key escrow (verify decrypt); retrieve the staged Vaultwarden
 admin token; optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. HA/VPS work is deferred
 indefinitely for budget and resumes only after a new owner decision. Pending (agent with an approved window):
-kubeconfig 0644->0600 + tailnet-only API firewall.
+tailnet-only API firewall with a timed rollback.
