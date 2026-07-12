@@ -1,0 +1,22 @@
+[Unit]
+Description=Block k3s control ports on the LAN interface
+After=k3s.service tailscaled.service
+Wants=k3s.service tailscaled.service
+ConditionPathExists=/usr/sbin/iptables
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/usr/sbin/iptables -D INPUT -j UAP-LAN-INPUT
+ExecStartPre=-/usr/sbin/iptables -F UAP-LAN-INPUT
+ExecStartPre=-/usr/sbin/iptables -X UAP-LAN-INPUT
+ExecStart=/usr/sbin/iptables -N UAP-LAN-INPUT
+ExecStart=/usr/sbin/iptables -A UAP-LAN-INPUT -i eth0 -p tcp -m multiport --dports 6443,10250 -j DROP
+ExecStart=/usr/sbin/iptables -A UAP-LAN-INPUT -i eth0 -p udp --dport 8472 -j DROP
+ExecStart=/usr/sbin/iptables -I INPUT 1 -j UAP-LAN-INPUT
+ExecStop=-/usr/sbin/iptables -D INPUT -j UAP-LAN-INPUT
+ExecStop=-/usr/sbin/iptables -F UAP-LAN-INPUT
+ExecStop=-/usr/sbin/iptables -X UAP-LAN-INPUT
+
+[Install]
+WantedBy=multi-user.target
