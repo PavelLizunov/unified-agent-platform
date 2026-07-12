@@ -320,6 +320,18 @@ def validate_kubeconfig_mode(root: Path) -> None:
         fail("Ansible k3s server template must render quoted kubeconfig mode \"0600\"")
 
 
+def validate_k3s_host_firewall(root: Path) -> None:
+    unit = (root / "infra" / "k3s" / "uap-k3s-lan-firewall.service").read_text()
+    required = (
+        "-i eth0 -p tcp -m multiport --dports 6443,10250 -j DROP",
+        "-i eth0 -p udp --dport 8472 -j DROP",
+        "ExecStop=-/usr/sbin/iptables -D INPUT -j UAP-LAN-INPUT",
+    )
+    missing = [line for line in required if line not in unit]
+    if missing:
+        fail(f"k3s host firewall unit missing safeguards: {missing}")
+
+
 def main() -> None:
     root = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path.cwd()
     validate_required_paths(root)
@@ -332,6 +344,7 @@ def main() -> None:
     validate_flux_examples_not_enabled(root)
     validate_k3s_s3_template(root)
     validate_kubeconfig_mode(root)
+    validate_k3s_host_firewall(root)
     validate_kustomization_orphans(root)
     print("iac-static-ok")
 
