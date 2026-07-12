@@ -8,8 +8,9 @@ Last updated: 2026-07-12
   (see "Model & Agent Layer" below). Active direction (2026-06-22/23 **pivot**): **vibe-coding** — adopt the
   external NousResearch **hermes-agent** as the harness (the bespoke `hermes/hermes.py` is parked). See
   `docs/next-steps.md`, `docs/infrastructure.md`, `docs/research/`.
-- HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
-  independent server + a failover drill are still required.
+- HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
+  (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
+  R2 backups, and the verified restore drill; adding a third server is not an active owner action.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
 - **Cross-node Secret restore: PASS 2026-07-12.** A snapshot created after a throwaway canary Secret was fetched
   back from R2 and restored on clean `debian-xfce` with only the snapshot + original server token. The snapshot
@@ -387,9 +388,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 
 ## Pending
 
-Canonical list: `BACKLOG.md`. Highest-impact open items are the third independent k3s server + failover drill,
+Canonical list: `BACKLOG.md`. Highest-impact open items under the current single-control-plane strategy are
 off-homelab age-key escrow, tailnet-only API firewall hardening, Proxmox VM backups and owner retrieval of the
-staged Vaultwarden admin token. R2 credential scope/lifecycle are accepted as-is by owner decision.
+staged Vaultwarden admin token. The third k3s server / HA failover path is deferred indefinitely for budget and is
+not an active owner action. R2 credential scope/lifecycle are accepted as-is by owner decision.
 
 ## Plan Fact-Check (2026-06-18)
 
@@ -445,7 +447,7 @@ Done:
 - #9 cross-node Secret restore passed on 2026-07-12; snapshot + original token restored the exact canary value.
 - Owner accepted the current R2 credential scope and lifecycle as-is on 2026-07-12; do not rotate automatically.
 
-Pending (owner action): independent off-homelab age-key escrow (verify decrypt); allocate a third always-on k3s
-server host if HA becomes affordable; retrieve the staged Vaultwarden admin token; optional — revoke the old
-"GitHub CLI" OAuth grant in GitHub settings. Pending (agent with an approved window): kubeconfig 0644->0600 +
-tailnet-only API firewall.
+Pending (owner action): independent off-homelab age-key escrow (verify decrypt); retrieve the staged Vaultwarden
+admin token; optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. HA/VPS work is deferred
+indefinitely for budget and resumes only after a new owner decision. Pending (agent with an approved window):
+kubeconfig 0644->0600 + tailnet-only API firewall.

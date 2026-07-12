@@ -14,8 +14,9 @@
   and an operator VM. **No GPU on any of them.**
 - **2 GPU/personal machines** (Windows desktop with an RTX 5060 Ti, Mac mini) are on the tailnet but
   are **NOT always-on** and are **NOT** k3s/etcd members — they are future external agent-workers.
-- **NOT HA.** One k3s server + one agent = a single etcd member. A 3rd independent k3s server in a
-  separate failure domain is still required before any HA claim. See
+- **NOT HA; HA/VPS deferred indefinitely for budget.** One k3s server/control-plane + one agent = a single
+  etcd member. The current strategy is one control-plane, R2 backups, and the verified 2026-07-12 restore drill.
+  A 3rd independent k3s server remains a future HA prerequisite, not an active owner action. See
   [CLAUDE.md → Important Boundaries](../CLAUDE.md).
 - Network = **Tailscale mesh**; cloud LLM egress from Russia goes through a **sing-box / VLESS+REALITY**
   proxy (ADR-018), because Anthropic/OpenAI/OpenRouter are unreachable directly from RU.

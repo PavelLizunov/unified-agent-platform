@@ -1,9 +1,9 @@
 # Next Steps
 
 > Two parallel tracks. **Track A** is the new north star: pilot the external **hermes-agent** as the
-> vibe-coding harness. **Track B** is the **foundation work that does not go away** — the cluster is
-> NOT HA and `uap-ops-1` is an over-concentrated SPOF. The pivot does **not** resolve Track B; both
-> must progress.
+> vibe-coding harness. **Track B** is the **foundation work that does not go away** under the current
+> single-control-plane strategy — `uap-ops-1` is an over-concentrated SPOF, DR must stay proven, and the
+> cluster is explicitly NOT HA. VPS/HA work is deferred indefinitely for budget and is not active work.
 >
 > Context: [docs/infrastructure.md](infrastructure.md). Decisions: [DECISIONS.md](../DECISIONS.md).
 > This doc **references** [BUILD-PLAN.md](../BUILD-PLAN.md) and [REVIEW-CODEX.md](../REVIEW-CODEX.md)
@@ -13,10 +13,11 @@
 
 ## Status banner
 
-- **NOT HA.** One k3s server (`uap-home-1`, single embedded-etcd member) + one agent (`uap-home-2`).
-  A 3rd **independent** k3s server in a separate failure domain is required before any HA claim. Do
-  **not** turn `uap-home-2` into a second server (2-member etcd is not HA) — see
-  [CLAUDE.md → Important Boundaries](../CLAUDE.md).
+- **NOT HA; HA/VPS deferred indefinitely for budget (owner decision 2026-07-12).** One k3s server/control-plane
+  (`uap-home-1`, single embedded-etcd member) + one agent (`uap-home-2`). The active strategy is one
+  control-plane, R2 backups, and the verified 2026-07-12 restore drill. A 3rd independent k3s server is a future
+  HA prerequisite, not an active owner action. Do **not** turn `uap-home-2` into a second server (2-member etcd is
+  not HA) — see [CLAUDE.md → Important Boundaries](../CLAUDE.md).
 - **The quality gate is ENFORCED.** The repo is public, the ruleset `protect-master` is active (PR
   required + `static-checks` CI a required/strict check), and direct push to master is blocked. The
   "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
@@ -145,17 +146,16 @@ Open infrastructure debt from [STATUS.md](../STATUS.md) and the 2026-06-19 cross
 - `validate_iac.py` now rejects orphaned prod manifests; CI and the local gate enforce it. **DONE.**
 - Hermes-legacy is explicitly parked; the external hermes-agent is the active harness.
 
-### B1 — Reach real HA: 3rd independent k3s server + failover drill (owner+agent)
+### B1 — Real HA path — DEFERRED (owner decision 2026-07-12)
 
-- (owner) Provision a **3rd k3s server in a separate failure domain** (a non-RU VPS is doubly useful — it
-  also serves as the egress node, ADR-018). Needs **owner input**: VPS provider + credentials.
-- (agent) Join as a server (`--server https://<tailnet-ip-1>:6443`, `--flannel-iface=tailscale0`); keep
-  the etcd member count **odd**. First make the Ansible k3s join reproducible (notify a restart on
-  config/token change; recorded two-run idempotency test).
-- (owner-approved) Run the **destructive failover drill**: 3x Ready, power off any one node, confirm
-  `kubectl` still answers and pods survive.
-- **Done when:** the 3-node failover milestone is green with owner sign-off. Only then may anything claim
-  "HA".
+VPS provisioning and the HA build are deferred indefinitely because of budget. Do not carry a third k3s server as an
+active owner action, and do not start join/failover work without a new owner decision.
+
+- Current operating mode: one k3s control-plane/server (`uap-home-1`, single embedded-etcd member) + one agent
+  (`uap-home-2`).
+- Current risk control: R2 backups plus the verified 2026-07-12 cross-node canary Secret restore drill.
+- Future prerequisite before any HA claim: a 3rd independent k3s server in a separate failure domain, followed by
+  an owner-approved destructive failover drill with 3x Ready and API/workload survival after one server loss.
 
 ### B2 — Reduce the `uap-ops-1` blast radius (owner+agent)
 
@@ -210,12 +210,13 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
   "self-test passed" is real (north-star demo PASSED, PR #25).
-- **B1 (3rd node + failover)** and **B3 (DR proof)** gate any "HA ready" / "DR complete" claim and need
-  **owner input** (VPS, escrow) — start those conversations now.
+- **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
+- **B3 remaining DR proof** now centers on off-homelab age-key escrow and Proxmox VM backups; the R2 canary Secret
+  restore drill is already green.
 - **B2** hardening should land before the platform takes on more load or secrets.
 
 ## Owner inputs needed
 
-- A third always-on k3s server host when affordable; a foreign VPS is explicitly deferred for cost.
 - Off-homelab age-key escrow location.
-- Approval for destructive tests (node shutdown, restore-over-VM, k3s reset).
+- Approval for destructive tests that are still relevant to the current strategy (restore-over-VM, k3s reset on a
+  disposable target). HA node-shutdown tests resume only after a new owner decision funds a third server.
