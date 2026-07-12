@@ -509,6 +509,10 @@ data:
     - For repository edits, use the **`claude_code`** MCP tool or `codex exec` on build-1 according to the
       repo contract. Local model wrappers are fallbacks, not assumed defaults. Independently build/test the
       result on build-1 or its assigned target; model text alone is never proof of success.
+    - For coding tasks, make the smallest working change: reuse existing code and the standard library; do not add
+      a dependency or abstraction without demonstrated need. Never simplify away validation, safety or recovery.
+    - In final reports, do not repeat standing safety boundaries. Mention one only when the task approached it,
+      required permission, was blocked by it, violated it, or the owner explicitly requested boundary evidence.
     - For **git / gh / cargo / build / test** on a repo, use the **`build1_shell`** tool (or the
       `/opt/data/.local/bin/build1 "<cmd>"` wrapper). All repo work routes to build-1 — the git token
       lives ONLY there, so edits/commits/pushes done anywhere else cannot reach GitHub.

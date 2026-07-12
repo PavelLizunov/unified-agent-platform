@@ -57,7 +57,9 @@ Last updated: 2026-07-12
   `hermes --version`/`codex --version`/`claude --version` match the pins exactly, dedicated SA +
   `automountServiceAccountToken:false` live, `tests/ops/check-pv-reclaim.ps1 -Require` →
   `pv-reclaim-ok`, ponytail installed at `/opt/data/plugins/ponytail` and **enabled** on first real boot
-  (`hermes plugins list` confirms). `claude -p` verified working end-to-end. `singbox-egress-ha`: pod
+  (`hermes plugins list` confirmed it then). On 2026-07-12 it was found installed but disabled, so the owner chose
+  to remove the dead plugin/bootstrap and retain only two concise managed coding/report rules. `claude -p` verified
+  working end-to-end. `singbox-egress-ha`: pod
   1/1 Running, `sing-box check` valid, reachability confirmed from inside hermes-agent (telegram=302,
   chatgpt=403 — the expected signature). The Codex OAuth later expired because of its single-use refresh-token
   lineage; the local router carried the brain from 2026-07-06 until owner device-auth restored Codex on 2026-07-11
