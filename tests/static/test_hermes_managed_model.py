@@ -42,11 +42,15 @@ assert "qwen-35b" in agents and "do not probe or call it" in agents
 assert "approval naming the specific agent and action" in agents
 assert "codex_app_server" in agents
 assert "gpt-5." not in agents, "model id must have one owner: managed config"
+assert "smallest working change" in agents
+assert "do not repeat standing safety boundaries" in agents
 assert "mm4.local" in agents and "100.116.97.112" in agents
 assert 'build1 "ssh slovn@100.116.97.112' in agents
 assert "cp /config/agents-md /opt/data/.codex/AGENTS.md" in deployment
 assert "[ -f /opt/data/.codex/AGENTS.md ] ||" not in deployment
 assert "/config/profile-migrate.py" in deployment
+assert "DietrichGebert/ponytail" not in deployment
+assert "/plugins/ponytail" not in deployment
 assert "мозг = локальный qwen-35b" in profile_migration
 assert "КОДЕР = ornith-9b" in profile_migration
 
@@ -60,7 +64,9 @@ owner-enriched-sentinel
 with tempfile.TemporaryDirectory() as tmp:
     profile = Path(tmp) / "USER.md"
     profile.write_text(old_profile, encoding="utf-8")
-    migration = profile_migration.replace("/opt/data/memories/USER.md", str(profile))
+    migration = profile_migration.replace(
+        "/opt/data/memories/USER.md", str(profile).replace("\\", "\\\\")
+    )
     exec(compile(migration, "profile-migrate.py", "exec"))
     once = profile.read_text(encoding="utf-8")
     exec(compile(migration, "profile-migrate.py", "exec"))
@@ -80,7 +86,9 @@ owner-live-sentinel
 with tempfile.TemporaryDirectory() as tmp:
     profile = Path(tmp) / "USER.md"
     profile.write_text(live_profile, encoding="utf-8")
-    migration = profile_migration.replace("/opt/data/memories/USER.md", str(profile))
+    migration = profile_migration.replace(
+        "/opt/data/memories/USER.md", str(profile).replace("\\", "\\\\")
+    )
     exec(compile(migration, "profile-migrate.py", "exec"))
     once = profile.read_text(encoding="utf-8")
     exec(compile(migration, "profile-migrate.py", "exec"))

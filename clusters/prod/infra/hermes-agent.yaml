@@ -136,18 +136,6 @@ spec:
               [ -f /opt/data/memories/USER.md ] || cp /config/user-profile /opt/data/memories/USER.md
               # Preserve enriched owner memory, but remove the known 2026-07-06 model/coder drift.
               /opt/hermes/.venv/bin/python /config/profile-migrate.py
-              # 3d) Ponytail (anti-overengineering coding skill for the claude -p / codex exec
-              #     workers) -- seed-if-absent like the CLIs above. Lands on the PVC under
-              #     HERMES_HOME so it persists across restarts and rides the existing daily
-              #     backup. This initContainer has no env: block (unlike the gateway container
-              #     below), so the egress proxy is exported inline for the install's git clone.
-              if [ ! -d /opt/data/plugins/ponytail ]; then
-                HOME=/opt/data HERMES_HOME=/opt/data \
-                HTTPS_PROXY=http://singbox-egress-ha.uap-system.svc:12080 \
-                HTTP_PROXY=http://singbox-egress-ha.uap-system.svc:12080 \
-                NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10 \
-                  /opt/hermes/.venv/bin/hermes plugins install DietrichGebert/ponytail --enable
-              fi
               # 4a) durable ssh for the AGENT: root-owned /root/.ssh (shared emptyDir with the gateway)
               #     so bare `ssh build-1` from the agent bash -lc survives pod rolls (the ephemeral
               #     in-pod fix kept getting wiped). config resolves the build-1 alias; key stays on PVC.

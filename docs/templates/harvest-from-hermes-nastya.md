@@ -116,7 +116,7 @@ Material corrections:
   through the VLESS proxy), and **never raises** from a handler (every failure — bridge off, 401,
   timeout, bad JSON — collapses to a returned message string).
 - **WHY** — the cleanest reference for writing UAP's own native Hermes plugins. We already ship
-  native adapters (ponytail) and stdlib CLIs (ai-search, knowledge, local-models-router); this is
+  stdlib CLIs (ai-search, knowledge, local-models-router); this is
   the canonical skeleton for the *plugin* packaging of one. The four discipline points (stdlib-only,
   env-at-call-time, no-proxy-on-loopback, handlers-never-raise) are exactly UAP's own conventions.
 - **HOW (UAP)** — keep it as a **template skeleton only**. The suflyor *feature* (a personal
