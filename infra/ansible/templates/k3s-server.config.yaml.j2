@@ -18,7 +18,7 @@ disable:
   - {{ component }}
 {% endfor %}
 secrets-encryption: true
-write-kubeconfig-mode: "0644"
+write-kubeconfig-mode: "0600"
 etcd-snapshot-retention: {{ k3s_snapshot_retention }}
 {% if k3s_etcd_s3_enabled | default(false) %}
 etcd-s3: true
