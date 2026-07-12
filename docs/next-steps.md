@@ -181,8 +181,9 @@ Remaining:
 - **Canary cross-node Secret restore: DONE 2026-07-12.** A clean disposable host restored the R2-fetched snapshot
   with only the original server token and read back the exact canary Secret value; no separate encryption config
   was required. Test state was fully removed.
-- (owner) **Proxmox VM backups:** still pending — configure them.
-- **Done when:** an off-homelab escrow decrypt succeeds and Proxmox VM backups run.
+- **Proxmox VM backups: DONE 2026-07-13.** Critical VMIDs `102/201/202/203` run daily to a separate
+  `pve-ninitux2` disk; VM203 passed archive integrity plus an isolated, never-started restore check.
+- **Done when:** an off-homelab escrow decrypt succeeds. Proxmox VM backup/restore is already proven.
 
 ---
 
@@ -211,7 +212,7 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
   "self-test passed" is real (north-star demo PASSED, PR #25).
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
-- **B3 remaining DR proof** now centers on off-homelab age-key escrow and Proxmox VM backups; the R2 canary Secret
+- **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
 - **B2** hardening should land before the platform takes on more load or secrets.
 

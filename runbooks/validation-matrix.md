@@ -53,6 +53,7 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadin
 | Backup existence | Snapshot list | `tests/smoke/k3s-snapshot.ps1` | Daily/manual | expected snapshot appears |
 | Offsite backup | etcd snapshot in R2 | `rclone lsf r2:uap-k3s-snapshots/prod/` (on uap-ops-1) | weekly | recent snapshot object present |
 | ops-1 services backup | Vaultwarden + egress secrets archive in R2 | `rclone lsf r2:uap-k3s-snapshots/ops-backup/` (on uap-ops-1) | weekly | recent `ops-*.tar.gz.age` present; see `runbooks/uap-ops-services-backup.md` |
+| Proxmox VM backups | Storage, job and recent VM203 archive | `tests/ops/check-proxmox-backups.ps1 -Require` | weekly | `proxmox-backup-ok` |
 | SOPS | Decrypt fixture | `tests/smoke/sops-decrypt.ps1` | After SOPS key changes | `sops-decrypt-ok` |
 | Disaster recovery | Disposable restore (+ canary Secret decrypt) | `runbooks/restore-drill.md` | Before claiming recovery readiness; then quarterly | restored cluster answers `kubectl` AND a known canary Secret decrypts |
 | Local FC brain (A1) | Structured `tool_calls` at >= 64k context | `tests/smoke/local-fc-toolcall.ps1 -StartOllama` | On the GPU desktop, when standing up/verifying the local brain | `local-fc-toolcall-ok` (tool_calls present, not text; greeting yields none; context >= 64k) |

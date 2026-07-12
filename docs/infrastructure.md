@@ -72,8 +72,9 @@ test VMs); `pve-ninitux3` holds `uap-home-2` + `uap-build-1` (so build-1's 16 GB
 | 203 | `uap-ops-1` | pve-ninitux | 2 vCPU / 2 GB / 30 GB |
 | 102 | `uap-build-1` | pve-ninitux3 | 8 vCPU / 16 GB / 100 GB (Ubuntu 22.04) |
 
-Proxmox endpoint is LAN-only. **Proxmox VM backups are still pending** (k3s/etcd DR is in R2; the VMs
-themselves are not yet backed up).
+Proxmox endpoint is LAN-only. Critical VMIDs `102/201/202/203` are backed up daily at `03:15` to
+`backup-pve2`, a backup-only NFS export on the separate `pve-ninitux2` disk. The NFS server is excluded
+from mounting its own export. VM203 passed archive integrity and isolated restore verification on 2026-07-13.
 
 ---
 

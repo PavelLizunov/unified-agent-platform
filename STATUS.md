@@ -86,12 +86,17 @@ Last updated: 2026-07-12
 - Proxmox version observed: `8.4.1`.
 - Online nodes:
   - `pve-ninitux`
-  - `pve-ninitux3`
-- Offline node observed:
   - `pve-ninitux2`
+  - `pve-ninitux3`
 - Shared storage used: `nfs-share`.
+- Backup-only storage: `backup-pve2` on the separate `pve-ninitux2` disk; clients are only
+  `pve-ninitux` and `pve-ninitux3` (no self-mount).
 - Bridge used: `vmbr0`.
 - Storage change made: `nfs-share` content types now include `import` so cloud images can be imported.
+- **Proxmox VM backups DONE 2026-07-13:** cluster job `uap-critical-daily` backs up VMIDs
+  `102/201/202/203` at `03:15` with snapshot mode, zstd, 50 MiB/s cap and retention
+  `keep-last=2,keep-weekly=2,keep-monthly=1`. VM203 produced a 2.03 GB archive from a 30 GB disk;
+  `zstd -t`, isolated restore to an unstarted disposable VMID, and `qemu-img check` passed. Cleanup passed.
 
 ## Local VMs
 
@@ -390,8 +395,8 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 
 ## Pending
 
-Canonical list: `BACKLOG.md`. Highest-impact open items under the current single-control-plane strategy are
-off-homelab age-key escrow and Proxmox VM backups. The third k3s server / HA failover path is deferred indefinitely
+Canonical list: `BACKLOG.md`. The highest-impact open DR item under the current single-control-plane strategy is
+off-homelab age-key escrow. Proxmox VM backup/restore is proven. The third k3s server / HA failover path is deferred indefinitely
 for budget and is not an active owner action. R2 credential scope/lifecycle are accepted as-is by owner decision.
 
 ## Plan Fact-Check (2026-06-18)
