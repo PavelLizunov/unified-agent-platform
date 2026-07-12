@@ -391,9 +391,8 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 ## Pending
 
 Canonical list: `BACKLOG.md`. Highest-impact open items under the current single-control-plane strategy are
-off-homelab age-key escrow, Proxmox VM backups and owner retrieval of the staged Vaultwarden admin token. The third
-k3s server / HA failover path is deferred indefinitely for budget and is not an active owner action. R2 credential
-scope/lifecycle are accepted as-is by owner decision.
+off-homelab age-key escrow and Proxmox VM backups. The third k3s server / HA failover path is deferred indefinitely
+for budget and is not an active owner action. R2 credential scope/lifecycle are accepted as-is by owner decision.
 
 ## Plan Fact-Check (2026-06-18)
 
@@ -444,8 +443,8 @@ Done:
   push to `master` is **blocked**. The CI gate (`.github/workflows/ci.yml`) is therefore an **enforced required check**,
   not just a signal (see `docs/next-steps.md` → Platform hardening). DONE.
 - #4 Vaultwarden rotated: admin token regenerated and stored as an Argon2 PHC hash in `.env` (no longer plaintext);
-  RSA identity key regenerated (0600). New admin token staged at `~/vaultwarden/admin-token.NEW.txt` on ops-1 for
-  owner retrieval (move to a password manager, then delete).
+  RSA identity key regenerated (0600). Owner saved the new token in a password manager on 2026-07-12, its admin
+  login was verified, and the staging file `~/vaultwarden/admin-token.NEW.txt` was deleted.
 - #9 cross-node Secret restore passed on 2026-07-12; snapshot + original token restored the exact canary value.
 - Owner accepted the current R2 credential scope and lifecycle as-is on 2026-07-12; do not rotate automatically.
 - #11 kubeconfig permissions hardened on 2026-07-12: the live unquoted `0644` value had been interpreted as mode
@@ -455,6 +454,6 @@ Done:
   `6443/tcp`, `10250/tcp`, and `8472/udp`. A timed-rollback canary and the durable deployment both kept tailnet API
   and kubelet access open; both nodes, metrics, and workloads remained healthy. LAN DROP counters were observed.
 
-Pending (owner action): independent off-homelab age-key escrow (verify decrypt); retrieve the staged Vaultwarden
-admin token; optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. HA/VPS work is deferred
-indefinitely for budget and resumes only after a new owner decision.
+Pending (owner action): independent off-homelab age-key escrow (verify decrypt); optional — revoke the old
+"GitHub CLI" OAuth grant in GitHub settings. HA/VPS work is deferred indefinitely for budget and resumes only after
+a new owner decision.
