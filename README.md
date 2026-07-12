@@ -16,15 +16,17 @@
 > переписываются под каждое изменение инфраструктуры.
 
 - **Проектирование: завершено.** Ключевые решения приняты и зафиксированы в [DECISIONS.md](DECISIONS.md).
-- **Реализация: начата.** Локальный Proxmox bootstrap поднят: `uap-home-1` работает как k3s server,
-  `uap-home-2` подключён как k3s agent. Полный HA-этап всё ещё требует третью независимую server-ноду.
+- **Реализация: начата.** Локальный Proxmox bootstrap поднят: `uap-home-1` работает как единственный
+  k3s control-plane/server, `uap-home-2` подключён как k3s agent. Из-за бюджета владелец отложил VPS и
+  построение HA на неопределённый срок; текущая стратегия — один control-plane, etcd/PVC backups в R2 и
+  проверенный restore drill.
 
 ## Окружение владельца
 
 | Узел | ОС | Роль в платформе |
 |---|---|---|
-| Домашний сервер | Linux | k3s control-plane (1 из 3) + agent-воркер |
-| VPS-1, VPS-2 | Linux (заводятся) | k3s control-plane (2 из 3) |
+| Домашний сервер | Linux | единственный k3s control-plane + agent-воркер |
+| VPS-1, VPS-2 | Linux (отложены) | будущие failure domains для HA, не active owner action |
 | Рабочая станция | Windows 11 | agent-воркер + Ollama (большие локальные модели) |
 | Ноутбук | Mac | agent-воркер + Ollama (мелкие/демо модели) |
 
@@ -65,14 +67,14 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1
 | Bootstrap/IaC | OpenTofu-compatible Terraform + Ansible | repeatable provisioning и настройка указанных серверов |
 | Код платформы | Go-first; Rust для daemon/proxy | лёгкие бинарники, тестируемость, контроль зависимостей |
 
-## Что нужно от владельца до старта HA-реализации (Этап 0)
+## Текущая стратегия вместо HA-старта
 
-Можно начать без VPS через **Этап 0L**: один домашний Linux-сервер, single-node k3s, GitOps/SOPS/runbooks
-и smoke-тесты. Это подготовительный режим, не HA.
+VPS и построение HA отложены владельцем на неопределённый срок из-за бюджета. Третий k3s server больше не
+является active owner action. Рабочая стратегия сейчас:
 
-1. Завести **2 дешёвых VPS**. Бюджетный профиль 1 vCPU / 1 ГБ RAM / 15 ГБ SSD допустим только как
-   проверяемый эксперимент: если Этап 1 не проходит веху, конфигурацию придётся усилить или пересмотреть.
-2. Поставить **Tailscale** на все 5 машин. Headscale и Hysteria Realms не являются стартовым фундаментом:
-   Headscale возможен позже, Hysteria Realms — только аварийный/экспериментальный канал.
+1. Держать один k3s control-plane (`uap-home-1`, single embedded-etcd member) и один worker (`uap-home-2`).
+2. Не заявлять HA: кластер остаётся single-control-plane и переживает только process/pod-level сбои.
+3. Компенсировать риск R2 backups и проверенным restore drill: etcd snapshots и hermes-agent PVC backups уходят в
+   R2, а restore drill 2026-07-12 доказал восстановление canary Secret с R2-снимка.
 
 Детали — в [BUILD-PLAN.md](BUILD-PLAN.md).

@@ -8,7 +8,6 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 | Ref | Item | Why it needs the owner | Unblocks |
 |---|---|---|---|
 | #2 | **Independent off-homelab age-key escrow** + verify a decrypt with it (keystone DR) | Owner must place the master key in a vault outside the Proxmox homelab | Homelab-loss recovery of age-encrypted DR material |
-| #5 | **Third independent k3s server host** (foreign VPS deferred for cost; an always-on local host is acceptable with reduced failure-domain coverage) | Owner allocates the host/VM | Stage 1 HA and its failover drill |
 | — | Retrieve the new Vaultwarden admin token from `~/vaultwarden/admin-token.NEW.txt` on ops-1, move to a password manager, then delete the file | Owner-only credential | — |
 | — | (optional) Revoke the old "GitHub CLI" OAuth grant in GitHub settings | Owner GitHub account | full invalidation of the token already removed from ops-1 |
 
@@ -29,3 +28,5 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 - Hermes development readiness and the canary cross-node Secret restore are complete; see `STATUS.md` and
   `runbooks/restore-drill.md`.
 - Still open: single-region R2; ops-1 remains a SPOF until services migrate or their restores are proven.
+- Future reference only: the third k3s server / HA path is parked until a new owner budget decision; it is not an
+  active owner action.
