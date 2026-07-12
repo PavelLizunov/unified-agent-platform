@@ -81,7 +81,8 @@ rm -rf /tmp/ops
 
 ## Caveats
 
-- **Blast radius (REVIEW-CODEX.md #1):** the R2 credential on ops-1 can also delete these objects. Until the R2
-  token is bucket-scoped and a lifecycle/versioning policy exists, an ops-1 compromise can erase the backups.
+- **Blast radius (REVIEW-CODEX.md #1):** the R2 credential on ops-1 can also delete these objects. Owner accepted
+  the current credential scope and no-lifecycle policy on 2026-07-12; an ops-1 compromise can erase the backups,
+  so do not present R2 as immutable storage.
 - These backups protect against VM/disk loss; they do **not** replace migrating these services into the cluster
   (Stage 3), which is the durable fix for the ops-1 SPOF.

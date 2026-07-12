@@ -22,8 +22,8 @@ same R2 bucket `uap-k3s-snapshots`, same retention style).
 | `~/knowledge/bin/knowledge.py` | in git (`tools/knowledge/knowledge.py`) | incidental (whole `bin/`) |
 
 The archive can contain `ai-search.env` (provider keys) — same exposure class as the
-hermes-agent R2 backup, which already ships plaintext auth to this bucket. Harden with a
-**bucket-scoped R2 key** (per `REVIEW-CODEX.md`). The archive is written `chmod 600`.
+hermes-agent R2 backup, which already ships plaintext auth to this bucket. The current shared R2 credential scope
+is an owner-accepted risk (2026-07-12); do not rotate it automatically. The archive is written `chmod 600`.
 
 ## Install (on build-1, run once)
 
@@ -32,8 +32,7 @@ hermes-agent R2 backup, which already ships plaintext auth to this bucket. Harde
 install -m 755 tools/backup/build1-knowledge-backup.sh ~/knowledge/bin/build1-knowledge-backup.sh
 
 # 2) ensure build-1's rclone has an R2 remote named `r2` (this is the ONE operator input).
-#    Copy the [r2] stanza from ops-1 (100.82.241.121:~/.config/rclone/rclone.conf), or add a
-#    bucket-scoped key:  rclone config   ->  new remote `r2`, type s3, provider Cloudflare.
+#    Copy the managed [r2] stanza from ops-1 (100.82.241.121:~/.config/rclone/rclone.conf).
 rclone lsf r2:uap-k3s-snapshots/ >/dev/null   # must succeed before enabling the timer
 
 # 3) dry-run once, confirm an archive lands in R2 under knowledge/
@@ -90,5 +89,5 @@ rclone copy ~/local-model-router.service.bak r2:uap-k3s-snapshots/ops1-config/
 ```
 
 If it grows an env/config file with backend URLs or a `ROUTER_KEY`, add that path here (a
-`ROUTER_KEY` is a secret — SOPS it in git, do not ship a plaintext key without a
-bucket-scoped R2 key). See `runbooks/offsite-backups.md`.
+`ROUTER_KEY` is a secret — SOPS it in git and age-encrypt it before any R2 upload). See
+`runbooks/offsite-backups.md`.

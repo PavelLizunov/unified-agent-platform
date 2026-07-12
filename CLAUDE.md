@@ -184,9 +184,9 @@ Good next tasks that do not require redesign:
 
 1. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 2. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-3. Work the 2026-06-19 cross-review (`REVIEW-CODEX.md`): reduce `uap-ops-1` blast radius (rotate R2 token to a
-   bucket-scoped key, GitHub branch protection + least-privilege token, separate backup creds from interactive
-   rclone), prove cross-node Secret restore with a canary, set explicit S3 retention.
+3. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
+   restore are done. Owner accepted the current R2 credential scope/lifecycle as-is; do not rotate or alter it
+   without a new decision. Off-homelab age-key escrow remains open.
 4. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
 5. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
 6. Add third independent k3s server, then run a real failover drill.

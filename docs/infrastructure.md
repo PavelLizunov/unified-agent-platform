@@ -112,9 +112,9 @@ exactly what the hermes-agent pilot reuses.
 - **GitOps:** Flux reconciles `clusters/prod` from the GitHub remote over a read-only SSH deploy key,
   with **SOPS/age** decryption. The age **private** key lives only in-cluster (`flux-system/sops-age`) —
   so `sops -d` does **not** work on `uap-ops-1`; verify decrypted secrets in-cluster with `kubectl`.
-- **Offsite DR:** k3s etcd-s3 snapshots → Cloudflare R2 (bucket `uap-k3s-snapshots`, `prod/`). A
-  cross-node restore drill passed (canary-Secret value verification still pending — see
-  `runbooks/restore-drill.md`).
+- **Offsite DR:** k3s etcd-s3 snapshots → Cloudflare R2 (bucket `uap-k3s-snapshots`, `prod/`). The 2026-07-12
+  cross-node drill restored and decrypted an exact canary Secret value from an R2-fetched snapshot using only the
+  snapshot + original server token; see `runbooks/restore-drill.md`.
 
 ### Model + agent layer (namespace `uap-system`)
 
