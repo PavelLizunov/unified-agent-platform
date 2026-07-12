@@ -8,10 +8,11 @@ description: Take a routine on-demand k3s etcd snapshot and confirm it reached o
 ## Save + verify offsite (on uap-home-1)
 
 ```bash
-ssh uap@100.106.223.120 'SNAP=uap-local-$(date -u +%Y%m%d-%H%M%S); sudo k3s etcd-snapshot save --name "$SNAP" --s3 && sudo k3s etcd-snapshot list --s3 | grep -F "$SNAP"'
+ssh uap@100.106.223.120 'SNAP=uap-local-$(date -u +%Y%m%d-%H%M%S); sudo k3s etcd-snapshot save --name "$SNAP" && sudo k3s etcd-snapshot list | grep -F "$SNAP"'
 ```
 
-Success means the command exits 0 and prints the exact new snapshot name from the S3 list.
+Production config already sets `etcd-s3: true`; current k3s rejects a duplicate CLI `--s3` flag. Success means
+the command exits 0 and prints the exact new snapshot name with an `s3://` location.
 
 ## EXPECTED warnings (do NOT treat as errors)
 
@@ -20,7 +21,7 @@ Success means the command exits 0 and prints the exact new snapshot name from th
 ## Offsite details
 
 - The offsite copy is pushed by k3s-native **etcd-s3 -> Cloudflare R2** (configured per runbooks/cloudflare-r2-k3s-snapshots.md). It is NOT a separate rclone copy.
-- The exact-name `etcd-snapshot list --s3` check above is the confirmation; a generic bucket listing is not sufficient.
+- The exact-name `etcd-snapshot list` check above is the confirmation; a generic bucket listing is not sufficient.
 
 ## Out of scope
 
