@@ -1,16 +1,17 @@
 # Observability: uap-ops-1 platform healthcheck + Telegram alerting
 
 A lightweight, dependency-free healthcheck for the UAP platform. It runs **on `uap-ops-1`**
-(tailnet `100.82.241.121`) as a `systemd --user` timer every 20 minutes, checks the four things
-that actually page you, and if any fail it POSTs **one** summary to Telegram.
+(tailnet `100.82.241.121`) as a `systemd --user` timer every 20 minutes, checks the things
+that actually page you, and if any fail it POSTs **one** summary to Telegram. It also sends one
+successful Proxmox backup report per day after the backup window.
 
 **Why ops-1 and not a k8s CronJob:** cluster pods cannot reach the tailnet brain router
 (`100.82.x`) and have no operator kubeconfig. `uap-ops-1` reaches `kubectl`, the tailnet, and the
 egress proxy — so the probe has to live there. This is the same reason the local-models router and
 the ops-backup timer live on ops-1, not in-cluster.
 
-**No metrics stack.** POSIX `sh` + `kubectl` + `curl` + `date`. On a 2-node homelab a 15-min timer
-that alerts on the 4 real failure modes beats kube-prometheus-stack — see the ponytail note in the
+**No metrics stack.** POSIX `sh` plus existing `kubectl`, `curl`, `ssh` and coreutils. On a 2-node homelab a 20-min timer
+that alerts on the real failure modes beats kube-prometheus-stack — see the ponytail note in the
 script header. Add real metrics only when there is a second consumer for them.
 
 Files (all in `infra/ops/`):
@@ -33,6 +34,9 @@ Files (all in `infra/ops/`):
    HTTP code. `000` = connect failed = egress down.
 4. **Pods** — no `uap-system` pod is non-`Running` or not-`Ready` (`Completed`/`Succeeded` job pods
    are ignored, e.g. the nightly backup pod).
+5. **Proxmox VM backups** — after `05:00 Europe/Moscow`, VMIDs `102/201/202/203` each need a non-empty
+   archive newer than 26h on `backup-pve2`. A healthy result sends one daily Telegram report with each
+   archive size, total size and free target space; a state file prevents 20-minute duplicates.
 
 The script **always exits 0** and logs to journald. A failed check is an alert, not a crash.
 
@@ -87,7 +91,10 @@ journalctl --user -u uap-healthcheck.service -n 40 --no-pager
 # 2) run the script directly (identical behaviour; sources the env file itself):
 ~/bin/uap-healthcheck.sh
 
-# 3) force a failure to prove the Telegram path end-to-end (temporary override, no real outage):
+# 3) parser regression check (no network, no Telegram):
+~/bin/uap-healthcheck.sh --self-test
+
+# 4) force a failure to prove the Telegram path end-to-end (temporary override, no real outage):
 ROUTER_URL=http://127.0.0.1:1/v1/models ~/bin/uap-healthcheck.sh
 #   -> "brain router unreachable" fail + a Telegram message. Restore by omitting the override.
 ```
@@ -105,12 +112,17 @@ All optional; set in `/etc/uap/healthcheck.env` (systemd re-reads it each run):
 | `ROUTER_URL` | `http://100.82.241.121:8090/v1/models` | router endpoint changes |
 | `EGRESS_TARGET` | `https://api.telegram.org` | prefer a different reachability probe |
 | `KUBECONFIG` | `$HOME/.kube/config` | non-default kubeconfig location |
+| `PVE_SSH_TARGET` | `root@192.168.0.169` | Proxmox operator endpoint changes |
+| `PVE_SSH_KEY` | `$HOME/.ssh/uap_proxmox_admin` | Proxmox key path changes |
+| `PVE_BACKUP_STORAGE` | `backup-pve2` | backup storage ID changes |
+| `PVE_BACKUP_VMIDS` | `102 201 202 203` | protected VM set changes |
+| `PVE_BACKUP_MAX_AGE_H` | `26` | daily cadence or allowed delay changes |
+| `PVE_REPORT_AFTER` | `0500` | report time changes (in `PVE_REPORT_TZ`) |
+| `PVE_REPORT_TZ` | `Europe/Moscow` | backup schedule timezone changes |
 
 Change the interval by editing `OnCalendar` in `uap-healthcheck.timer` (e.g. `*:0/15` for 15 min),
 then `systemctl --user daemon-reload && systemctl --user restart uap-healthcheck.timer`.
 
-## Known gap this does NOT cover
-
-Data-loss gaps outside `uap-system`: the `uap-build-1` `knowledge.db` and the ops-1 router config
-have no backup and are not in GitOps. This healthcheck watches the in-cluster backup + brain +
-egress + pods only. Backing up build-1/ops-1 state is tracked separately.
+The Proxmox report depends on ops-1 reaching `pve-ninitux` with the existing
+`~/.ssh/uap_proxmox_admin` key. It never creates another Telegram credential; delivery reuses the
+existing 0600 healthcheck environment file.
