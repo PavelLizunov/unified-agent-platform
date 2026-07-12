@@ -97,6 +97,8 @@ Last updated: 2026-07-12
   `102/201/202/203` at `03:15` with snapshot mode, zstd, 50 MiB/s cap and retention
   `keep-last=2,keep-weekly=2,keep-monthly=1`. VM203 produced a 2.03 GB archive from a 30 GB disk;
   `zstd -t`, isolated restore to an unstarted disposable VMID, and `qemu-img check` passed. Cleanup passed.
+  `uap-healthcheck.timer` sends missing/stale failures and one successful size/free-space report per day
+  to the owner's existing Telegram chat after `05:00 Europe/Moscow`; delivery test passed.
 
 ## Local VMs
 

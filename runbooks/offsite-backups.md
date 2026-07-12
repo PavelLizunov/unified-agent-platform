@@ -91,6 +91,10 @@ Weekly verification from the repository root:
 powershell -ExecutionPolicy Bypass -File .\tests\ops\check-proxmox-backups.ps1 -Require
 ```
 
+`uap-healthcheck.timer` on ops-1 also checks these four VMIDs every 20 minutes after `05:00
+Europe/Moscow`. Missing/stale archives trigger the existing Telegram alert; a healthy set produces
+one daily Telegram report with per-VM sizes, total size and remaining free space.
+
 The 2026-07-13 restore proof used a disposable, never-started VMID on `pve-ninitux2`: `zstd -t` on the
 archive, `qmrestore --storage local --unique 1`, `qemu-img check` on the restored disk, then guarded
 `qm destroy`. Repeat quarterly with a fresh unused VMID. Never start the clone: its restored guest IP
