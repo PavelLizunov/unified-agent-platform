@@ -111,27 +111,28 @@ used during restore because the API server is not available yet.
 
 Verified 2026-06-19 against Cloudflare R2 (EU endpoint): `k3s server --cluster-reset --etcd-s3 --etcd-s3-endpoint=... --etcd-s3-access-key=... --etcd-s3-secret-key=... --etcd-s3-bucket=uap-k3s-snapshots --etcd-s3-folder=prod --etcd-s3-region=auto --cluster-reset-restore-path=<snapshot-name>` downloaded the snapshot from R2, decrypted it with the home-1 server token, and restored etcd. The restored cluster showed both nodes, all namespaces, the Flux controllers, and the `uap-platform` Kustomization at the current commit.
 
-## Secrets Encryption — Cross-Node Restore Caveat
+## Secrets Encryption — Cross-Node Restore Result
 
-The drill restored all cluster state (nodes, namespaces, Deployments, Flux GitRepository/Kustomization) and the
-secret *objects*. With `secrets-encryption: true`, secret *values* are encrypted at rest in etcd; in this drill
-`kubectl get secret` returned `identity transformer tried to read encrypted data` on the fresh node.
+**PASS 2026-07-12.** With `secrets-encryption: true`, a snapshot taken after creating a random canary Secret was
+fetched back from R2 and restored on clean `debian-xfce` using k3s `v1.35.5+k3s1`. Only the snapshot and original
+server token were transferred; `encryption-config.json` was deliberately absent before `cluster-reset`.
 
-**Caveat — not yet root-caused (see `REVIEW-CODEX.md`).** k3s docs state an etcd snapshot taken with
-secrets-encryption enabled already contains the encryption config + keys, as bootstrap data encrypted by the
-*original server token* — so a snapshot **+ the original token** *should* suffice to decrypt secrets on another node.
-The drill's read failure coincided with `k3s.service` failing to start cleanly, so it does **not** prove a separate
-`encryption-config.json` is mandatory. The `dr/` `encryption-config.json` is kept as belt-and-suspenders.
-**TODO before any DR claim:** re-run on a clean disposable node with a known **canary Secret**, restore from the R2
-snapshot + token only, and confirm the canary decrypts; only then state whether the separate encryption-config is
-required. An **in-place** restore on `uap-home-1` is unaffected (encryption-config already present).
-The exact verbatim procedure that settles this TODO is **Canary Secret-value restore drill** below.
+K3s extracted the encryption config from snapshot bootstrap data, started a new single-member etcd cluster and
+returned the exact canary value byte-for-byte. Therefore snapshot + original token are sufficient for the current
+configuration; the separately age-encrypted `dr/encryption-config.json` remains belt-and-suspenders, not a required
+restore input. The prior `identity transformer tried to read encrypted data` result was caused by the incomplete
+target startup, not missing snapshot material.
+
+The production canary namespace, exact local/R2 test snapshot, staged token/value and all disposable k3s/CNI state
+were removed. Production nodes remained Ready and the test VM returned to its original non-k3s state.
 
 ## Canary Secret-value restore drill (owner-gated, destructive-on-a-throwaway-node)
 
-**Purpose.** Prove that a Secret *value* (not just the Secret object) survives a cross-node restore from the R2
-snapshot, and **settle the standing TODO above**: observe whether the value decrypts with the snapshot + original
-server token **alone**, or whether a separate `encryption-config.json` is also required.
+Status: **verified PASS 2026-07-12**. Keep this procedure for future periodic drills; every repeat remains
+owner-gated because it creates a temporary production Secret and performs a destructive restore on the target.
+
+**Purpose.** Repeatably prove that a Secret *value* (not just the Secret object) survives a cross-node restore from
+the R2 snapshot using the snapshot + original server token alone.
 
 **Owner-gated.** This is a destructive drill: it needs a **disposable k3s node the owner provisions**, and it
 touches prod (creates a throwaway Secret + takes a snapshot). Per repo boundaries (`CLAUDE.md` → "Things That Need

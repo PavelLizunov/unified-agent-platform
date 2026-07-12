@@ -165,9 +165,8 @@ on the **same Proxmox host** as `uap-home-1`. Already DONE: secret perms tighten
 RSA key rotated, broad `gh` OAuth removed → repo-scoped SSH deploy key, daily `ops-backup` timer.
 Remaining:
 
-- (owner) **R2 least privilege:** rotate to a **bucket-scoped** R2 key (separate from interactive rclone)
-  and add an R2 **lifecycle / Object Lock / versioning** policy — the bucket has none, so a compromise can
-  overwrite/delete `prod/` and `dr/` (REVIEW-CODEX #1).
+- **R2 scope/lifecycle: accepted as-is by owner 2026-07-12.** Do not rotate credentials or change bucket policy
+  without a new owner decision. The broader delete/overwrite blast radius is understood.
 - **GitHub→cluster takeover path: DONE.** `protect-master` requires PR + green `static-checks`; direct
   master pushes are blocked.
 - (agent) **Prove recovery for ops-1 services.** Daily age-encrypted backup and health alerts are live
@@ -179,12 +178,11 @@ Remaining:
 - (owner) **Independent age-key escrow:** the age **private** key was found **only** on `uap-home-1`. Put
   a copy in a verified **off-homelab, owner-controlled** escrow and **prove a decrypt**. Never put the key
   value in git/markdown/prompts/logs.
-- (agent) **Canary cross-node Secret restore:** the drill proved etcd objects/nodes/Flux resources but has
-  **not** read back a known **Secret value**. Restore onto a clean disposable node using **only** the R2
-  snapshot + original server token, then read and compare a deliberately created **canary Secret**.
+- **Canary cross-node Secret restore: DONE 2026-07-12.** A clean disposable host restored the R2-fetched snapshot
+  with only the original server token and read back the exact canary Secret value; no separate encryption config
+  was required. Test state was fully removed.
 - (owner) **Proxmox VM backups:** still pending — configure them.
-- **Done when:** an off-homelab escrow decrypt succeeds, the canary Secret round-trips on a clean node,
-  and Proxmox VM backups run.
+- **Done when:** an off-homelab escrow decrypt succeeds and Proxmox VM backups run.
 
 ---
 
@@ -218,7 +216,6 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 
 ## Owner inputs needed
 
-- Remote VPS provider + credentials (3rd k3s server **and** the non-RU egress node).
-- R2 bucket-scoped key + lifecycle policy.
+- A third always-on k3s server host when affordable; a foreign VPS is explicitly deferred for cost.
 - Off-homelab age-key escrow location.
 - Approval for destructive tests (node shutdown, restore-over-VM, k3s reset).

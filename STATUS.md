@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Phase
 
@@ -11,6 +11,10 @@ Last updated: 2026-07-11
 - HA status: **not HA ready**. Two local k3s VMs (one server, one agent) = a single etcd member; a third
   independent server + a failover drill are still required.
 - k3s status: **local bootstrap running on `uap-home-1` with `uap-home-2` joined as an agent**.
+- **Cross-node Secret restore: PASS 2026-07-12.** A snapshot created after a throwaway canary Secret was fetched
+  back from R2 and restored on clean `debian-xfce` with only the snapshot + original server token. The snapshot
+  supplied the encryption config automatically and the Secret value matched byte-for-byte. All canary resources,
+  credentials, k3s state and the test snapshot were removed; production and the target returned healthy.
 - **Brain reality (current, since 2026-07-11):** the live hermes-agent brain is **Codex `gpt-5.6-luna`** through
   `codex_app_server` (`provider: openai-codex`). Owner device-auth restored the ChatGPT-Plus OAuth lineage; an
   explicit in-pod Luna probe returned `LUNA-PROBE-OK`. The ops-1 `qwen-35b`/`ornith-9b` local-models-router, which served as
@@ -257,7 +261,8 @@ over bare Docker.
   incl. the `.codex` brain DBs) → `r2:uap-k3s-snapshots/hermes-agent-backup/`, keep-7, direct to R2 (so it works
   while the egress is down). Fail-loud integrity guards (non-empty + valid zip + `.codex` present). PV flipped to
   `reclaimPolicy: Retain`. **Verified:** a manual job shipped a 40MB zip to R2. Restore + hardening follow-ups
-  (bucket-scoped key, client-side encryption) in `runbooks/hermes-agent-dr.md`.
+  (client-side encryption; current shared R2 credential scope is an owner-accepted risk) in
+  `runbooks/hermes-agent-dr.md`.
 - **Egress outage RESOLVED 2026-06-25 (PR #19, merged) — HA failover egress.** The single German VLESS+REALITY exit
   had died server-side (`singbox-egress` logged `EOF` to chatgpt.com/api.telegram.org/ipify/dns alike), taking the
   Codex brain + Telegram offline. Fix: a **separate `singbox-egress-ha`** (Deployment + Service + SOPS config) running
@@ -383,8 +388,8 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 ## Pending
 
 Canonical list: `BACKLOG.md`. Highest-impact open items are the third independent k3s server + failover drill,
-bucket-scoped R2 credentials + lifecycle, off-homelab age-key escrow, execution of the documented canary Secret
-restore drill, tailnet-only API firewall hardening, and Proxmox VM backups.
+off-homelab age-key escrow, tailnet-only API firewall hardening, Proxmox VM backups and owner retrieval of the
+staged Vaultwarden admin token. R2 credential scope/lifecycle are accepted as-is by owner decision.
 
 ## Plan Fact-Check (2026-06-18)
 
@@ -408,8 +413,11 @@ to the design docs only (no infra change yet):
 - S3 creds: SOPS secret clusters/prod/infra/k3s-etcd-snapshot-s3-config.sops.yaml, applied to kube-system by Flux.
 - Verified: snapshot uploaded to R2 (prod/uap-r2-verify-...); scheduled snapshots auto-upload. Retention: the
   `etcd-snapshot-retention` value (7) is LOCAL-disk; k3s prunes SCHEDULED S3 snapshots too, but MANUAL/on-demand R2
-  snapshots are NOT auto-pruned — set an R2 lifecycle rule. (Corrected per REVIEW-CODEX.md; the prior "retention 7"
-  for R2 was inaccurate.)
+  snapshots are NOT auto-pruned. Owner accepted the current no-lifecycle policy on 2026-07-12; the prior
+  "retention 7" claim for all R2 objects was inaccurate.
+- Verified 2026-07-12: the canary cross-node drill restored from an R2-fetched snapshot on a clean host and read
+  back the encrypted Secret value using only the snapshot + original server token. A separate
+  `encryption-config.json` was not required. The test namespace, snapshot and disposable k3s state were removed.
 - R2 reachable directly from RU via the EU endpoint (no proxy needed for backups).
 - Operator-node services (ad-hoc on uap-ops-1, NOT yet in GitOps): sing-box VLESS egress, Vaultwarden. Flagged as a
   blast-radius/SPOF + secrets-at-rest concern in REVIEW-CODEX.md; migrate into the cluster (Stage 3) or back up +
@@ -434,8 +442,10 @@ Done:
 - #4 Vaultwarden rotated: admin token regenerated and stored as an Argon2 PHC hash in `.env` (no longer plaintext);
   RSA identity key regenerated (0600). New admin token staged at `~/vaultwarden/admin-token.NEW.txt` on ops-1 for
   owner retrieval (move to a password manager, then delete).
+- #9 cross-node Secret restore passed on 2026-07-12; snapshot + original token restored the exact canary value.
+- Owner accepted the current R2 credential scope and lifecycle as-is on 2026-07-12; do not rotate automatically.
 
-Pending (owner action): rotate R2 token to a bucket-scoped key + R2 lifecycle rule; independent off-homelab age-key
-escrow (verify decrypt); foreign VPS (Stage 1 HA + Stage 3 egress); retrieve the staged Vaultwarden admin token;
-optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. Pending (agent with an approved window):
-execute the documented canary cross-node Secret restore drill; kubeconfig 0644->0600 + tailnet-only API firewall.
+Pending (owner action): independent off-homelab age-key escrow (verify decrypt); allocate a third always-on k3s
+server host if HA becomes affordable; retrieve the staged Vaultwarden admin token; optional — revoke the old
+"GitHub CLI" OAuth grant in GitHub settings. Pending (agent with an approved window): kubeconfig 0644->0600 +
+tailnet-only API firewall.

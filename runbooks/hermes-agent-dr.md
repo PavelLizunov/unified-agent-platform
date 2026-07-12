@@ -109,8 +109,8 @@ kubectl -n uap-system delete job hermes-backup-manual
 
 ## Hardening follow-ups
 
-- **Bucket-scoped R2 key.** The backup reuses the broad R2 key (same as the etcd snapshots). Scope a
-  dedicated key to `uap-k3s-snapshots` (the open `REVIEW-CODEX.md` R2 item) and repoint the secret.
+- **R2 credential scope is accepted as-is.** The backup reuses the same R2 credential as etcd snapshots. Owner
+  decided on 2026-07-12 not to rotate or rescope it; do not change this without a new owner decision.
 - **Client-side encryption.** The zip contains plaintext `auth.json` + `.env` (Codex OAuth + Telegram
   token) — same exposure class as the unencrypted etcd snapshots already in this bucket. R2 is private +
   encrypted-at-rest, but for defense-in-depth add an rclone `crypt` remote or age-encrypt before upload

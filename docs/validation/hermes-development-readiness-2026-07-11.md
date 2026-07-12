@@ -468,7 +468,8 @@ new approval that names the specific agent and action. Repository classification
 
 ## Non-blocking foundation and owner follow-ups
 
-- destructive k3s restore and cross-node DR drills remain owner-gated Track B work;
+- the cross-node canary Secret restore passed on 2026-07-12; future destructive/in-place restores remain
+  owner-gated Track B work;
 - complete HA still requires a third independent k3s server and its failover milestone;
 - VPNRouter issue #39 tracks misleading CLI status while a GUI-owned tunnel is active.
 
