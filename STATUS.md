@@ -391,9 +391,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 ## Pending
 
 Canonical list: `BACKLOG.md`. Highest-impact open items under the current single-control-plane strategy are
-off-homelab age-key escrow, tailnet-only API firewall hardening, Proxmox VM backups and owner retrieval of the
-staged Vaultwarden admin token. The third k3s server / HA failover path is deferred indefinitely for budget and is
-not an active owner action. R2 credential scope/lifecycle are accepted as-is by owner decision.
+off-homelab age-key escrow, Proxmox VM backups and owner retrieval of the staged Vaultwarden admin token. The third
+k3s server / HA failover path is deferred indefinitely for budget and is not an active owner action. R2 credential
+scope/lifecycle are accepted as-is by owner decision.
 
 ## Plan Fact-Check (2026-06-18)
 
@@ -451,8 +451,10 @@ Done:
 - #11 kubeconfig permissions hardened on 2026-07-12: the live unquoted `0644` value had been interpreted as mode
   `0420`; the authoritative config is now the quoted string `"0600"`, the live kubeconfig is `root:root` mode `0600`,
   and k3s plus both nodes remained healthy without a service restart. Static validation prevents regression.
+- #11 LAN firewall hardened on 2026-07-12: the boot-persistent `uap-k3s-lan-firewall.service` drops LAN ingress to
+  `6443/tcp`, `10250/tcp`, and `8472/udp`. A timed-rollback canary and the durable deployment both kept tailnet API
+  and kubelet access open; both nodes, metrics, and workloads remained healthy. LAN DROP counters were observed.
 
 Pending (owner action): independent off-homelab age-key escrow (verify decrypt); retrieve the staged Vaultwarden
 admin token; optional — revoke the old "GitHub CLI" OAuth grant in GitHub settings. HA/VPS work is deferred
-indefinitely for budget and resumes only after a new owner decision. Pending (agent with an approved window):
-tailnet-only API firewall with a timed rollback.
+indefinitely for budget and resumes only after a new owner decision.

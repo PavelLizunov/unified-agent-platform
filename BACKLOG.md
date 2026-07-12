@@ -11,12 +11,6 @@ Tracked items that are **not** done yet, split by who must act. Reality-synced a
 | — | Retrieve the new Vaultwarden admin token from `~/vaultwarden/admin-token.NEW.txt` on ops-1, move to a password manager, then delete the file | Owner-only credential | — |
 | — | (optional) Revoke the old "GitHub CLI" OAuth grant in GitHub settings | Owner GitHub account | full invalidation of the token already removed from ops-1 |
 
-## Agent-doable, but needs an owner "go" or a careful window
-
-| Ref | Item | Note |
-|---|---|---|
-| #11 | **Tailnet-only host firewall** (restrict 6443/10250/8472 off the LAN) | Firewall changes on the single control-plane node carry lockout risk. Do in a supervised window with a timed auto-rollback, not unattended. |
-
 ## Notes
 
 - Stage 2 (`Postgres HA + Garage`) manifests may be **prepared and reviewed** now (review-only scaffolding), but
