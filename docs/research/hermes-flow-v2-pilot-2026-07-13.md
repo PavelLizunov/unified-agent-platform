@@ -15,7 +15,7 @@ Status: **not green; production integration remains blocked**.
 
 A GitHub test repository could not be created: the build-1 token returned HTTP 403, the GitHub connector has no
 repository-creation operation, and the in-app browser was not signed in. No existing product repository was used as
-a substitute.
+a substitute. This describes R1; R2 later created the private repository through the owner OAuth on ops-1.
 
 ## Routing evidence
 
@@ -57,10 +57,25 @@ guarded worktree.
 
 ## Required rerun
 
-1. Create a private `PavelLizunov/hermes-flow-v2-pilot` repository with Actions enabled.
-2. Start a fresh mission after Claude quota becomes available and record the exact Claude model before the real
-   reviewer task; do not spend quota on a dummy probe.
-3. Run author → orchestrator commit → read-only cross-family reviewer → required CI → merge → branch/worktree cleanup.
-4. Require matching `summary.json`, `verification.json`, actual PR HEAD and green CI, then run `terminal-check`.
+R2 is active in private PR `PavelLizunov/hermes-flow-v2-pilot#1`:
+
+- Fresh GitHub baseline and disposable build-1 worktree passed the exact remote/branch/worktree guard; a wrong
+  GitHub remote was rejected before write.
+- The first author attempt failed closed because Codex CLI 0.142.0 could not run `gpt-5.6-luna`. The CLI was updated
+  to stable 0.144.3 and the same exact model was retried; no model substitution occurred.
+- Author session `019f5b10-0cef-7e20-960c-c900525471f6` used `gpt-5.6-luna`: 7 command executions, 2 file-change
+  batches, 0 failed commands and 0 timeouts; 148,644 input, 124,416 cached input, 2,859 output and 792 reasoning
+  tokens. One runtime retry was required for the CLI update.
+- The orchestrator created exact commit `de3c6b0d65363ea666d637a54c81b41b67ec3b5a` from the four-file allowlist.
+  Both push and pull-request GitHub Actions `test` checks passed. The SHA-bound artifact is
+  `hermes-flow-v2-pilot-r2-summary.json`.
+- Claude remained `quota_blocked`; no Claude process/session and no local-model substitute was used in R2.
+
+Remaining steps:
+
+1. After Claude quota becomes available, record the exact Claude model and run the real read-only reviewer; do not
+   spend quota on a dummy probe.
+2. Produce `verification.json` for the exact PR HEAD and validate it together with green CI.
+3. Merge, confirm `main`, delete the branch/worktree, and pass `terminal-check`.
 
 Only that clean rerun may turn the pilot gate green.
