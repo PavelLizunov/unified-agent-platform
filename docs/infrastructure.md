@@ -179,7 +179,7 @@ crates.io + rust-lang.org are RU-blocked, so cargo builds go through the VLESS e
 | Subscription | Count | Used for | Notes |
 |---|---|---|---|
 | **ChatGPT Plus** | 2 (shared with friends) | Target **brain** for hermes-agent via the **Codex `codex_app_server`** runtime (native function-calling, **no API key**, OAuth) | The sharers don't use Codex, so the Codex capacity is effectively ours; two accounts = rate-limit headroom. |
-| **Claude Max ($200)** | 1 | **Coding execution** via `claude -p` (full Claude Code harness) and as the backend behind subfleet | The Claude subscription **cannot** be hermes-agent's *brain* (the subfleet/Claude path drops `tool_calls`; hermes-agent has no prompt-based fallback). Excellent as a **coding subprocess** and for subfleet chat. |
+| **Claude (current non-Max plan)** | 1 | Quota-aware **review/secondary coding** via `claude -p` (full Claude Code harness) and as the backend behind subfleet | Capacity is not guaranteed; do not invoke while `quota_blocked`. The Claude subscription **cannot** be hermes-agent's *brain* (the subfleet/Claude path drops `tool_calls`; hermes-agent has no prompt-based fallback). |
 
 Why this split: Codex can be a hermes-agent brain because the Codex CLI is a drivable app-server that
 owns its own native tool loop; the Claude CLI has no equivalent runtime in hermes-agent. So **Codex =
@@ -213,7 +213,7 @@ SQLite/FTS memory, subagents, cron, checkpoints/rollback, git worktrees, 20+ mes
      BRAIN (native function-calling — REQUIRED)            CODING (skills, shelled out)
    +--------------+---------------+                  +----------+----------+
    Codex codex_app_server     local FC model         claude -p             codex exec
-   (ChatGPT sub, OAuth,       (RTX 5060 Ti, vLLM/    (Claude Max,          (ChatGPT sub)
+   (ChatGPT sub, OAuth,       (RTX 5060 Ti, vLLM/    (non-Max Claude,      (ChatGPT sub)
     no API key)                llama.cpp, >=64k ctx)   Claude Code harness)
          |                          |                       |
       egress proxy             local, no egress         egress proxy        egress proxy

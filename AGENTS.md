@@ -29,7 +29,7 @@ push в master блокируется ruleset'ом; нужен зелёный `s
 
 Ты получил спецификацию платформы. **Инфра/ADR-решения — закрыты:** реализуй, не перепроектируй. **НО
 модельный/агентный слой и харнесс — в активной переработке** (2026-06 пивот на вайб-кодинг + внешний
-NousResearch hermes-agent, ADR-022..026): здесь предлагай через ADR и действуй с согласия владельца, и **не
+NousResearch hermes-agent, ADR-022..028): здесь предлагай через ADR и действуй с согласия владельца, и **не
 считай старые ADR-001/004/006 текущими** по этому слою. Ориентиры: `STATUS.md`, `docs/next-steps.md`, `docs/research/`.
 
 ## Порядок работы
@@ -64,8 +64,15 @@ NousResearch hermes-agent, ADR-022..026): здесь предлагай чере
 - Параллельные кодинг-воркеры — **каждый в своём `git worktree`** на одноразовой ветке (а не «не править
   одни файлы» на словах); сливать в master только по зелёному гейту. Если работаешь без worktree и задачи
   пересекаются — сначала зафиксировать границу: кто меняет infra, кто tests/runbooks, кто docs.
-- Коммиты — **Conventional Commits** (`type(scope): summary`) с трейлером
-  `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; git-identity на ops-1 = `UAP Agent <slovnmi@gmail.com>`.
+- Multi-checkpoint и задачи дольше 30 минут запускаются по ADR-028 через Hermes Kanban flow из
+  `runbooks/hermes-flow-v2.md`, а не цепочкой `chat --resume`.
+- Author и read-only reviewer — разные engine family. Merge запрещён без `verification.json` с `accept`,
+  совпадающим HEAD SHA и зелёным required CI; новый commit требует нового review.
+- Не вызывай Claude Code при `quota_blocked`; используй quota state/circuit breaker. Тариф (`x20`, non-Max)
+  и точный model ID записываются раздельно. Локальные модели — только после отдельного разрешения владельца.
+- Коммиты — **Conventional Commits** (`type(scope): summary`). `Co-Authored-By` добавляется только для реально
+  участвовавшего автора; точная модель и session фиксируются в Flow v2 artifacts. Git-identity на ops-1 =
+  `UAP Agent <slovnmi@gmail.com>`.
   **Деплой — только через PR** (прямой push в master отклоняется ruleset'ом; требуется зелёный `static-checks`).
 - Изменения делать маленькими и проверяемыми: манифесты отдельно, скрипты отдельно, runbook отдельно.
 - Каждый агент оставляет результат так, чтобы другой мог продолжить: что изменено, какие команды
