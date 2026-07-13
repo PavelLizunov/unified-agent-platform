@@ -61,9 +61,10 @@ preflight → author → reviewer → CI/PR → merge → cleanup
                  ↖ revise ─────┘
 ```
 
-Author and reviewer profiles must resolve to different engine families. Reviewer is read-only: it may inspect the
-diff and run checks, but must not patch files. A reviewer finding creates a `revise` task for the author. Maximum two
-review cycles; the third request becomes `blocked` with evidence.
+Cross-family review is preferred. When Claude is `quota_blocked`, `standard_code` may use the policy's explicit
+`same_provider_degraded` fallback: a separate read-only Codex session using a different exact model. This fallback
+is forbidden for infra, security and secrets. Reviewer may inspect the diff and run checks, but must not patch files.
+A finding creates a `revise` task for the author. Maximum two review cycles; the third becomes `blocked`.
 
 With `codex exec --sandbox workspace-write`, the linked worktree git-admin directory may be outside the writable
 root. The author therefore edits and tests only. The orchestrator re-runs the checks, stages an explicit file
@@ -82,6 +83,8 @@ Author writes `/home/uap/swarm-out/<mission>/summary.json`:
   "head_sha": "full-sha",
   "engine_family": "openai",
   "model": "gpt-5.3-codex-spark",
+  "session_id": "exact-author-session-id",
+  "task_class": "standard_code",
   "changed_files": ["src/lib.rs"],
   "checks": [{"command": "cargo test --locked", "exit_code": 0}],
   "remaining_risks": []
@@ -96,6 +99,8 @@ Reviewer reads the actual worktree/diff and writes `verification.json`:
   "reviewed_sha": "full-sha",
   "engine_family": "anthropic",
   "model": "exact-claude-model-id",
+  "session_id": "exact-reviewer-session-id",
+  "review_mode": "cross_family",
   "verdict": "accept",
   "review_cycle": 1,
   "findings": [],
@@ -113,6 +118,10 @@ python tools/swarm/flow_contract.py validate-review \
 ```
 
 Any author commit invalidates the previous verification.
+
+For the owner-approved standard-code fallback, use a distinct reviewer model/session, set
+`"review_mode": "same_provider_degraded"`, and add `--allow-same-provider-review` to `validate-review`. The flag
+does not waive SHA, tests, CI, cycle, exact-model, or session checks and is rejected for other task classes.
 
 ## 5. Terminal state
 
@@ -150,7 +159,7 @@ Use a separate disposable repository. Required behavioral evidence:
 - quota-blocked Claude is not invoked;
 - wrong remote is rejected before write;
 - author commit after `accept` makes review stale;
-- same-family reviewer is rejected;
+- same-family reviewer is rejected by default; degraded standard-code review requires distinct models and sessions;
 - review cycle 3 is blocked;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.

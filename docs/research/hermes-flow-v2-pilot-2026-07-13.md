@@ -73,8 +73,8 @@ R2 is active in private PR `PavelLizunov/hermes-flow-v2-pilot#1`:
 
 Remaining steps:
 
-1. After Claude quota becomes available, record the exact Claude model and run the real read-only reviewer; do not
-   spend quota on a dummy probe.
+1. Because Claude remains `quota_blocked`, use the owner-approved `standard_code` degraded fallback: a separate
+   read-only `gpt-5.6-sol` Codex session with exact session/model telemetry. Do not probe Claude.
 2. Produce `verification.json` for the exact PR HEAD and validate it together with green CI.
 3. Merge, confirm `main`, delete the branch/worktree, and pass `terminal-check`.
 

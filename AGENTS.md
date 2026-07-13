@@ -66,8 +66,11 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
   пересекаются — сначала зафиксировать границу: кто меняет infra, кто tests/runbooks, кто docs.
 - Multi-checkpoint и задачи дольше 30 минут запускаются по ADR-028 через Hermes Kanban flow из
   `runbooks/hermes-flow-v2.md`, а не цепочкой `chat --resume`.
-- Author и read-only reviewer — разные engine family. Merge запрещён без `verification.json` с `accept`,
-  совпадающим HEAD SHA и зелёным required CI; новый commit требует нового review.
+- Author и read-only reviewer по умолчанию используют разные engine family. Если Claude `quota_blocked`,
+  `standard_code` может использовать owner-approved degraded fallback: отдельная read-only Codex-сессия на
+  другой exact model (`gpt-5.6-sol`). Для infra/security/secrets cross-family reviewer остаётся обязательным.
+  Merge запрещён без `verification.json` с `accept`, совпадающим HEAD SHA и зелёным required CI; новый commit
+  требует нового review.
 - Не вызывай Claude Code при `quota_blocked`; используй quota state/circuit breaker. Тариф (`x20`, non-Max)
   и точный model ID записываются раздельно. Локальные модели — только после отдельного разрешения владельца.
 - Коммиты — **Conventional Commits** (`type(scope): summary`). `Co-Authored-By` добавляется только для реально

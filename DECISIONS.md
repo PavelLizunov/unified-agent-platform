@@ -440,13 +440,17 @@
   Claude Code — независимый reviewer/второй engine, но при известном исчерпании квоты не запускается: circuit
   breaker переводит маршрут в Codex или `review_blocked`. Локальные модели разрешены только для явно одобренных
   low-risk задач; они не заменяют cloud-review для infra/security. Model ID, тариф и quota state — разные поля.
-- **Ограничения:** author и reviewer не могут быть одной engine family; reviewer не правит код. Максимум два
+- **Ограничения:** cross-family review остаётся нормой. По решению владельца от 2026-07-13 для `standard_code`
+  при `quota_blocked` Claude разрешён явно маркированный `same_provider_degraded` fallback: reviewer запускается
+  read-only в отдельной Codex-сессии на другой exact model. Для infra/security/secrets этот fallback запрещён.
+  Reviewer не правит код. Максимум два
   review/fix цикла, затем честный `blocked`. Перед записью обязательны guard-проверки repo root, remote, branch и
   worktree. Нельзя делать расходующий пустой Claude probe; интерактивный `/usage` или реальный rate-limit response
   только обновляют circuit breaker.
 - **Обоснование:** переиспользуется уже работающий Kanban вместо нового workflow engine. Cross-model review снижает
   коррелированные ошибки, SHA binding убирает stale approval, а hard repo guard закрывает весь класс CP6 misroute.
-- **Отвергнуто:** новый orchestrator/БД/GitHub App; self-review той же моделью как эквивалент независимого review;
+- **Отвергнуто:** новый orchestrator/БД/GitHub App; self-review той же моделью и той же сессией как эквивалент
+  независимого review;
   бесконечные retries; парсинг недокументированного quota API; запуск локальных моделей без разрешения владельца.
 - **Последствия:** контракт и команды описаны в `runbooks/hermes-flow-v2.md`; машинная политика —
   `tools/swarm/flow-policy.json`; stdlib validator/circuit breaker — `tools/swarm/flow_contract.py`. Сначала

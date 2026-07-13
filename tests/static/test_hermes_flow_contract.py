@@ -20,13 +20,18 @@ def artifact(engine_family, model, sha, *, reviewer=False):
         "schema_version": 1,
         "engine_family": engine_family,
         "model": model,
+        "session_id": "review-session" if reviewer else "author-session",
         "checks": [{"command": "python -m unittest", "exit_code": 0}],
     }
     if reviewer:
-        base.update({"reviewed_sha": sha, "verdict": "accept", "review_cycle": 1, "findings": []})
+        base.update({
+            "reviewed_sha": sha, "verdict": "accept", "review_cycle": 1, "findings": [],
+            "review_mode": "cross_family",
+        })
     else:
         base.update({
             "repo": "PavelLizunov/hermes-flow-pilot", "branch": "agent/pilot", "head_sha": sha,
+            "task_class": "standard_code",
             "changed_files": ["src/lib.rs"],
         })
     return base
@@ -48,13 +53,13 @@ class FlowContractTests(unittest.TestCase):
             },
         }
         routed = flow.choose_route(self.policy, quota, "standard_code")
-        self.assertEqual("review_blocked", routed["status"])
+        self.assertEqual("ready", routed["status"])
         self.assertEqual("codex", routed["author"]["engine"])
-        self.assertIsNone(routed["reviewer"])
+        self.assertEqual("gpt-5.6-sol", routed["reviewer"]["model"])
+        self.assertEqual("same_provider_degraded", routed["review_mode"])
         self.assertEqual(
             [
                 {"engine": "claude", "reason": "quota_blocked"},
-                {"engine": "codex", "reason": "same_family"},
             ],
             routed["skipped"]["reviewers"],
         )
@@ -79,6 +84,40 @@ class FlowContractTests(unittest.TestCase):
             flow.validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
+
+    def test_same_provider_degraded_review_requires_distinct_model_and_session(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        verification["review_mode"] = "same_provider_degraded"
+        with self.assertRaisesRegex(flow.ContractError, "different engine families"):
+            flow.validate_review(
+                summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
+            )
+        flow.validate_review(
+            summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+            allow_same_provider_review=True,
+        )
+        verification["model"] = summary["model"]
+        with self.assertRaisesRegex(flow.ContractError, "different exact models"):
+            flow.validate_review(
+                summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
+        verification["model"] = "gpt-5.6-sol"
+        verification["session_id"] = summary["session_id"]
+        with self.assertRaisesRegex(flow.ContractError, "different sessions"):
+            flow.validate_review(
+                summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
+
+    def test_high_risk_route_stays_blocked_without_cross_family_reviewer(self):
+        quota = {"schema_version": 1, "engines": {
+            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"}
+        }}
+        routed = flow.choose_route(self.policy, quota, "complex_rust")
+        self.assertEqual("review_blocked", routed["status"])
+        self.assertIsNone(routed["reviewer"])
 
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")

@@ -105,7 +105,8 @@ def choose_route(
     model_overrides = model_overrides or {}
 
     def eligible(
-        items: list[dict[str, Any]], forbidden_family: str | None = None
+        items: list[dict[str, Any]], forbidden_family: str | None = None,
+        allow_same_family: bool = False,
     ) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
         skipped: list[dict[str, str]] = []
         for item in items:
@@ -114,7 +115,9 @@ def choose_route(
             if not isinstance(engine_policy, dict):
                 raise ContractError(f"candidate engine {engine!r} is absent from policy.engines")
             family = _required_text(engine_policy, "family", engine)
-            if family == forbidden_family:
+            if family == forbidden_family and not (
+                allow_same_family and item.get("same_provider_fallback") is True
+            ):
                 skipped.append({"engine": engine, "reason": "same_family"})
                 continue
             if engine_policy.get("requires_local_permission") and not allow_local:
@@ -141,13 +144,25 @@ def choose_route(
             "reviewer": None,
             "skipped": {"authors": author_skipped},
         }
-    reviewer, reviewer_skipped = eligible(route.get("reviewers", []), author["family"])
+    reviewer, reviewer_skipped = eligible(
+        route.get("reviewers", []),
+        author["family"],
+        allow_same_family=route.get("same_provider_fallback") is True,
+    )
+    review_mode = None
+    if reviewer:
+        review_mode = (
+            "same_provider_degraded"
+            if reviewer["family"] == author["family"]
+            else "cross_family"
+        )
     return {
         "status": "ready" if reviewer else "review_blocked",
         "task_class": task_class,
         "risk": route.get("risk"),
         "author": author,
         "reviewer": reviewer,
+        "review_mode": review_mode,
         "skipped": {"authors": author_skipped, "reviewers": reviewer_skipped},
     }
 
@@ -177,6 +192,7 @@ def validate_review(
     expected_repo: str,
     current_head: str,
     ci_green: bool,
+    allow_same_provider_review: bool = False,
 ) -> None:
     if summary.get("schema_version") != 1 or verification.get("schema_version") != 1:
         raise ContractError("summary and verification schema_version must be 1")
@@ -188,11 +204,26 @@ def validate_review(
         raise ContractError("stale review: author, reviewer and current HEAD must match")
     if verification.get("verdict") != "accept":
         raise ContractError("review verdict is not accept")
-    if summary.get("engine_family") == verification.get("engine_family"):
-        raise ContractError("author and reviewer must use different engine families")
     _required_text(summary, "branch", "summary")
-    _exact_model(summary, "summary")
-    _exact_model(verification, "verification")
+    author_model = _exact_model(summary, "summary")
+    reviewer_model = _exact_model(verification, "verification")
+    author_session = _required_text(summary, "session_id", "summary")
+    reviewer_session = _required_text(verification, "session_id", "verification")
+    same_family = summary.get("engine_family") == verification.get("engine_family")
+    review_mode = _required_text(verification, "review_mode", "verification")
+    if same_family:
+        if not allow_same_provider_review:
+            raise ContractError("author and reviewer must use different engine families")
+        if summary.get("task_class") != "standard_code":
+            raise ContractError("same-provider review is allowed only for standard_code")
+        if review_mode != "same_provider_degraded":
+            raise ContractError("same-provider review must declare same_provider_degraded")
+        if author_model == reviewer_model:
+            raise ContractError("same-provider author and reviewer must use different exact models")
+        if author_session == reviewer_session:
+            raise ContractError("same-provider author and reviewer must use different sessions")
+    elif review_mode != "cross_family":
+        raise ContractError("cross-family review must declare cross_family")
     changed_files = summary.get("changed_files")
     if not isinstance(changed_files, list) or not changed_files or not all(
         isinstance(item, str) and item for item in changed_files
@@ -342,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     review.add_argument("--repo", required=True)
     review.add_argument("--head", required=True)
     review.add_argument("--ci-green", action="store_true")
+    review.add_argument("--allow-same-provider-review", action="store_true")
 
     guard = sub.add_parser("guard-repo")
     guard.add_argument("--path", required=True)
@@ -379,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             validate_review(
                 load_json(args.summary), load_json(args.verification), expected_repo=args.repo,
                 current_head=args.head, ci_green=args.ci_green,
+                allow_same_provider_review=args.allow_same_provider_review,
             )
             print("hermes-flow-review-ok")
             return 0

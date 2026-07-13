@@ -37,13 +37,14 @@
     },
     "standard_code": {
       "risk": "medium",
+      "same_provider_fallback": true,
       "authors": [
         {"engine": "codex", "model": "gpt-5.6-luna"},
         {"engine": "claude", "model_env": "CLAUDE_AUTHOR_MODEL"}
       ],
       "reviewers": [
         {"engine": "claude", "model_env": "CLAUDE_REVIEW_MODEL"},
-        {"engine": "codex", "model": "gpt-5.6-luna"}
+        {"engine": "codex", "model": "gpt-5.6-sol", "same_provider_fallback": true}
       ]
     },
     "low_risk_local": {
