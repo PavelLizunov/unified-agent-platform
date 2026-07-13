@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "reviewed_sha": "de3c6b0d65363ea666d637a54c81b41b67ec3b5a",
+  "engine_family": "openai",
+  "model": "gpt-5.6-sol",
+  "session_id": "019f5b1d-9e69-76a3-8fe3-be5b06871510",
+  "review_mode": "same_provider_degraded",
+  "verdict": "accept",
+  "review_cycle": 1,
+  "findings": [],
+  "checks": [
+    {
+      "command": "python3 -m unittest -v",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check main...HEAD",
+      "exit_code": 0
+    },
+    {
+      "command": "verify clean worktree, origin, branch, and exact HEAD",
+      "exit_code": 0
+    },
+    {
+      "command": "verify one-commit/four-file scope and documented CLI behavior",
+      "exit_code": 0
+    }
+  ]
+}

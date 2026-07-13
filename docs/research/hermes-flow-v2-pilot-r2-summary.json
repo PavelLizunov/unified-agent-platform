@@ -24,8 +24,7 @@
     }
   ],
   "remaining_risks": [
-    "cross-family reviewer is quota-blocked",
-    "verification.json is absent",
+    "cross-family reviewer was unavailable; owner-approved same-provider degraded review was used",
     "PR remains draft and unmerged"
   ]
 }

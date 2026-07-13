@@ -1,6 +1,6 @@
 # Hermes Flow v2 pilot evidence — 2026-07-13
 
-Status: **not green; production integration remains blocked**.
+Status: **R1 failed honestly; clean R2 is green and unlocks production integration**.
 
 ## Scope
 
@@ -55,7 +55,7 @@ guarded worktree.
 - Exact orchestrator runtime model and token usage were not exposed to this harness, so they remain unknown rather
   than being inferred from policy.
 
-## Required rerun
+## Clean R2 result
 
 R2 is active in private PR `PavelLizunov/hermes-flow-v2-pilot#1`:
 
@@ -70,12 +70,16 @@ R2 is active in private PR `PavelLizunov/hermes-flow-v2-pilot#1`:
   Both push and pull-request GitHub Actions `test` checks passed. The SHA-bound artifact is
   `hermes-flow-v2-pilot-r2-summary.json`.
 - Claude remained `quota_blocked`; no Claude process/session and no local-model substitute was used in R2.
+- Owner-approved `standard_code` fallback selected a separate read-only Codex reviewer using exact model
+  `gpt-5.6-sol`, session `019f5b1d-9e69-76a3-8fe3-be5b06871510`, and `same_provider_degraded` review mode.
+- Reviewer telemetry: 5 command executions, 4 agent messages, 0 failed commands, 0 timeouts; 107,997 input,
+  96,512 cached input, 2,604 output and 1,115 reasoning-output tokens. The worktree stayed clean.
+- SHA-bound `hermes-flow-v2-pilot-r2-verification.json` recorded `accept` for
+  `de3c6b0d65363ea666d637a54c81b41b67ec3b5a`. The validator returned `hermes-flow-review-ok` only with the
+  explicit degraded-mode flag and green CI.
+- [Pilot PR #1](https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/1) was squash-merged as
+  `2c6a455822c07245007d713075316af57c19df6d`. Build-1 `main` was fast-forwarded to that SHA; remote/local task
+  branches and the disposable worktree were deleted. `terminal-check` returned `hermes-flow-terminal-ok`.
 
-Remaining steps:
-
-1. Because Claude remains `quota_blocked`, use the owner-approved `standard_code` degraded fallback: a separate
-   read-only `gpt-5.6-sol` Codex session with exact session/model telemetry. Do not probe Claude.
-2. Produce `verification.json` for the exact PR HEAD and validate it together with green CI.
-3. Merge, confirm `main`, delete the branch/worktree, and pass `terminal-check`.
-
-Only that clean rerun may turn the pilot gate green.
+R2 therefore satisfies the pilot gate. It does not claim cross-family independence: the accepted residual risk is
+explicitly recorded as same-provider degraded review, limited by policy to `standard_code`.
