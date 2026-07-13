@@ -3,6 +3,11 @@
 ADR-028 contract for real multi-checkpoint repository work. This reuses Hermes Kanban; it does not add
 another workflow engine.
 
+Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
+`fe8b1aa0760b5f9cdc84306a03f2237bd40de835`. Installer/check, skill discovery, Claude-blocked routing, and a
+no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
+restart was required.
+
 ## When to use
 
 - Read-only or docs-only change up to three files: ordinary Hermes session is sufficient.
