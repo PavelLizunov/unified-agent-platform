@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "orchestrator": {
+    "engine": "codex",
+    "family": "openai",
+    "model": "gpt-5.6-luna"
+  },
+  "engines": {
+    "codex": {
+      "family": "openai",
+      "capacity_label": "x20"
+    },
+    "claude": {
+      "family": "anthropic",
+      "capacity_label": "non-max"
+    },
+    "ornith": {
+      "family": "local-ornith",
+      "capacity_label": "local",
+      "requires_local_permission": true
+    },
+    "qwen": {
+      "family": "local-qwen",
+      "capacity_label": "local",
+      "requires_local_permission": true
+    }
+  },
+  "routes": {
+    "complex_rust": {
+      "risk": "high",
+      "authors": [
+        {"engine": "codex", "model": "gpt-5.3-codex-spark"}
+      ],
+      "reviewers": [
+        {"engine": "claude", "model_env": "CLAUDE_REVIEW_MODEL"}
+      ]
+    },
+    "standard_code": {
+      "risk": "medium",
+      "same_provider_fallback": true,
+      "authors": [
+        {"engine": "codex", "model": "gpt-5.6-luna"},
+        {"engine": "claude", "model_env": "CLAUDE_AUTHOR_MODEL"}
+      ],
+      "reviewers": [
+        {"engine": "claude", "model_env": "CLAUDE_REVIEW_MODEL"},
+        {"engine": "codex", "model": "gpt-5.6-sol", "same_provider_fallback": true}
+      ]
+    },
+    "low_risk_local": {
+      "risk": "low",
+      "authors": [
+        {"engine": "ornith", "model": "ornith-9b"}
+      ],
+      "reviewers": [
+        {"engine": "qwen", "model": "qwen-35b"}
+      ]
+    }
+  }
+}

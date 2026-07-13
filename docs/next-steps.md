@@ -97,7 +97,8 @@ every tool goes dark). Detail + citations in the two research docs.
 ### Phase A4 — First `claude -p` coding worker (the vibe-coding gate) — ✅ DONE (PR #23; north-star demo PASSED, PR #25)
 
 - Install the **Claude Code** bundled skill; it shells `claude -p '<task>'` in print mode and reads back
-  the JSON result (session id, turns, cost, tokens). Auth via the **Claude Max** subscription OAuth,
+  the JSON result (session id, turns, cost, tokens). Auth uses the owner's current Claude subscription OAuth;
+  as of 2026-07-13 that plan is non-Max and quota-aware,
   reusing the carried-forward headless-auth + egress know-how. **LIVE (PR #23).**
 - Drive a **real, small change in this repo** end-to-end: idea (phone) → hermes-agent plans → `claude -p`
   edits in a **git worktree** → **the change's own tests pass (the enforced gate from the hardening

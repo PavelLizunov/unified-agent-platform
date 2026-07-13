@@ -49,7 +49,8 @@ pass" for the merged-PR list. The original reports are kept for historical recor
   - **Agent** — bespoke `hermes/hermes.py` ("Hermes-legacy"; prompt-based ReAct/ReWOO; NodePort `:30890`). **PARKED.**
 - **Active direction (2026-06-22/23 pivot):** adopt the **external NousResearch hermes-agent** as the vibe-coding harness.
   Brain = a **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling) OR a **local FC model** on the
-  RTX 5060 Ti; coding = `claude -p` (Claude Max) + `codex exec` as skills. **Do NOT point hermes-agent's brain at the
+  RTX 5060 Ti; coding = quota-aware `codex exec` (primary) + `claude -p` (current non-Max plan) as skills.
+  **Do NOT point hermes-agent's brain at the
   subfleet endpoint — it is FC-less and every tool silently goes dark.** Rationale + citations in `docs/research/`.
 - **GitOps coverage (verified):** the model+agent layer is now **fully Flux-reconciled** — `litellm.yaml`,
   `litellm-keys.sops.yaml`, `hermes.yaml`, `hermes-keys.sops.yaml`, and every hermes-agent manifest are referenced by

@@ -368,7 +368,8 @@
 - **Контекст:** hermes-agent **требует нативный function-calling** и не имеет prompt-based фоллбэка.
 - **Решение:** мозг = **ChatGPT/Codex-подписка** через рантайм **`codex_app_server`** (нативный FC, без API-ключа,
   OAuth) **или** **локальная FC-модель** (Hermes/Qwen, vLLM `--tool-call-parser hermes`, ≥64k ctx) на RTX 5060 Ti.
-  Кодинг = скиллы **`claude -p`** (Claude Max) + **`codex exec`**, делёж нагрузки между подписками.
+  Кодинг = скиллы **`codex exec`** (основная текущая ёмкость подписки: x20) + **`claude -p`**
+  (второй движок; текущая подписка не Max), с обязательной записью точного model ID отдельно от тарифа/квоты.
 - **Обоснование:** Codex CLI — управляемый app-server, его можно поставить мозгом; Claude-CLI такого рантайма в
   hermes-agent не имеет. GPU-десктоп не круглосуточный → Codex-подписка = надёжный основной мозг, локальная модель =
   резерв.
@@ -418,3 +419,39 @@
   завершившийся после tool result без terminal assistant response, становится partial и retire-ит Codex session;
   quiet CLI возвращает non-zero для failed, partial и incomplete results. Echoed Codex `userMessage` не входит в
   durable transcript, а dashboard сохраняет текущий `session_id` как `?resume=` сразу после `session.info`.
+
+## ADR-028 — Hermes Flow v2: Kanban, quota-aware routing и независимое review
+
+- **Контекст:** восьмичасовая Spark Runner mission дала пять зелёных PR, но прошла через 22 отдельные
+  `chat/--resume`-сессии, 713 последовательных tool calls и активные подсказки внешнего monitor. Отдельный
+  reviewer-agent и Hermes Kanban swarm не использовались; Claude Code вызывался как редактор, а не verifier.
+  Один checkpoint попал не в тот репозиторий, четыре сессии завершились tool guardrail. При этом UAP уже
+  доказал Kanban DAG, verifier, retries и durable artifacts в изолированном пилоте.
+- **Решение:** multi-checkpoint/длинные coding missions исполняются через родной Hermes Kanban swarm, не
+  цепочкой `chat --resume`. Роли разделены: orchestrator строит DAG, author пишет только в allowlisted worktree,
+  read-only reviewer другой model family проверяет фактический diff/тесты, required CI остаётся финальным
+  детерминированным гейтом. Author создаёт `summary.json`, reviewer — `verification.json`, привязанный к точному
+  HEAD SHA; новый commit инвалидирует review. Merge разрешён только при `verdict=accept`, зелёном CI и совпадении
+  reviewed SHA. Terminal state наступает только после merge, подтверждения default branch и cleanup ветки/worktree.
+  При `codex exec --sandbox workspace-write` author только меняет файлы и запускает тесты: реальный commit из
+  явного allowlist создаёт orchestrator после повторной проверки. Копировать/подменять `.git` запрещено; заявленный
+  SHA принимается только если его возвращает `git rev-parse HEAD` внутри guarded worktree.
+- **Маршрутизация:** Codex x20 — основная coding capacity; exact Spark используется там, где он является gate.
+  Claude Code — независимый reviewer/второй engine, но при известном исчерпании квоты не запускается: circuit
+  breaker переводит маршрут в Codex или `review_blocked`. Локальные модели разрешены только для явно одобренных
+  low-risk задач; они не заменяют cloud-review для infra/security. Model ID, тариф и quota state — разные поля.
+- **Ограничения:** cross-family review остаётся нормой. По решению владельца от 2026-07-13 для `standard_code`
+  при `quota_blocked` Claude разрешён явно маркированный `same_provider_degraded` fallback: reviewer запускается
+  read-only в отдельной Codex-сессии на другой exact model. Для infra/security/secrets этот fallback запрещён.
+  Reviewer не правит код. Максимум два
+  review/fix цикла, затем честный `blocked`. Перед записью обязательны guard-проверки repo root, remote, branch и
+  worktree. Нельзя делать расходующий пустой Claude probe; интерактивный `/usage` или реальный rate-limit response
+  только обновляют circuit breaker.
+- **Обоснование:** переиспользуется уже работающий Kanban вместо нового workflow engine. Cross-model review снижает
+  коррелированные ошибки, SHA binding убирает stale approval, а hard repo guard закрывает весь класс CP6 misroute.
+- **Отвергнуто:** новый orchestrator/БД/GitHub App; self-review той же моделью и той же сессией как эквивалент
+  независимого review;
+  бесконечные retries; парсинг недокументированного quota API; запуск локальных моделей без разрешения владельца.
+- **Последствия:** контракт и команды описаны в `runbooks/hermes-flow-v2.md`; машинная политика —
+  `tools/swarm/flow-policy.json`; stdlib validator/circuit breaker — `tools/swarm/flow_contract.py`. Сначала
+  отдельный безопасный pilot repo и behavioral gates; production/Flux меняются только отдельным PR после пилота.
