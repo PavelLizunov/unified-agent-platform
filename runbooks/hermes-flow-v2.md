@@ -11,6 +11,17 @@ another workflow engine.
 
 ## 1. Quota and route preflight
 
+On build-1, install or verify the runtime bridge from a trusted UAP checkout:
+
+```bash
+python3 tools/swarm/install_flow_v2.py
+python3 tools/swarm/install_flow_v2.py --check
+```
+
+This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` skill under
+`~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while
+Codex CLI provides the separately sandboxed author/reviewer executions.
+
 Claude Code exposes plan status interactively through `/usage`, but the installed CLI has no documented
 machine-readable `claude usage --json`. Never spend quota on an empty `claude -p` probe.
 
