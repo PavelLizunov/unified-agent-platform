@@ -14,6 +14,12 @@ flow = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(flow)
 
+INSTALLER_PATH = ROOT / "tools" / "swarm" / "install_flow_v2.py"
+INSTALLER_SPEC = importlib.util.spec_from_file_location("install_flow_v2", INSTALLER_PATH)
+installer = importlib.util.module_from_spec(INSTALLER_SPEC)
+assert INSTALLER_SPEC.loader
+INSTALLER_SPEC.loader.exec_module(installer)
+
 
 def artifact(engine_family, model, sha, *, reviewer=False):
     base = {
@@ -207,6 +213,17 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("gpt-5.3-codex-spark", result["model"])
         self.assertEqual({"file_change": 1, "command_execution": 1}, result["tool_calls"])
         self.assertEqual(1, result["failed_commands"])
+
+    def test_installer_is_idempotent_and_detects_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            installer.install(ROOT / "tools" / "swarm", home)
+            installer.check(ROOT / "tools" / "swarm", home)
+            installer.install(ROOT / "tools" / "swarm", home)
+            installer.check(ROOT / "tools" / "swarm", home)
+            (home / "swarm-bin" / "flow-policy.json").write_text("{}")
+            with self.assertRaises(SystemExit):
+                installer.check(ROOT / "tools" / "swarm", home)
 
 
 if __name__ == "__main__":
