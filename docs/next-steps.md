@@ -196,7 +196,8 @@ workflow engine or mission database.
    central `task.upsert`; no worker/model route is selected.
 3. **A7.3 — Owner-approved activation and delivery.** Only after exact assignee, model/runtime and target approval,
    enable `--activate` and the periodic build-1 timer. This may cause native Kanban to launch the configured worker;
-   author/review/PR/CI/merge/post-verify are proven by a separate real-project canary.
+   author/review/PR/CI/merge/post-verify are proven by a separate real-project canary under the executable
+   [A7.3 contract](a7-real-project-canary.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.

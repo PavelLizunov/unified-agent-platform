@@ -65,7 +65,8 @@ No Qwen, local inference, GPU, Claude, swarm, Spark Runner, model turn or destru
 - No live `mission.accepted → blocked task → task.upsert` canary has run.
 - No periodic timer, claim, worker, author/reviewer, PR delivery, merge or post-verify path is enabled by A7.1.
 - Independent model review was not run because no reviewer/model was owner-approved for this stage.
-- A7.3 real-project delivery, recoverable runtime failure and cleanup remain designed but unexecuted.
+- A7.3 is specified in `docs/a7-real-project-canary.md`, but its target, routes, activation, recoverable fault and full
+  delivery/cleanup run remain unapproved and unexecuted.
 
 ## Next owner gate
 
