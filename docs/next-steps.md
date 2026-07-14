@@ -24,8 +24,9 @@
   "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
   design) — see Track A4 (DONE) and the platform-hardening items.
 - **Model+agent backend is fully in GitOps** (Track B0 DONE).
-- **Product workflow convergence is the active agent-layer phase (A6).** Hermes remains the harness, but the current
-  central-Workspace/local-Flow split is not the accepted end state. No runtime change has been made yet under ADR-030.
+- **Product workflow convergence Phase A6 passed its controlled live canary.** Hermes remains the harness; central
+  mission state, Workspace/Telegram observation and build-1 Flow evidence were exercised under one `mission_id`.
+  Automatic intake-to-dispatch for arbitrary future missions remains a later product milestone.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
 
@@ -130,7 +131,7 @@ every tool goes dark). Detail + citations in the two research docs.
 > **Do NOT** point hermes-agent's brain at the subfleet endpoint at any phase — it is FC-less. subfleet
 > stays the backend for the owner's **other** projects (Telegram bot + web sessions), not the coding path.
 
-### Phase A6 — One Hermes mission plane — 🟡 ACTIVE (contract accepted 2026-07-14)
+### Phase A6 — One Hermes mission plane — ✅ CONTROLLED CANARY COMPLETE (2026-07-14)
 
 **Goal:** Workspace and Telegram are synchronized views of one central Hermes mission. Build-1, Kanban, swarms,
 coding agents and test VMs execute that mission and publish correlated progress/results under the same `mission_id`.
@@ -162,16 +163,18 @@ This phase does **not** replace Hermes and does not create a new control plane.
    projection hash. **Gate: PASS offline:** the fixture survives store restart/cursor reconnect with identical
    Workspace/Telegram state; producer retries do not duplicate events or notifications; pinned overlay tamper checks,
    the patched Workspace production build and an aiohttp API smoke all pass. The overlays are not installed live.
-5. **A6.4 — Controlled one-shot canary.** With the owner's explicit approval of the model/runtime and test target,
-   run one disposable goal through implementation, tests, independent review, PR/CI and final verification. No GPU,
-   destructive test or Spark Runner. The owner approved the exact route on 2026-07-14: central
+5. **A6.4 — Controlled one-shot canary — ✅ DONE (2026-07-14).** With the owner's explicit approval of the
+   model/runtime and test target, one disposable goal ran through implementation, tests, independent review, PR/CI,
+   merge and fresh-main verification. The exact route was central
    `openai-codex`/`codex_app_server`, author `gpt-5.6-luna`, independent exact-SHA read-only reviewer
    `gpt-5.6-sol`, and private target `PavelLizunov/hermes-flow-v2-pilot`. Qwen/local inference, GPU, Claude, swarm and
-   Spark remain forbidden. **Gate:** evidence links every state transition and no operator step is hidden.
+   Spark were not used. **Gate: PASS:** [evidence](evidence/a6-4-controlled-canary-2026-07-14.md) links rollout,
+   implementation, 4/4 tests, exact-SHA review, PR/CI/merge, fresh-main post-verify, idempotent event replay, equal
+   Central/Workspace projection and the caught-up Telegram cursor. No human operator step is hidden.
 
-Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
-A6.4 is now the active owner-approved phase. Stay inside the exact route and target recorded above; any model/runtime,
-test target, local inference/GPU, swarm, Spark or destructive-test expansion requires a new explicit approval.
+Each numbered item was delivered as a separate small PR or an explicitly recorded live canary. A6 is complete at the
+controlled-canary boundary. The next product milestone is repeatable automatic mission intake/dispatch and does not
+inherit approval for a model/runtime, local inference/GPU, swarm, Spark or destructive-test expansion.
 
 ---
 
@@ -255,13 +258,13 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 ## Sequencing
 
 - **B0** and the **gate-enforcement** hardening are ✅ DONE — both removed live risk.
-- **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
+- **Track A** (the pilot) proceeded **in parallel**: it uses subscriptions and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
-  "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** A6.0 mapped
-  the split state plane, A6.1 fixed the offline mission contract/fail-closed authority boundary, A6.2 added the
-  offline idempotent build-1 adapter, and A6.3 added the offline central runtime plus synchronized channel
-  projections. A6.4 is owner-gated. Do not install/deploy it or launch models, swarms or a live canary without the
-  exact approval recorded in that step.
+  "self-test passed" is real (north-star demo PASSED, PR #25). **A6 passed its controlled canary:** A6.0 mapped the
+  split state plane; A6.1-A6.3 built and tested the contract, adapter and synchronized projections; A6.4 installed the
+  exact pinned runtime and completed one explicitly approved Luna/Sol mission through PR/CI/merge/post-verify. The
+  next Track A product milestone is automatic intake-to-dispatch for arbitrary missions. It has no inherited approval
+  for local inference/GPU, swarm, Spark, destructive tests or a different model route.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.

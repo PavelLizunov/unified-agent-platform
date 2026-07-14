@@ -145,6 +145,11 @@ notification idempotency, central-only completion, monotonic progress and termin
 pass idempotency/tamper checks; the patched Workspace production build and an aiohttp mission API smoke pass on
 build-1 without touching live services.
 
-A6.3 remained offline. Owner-approved A6.4 adds a generated ConfigMap for the exact pinned overlay, a SOPS-encrypted
-producer key and fail-closed Deployment mounts. The live runtime is still unchanged until the rollout PR is merged
-and Flux reports that exact merge revision; the disposable mission may start only after that post-deploy check.
+A6.3 remained offline until owner-approved A6.4. UAP PR #178 added the generated ConfigMap, SOPS-encrypted producer
+key and fail-closed Deployment mounts; Flux reconciled its exact merge revision. UAP PR #179 then migrated the two
+known legacy Workspace overlay hashes, rebuilt the pinned Workspace and restarted its owner-approved service.
+
+Mission `a6-canary-help-20260714` subsequently exercised the contract through implementation, tests, exact-SHA
+read-only review, PR/CI/merge and post-verify. Central and Workspace returned the same terminal projection, the
+Telegram cursor matched the central cursor, and replaying all adapter events created no duplicates. The full sanitized
+record is [A6.4 controlled canary evidence](evidence/a6-4-controlled-canary-2026-07-14.md).
