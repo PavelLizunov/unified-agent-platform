@@ -1,6 +1,6 @@
 apiVersion: v1
 data:
-    password: ENC[AES256_GCM,data:JzER3PdstfdVMD4gDOQZln5VjzU+iQ6PGQft4w==,iv:H7I/EUMQ7Ie58R3nGfdaJVnTbk29vuuqSFqS+HZ1Um8=,tag:kSfUZuvovyEHRDEOPz21VQ==,type:str]
+    password: ENC[AES256_GCM,data:scDsDTJL1fFoUG3fmtrvKCFGSeK9gZuMN9aX7hRrwlAdOxgk1kn7UUGTyBOyYuHRuin+6Wy+2OT6gSjM,iv:35yZ+XxhiuBrGa8VXoOlu487mohB2+BlEbaN7kdSh3w=,tag:VxFkeYSYid4jAXGXAJ/R7A==,type:str]
 kind: Secret
 metadata:
     name: hermes-agent-dashboard
@@ -9,14 +9,14 @@ sops:
     age:
         - enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA1WkpjdEdnUTNGK1djWWlr
-            UTY2aXcrWmliZmVtc0o4MEdHVFR2Y1QwcUhrCi9UQXhNTE5VNVpZbUZVbkIyb09w
-            emhzb2VXTWMwQ2VBdkR4aUtXT0ZsSjgKLS0tIEVidWdpbUpMZzZ1OXVjRXAvSW1N
-            TDN5dHRGcHpYNWxLTnBZOUNzVmNXd2cK3Wdm2kxPanA+JbxmKR3Pe7v9q97OrvQX
-            k1+JJ83TiIEhrggfr99xdtpZlMksCVpAxvMGuyyyH1EDF9+BsthFbw==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSByOG0xazJzanlPV3RvREo2
+            L1V3U1BoUVBTaGYrWEVTb0FrcEgvNWc4ZG5JClRWY3FRc080eEQvdDNyK3FBdkl4
+            V0szcTRuZlkwUjNKcWlZZXJSM2I3WTAKLS0tIGJpTWtxR1plNDBTSjdsQkJvNHFs
+            R0JPYWhEWlZlcTREamNyb3JiOVpiR0UKOQkQS1vnXFjedDYPqKLJqXVCkEcKanbp
+            peMWi5B7a7gviGC//bcd+gMJXMynmAgQy3DtEAH5Ib3JwooSB5NOwg==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-06-24T15:51:24Z"
-    mac: ENC[AES256_GCM,data:OLlYkyrAYof5x7vIvaZXMfFBT39sVeSn+97xsMr6zS/wlvON4oRGdL8YQMe7vBgOxHmCgJfE5wc/Lz1gT1kUwuUofJ0LTzGPDySwNLzWOgFlfqlQ+uJDVfkvVvcTxPfn/DFOJz3VX0x+qT2TV3NpTCmSAx5pcGFfFvNncl7ScAo=,iv:qBat9IQ9JvFQKVFNEq0csV4TAdoO3Iu+hv7juQ8Ubro=,tag:OUmWJzxLS2da5BDZgmiaqw==,type:str]
+    lastmodified: "2026-07-14T07:33:38Z"
+    mac: ENC[AES256_GCM,data:TjVnMt5oZeWgLBsnzfXuSCr/AuvzYxdWKQSjcEHQnrNCiHOsOg6lodgmk5pStK7YbtKknfsqnGzswECvq38dS8c96RppZ9e8xxTUp2797N6aNZkZw+MVRvb9yGNorWXCXHfrBlj6h3qk3y8ClUHxEFd8tkq0NseNxBa3RATVK7A=,iv:KXqnFeQCFbKVAXWlsWlmwHLxdlAivQOxhIPJ0wqnvrI=,tag:23PE5RPuKb3Xa25i+N+8/A==,type:str]
     version: 3.13.1
