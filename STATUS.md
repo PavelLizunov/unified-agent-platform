@@ -8,11 +8,11 @@ Last updated: 2026-07-14
   (see "Model & Agent Layer" below). Active direction (2026-06-22/23 **pivot**): **vibe-coding** — adopt the
   external NousResearch **hermes-agent** as the harness (the bespoke `hermes/hermes.py` is parked). See
   `docs/next-steps.md`, `docs/infrastructure.md`, `docs/research/`.
-- **Product workflow contract accepted 2026-07-14 (ADR-030).** Hermes remains the agent-layer foundation. The active
-  design phase is A6: converge Workspace, Telegram and Flow on one central Hermes `mission_id`/event history while
-  keeping build-1 as the execution plane. This is a documentation/architecture decision only: the live runtime has
-  not yet been migrated and the current central-Workspace/local-Flow split remains a known contract gap. Canonical
-  behaviour: `docs/product-operating-contract.md`.
+- **Product workflow contract accepted 2026-07-14 (ADR-030); A6 controlled canary complete.** Hermes remains the
+  agent-layer foundation. Central Hermes now owns one live `mission_id`/event history, Workspace and Telegram render
+  that projection, and build-1 publishes correlated Flow/Kanban execution evidence. The exact proof and its remaining
+  automation boundary are recorded in `docs/evidence/a6-4-controlled-canary-2026-07-14.md`. Canonical behaviour remains
+  `docs/product-operating-contract.md`.
 - **A6.1 central mission contract complete offline 2026-07-14.** `docs/hermes-mission-contract-v1.md` fixes the minimal
   `mission_id`, ordered event envelope, lifecycle and cursor/replay rules. A fake central backend proves that Workspace
   and Telegram projections converge after refresh/reconnect, while the pinned Workspace overlay makes
@@ -23,15 +23,15 @@ Last updated: 2026-07-14
   creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
   workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
   duplicate work/events. The adapter is not installed live and dispatch remains disabled.
-- **A6.3 synchronized observation complete offline 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
+- **A6.3 synchronized observation live and A6.4 canary complete 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
   stdlib/SQLite mission log and reducer inside the pinned central Hermes modular monolith. The pinned Hermes overlay
   adds authenticated mission API routes and Telegram `/mission`/notifications; the Workspace overlay adds a compact
   Dashboard projection with stage/progress and expandable tasks, workers, bounded terminal, changes, gates and
-  delivery links. Restart/cursor fixtures reach the same projection hash in both channels; retry/notification
-  idempotency, overlay tamper checks, the patched Workspace production build and an aiohttp API smoke pass. Nothing is
-  installed or deployed live. A6.4 is owner-approved for the exact `openai-codex`/`codex_app_server` route,
-  `gpt-5.6-luna` author, exact-SHA read-only `gpt-5.6-sol` reviewer and private
-  `PavelLizunov/hermes-flow-v2-pilot` target; rollout and the single canary are still pending.
+  delivery links. After the offline gates passed, PRs #178/#179 rolled out the exact pinned runtime and Workspace
+  overlay. Mission `a6-canary-help-20260714` completed through the approved `openai-codex`/`codex_app_server` route,
+  `gpt-5.6-luna` author and independent exact-SHA read-only `gpt-5.6-sol` reviewer. Target PR #2 passed CI, merged and
+  passed fresh-main verification. Central and Workspace projections matched and Telegram reached the terminal cursor.
+  Qwen/local inference, GPU, Claude, swarm, Spark and destructive tests were not used.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -352,14 +352,14 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
-- **Current control-flow gap (ADR-030/A6):** Workspace presents central Hermes while local Flow/Kanban on build-1 has
-  its own orchestration/state boundary. Sessions/jobs/tasks/workers are not yet one end-to-end mission lifecycle, and
-  the owner-facing progress view is incomplete. Build-1 is retained, but its target role is executor for central
-  Hermes missions rather than a second user-visible control plane. A6.0 mapped the concrete stores, fallbacks and
-  missing joins in `docs/hermes-mission-state-map.md`.
-- **A6 repository boundary:** the canonical event contract, central-only fail-closed overlay and offline build-1
-  adapter now exist, but synchronized Workspace/Telegram projections and a live central transport do not. The live
-  system therefore still has the A6.0 split until later phases and an owner-approved rollout are completed.
+- **Remaining automation gap after ADR-030/A6:** one live mission now correlated central Hermes, Workspace, Telegram
+  and build-1 Flow/Kanban state through completion. Build-1 remains the executor rather than a second user-visible
+  control plane. Arbitrary future goals are not yet automatically dispatched from central mission intake: the A6.4
+  Codex orchestrator explicitly created/claimed the task and invoked the approved routes. This is the next product
+  milestone, not a hidden human operator step.
+- **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
+  adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
+  controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through
