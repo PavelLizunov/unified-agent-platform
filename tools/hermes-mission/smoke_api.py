@@ -33,7 +33,11 @@ async def smoke(checkout: pathlib.Path) -> None:
     await client.start_server()
     try:
         created = await client.post(
-            "/api/missions", json={"mission_id": "mission-smoke", "goal": "Ship smoke"}
+            "/api/missions", json={
+                "mission_id": "mission-smoke",
+                "goal": "Ship smoke",
+                "dispatch_profile": "build1-smoke",
+            }
         )
         assert created.status == 201, await created.text()
         bad = await client.post("/api/missions/mission-smoke/events", json={})
@@ -59,6 +63,7 @@ async def smoke(checkout: pathlib.Path) -> None:
         listing = await client.get("/api/missions")
         view = (await listing.json())["missions"][0]
         assert view["stage"] == "testing" and view["progress_percent"] == 60
+        assert view["dispatch_profile"] == "build1-smoke"
         completed = await client.post(
             "/api/missions/mission-smoke/terminal",
             json={"status": "completed", "message": "Smoke delivered"},

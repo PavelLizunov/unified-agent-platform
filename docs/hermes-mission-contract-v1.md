@@ -50,7 +50,7 @@ checkpoint persistence.
 
 | Type | Required payload | Projection effect |
 |---|---|---|
-| `mission.accepted` | `goal` | status becomes `active`, stage `accepted` |
+| `mission.accepted` | `goal`; optional `dispatch_profile` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
 | `task.upsert` | `task_id`, `title`, `status` | creates or replaces one task projection |
@@ -65,6 +65,8 @@ checkpoint persistence.
 
 Stages are `accepted`, `planning`, `implementing`, `testing`, `reviewing`, `delivering`, `verifying` and `complete`.
 Progress is an integer from 0 through 100 and may not decrease. Terminal events are final; later events are invalid.
+`dispatch_profile` is an immutable, opaque label. Central Hermes stores and projects it; only an exact build-1
+configuration match authorizes handoff. An absent or unknown label does not dispatch.
 
 ## Authority rules
 
@@ -114,8 +116,22 @@ cannot forge a terminal mission event. Expected metadata shape:
 
 `tests/static/test_hermes_mission_adapter.py` injects a crash after Kanban create, restarts the adapter/backend against
 the same store and proves that one task completes without duplicate work or producer events. This is an offline gate;
-the adapter is not installed into the live build-1 runtime by this phase. It reuses Flow v2's existing Python runtime
-and standard library, so it adds no interpreter or third-party package.
+At the A6.2 checkpoint the adapter was not yet installed into the live build-1 runtime; A6.4 later installed it for the
+controlled canary. It reuses Flow v2's existing Python runtime and standard library, so it adds no interpreter or
+third-party package.
+
+The post-A6 `poll` command is a bounded pull handoff. It reads at most the 100 latest central projections and accepts
+at most one mission per invocation when all of these are true: its immutable `dispatch_profile` exactly matches the
+locally configured profile, status/stage are `active`/`accepted`, and no task has yet been projected. API credentials
+come from environment variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace;
+mission data never becomes a shell command.
+
+The safe default creates a blocked, unassigned root and publishes its deterministic `task.upsert`; it cannot launch a
+worker. `--activate` additionally requires an assignee and is the only mode that creates a ready card. A crash after
+Kanban commit but before the central POST repeats the same Kanban idempotency key and producer event ID, so it converges
+to one root task and one central task event without a dispatch lease table. The hermetic test uses a fake Kanban and
+fake central API and invokes no model. A periodic service/timer and its exact assignee/profile remain a separate
+owner-approved live rollout; enabling `--activate` can cause the existing Kanban dispatcher to launch a worker.
 
 ## Central runtime and channel projections
 
