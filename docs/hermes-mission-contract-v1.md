@@ -144,8 +144,9 @@ service:
   endpoints;
 - producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
   mission event;
-- only the normal authenticated central API may publish `completed`, `failed` or `cancelled`; terminal retries with
-  the same status and redacted message are idempotent;
+- only an authenticated direct loopback caller inside the Central Hermes process boundary may publish `completed`,
+  `failed` or `cancelled`; forwarded client headers are ignored, and terminal retries with the same status and
+  redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
   render from the exact same projection and `projection_id`;
