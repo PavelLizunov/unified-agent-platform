@@ -42,6 +42,9 @@ pass" for the merged-PR list. The original reports are kept for historical recor
 
 - **North star: vibe-coding** — the owner supplies ideas + infrastructure; the agent ships *verified* code. The owner
   does **NOT review code**, so the agent's own self-testing is the quality gate. (See `docs/next-steps.md`, `docs/infrastructure.md`.)
+- **Accepted product contract (2026-07-14):** the owner is not an operator. Central external `hermes-agent` remains the
+  foundation and sole target source of sessions/missions/events; Workspace and Telegram are synchronized views;
+  build-1/Flow is the execution plane. Read `docs/product-operating-contract.md` and ADR-030 before agent-layer work.
 - **Three layers, live (namespace `uap-system`):**
   - **Infra** — k3s 2-node (**NOT HA**: server `uap-home-1` + agent `uap-home-2` = single etcd member), Flux GitOps + SOPS, k3s→R2 DR.
   - **Model** — `subfleet` (the Claude subscription as an OpenAI **chat** API; drops `tool_calls`) + **LiteLLM** v1.89.0.
@@ -183,14 +186,17 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
-2. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-3. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
+1. Execute A6.0 as a read-only/repo-only current-state map: central Hermes sessions/events, Workspace proxies and
+   fallbacks, local Flow/Kanban stores, dispatcher and correlation IDs. Do not run a model, swarm, GPU or service.
+2. Convert the A6.0 evidence into the smallest A6.1 contract/test PR; do not build a new dashboard or replacement
+   orchestrator.
+3. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
+4. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
+5. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
    restore are done. Owner accepted the current R2 credential scope/lifecycle as-is; do not rotate or alter it
    without a new decision. Off-homelab age-key escrow remains open.
-4. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
-5. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
-6. Add third independent k3s server, then run a real failover drill.
+6. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
+7. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
 
 ## Things That Need Owner Input
 

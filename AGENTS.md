@@ -14,14 +14,16 @@ push в master блокируется ruleset'ом; нужен зелёный `s
 |---|---|
 | **Infra** | k3s 2-node, **НЕ HA** (единственный control-plane/server `uap-home-1` + agent `uap-home-2` = один etcd-член; `uap-home-2` = 6 vCPU / 8 GB). VPS/HA отложены владельцем из-за бюджета; текущая стратегия — один control-plane + R2 backups + проверенный restore drill. Flux GitOps + SOPS/age; etcd→R2 DR. **LIVE.** |
 | **Model** | `subfleet` v0.3.1 (Claude-подписка как OpenAI-совместимый gateway) **LIVE + healthy**; DE-exit ротирован на живой ninitux. LiteLLM. Два egress-сервиса: `singbox-egress` (pinned VLESS, subfleet OAuth — **НИКОГДА не ротировать**) + `singbox-egress-ha` (urltest-failover, hermes + build-1). **LIVE.** |
-| **Agent** | hermes-agent в k3s (`uap-system`, `uap-home-2`). **Мозг = локальный router** (`http://100.82.241.121:8090/v1`, `qwen-35b`, fallback `ornith-9b`); cloud-tier (Codex/Claude) **OFF** — платные лимиты исчерпаны, revert-путь в ConfigMap. **Codex — только coding-engine.** **LIVE.** |
+| **Agent** | Внешний hermes-agent в k3s (`uap-system`, `uap-home-2`) — основа агентного слоя. Текущий brain/runtime и его доказательства сверять только с `STATUS.md`; не переключать model/provider и не запускать local/GPU route без разрешённой policy. **LIVE.** |
 | **Tools** | На `uap-build-1` (VMID 102, 8c/16GB, tailnet `100.85.56.31`; всё systemd, **НЕ k3s, НЕ GitOps**): knowledge-система, Kanban-рой, ai-search, hermes-workspace `:3000`. `local-models`-router — systemd на ops-1. Индекс: [tools/README.md](tools/README.md). **LIVE.** |
 
 ### Канонический порядок чтения
 
 1. `AGENTS.md` (этот файл) → `README.md` → `DECISIONS.md` → `STATUS.md` (факты) → `RISKS.md`
-2. `docs/infrastructure.md` (флот + что-где) → `docs/next-steps.md` (план hermes-agent + открытый фундамент)
-3. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` (почему hermes-agent; исходное «мозг = Codex» — теперь локальный router, см. `STATUS.md`)
+2. `docs/product-operating-contract.md` (что платформа обязана делать для владельца) → `docs/infrastructure.md`
+   (флот + что-где) → `docs/next-steps.md` (текущий phased plan)
+3. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` (почему hermes-agent;
+   фактический текущий brain/runtime всегда сверять с `STATUS.md`)
 4. Индексы: [runbooks/README.md](runbooks/README.md) (все runbook'и) + [tools/README.md](tools/README.md) (подсистемы `tools/`)
 5. Гейты: `runbooks/validation-matrix.md` (инфра) + `runbooks/vibe-coding-acceptance.md` (сквозной цикл)
 
@@ -98,8 +100,10 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
 
 ## Текущий фокус
 
-**2026-06 пивот: вайб-кодинг через внешний hermes-agent** (ADR-024/025). Магистраль — поднять hermes-agent
-(мозг = Codex `codex_app_server` или локальная FC-модель на RTX 5060 Ti; кодинг = `claude -p` + `codex exec`).
+**2026-07-14: единый Hermes mission plane** (ADR-030, `docs/product-operating-contract.md`). Внешний hermes-agent
+остаётся основой. Workspace и Telegram должны показывать одну central Hermes mission/history; build-1, Flow/Kanban,
+coding workers и test VM — execution plane этой mission, не вторая точка управления. Текущий central-Workspace/local-
+Flow split ещё не мигрирован: ближайший этап A6.0 — repo/read-only state map без model, swarm, GPU или service action.
 Инфра-слой (k3s/Flux/SOPS) построен и стабилен; **VPS и HA отложены владельцем на неопределённый срок из-за бюджета**.
 Третий k3s server не является active owner action. Фазированный план — `docs/next-steps.md` (Track A — пилот
 hermes-agent, Track B — blast-radius + DR при текущей single-control-plane стратегии). HA-заявления — только после

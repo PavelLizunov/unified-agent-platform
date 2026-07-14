@@ -463,3 +463,34 @@
 - **Последствия:** контракт и команды описаны в `runbooks/hermes-flow-v2.md`; машинная политика —
   `tools/swarm/flow-policy.json`; stdlib validator/circuit breaker — `tools/swarm/flow_contract.py`. Сначала
   отдельный безопасный pilot repo и behavioral gates; production/Flux меняются только отдельным PR после пилота.
+
+## ADR-030 — Единый Hermes mission plane и автономный Product Operating Contract
+
+- **Контекст:** владелец задаёт продуктовую цель, но не является разработчиком, оператором, ревьюером или ручным
+  тестировщиком. Workspace и Telegram должны быть двумя синхронными окнами одной системы. ADR-029 оставил central
+  Hermes пользовательским backend Workspace, но сохранил local build-1 Hermes как отдельную Flow infrastructure;
+  фактически это даёт два контура состояния и не обеспечивает единый путь goal → mission → workers → verified result.
+- **Решение:** принять [`docs/product-operating-contract.md`](docs/product-operating-contract.md) как нормативный
+  продуктовый контракт. Внешний NousResearch `hermes-agent` из ADR-024 остаётся основой агентного слоя и **единственным
+  источником истины** для sessions, missions, status и events. Workspace и Telegram являются представлениями одного
+  central Hermes. Flow/Kanban, swarm, coding agents, test VM и `uap-build-1` становятся execution plane центральной
+  mission и возвращают события под тем же `mission_id`; они не имеют второго пользовательского mission store.
+- **Уточнение ADR-029/028:** сохраняются central Workspace backend, reversible overlay, Kanban/DAG, guarded worktrees,
+  quota-aware routing и SHA-bound review. Отменяется только смысл независимого local Hermes control/state plane.
+  Build-1 остаётся always-on executor/dispatcher, но не второй точкой управления. Любое несовместимое изменение
+  upstream Hermes сначала доказывается узким adapter/overlay; новый replacement-orchestrator не создаётся, пока
+  невозможность расширить Hermes не подтверждена тестом и отдельным ADR.
+- **Автономность:** постановка mission разрешает обычные repo-contract workers, тесты, review, PR/CI и
+  deploy/release/post-verify. Отдельное согласие сохраняется для новой model/provider policy, Windows/GPU, destructive
+  tests, credentials/external authority и необратимых продуктовых/архитектурных решений.
+- **Инженерная форма:** сначала модульный монолит и минимальные зависимости; сервис выделяется только по доказанной
+  границе isolation/scaling/security/lifecycle. Не переписывать Hermes и существующий Python wholesale. Новые
+  production daemons/state machines — Rust по умолчанию, малые infra tools — Go, существующий Workspace UI — его
+  TypeScript/web stack. Новый Electron запрещён по умолчанию.
+- **Отвергнуто:** заменить Hermes отдельным Rust control plane; поддерживать два независимых Hermes mission stores;
+  превращать владельца в оператора; автоматически использовать личный GPU; строить новый dashboard до исправления
+  mission/event contract.
+- **Последствия:** текущий runtime ещё не соответствует ADR. Миграция идёт малыми PR по Phase A6 в
+  `docs/next-steps.md`; сначала contract/state mapping и offline tests, затем один central mission, build-1 executor
+  adapter, синхронные Workspace/Telegram views и только после этого controlled end-to-end canary. Spark Runner остаётся
+  остановленным до отдельного решения владельца.
