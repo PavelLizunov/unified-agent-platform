@@ -5,6 +5,11 @@ Workspace runs on `uap-build-1:3000` (tailnet-only) and points to central hermes
 Build-1's `hermes-gateway`/`hermes-dashboard` remain running for Hermes Flow v2's Kanban dispatcher;
 they are not the Workspace backend.
 
+When `HERMES_CENTRAL_ONLY=1`, the pinned overlay treats central Hermes as the only authority for sessions, profiles,
+tasks, Kanban, jobs and Conductor state. If the corresponding central capability is unavailable, Workspace must show
+an unavailable error rather than read or write build-1/browser fallback state. The canonical projection contract is
+`docs/hermes-mission-contract-v1.md`. Applying the overlay does not itself migrate Flow; that is A6.2.
+
 ## Reproducible rollout
 
 1. Confirm the external checkout is exactly `c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c`, then run

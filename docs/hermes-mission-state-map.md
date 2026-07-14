@@ -177,9 +177,10 @@ ADR-030. Workspace sometimes returns `jobId = missionId` for Conductor; that val
 - One authoritative Tasks/Jobs/Kanban view: **not present**; current source selection and fallbacks are listed above.
 - Flow result -> central mission -> synchronized Workspace/Telegram result: **missing link**.
 
-The smallest next phase is A6.1: define one central mission/event contract and hermetic channel/reconnect tests, then
-make `HERMES_CENTRAL_ONLY=1` fail closed for authority selection. It must not add a replacement dashboard or start a
-live model/swarm canary.
+A6.1 subsequently fixed the offline boundary in `docs/hermes-mission-contract-v1.md`: one ordered mission contract,
+hermetic channel/reconnect projections and fail-closed central-only authority selection. The live split mapped above
+remains until the later adapter/projection phases are implemented and separately rolled out. A6.2 is next; it must not
+add a replacement dashboard or start a live model/swarm canary.
 
 ## Repository evidence index
 

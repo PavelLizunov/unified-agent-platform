@@ -59,6 +59,8 @@ def main() -> None:
         capabilities = (clone / "src/server/gateway-capabilities.ts").read_text()
         assert "HAS_DASHBOARD_USERNAME !== HAS_DASHBOARD_PASSWORD" in capabilities
         assert "Dashboard password auth requires both username and password" in capabilities
+        assert "const _initialOverrides = CENTRAL_ONLY ? {} : readOverrides()" in capabilities
+        assert capabilities.count("environment-managed in central-only mode") == 2
         root_source = (clone / "src/routes/__root.tsx").read_text()
         assert "DISABLED_GAME_PATHS" in root_source and "<Navigate to=\"/dashboard\" replace />" in root_source
         assert all(path in root_source for path in ("/reserve", "/reserve/confirm", "/early-access"))
@@ -84,6 +86,36 @@ def main() -> None:
         filesystem_pos = profiles.index("const profilePath", read_start)
         assert dashboard_pos < filesystem_pos
         assert "active: match.is_default === true" in profiles
+        assert "Central profile source unavailable" in profiles
+        assert "Central profile not found or unavailable" in profiles
+
+        sessions = (clone / "src/routes/api/sessions.ts").read_text()
+        assert "const localSessions = CENTRAL_ONLY ? [] : listLocalSessions()" in sessions
+        assert sessions.count("SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503") == 2
+        assert "if (!CENTRAL_ONLY && localSession)" in sessions
+        assert "if (!CENTRAL_ONLY && getLocalSession(sessionKey))" in sessions
+
+        send_stream = (clone / "src/routes/api/send-stream.ts").read_text()
+        assert "if (CENTRAL_ONLY && chatMode === 'portable')" in send_stream
+        assert "Central session stream unavailable" in send_stream
+
+        kanban = (clone / "src/server/kanban-backend.ts").read_text()
+        central_selection = kanban.index("if (CENTRAL_ONLY)", kanban.index("export function resolveKanbanBackend"))
+        local_selection = kanban.index("if (preference === 'local')")
+        assert central_selection < local_selection
+        assert "Central Kanban unavailable in central-only mode" in kanban
+
+        local_tasks = (clone / "src/routes/api/hermes-tasks.ts").read_text()
+        assert local_tasks.count("Local task store disabled in central-only mode") == 2
+
+        jobs = (clone / "src/routes/api/claude-jobs.ts").read_text()
+        assert "const aggregateProfiles = !CENTRAL_ONLY" in jobs
+        assert "Central jobs unavailable" in jobs
+        assert "Local profile jobs disabled in central-only mode" in jobs
+
+        conductor = (clone / "src/routes/api/conductor-spawn.ts").read_text()
+        assert "const nativeMission = CENTRAL_ONLY ? null : getSwarmMission(missionId)" in conductor
+        assert conductor.count("Central Conductor unavailable in central-only mode") == 2
 
         target = clone / "src/server/gateway-capabilities.ts"
         target.write_bytes(target.read_bytes() + b"\n// tamper\n")

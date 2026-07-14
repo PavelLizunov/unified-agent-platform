@@ -13,10 +13,12 @@ Last updated: 2026-07-14
   keeping build-1 as the execution plane. This is a documentation/architecture decision only: the live runtime has
   not yet been migrated and the current central-Workspace/local-Flow split remains a known contract gap. Canonical
   behaviour: `docs/product-operating-contract.md`.
-- **A6.0 state map complete 2026-07-14.** `docs/hermes-mission-state-map.md` proves that Workspace chat reaches central
-  Hermes, but Tasks, Jobs, Conductor/native-swarm, browser mission state and local Flow use multiple selectable stores
-  without one enforced correlation ID. The Telegram-to-Workspace session join and central-mission-to-Flow event path
-  are absent from repository evidence. No runtime, model, swarm, GPU or service change was made. A6.1 is next.
+- **A6.1 central mission contract complete offline 2026-07-14.** `docs/hermes-mission-contract-v1.md` fixes the minimal
+  `mission_id`, ordered event envelope, lifecycle and cursor/replay rules. A fake central backend proves that Workspace
+  and Telegram projections converge after refresh/reconnect, while the pinned Workspace overlay makes
+  `HERMES_CENTRAL_ONLY=1` fail closed instead of selecting local sessions, profiles, tasks, Kanban, jobs or native
+  Conductor state. This repository change has not restarted or redeployed the live Workspace and has not launched a
+  model, swarm or GPU workload. A6.2 (the build-1 execution adapter) is next.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -342,6 +344,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   the owner-facing progress view is incomplete. Build-1 is retained, but its target role is executor for central
   Hermes missions rather than a second user-visible control plane. A6.0 mapped the concrete stores, fallbacks and
   missing joins in `docs/hermes-mission-state-map.md`.
+- **A6.1 repository boundary:** the canonical event contract and central-only fail-closed overlay now exist, but the
+  central Hermes-to-build-1 adapter and synchronized live channel projections do not. The live system therefore still
+  has the A6.0 split until later phases are implemented and an owner-approved rollout is performed.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through
