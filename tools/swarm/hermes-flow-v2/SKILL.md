@@ -32,6 +32,9 @@ not continue such work through a chain of `chat --resume` sessions.
    for infra, security, and secrets.
 7. At most two review/fix cycles. Complete the root card only after merge, default-branch proof, remote/local branch
    deletion, disposable worktree removal, and a green `terminal-check`.
+8. When the task belongs to a central Hermes mission, use the installed `mission_adapter.py` ingress/sync boundary and
+   preserve its `mission_id`/tenant. Never bypass its idempotency key. `--allow-dispatch` additionally requires the
+   owner's approved runtime/profile, an explicit assignee and a non-scratch workspace.
 
 The full command reference and artifact schemas are in `runbooks/hermes-flow-v2.md` in
 `PavelLizunov/unified-agent-platform`.

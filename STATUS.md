@@ -18,7 +18,11 @@ Last updated: 2026-07-14
   and Telegram projections converge after refresh/reconnect, while the pinned Workspace overlay makes
   `HERMES_CENTRAL_ONLY=1` fail closed instead of selecting local sessions, profiles, tasks, Kanban, jobs or native
   Conductor state. This repository change has not restarted or redeployed the live Workspace and has not launched a
-  model, swarm or GPU workload. A6.2 (the build-1 execution adapter) is next.
+  model, swarm or GPU workload.
+- **A6.2 build-1 adapter complete offline 2026-07-14.** `tools/swarm/mission_adapter.py` reuses native Hermes Kanban,
+  creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
+  workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
+  duplicate work/events. The adapter is not installed live and dispatch remains disabled. A6.3 is next.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -344,9 +348,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   the owner-facing progress view is incomplete. Build-1 is retained, but its target role is executor for central
   Hermes missions rather than a second user-visible control plane. A6.0 mapped the concrete stores, fallbacks and
   missing joins in `docs/hermes-mission-state-map.md`.
-- **A6.1 repository boundary:** the canonical event contract and central-only fail-closed overlay now exist, but the
-  central Hermes-to-build-1 adapter and synchronized live channel projections do not. The live system therefore still
-  has the A6.0 split until later phases are implemented and an owner-approved rollout is performed.
+- **A6 repository boundary:** the canonical event contract, central-only fail-closed overlay and offline build-1
+  adapter now exist, but synchronized Workspace/Telegram projections and a live central transport do not. The live
+  system therefore still has the A6.0 split until later phases and an owner-approved rollout are completed.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through

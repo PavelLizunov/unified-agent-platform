@@ -8,6 +8,9 @@ Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
+Repository status (2026-07-14): the A6.2 central mission adapter is implemented and tested offline, but is not yet
+installed on live build-1. Installation or dispatch belongs to the later owner-approved canary/rollout.
+
 ## When to use
 
 - Read-only or docs-only change up to three files: ordinary Hermes session is sufficient.
@@ -86,6 +89,37 @@ With `codex exec --sandbox workspace-write`, the linked worktree git-admin direc
 root. The author therefore edits and tests only. The orchestrator re-runs the checks, stages an explicit file
 allowlist and creates the real commit. Never copy or replace `.git`, and never accept a SHA unless
 `git rev-parse HEAD` in the guarded worktree returns it.
+
+## 3a. Central mission adapter
+
+`mission_adapter.py` is installed beside `flow_contract.py`. It does not replace Kanban or run a second dispatcher.
+It gives central Hermes one idempotent ingress and converts native Kanban state back into mission producer events.
+
+Acceptance is fail-safe by default:
+
+```bash
+python tools/swarm/mission_adapter.py \
+  --state-root /home/uap/swarm-out \
+  --board default \
+  accept --event /path/to/mission-accepted.json
+```
+
+This creates or reuses one blocked, unassigned root card. `--allow-dispatch` is forbidden until the owner has approved
+the exact runtime/profile and test target. Once approved, the platform must also supply both `--assignee` and a
+non-scratch `--workspace`; omission fails closed.
+
+Read the current deterministic producer-event batch without starting work:
+
+```bash
+python tools/swarm/mission_adapter.py \
+  --state-root /home/uap/swarm-out \
+  --board default \
+  sync --mission-id <central-mission-id> --output /path/to/events.json
+```
+
+Every retry emits stable `producer_event_id` values for central deduplication. The adapter accepts worker metadata only
+for file, gate/review and delivery evidence; mission completion remains a central Hermes decision. See
+`docs/hermes-mission-contract-v1.md` for the envelope and metadata schema.
 
 ## 4. Durable artifacts
 
