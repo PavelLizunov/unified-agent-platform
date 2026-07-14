@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -287,6 +289,17 @@ def test_terminal_authority_is_loopback_only() -> None:
     assert not missions.terminal_request_allowed("not-an-address")
 
 
+def test_mission_database_is_owner_only_on_posix() -> None:
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as temp:
+        database = Path(temp) / "missions.sqlite3"
+        database.touch(mode=0o666)
+        os.chmod(database, 0o666)
+        missions.MissionStore(database)
+        assert stat.S_IMODE(database.stat().st_mode) == 0o600
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
@@ -295,6 +308,7 @@ def main() -> None:
     test_dispatch_profile_is_projected_and_immutable()
     test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
+    test_mission_database_is_owner_only_on_posix()
     print("hermes mission runtime checks passed")
 
 

@@ -2,7 +2,9 @@
 import copy
 import importlib.util
 import json
+import os
 import pathlib
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -250,6 +252,19 @@ class MissionAdapterTests(unittest.TestCase):
                     },
                 }]},
             )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX mode invariant")
+    def test_adapter_state_is_owner_only(self):
+        backend = FakeKanban()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            mission_dir = adapter._mission_dir(state_root, self.document["mission_id"])
+            mission_dir.mkdir(mode=0o777)
+            os.chmod(mission_dir, 0o777)
+            adapter.accept_mission(self.document, state_root, backend)
+            state_path = adapter._state_path(state_root, self.document["mission_id"])
+            self.assertEqual(0o700, stat.S_IMODE(state_path.parent.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(state_path.stat().st_mode))
 
     def test_pull_dispatch_recovers_after_task_create_before_publish(self):
         backend = FakeKanban()

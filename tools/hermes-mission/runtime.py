@@ -309,6 +309,9 @@ class MissionStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            self.path.touch(mode=0o600, exist_ok=True)
+            os.chmod(self.path, 0o600)
         self._init_schema()
 
     @classmethod

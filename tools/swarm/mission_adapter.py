@@ -36,13 +36,19 @@ def _read_json(path: str | pathlib.Path) -> Any:
         return json.load(handle)
 
 
-def _write_json(path: pathlib.Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_json(path: pathlib.Path, value: Any, *, private_parent: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700 if private_parent else 0o755)
+    if os.name == "posix" and private_parent:
+        os.chmod(path.parent, 0o700)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
         temporary = pathlib.Path(handle.name)
+    if os.name == "posix":
+        os.chmod(temporary, 0o600)
     os.replace(temporary, path)
+    if os.name == "posix":
+        os.chmod(path, 0o600)
 
 
 def _accepted_event(document: Any) -> dict[str, Any]:
@@ -226,7 +232,7 @@ def accept_mission(
         "tenant": mission_id,
         "idempotency_key": f"central-mission:{mission_id}",
     }
-    _write_json(_state_path(state_root, mission_id), state)
+    _write_json(_state_path(state_root, mission_id), state, private_parent=True)
     return state
 
 
