@@ -420,6 +420,14 @@
   quiet CLI возвращает non-zero для failed, partial и incomplete results. Echoed Codex `userMessage` не входит в
   durable transcript, а dashboard сохраняет текущий `session_id` как `?resume=` сразу после `session.info`.
 
+## ADR-029 — Central Hermes Workspace split (2026-07-14)
+
+- **Контекст:** the tailnet-only Workspace on `uap-build-1` must present the central k3s hermes-agent while the local build-1 services remain the Hermes Flow v2 Kanban dispatcher and CLI/orchestrator infrastructure.
+- **Решение:** central k3s Hermes is the user-facing Workspace backend; local build-1 Hermes remains Flow infrastructure. Workspace uses a small, exact-commit, fail-closed external overlay. There is no permanent upstream fork.
+- **Обоснование:** this keeps one user-facing dashboard/Kanban source of truth and avoids duplicating the dispatcher or maintaining a fork.
+- **Отвергнуто:** exposing build-1's local models/game/update surface in the central UI; replacing the local Flow dispatcher; a permanent fork or custom image.
+- **Последствия:** the overlay is reversible and must be removed when upstream provides equivalent switches/auth support. The central gateway API is exposed only on the tailnet NodePort with its bearer key from SOPS; dashboard password session cookies remain in Workspace process memory.
+
 ## ADR-028 — Hermes Flow v2: Kanban, quota-aware routing и независимое review
 
 - **Контекст:** восьмичасовая Spark Runner mission дала пять зелёных PR, но прошла через 22 отдельные
