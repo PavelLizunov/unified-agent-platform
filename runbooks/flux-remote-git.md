@@ -34,11 +34,19 @@ Use this path when the Git host supports deploy keys:
 
 Flux expects SSH credentials with `identity` and `known_hosts`.
 
+For GitHub, use its official SSH-over-443 endpoint because outbound port 22 is not reliable from the cluster:
+
+```text
+ssh://git@ssh.github.com:443/OWNER/REPOSITORY.git
+```
+
+Generate `known_hosts` for that exact host and port with `ssh-keyscan -p 443 ssh.github.com`.
+
 Secret creation shape:
 
 ```powershell
 ssh-keygen -t ed25519 -C flux-uap-platform -f .\tmp\flux-uap-platform -N ""
-ssh-keyscan REPLACE_WITH_GIT_HOST > .\tmp\flux-known-hosts
+ssh-keyscan -p REPLACE_WITH_GIT_PORT REPLACE_WITH_GIT_HOST > .\tmp\flux-known-hosts
 kubectl -n flux-system create secret generic uap-platform-git-auth `
   --from-file=identity=.\tmp\flux-uap-platform `
   --from-file=known_hosts=.\tmp\flux-known-hosts `
