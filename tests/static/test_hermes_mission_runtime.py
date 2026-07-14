@@ -210,6 +210,75 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             assert "different parameters" in str(error)
 
 
+def test_producer_schema_is_closed_and_all_strings_are_redacted() -> None:
+    event = {
+        "schema_version": 1,
+        "mission_id": "mission-schema",
+        "type": "task.upsert",
+        "source": "build1-flow",
+        "correlation": {
+            "session_id": "session-token",
+            "task_id": "task-1",
+            "producer_event_id": "flow:schema:event",
+        },
+        "payload": {"task_id": "task-1", "title": "token title", "status": "queued"},
+    }
+    sanitized = missions.sanitize_producer_submission(
+        "mission-schema", event, lambda value: value.replace("token", "redacted")
+    )
+    assert sanitized["correlation"]["session_id"] == "session-redacted"
+    assert sanitized["correlation"]["producer_event_id"] == "flow:schema:event"
+    assert sanitized["payload"]["title"] == "redacted title"
+
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Schema mission", mission_id="mission-schema")
+        stored, created = store.append_producer("mission-schema", sanitized)
+        assert created and stored["payload"]["title"] == "redacted title"
+
+        invalid = [
+            {**event, "unexpected": True},
+            {**event, "payload": {**event["payload"], "details": "not allowed"}},
+            {**event, "correlation": {**event["correlation"], "extra_id": "nope"}},
+            {**event, "source": "untrusted-producer"},
+        ]
+        for submission in invalid:
+            try:
+                store.append_producer("mission-schema", submission)
+                raise AssertionError("producer schema accepted an unknown field/source")
+            except missions.MissionError:
+                pass
+
+        sensitive_id = {
+            **event,
+            "correlation": {**event["correlation"], "producer_event_id": "flow:schema:token"},
+        }
+        try:
+            missions.sanitize_producer_submission(
+                "mission-schema", sensitive_id, lambda value: value.replace("token", "redacted")
+            )
+            raise AssertionError("sensitive producer_event_id was stored")
+        except missions.MissionError as error:
+            assert "sensitive producer_event_id" in str(error)
+
+        try:
+            store.append_producer(
+                "mission-forged",
+                {
+                    "schema_version": 1,
+                    "mission_id": "mission-forged",
+                    "type": "mission.accepted",
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": "flow:forged:accepted"},
+                    "payload": {"goal": "Forged"},
+                },
+            )
+            raise AssertionError("producer created mission.accepted")
+        except missions.MissionError as error:
+            assert "producer cannot" in str(error)
+        assert store.events("mission-forged") == []
+
+
 def test_terminal_authority_is_loopback_only() -> None:
     assert missions.terminal_request_allowed("127.0.0.1")
     assert missions.terminal_request_allowed("::1")
@@ -224,6 +293,7 @@ def main() -> None:
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
+    test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
     print("hermes mission runtime checks passed")
 

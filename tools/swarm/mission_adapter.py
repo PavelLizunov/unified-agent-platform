@@ -282,7 +282,7 @@ def _worker_metadata_events(
         event_type = item["type"]
         if (
             not isinstance(payload, dict)
-            or not REQUIRED_PAYLOAD[event_type].issubset(payload)
+            or set(payload) != REQUIRED_PAYLOAD[event_type]
             or any(not isinstance(payload[key], str) or not payload[key] for key in REQUIRED_PAYLOAD[event_type])
         ):
             raise AdapterError("worker mission event payload is invalid")

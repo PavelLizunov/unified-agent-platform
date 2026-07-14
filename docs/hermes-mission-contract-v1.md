@@ -36,15 +36,18 @@ build-1 are clients or producers, never alternate authorities.
 }
 ```
 
-Required fields are fixed for v1. `correlation` and `payload` are objects and may be empty. Unknown payload fields must
-be preserved. Unknown event types may be retained for forward compatibility but do not change a v1 projection.
+Fields and event types are closed for v1: unknown top-level, correlation or payload fields and unknown event types are
+rejected before persistence. Schema expansion therefore requires an explicit contract revision rather than silent
+forward-compatible storage.
 
 ### Producer submission
 
 Build-1 submits the same envelope without the central-only fields `sequence`, `event_id` and `occurred_at`. It must
 include a deterministic `correlation.producer_event_id`. Central Hermes deduplicates that value, then assigns the
 canonical sequence, event ID and timestamp. A producer retry is therefore safe after a crash between execution and
-checkpoint persistence.
+checkpoint persistence. Producer submissions must use source `build1-flow`; they cannot create `mission.accepted` or
+any terminal mission event. Every allowed string is inspected before SQLite storage: normal fields are force-redacted,
+while a sensitive idempotency key is rejected instead of being mutated and breaking retry identity.
 
 ## Event types
 
