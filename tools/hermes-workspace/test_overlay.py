@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import pathlib
 import subprocess
 import tempfile
@@ -18,6 +19,49 @@ def run(*args: object) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def downgrade_legacy(relative: str, text: str) -> str:
+    if relative == "src/server/gateway-capabilities.ts":
+        text = text.replace(
+            "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'\n"
+            "const _initialOverrides = CENTRAL_ONLY ? {} : readOverrides()",
+            "const _initialOverrides = readOverrides()",
+            1,
+        )
+        text = text.replace(
+            "  if (CENTRAL_ONLY) throw new Error('Gateway URL is environment-managed in central-only mode')\n",
+            "",
+            1,
+        )
+        text = text.replace(
+            "  if (CENTRAL_ONLY) throw new Error('Dashboard URL is environment-managed in central-only mode')\n",
+            "",
+            1,
+        )
+        return text.replace(
+            "  const overrides = CENTRAL_ONLY ? {} : readOverrides()",
+            "  const overrides = readOverrides()",
+            1,
+        )
+    if relative == "src/server/profiles-browser.ts":
+        text = text.replace(
+            "import { dashboardFetch } from './gateway-capabilities'\n\n"
+            "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'",
+            "import { dashboardFetch } from './gateway-capabilities'",
+            1,
+        )
+        text = text.replace(
+            "  if (CENTRAL_ONLY) throw new Error('Central profile source unavailable')\n",
+            "",
+            1,
+        )
+        return text.replace(
+            "  if (CENTRAL_ONLY) throw new Error('Central profile not found or unavailable')\n\n",
+            "",
+            1,
+        )
+    raise AssertionError(relative)
 
 
 def main() -> None:
@@ -129,6 +173,26 @@ def main() -> None:
         assert "refetchInterval: 2_000" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
+
+        for relative, expected in (
+            (
+                "src/server/gateway-capabilities.ts",
+                "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
+            ),
+            (
+                "src/server/profiles-browser.ts",
+                "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
+            ),
+        ):
+            path = clone / relative
+            path.write_text(downgrade_legacy(relative, path.read_text()), encoding="utf-8")
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == expected
+        legacy = run(clone, "--check")
+        assert legacy.returncode == 0 and legacy.stdout.count("legacy-needs-overlay") == 2
+        upgraded = run(clone)
+        assert upgraded.returncode == 0 and "overlay applied" in upgraded.stdout
+        upgraded_check = run(clone, "--check")
+        assert upgraded_check.returncode == 0 and "legacy-needs-overlay" not in upgraded_check.stdout
 
         target = clone / "src/server/gateway-capabilities.ts"
         target.write_bytes(target.read_bytes() + b"\n// tamper\n")
