@@ -270,6 +270,53 @@ class MissionAdapterTests(unittest.TestCase):
                 }]},
             )
 
+    def test_safe_backend_rejects_malformed_final_native_state(self):
+        cases = {
+            "missing-assignee": {
+                "task": {"id": "task-1", "status": "blocked"}, "runs": [],
+            },
+            "missing-id": {
+                "task": {"status": "blocked", "assignee": None}, "runs": [],
+            },
+            "mismatched-id": {
+                "task": {"id": "task-other", "status": "blocked", "assignee": None}, "runs": [],
+            },
+            "malformed-runs": {
+                "task": {"id": "task-1", "status": "blocked", "assignee": None}, "runs": None,
+            },
+        }
+        for name, malformed in cases.items():
+            with self.subTest(name=name):
+                shows = 0
+
+                def runner(command):
+                    nonlocal shows
+                    action = command[command.index("central") + 1]
+                    if action == "create":
+                        output = {"id": "task-1", "status": "ready"}
+                    elif action == "block":
+                        return subprocess.CompletedProcess(command, 0, stdout="Blocked task-1\n", stderr="")
+                    else:
+                        shows += 1
+                        output = (
+                            {
+                                "task": {"id": "task-1", "status": "ready", "assignee": None},
+                                "events": [],
+                                "runs": [],
+                            }
+                            if shows == 1 else malformed
+                        )
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=json.dumps(output), stderr=""
+                    )
+
+                backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+                with self.assertRaises(adapter.AdapterError):
+                    backend.ensure_root(
+                        mission_id="mission-malformed", goal="Goal", allow_dispatch=False,
+                        assignee=None, workspace=None,
+                    )
+
     def test_worker_metadata_rejects_unknown_payload_fields(self):
         with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
             adapter._worker_metadata_events(

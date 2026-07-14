@@ -136,8 +136,12 @@ class HermesKanbanBackend:
         if not allow_dispatch:
             snapshot = self.show(task["id"])
             current = snapshot["task"]
-            if current.get("assignee") is not None:
-                raise AdapterError("blocked handoff unexpectedly has an assignee")
+            if (
+                current.get("id") != task["id"]
+                or "assignee" not in current
+                or current["assignee"] is not None
+            ):
+                raise AdapterError("blocked handoff task identity/assignee mismatch")
             events = snapshot.get("events", [])
             if not isinstance(events, list):
                 raise AdapterError("Hermes Kanban task events are invalid")
@@ -155,8 +159,13 @@ class HermesKanbanBackend:
                 raise AdapterError("safe handoff task is not blockable")
             snapshot = self.show(task["id"])
             task = snapshot["task"]
-            if task.get("status") != "blocked" or task.get("assignee") is not None:
-                raise AdapterError("safe handoff task did not remain blocked and unassigned")
+            if (
+                task.get("id") != current["id"]
+                or task.get("status") != "blocked"
+                or "assignee" not in task
+                or task["assignee"] is not None
+            ):
+                raise AdapterError("safe handoff native task identity/status/assignee mismatch")
             if not isinstance(snapshot.get("runs"), list) or snapshot["runs"]:
                 raise AdapterError("safe handoff unexpectedly created a Kanban run")
         return task
