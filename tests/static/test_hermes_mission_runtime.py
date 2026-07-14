@@ -210,12 +210,21 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             assert "different parameters" in str(error)
 
 
+def test_terminal_authority_is_loopback_only() -> None:
+    assert missions.terminal_request_allowed("127.0.0.1")
+    assert missions.terminal_request_allowed("::1")
+    assert not missions.terminal_request_allowed("10.42.1.9")
+    assert not missions.terminal_request_allowed(None)
+    assert not missions.terminal_request_allowed("not-an-address")
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
+    test_terminal_authority_is_loopback_only()
     print("hermes mission runtime checks passed")
 
 

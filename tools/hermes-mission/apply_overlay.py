@@ -19,7 +19,7 @@ FILES = {
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "732d01c6f3a00b191db83db8ba49cf10d0f06cf36277832d1e6e0ec2ac6f55fc",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "66fb90e5b015e156d09e5deb7df238d6b42a2afde6295ffd8687a7c7a3b0a26c",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -83,6 +83,7 @@ def transform(relative: str, text: str) -> str:
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
             "    MissionError, MissionStore, notify_subscribers, producer_key_valid,\n"
+            "    terminal_request_allowed,\n"
             ")",
             "mission imports",
         )
@@ -196,6 +197,10 @@ def transform(relative: str, text: str) -> str:
     async def _handle_finish_mission(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
             return auth_error
+        if not terminal_request_allowed(request.remote):
+            return web.json_response(
+                {"error": "Mission terminal authority is local only"}, status=403
+            )
         try:
             body = await request.json()
             status = str(body.get("status") or "").strip()

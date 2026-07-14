@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import re
@@ -534,3 +535,11 @@ async def notify_subscribers(
 def producer_key_valid(provided: str | None) -> bool:
     expected = os.environ.get("HERMES_MISSION_PRODUCER_KEY", "").strip()
     return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
+
+
+def terminal_request_allowed(remote: str | None) -> bool:
+    """Keep terminal mission authority inside the Central Hermes process boundary."""
+    try:
+        return ipaddress.ip_address(remote or "").is_loopback
+    except ValueError:
+        return False
