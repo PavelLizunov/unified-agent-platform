@@ -42,6 +42,10 @@ PATCHED_FILES = {
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 }
+LEGACY_FILES = {
+"src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
+"src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
+}
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
     "src/screens/dashboard/components/mission-overview-card.tsx": "src/screens/dashboard/components/mission-overview-card.tsx",
@@ -410,6 +414,35 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
       {/* ── Attention marquee ──""", "mission card placement")
     return text
 
+def upgrade_legacy(rel, text):
+    if rel == "src/server/gateway-capabilities.ts":
+        text = replace(text, "const _initialOverrides = readOverrides()", "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'\nconst _initialOverrides = CENTRAL_ONLY ? {} : readOverrides()", "legacy central-only overrides")
+        text = replace(text, """export function setGatewayUrl(input: string | null | undefined): string {
+  const normalized""", """export function setGatewayUrl(input: string | null | undefined): string {
+  if (CENTRAL_ONLY) throw new Error('Gateway URL is environment-managed in central-only mode')
+  const normalized""", "legacy central-only gateway setter")
+        text = replace(text, """export function setDashboardUrl(input: string | null | undefined): string {
+  const normalized""", """export function setDashboardUrl(input: string | null | undefined): string {
+  if (CENTRAL_ONLY) throw new Error('Dashboard URL is environment-managed in central-only mode')
+  const normalized""", "legacy central-only dashboard setter")
+        return replace(text, "  const overrides = readOverrides()\n  const source = overrides.claudeApiUrl", "  const overrides = CENTRAL_ONLY ? {} : readOverrides()\n  const source = overrides.claudeApiUrl", "legacy central-only resolved source")
+    if rel == "src/server/profiles-browser.ts":
+        text = replace(text, "import { dashboardFetch } from './gateway-capabilities'", "import { dashboardFetch } from './gateway-capabilities'\n\nconst CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'", "legacy profiles central-only flag")
+        text = replace(text, """  const dashboardResult = await fetchDashboardProfiles()
+  if (dashboardResult) return dashboardResult
+
+  // Fall back to filesystem (colocated deployment)""", """  const dashboardResult = await fetchDashboardProfiles()
+  if (dashboardResult) return dashboardResult
+  if (CENTRAL_ONLY) throw new Error('Central profile source unavailable')
+
+  // Fall back to filesystem (colocated deployment)""", "legacy profiles central-only list")
+        return replace(text, """  const profilePath =
+    normalized === 'default'""", """  if (CENTRAL_ONLY) throw new Error('Central profile not found or unavailable')
+
+  const profilePath =
+    normalized === 'default'""", "legacy profiles central-only read")
+    raise SystemExit(f"no legacy upgrade for {rel}")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("workspace", type=pathlib.Path)
@@ -427,9 +460,12 @@ def main():
         actual = sha(path)
         if actual == expected:
             statuses.append(f"{rel}: source-needs-overlay")
-            source_paths.append((rel, path))
+            source_paths.append((rel, path, False))
         elif actual == PATCHED_FILES[rel]:
             statuses.append(f"{rel}: exact-patched")
+        elif actual == LEGACY_FILES.get(rel):
+            statuses.append(f"{rel}: legacy-needs-overlay")
+            source_paths.append((rel, path, True))
         else:
             raise SystemExit(f"upstream fingerprint mismatch: {rel}")
     added_paths = []
@@ -446,8 +482,9 @@ def main():
     if args.check:
         print("\n".join(statuses))
     else:
-        for rel, path in source_paths:
-            path.write_text(transform(rel, path.read_text()), encoding="utf-8")
+        for rel, path, legacy in source_paths:
+            transform_file = upgrade_legacy if legacy else transform
+            path.write_text(transform_file(rel, path.read_text()), encoding="utf-8")
             if sha(path) != PATCHED_FILES[rel]:
                 raise SystemExit(f"overlay output fingerprint mismatch: {rel}")
             changed = True
