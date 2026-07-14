@@ -11,9 +11,10 @@ The owner approved one disposable end-to-end canary with this exact route:
 - change: add `counter.py --help`, one focused test and README usage;
 - delivery: tests, independent review, PR/CI, merge and fresh-main post-verify.
 
-The model IDs and `read-only` mode below are the approved and recorded route labels. The current
-`flow_contract.py summarize-codex` input does not derive model identity from a runtime event, and the evidence does not
-attest an OS-enforced read-only filesystem or credential boundary for the reviewer.
+The model IDs and `read-only` mode below were initially approved and recorded route labels. The original
+`flow_contract.py summarize-codex` input did not derive model identity from a runtime event. The post-canary addendum
+below now binds the accepted sessions to their persisted Codex runtime context, but still does not attest an
+OS-independent read-only filesystem or credential boundary for the reviewer.
 
 Qwen, local inference, GPU, Claude, swarm, Spark Runner and destructive tests remained forbidden. The owner did not
 perform an execution step after approving this boundary.
@@ -69,10 +70,28 @@ perform an execution step after approving this boundary.
   `9c69b3f46a8201c03e7b03cabda082453fdd40a06079be09952cb455b25f46ec`, stage `complete` and progress 100%.
 - The single Telegram subscription reached `last_notified_sequence=26`, equal to the central mission cursor.
 
+## Post-canary runtime attestation
+
+On 2026-07-14 the saved A6.4 `codex exec --json` streams were reprocessed read-only with the strengthened offline Flow
+contract. No model, worker, local inference, GPU, swarm or deployment was started. Each JSONL `thread_id` had to equal
+the matching persisted rollout `session_meta.id`; exactly one `turn_context` was accepted, and any model mismatch,
+sandbox mismatch or Codex `model rerouted` event failed closed.
+
+- accepted author session `019f61c4-8690-73b1-86e2-aca746a7c073`: Codex CLI `0.144.3`, provider `openai`, runtime
+  context model `gpt-5.6-luna`, sandbox policy `workspace-write`;
+- reviewer session `019f61ca-f532-7ef1-8859-37ad321dd615`: Codex CLI `0.144.3`, provider `openai`, runtime context
+  model `gpt-5.6-sol`, sandbox policy `read-only`.
+
+Both matching streams contained `turn.completed` and no reroute marker. This upgrades A6.4 model and Codex sandbox
+claims from declared labels to locally runtime-derived evidence. It does not prove which upstream physical backend
+served the alias, filesystem immutability outside the Codex sandbox, absence of write credentials, or cryptographic
+attestation of the saved files.
+
 ## Honest boundary after the canary
 
-This proves the A6 mission projection and one owner-approved, explicitly orchestrated route end to end. It does not
-prove runtime-derived model identity or an OS-enforced read-only reviewer, and it does not yet make arbitrary missions
-fully push-button: Codex orchestration explicitly created/claimed the Kanban task, invoked the approved author and
-reviewer routes and published the adapter events. No human operator action was hidden, but automatic central-mission
-dispatch and route selection remain a later product milestone. One canary is also not a soak or HA claim.
+This proves the A6 mission projection and one owner-approved, explicitly orchestrated route end to end. The addendum
+proves locally runtime-derived model and Codex sandbox policy, but not an OS-independent read-only reviewer. It also
+does not yet make arbitrary missions fully push-button: Codex orchestration explicitly created/claimed the Kanban
+task, invoked the approved author and reviewer routes and published the adapter events. No human operator action was
+hidden, but automatic central-mission dispatch and route selection remain a later product milestone. One canary is
+also not a soak or HA claim.
