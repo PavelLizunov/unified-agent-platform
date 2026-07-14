@@ -114,8 +114,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    the live route has not yet adopted that gate and it does not prove an OS-independent read-only filesystem or
    credential boundary.
 6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Producer
-   events use a closed schema and force-redact every allowed string before storage. Local state file permissions are
-   not yet a complete security invariant.
+   events use a closed schema and protect every allowed string before storage; mission DB and adapter state are
+   owner-only on POSIX. These offline hardening changes still await the owner-approved A7 rollout.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 
