@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-12
+Last updated: 2026-07-14
 
 ## Phase
 
@@ -8,6 +8,11 @@ Last updated: 2026-07-12
   (see "Model & Agent Layer" below). Active direction (2026-06-22/23 **pivot**): **vibe-coding** — adopt the
   external NousResearch **hermes-agent** as the harness (the bespoke `hermes/hermes.py` is parked). See
   `docs/next-steps.md`, `docs/infrastructure.md`, `docs/research/`.
+- **Product workflow contract accepted 2026-07-14 (ADR-030).** Hermes remains the agent-layer foundation. The active
+  design phase is A6: converge Workspace, Telegram and Flow on one central Hermes `mission_id`/event history while
+  keeping build-1 as the execution plane. This is a documentation/architecture decision only: the live runtime has
+  not yet been migrated and the current central-Workspace/local-Flow split remains a known contract gap. Canonical
+  behaviour: `docs/product-operating-contract.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -328,6 +333,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
+- **Current control-flow gap (ADR-030/A6):** Workspace presents central Hermes while local Flow/Kanban on build-1 has
+  its own orchestration/state boundary. Sessions/jobs/tasks/workers are not yet one end-to-end mission lifecycle, and
+  the owner-facing progress view is incomplete. Build-1 is retained, but its target role is executor for central
+  Hermes missions rather than a second user-visible control plane.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through

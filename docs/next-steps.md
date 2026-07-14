@@ -7,7 +7,8 @@
 >
 > Context: [docs/infrastructure.md](infrastructure.md). Decisions: [DECISIONS.md](../DECISIONS.md).
 > This doc **references** [BUILD-PLAN.md](../BUILD-PLAN.md) and [REVIEW-CODEX.md](../REVIEW-CODEX.md)
-> rather than restating their detail. Last reviewed: 2026-07-11.
+> rather than restating their detail. Product contract: [product-operating-contract.md](product-operating-contract.md).
+> Last reviewed: 2026-07-14.
 
 ---
 
@@ -23,6 +24,8 @@
   "agent ships unreviewed code" model is now backed by an enforced CI gate (human review stays absent by
   design) — see Track A4 (DONE) and the platform-hardening items.
 - **Model+agent backend is fully in GitOps** (Track B0 DONE).
+- **Product workflow convergence is the active agent-layer phase (A6).** Hermes remains the harness, but the current
+  central-Workspace/local-Flow split is not the accepted end state. No runtime change has been made yet under ADR-030.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
 
@@ -127,6 +130,35 @@ every tool goes dark). Detail + citations in the two research docs.
 > **Do NOT** point hermes-agent's brain at the subfleet endpoint at any phase — it is FC-less. subfleet
 > stays the backend for the owner's **other** projects (Telegram bot + web sessions), not the coding path.
 
+### Phase A6 — One Hermes mission plane — 🟡 ACTIVE (contract accepted 2026-07-14)
+
+**Goal:** Workspace and Telegram are synchronized views of one central Hermes mission. Build-1, Kanban, swarms,
+coding agents and test VMs execute that mission and publish correlated progress/results under the same `mission_id`.
+The owner supplies the goal and material product trade-offs; the platform performs the delivery loop.
+
+The normative behaviour is [Product Operating Contract](product-operating-contract.md); architecture is ADR-030.
+This phase does **not** replace Hermes and does not create a new control plane.
+
+1. **A6.0 — Contract and current-state map.** Document the exact central/local session, task, job, Kanban and event
+   stores; mark every fallback and ownership boundary. No service/model/GPU action. **Gate:** one repo-backed map can
+   trace or honestly declare the missing link from a Workspace/Telegram request to Flow output.
+2. **A6.1 — Central mission contract.** Define the smallest stable `mission_id`, lifecycle and event envelope at the
+   Hermes boundary; use a fake backend for offline tests. Disable ambiguous local fallback in central-only mode.
+   **Gate:** refresh/reconnect and both UI channels produce the same ordered mission state in hermetic tests.
+3. **A6.2 — Build-1 execution adapter.** Make the existing Flow/Kanban dispatcher consume a central mission and return
+   worker, terminal, files, tests and review events. Build-1 remains an executor, not a second source of truth.
+   **Gate:** a disposable offline mission survives dispatcher restart and completes once without duplicate work.
+4. **A6.3 — Compact synchronized observation.** Workspace renders stage/progress with expandable tasks, workers,
+   terminal, changes, gates and delivery links; Telegram carries the same questions/status/result. Reuse the current
+   web/PWA before considering a replacement UI. **Gate:** one fixture timeline has identical mission status in both
+   channels after reconnect.
+5. **A6.4 — Controlled one-shot canary.** With the owner's explicit approval of the model/runtime and test target,
+   run one disposable goal through implementation, tests, independent review, PR/CI and final verification. No GPU,
+   destructive test or Spark Runner. **Gate:** evidence links every state transition and no operator step is hidden.
+
+Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
+Do not start A6.1 before A6.0 is green, and do not build a new dashboard before the mission/event contract is proven.
+
 ---
 
 ## Track B — Foundation work (independent of the pilot)
@@ -211,7 +243,8 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **B0** and the **gate-enforcement** hardening are ✅ DONE — both removed live risk.
 - **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
-  "self-test passed" is real (north-star demo PASSED, PR #25).
+  "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** first map and
+  unify the mission plane; do not launch models, swarms or a live canary during A6.0.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
