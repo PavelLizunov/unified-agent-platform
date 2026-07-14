@@ -213,14 +213,21 @@ python tools/swarm/flow_contract.py terminal-check \
 Telemetry must attribute exact sessions/models/tools/retries/timeouts separately for orchestrator, author,
 reviewer, CI and external monitor. Unknown token usage remains `null`.
 
-Capture Codex JSONL with `codex exec --json` and summarize it without sending the log to another model:
+Capture Codex JSONL with `codex exec --json`, retain the matching local rollout, and summarize both without sending
+either log to another model. The summarizer requires the rollout `session_meta.id` to equal the JSONL `thread_id` and
+derives model/provider/sandbox from its single runtime `turn_context`; the CLI model argument is only the expected
+value and a mismatch or Codex `model rerouted` event fails closed:
 
 ```bash
 python tools/swarm/flow_contract.py summarize-codex \
   --events /home/uap/swarm-out/<mission>/author-events.jsonl \
-  --component author --model gpt-5.3-codex-spark \
+  --rollout /home/uap/.codex/sessions/<date>/rollout-<session-id>.jsonl \
+  --component author --model gpt-5.3-codex-spark --sandbox workspace-write \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```
+
+Use `--sandbox read-only` for the reviewer. This proves the policy recorded by the exact Codex turn, not an
+OS-independent filesystem or credential boundary; preserve before/after worktree evidence for that stronger claim.
 
 ## Pilot gate before production integration
 

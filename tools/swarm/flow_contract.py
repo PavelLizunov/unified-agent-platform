@@ -246,8 +246,59 @@ def terminal_complete(
     return all((merged, main_contains_head, branch_deleted, worktree_removed))
 
 
+def _codex_rollout_context(
+    path: str | pathlib.Path, *, session_id: str, expected_model: str, expected_sandbox: str
+) -> dict[str, str]:
+    session_meta: list[dict[str, Any]] = []
+    turn_context: list[dict[str, Any]] = []
+    with open(path, encoding="utf-8") as handle:
+        for line_number, raw_line in enumerate(handle, 1):
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError as error:
+                raise ContractError(f"rollout line {line_number}: invalid JSON") from error
+            if not isinstance(event, dict) or not isinstance(event.get("payload"), dict):
+                continue
+            if event.get("type") == "session_meta":
+                session_meta.append(event["payload"])
+            elif event.get("type") == "turn_context":
+                turn_context.append(event["payload"])
+    if len(session_meta) != 1 or len(turn_context) != 1:
+        raise ContractError("rollout must contain exactly one session_meta and one turn_context")
+    meta, context = session_meta[0], turn_context[0]
+    if _required_text(meta, "id", "rollout.session_meta") != session_id:
+        raise ContractError("rollout session does not match telemetry thread")
+    persisted_session = meta.get("session_id")
+    if persisted_session is not None and persisted_session != session_id:
+        raise ContractError("rollout persisted session does not match telemetry thread")
+    actual_model = _exact_model(context, "rollout.turn_context")
+    if actual_model != expected_model:
+        raise ContractError(
+            f"runtime model mismatch: expected {expected_model!r}, observed {actual_model!r}"
+        )
+    sandbox_policy = context.get("sandbox_policy")
+    if not isinstance(sandbox_policy, dict):
+        raise ContractError("rollout.turn_context.sandbox_policy: object required")
+    actual_sandbox = _required_text(sandbox_policy, "type", "rollout.turn_context.sandbox_policy")
+    if actual_sandbox != expected_sandbox:
+        raise ContractError(
+            f"runtime sandbox mismatch: expected {expected_sandbox!r}, observed {actual_sandbox!r}"
+        )
+    return {
+        "model": actual_model,
+        "model_provider": _required_text(meta, "model_provider", "rollout.session_meta"),
+        "sandbox": actual_sandbox,
+        "codex_cli_version": _required_text(meta, "cli_version", "rollout.session_meta"),
+    }
+
+
 def summarize_codex_events(
-    path: str | pathlib.Path, *, component: str, model: str
+    path: str | pathlib.Path,
+    *,
+    component: str,
+    model: str,
+    rollout: str | pathlib.Path,
+    sandbox: str,
 ) -> dict[str, Any]:
     _exact_model({"model": model}, "telemetry")
     session_id = None
@@ -257,6 +308,7 @@ def summarize_codex_events(
     timeouts = 0
     non_json_lines = 0
     completed = False
+    rerouted = False
     with open(path, encoding="utf-8") as handle:
         for raw_line in handle:
             try:
@@ -275,6 +327,8 @@ def summarize_codex_events(
                     failed_commands += 1
                 if "timed out" in str(item.get("aggregated_output", "")).lower():
                     timeouts += 1
+                if item_type == "error" and "model rerouted:" in str(item.get("message", "")).lower():
+                    rerouted = True
             elif event_type == "turn.completed":
                 usage = event.get("usage")
                 completed = True
@@ -282,12 +336,22 @@ def summarize_codex_events(
         raise ContractError("telemetry: thread.started event missing")
     if not completed:
         raise ContractError("telemetry: turn.completed event missing")
+    if rerouted:
+        raise ContractError("telemetry: model reroute is not an exact-model run")
+    runtime = _codex_rollout_context(
+        rollout, session_id=session_id, expected_model=model, expected_sandbox=sandbox
+    )
     return {
         "schema_version": 1,
         "component": component,
         "engine": "codex",
         "engine_family": "openai",
-        "model": model,
+        "model": runtime["model"],
+        "model_provider": runtime["model_provider"],
+        "model_attestation": "codex_rollout_turn_context",
+        "sandbox": runtime["sandbox"],
+        "sandbox_attestation": "codex_rollout_turn_context",
+        "codex_cli_version": runtime["codex_cli_version"],
         "session_id": session_id,
         "status": "completed",
         "tool_calls": tool_calls,
@@ -390,6 +454,11 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.add_argument("--events", required=True)
     telemetry.add_argument("--component", required=True)
     telemetry.add_argument("--model", required=True)
+    telemetry.add_argument("--rollout", required=True)
+    telemetry.add_argument(
+        "--sandbox", required=True,
+        choices=("read-only", "workspace-write", "danger-full-access"),
+    )
     telemetry.add_argument("--output", required=True)
 
     args = parser.parse_args(argv)
@@ -428,7 +497,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "summarize-codex":
             result = summarize_codex_events(
-                args.events, component=args.component, model=args.model
+                args.events, component=args.component, model=args.model,
+                rollout=args.rollout, sandbox=args.sandbox,
             )
             write_json(args.output, result)
             print("hermes-flow-telemetry-ok")

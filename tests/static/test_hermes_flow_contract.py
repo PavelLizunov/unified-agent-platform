@@ -199,18 +199,65 @@ class FlowContractTests(unittest.TestCase):
             }},
             {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 2}},
         ]
+        rollout_events = [
+            {"type": "session_meta", "payload": {
+                "id": "session-1", "session_id": "session-1",
+                "model_provider": "openai", "cli_version": "0.144.3",
+            }},
+            {"type": "turn_context", "payload": {
+                "model": "gpt-5.3-codex-spark",
+                "sandbox_policy": {"type": "workspace-write", "network_access": False},
+            }},
+        ]
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
             for event in events:
                 handle.write(json.dumps(event) + "\n")
             path = pathlib.Path(handle.name)
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            for event in rollout_events:
+                handle.write(json.dumps(event) + "\n")
+            rollout = pathlib.Path(handle.name)
         try:
             result = flow.summarize_codex_events(
-                path, component="author", model="gpt-5.3-codex-spark"
+                path, component="author", model="gpt-5.3-codex-spark",
+                rollout=rollout, sandbox="workspace-write",
             )
+            with self.assertRaisesRegex(flow.ContractError, "runtime model mismatch"):
+                flow.summarize_codex_events(
+                    path, component="author", model="gpt-5.6-luna",
+                    rollout=rollout, sandbox="workspace-write",
+                )
+            with self.assertRaisesRegex(flow.ContractError, "runtime sandbox mismatch"):
+                flow.summarize_codex_events(
+                    path, component="reviewer", model="gpt-5.3-codex-spark",
+                    rollout=rollout, sandbox="read-only",
+                )
+            rerouted_events = events[:-1] + [
+                {"type": "item.completed", "item": {
+                    "type": "error", "message": "model rerouted: a -> b (reason)",
+                }},
+                events[-1],
+            ]
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                for event in rerouted_events:
+                    handle.write(json.dumps(event) + "\n")
+                rerouted_path = pathlib.Path(handle.name)
+            try:
+                with self.assertRaisesRegex(flow.ContractError, "model reroute"):
+                    flow.summarize_codex_events(
+                        rerouted_path, component="author", model="gpt-5.3-codex-spark",
+                        rollout=rollout, sandbox="workspace-write",
+                    )
+            finally:
+                rerouted_path.unlink()
         finally:
             path.unlink()
+            rollout.unlink()
         self.assertEqual("session-1", result["session_id"])
         self.assertEqual("gpt-5.3-codex-spark", result["model"])
+        self.assertEqual("openai", result["model_provider"])
+        self.assertEqual("workspace-write", result["sandbox"])
+        self.assertEqual("codex_rollout_turn_context", result["model_attestation"])
         self.assertEqual({"file_change": 1, "command_execution": 1}, result["tool_calls"])
         self.assertEqual(1, result["failed_commands"])
 
