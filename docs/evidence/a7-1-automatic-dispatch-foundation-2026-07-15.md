@@ -64,6 +64,8 @@ No Qwen, local inference, GPU, Claude, swarm, Spark Runner, model turn or destru
 - Central Hermes was not restarted and the updated adapter was not installed on build-1.
 - No live `mission.accepted → blocked task → task.upsert` canary has run.
 - No periodic timer, claim, worker, author/reviewer, PR delivery, merge or post-verify path is enabled by A7.1.
+- No automatic Central Hermes completion caller exists in A7.1. The loopback guard deliberately removes the former
+  remote general-bearer completion path; a later coordinator must use the authenticated local authority path.
 - Independent model review was not run because no reviewer/model was owner-approved for this stage.
 - A7.3 is specified in `docs/a7-real-project-canary.md`, but its target, routes, activation, recoverable fault and full
   delivery/cleanup run remain unapproved and unexecuted.

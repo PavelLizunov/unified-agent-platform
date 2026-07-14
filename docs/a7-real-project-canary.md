@@ -32,7 +32,8 @@ The approved change must:
 7. **Post-verify:** fetch a fresh default branch, prove the reviewed commit is an ancestor of the merge, and rerun the
    repository's required post-merge check.
 8. **Cleanup:** remove the disposable worktree/branch and close the Kanban task only after merge and post-verify.
-   Preserve bounded evidence, not raw secrets or model output.
+   Preserve bounded evidence, not raw secrets or model output. Only after that evidence is durable may Central Hermes,
+   never the build-1 producer, write the terminal mission state through its authenticated local authority path.
 
 ## Acceptance evidence
 
