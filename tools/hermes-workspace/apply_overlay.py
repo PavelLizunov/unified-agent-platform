@@ -14,6 +14,7 @@ FILES = {
 "src/routes/__root.tsx": "1a6b2ae761aa1500835c53f79bf61730796fe2a67163a7c21012c44b793ae081",
 "src/routes/api/playground-admin.ts": "19b98cbed55f4ab874532e978484b4abebd14ec855d54461cb46ce965581113c",
 "src/routes/api/playground-npc.ts": "7e90a3a801ac7dbb85c5a97f3d51500c23d0296809b2f7497a034bf3cc97df30",
+"src/routes/api/models.ts": "0a8a94a277b3fe654c85d11def4283c9001639d1f9a80c55dfd7534c5e6e7b4a",
 }
 PATCHED_FILES = {
 "src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
@@ -25,6 +26,7 @@ PATCHED_FILES = {
 "src/routes/__root.tsx": "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
 "src/routes/api/playground-admin.ts": "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
 "src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
+"src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 }
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def replace(text, old, new, name):
@@ -195,6 +197,32 @@ async function fetchDashboardCookie(force = false): Promise<string> {
 }
 """
         text = text[:start] + replacement + text[end:]
+    elif rel == "src/routes/api/models.ts":
+        text = replace(text, """        try {
+          // Primary: read user-configured models from ~/.hermes/models.json""", """        try {
+          if (process.env.HERMES_CENTRAL_ONLY === '1') {
+            const models = await fetchClaudeModels()
+            const configuredProviders = Array.from(
+              new Set(
+                models
+                  .map((model) =>
+                    typeof model.provider === 'string' ? model.provider : '',
+                  )
+                  .filter(Boolean),
+              ),
+            )
+            return json({
+              ok: true,
+              object: 'list',
+              data: models,
+              models,
+              configuredProviders,
+              source: 'hermes-agent',
+              ...readStreamTimeouts(),
+            })
+          }
+
+          // Primary: read user-configured models from ~/.hermes/models.json""", "central-only models")
     elif rel in ("src/components/mobile-hamburger-menu.tsx", "src/components/mobile-tab-bar.tsx"):
         is_h = "hamburger" in rel
         needle = "export const MOBILE_HAMBURGER_NAV_ITEMS = [" if is_h else "export const MOBILE_NAV_TABS: Array<TabItem> = ["

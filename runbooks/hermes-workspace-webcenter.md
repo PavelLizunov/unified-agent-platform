@@ -17,6 +17,7 @@ they are not the Workspace backend.
    deliberate owner-only secret store and is never committed.
 3. Put runtime variables in that file without exposing values:
    `HERMES_API_URL=http://100.94.228.67:30642`, `HERMES_API_TOKEN` from Secret `hermes-agent-api/api-key`,
+   `HERMES_CENTRAL_ONLY=1` to exclude build-1 config and local discovery from the model picker,
    `HERMES_DASHBOARD_URL=http://100.94.228.67:30911`, `HERMES_DASHBOARD_USERNAME` to the configured
    dashboard user, and `HERMES_DASHBOARD_PASSWORD` from Secret `hermes-agent-dashboard/password`.
    Both dashboard credential variables must be present, or both must be absent for loopback ephemeral-token
@@ -38,7 +39,7 @@ curl -fsS -H "Authorization: Bearer $HERMES_API_TOKEN" http://100.94.228.67:3064
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.85.56.31:3000/
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.94.228.67:30911/api/status
 test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-npc)" = 404
-test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-admin)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' http://100.85.56.31:3000/api/playground-admin)" = 404
 ```
 
 Log in to Workspace and verify chat, central dashboard-backed Profiles, and Kanban. Verify no HermesWorld,
