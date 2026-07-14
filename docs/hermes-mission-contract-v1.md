@@ -39,6 +39,13 @@ build-1 are clients or producers, never alternate authorities.
 Required fields are fixed for v1. `correlation` and `payload` are objects and may be empty. Unknown payload fields must
 be preserved. Unknown event types may be retained for forward compatibility but do not change a v1 projection.
 
+### Producer submission
+
+Build-1 submits the same envelope without the central-only fields `sequence`, `event_id` and `occurred_at`. It must
+include a deterministic `correlation.producer_event_id`. Central Hermes deduplicates that value, then assigns the
+canonical sequence, event ID and timestamp. A producer retry is therefore safe after a crash between execution and
+checkpoint persistence.
+
 ## Event types
 
 | Type | Required payload | Projection effect |
@@ -80,3 +87,32 @@ Progress is an integer from 0 through 100 and may not decrease. Terminal events 
 4. duplicate replay is idempotent and sequence gaps fail closed.
 
 The fake backend is test-only and stdlib-only. It does not add a Python production runtime.
+
+## Build-1 adapter boundary
+
+`tools/swarm/mission_adapter.py` reuses native Hermes Kanban. It creates the root card with
+`--idempotency-key central-mission:<mission_id>` and uses the mission ID as the Kanban tenant. The default card is
+blocked and unassigned. Dispatch is possible only when the caller explicitly supplies `--allow-dispatch`, an
+assignee and a non-scratch workspace; model/runtime approval remains outside this contract.
+
+The adapter projects `kanban list/show/log` into `task.upsert`, `worker.upsert` and bounded `terminal.append` producer
+events. Worker completion metadata may contribute only `change.upsert`, `gate.upsert` and `delivery.upsert`; a worker
+cannot forge a terminal mission event. Expected metadata shape:
+
+```json
+{
+  "mission_events": [
+    {"type": "change.upsert", "payload": {"path": "src/lib.rs", "status": "modified"}},
+    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+    {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+    {"type": "delivery.upsert", "payload": {
+      "kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"
+    }}
+  ]
+}
+```
+
+`tests/static/test_hermes_mission_adapter.py` injects a crash after Kanban create, restarts the adapter/backend against
+the same store and proves that one task completes without duplicate work or producer events. This is an offline gate;
+the adapter is not installed into the live build-1 runtime by this phase. It reuses Flow v2's existing Python runtime
+and standard library, so it adds no interpreter or third-party package.

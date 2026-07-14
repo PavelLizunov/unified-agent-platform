@@ -103,10 +103,10 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
 **2026-07-14: единый Hermes mission plane** (ADR-030, `docs/product-operating-contract.md`). Внешний hermes-agent
 остаётся основой. Workspace и Telegram должны показывать одну central Hermes mission/history; build-1, Flow/Kanban,
 coding workers и test VM — execution plane этой mission, не вторая точка управления. Текущий central-Workspace/local-
-Flow split ещё не мигрирован. Карта A6.0 завершена в `docs/hermes-mission-state-map.md`; A6.1 завершён офлайн в
-`docs/hermes-mission-contract-v1.md`: единый contract/cursor и hermetic channel/reconnect gate зафиксированы, а
-central-only authority fail-closed. Следующий этап A6.2 — узкий build-1 execution adapter к существующему Flow/Kanban;
-без новой панели, model, swarm, GPU или live canary.
+Flow split ещё не мигрирован. A6.0/A6.1 зафиксировали карту и central mission contract; A6.2 добавил офлайн
+idempotent adapter к существующему Flow/Kanban (`tools/swarm/mission_adapter.py`) без live-установки или dispatch.
+Следующий этап A6.3 — синхронные projections одной mission в существующих Workspace/Telegram; без новой панели,
+model, swarm, GPU или live canary.
 Инфра-слой (k3s/Flux/SOPS) построен и стабилен; **VPS и HA отложены владельцем на неопределённый срок из-за бюджета**.
 Третий k3s server не является active owner action. Фазированный план — `docs/next-steps.md` (Track A — пилот
 hermes-agent, Track B — blast-radius + DR при текущей single-control-plane стратегии). HA-заявления — только после

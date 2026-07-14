@@ -150,9 +150,11 @@ This phase does **not** replace Hermes and does not create a new control plane.
    cursor/replay rules. Its fake central backend proves Workspace/Telegram convergence after refresh/reconnect. The
    pinned Workspace overlay makes central-only authority selection fail closed for sessions, profiles, tasks, Kanban,
    jobs and Conductor. **Gate: PASS offline.** No live Workspace restart/deploy or model execution was performed.
-3. **A6.2 — Build-1 execution adapter.** Make the existing Flow/Kanban dispatcher consume a central mission and return
-   worker, terminal, files, tests and review events. Build-1 remains an executor, not a second source of truth.
-   **Gate:** a disposable offline mission survives dispatcher restart and completes once without duplicate work.
+3. **A6.2 — Build-1 execution adapter — ✅ DONE offline (2026-07-14).** The stdlib-only adapter reuses native Hermes
+   Kanban with a central mission tenant and idempotent root-card key, then projects task/worker/terminal/file/test/
+   review/PR/deploy evidence into deterministic producer events. It is blocked/unassigned by default and cannot forge
+   central mission completion. **Gate: PASS offline:** an injected post-create crash plus backend restart completes one
+   fake mission without duplicate work/events. The adapter has not been installed or dispatched live.
 4. **A6.3 — Compact synchronized observation.** Workspace renders stage/progress with expandable tasks, workers,
    terminal, changes, gates and delivery links; Telegram carries the same questions/status/result. Reuse the current
    web/PWA before considering a replacement UI. **Gate:** one fixture timeline has identical mission status in both
@@ -162,8 +164,8 @@ This phase does **not** replace Hermes and does not create a new control plane.
    destructive test or Spark Runner. **Gate:** evidence links every state transition and no operator step is hidden.
 
 Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
-A6.2 is now the next phase. Do not build a new dashboard; implement the narrow build-1 adapter against the proven
-mission/event contract.
+A6.3 is now the next phase. Do not build a new dashboard; project the same canonical fixture/events through the
+existing Workspace and Telegram surfaces.
 
 ---
 
@@ -250,8 +252,8 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
   "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** A6.0 mapped
-  the split state plane and A6.1 fixed the offline mission contract/fail-closed authority boundary. A6.2 is next. Do
-  not launch models, swarms or a live canary.
+  the split state plane, A6.1 fixed the offline mission contract/fail-closed authority boundary, and A6.2 added the
+  offline idempotent build-1 adapter. A6.3 is next. Do not launch models, swarms or a live canary.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
