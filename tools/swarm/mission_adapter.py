@@ -196,8 +196,9 @@ class CentralMissionClient:
             raise AdapterError("central mission API returned invalid JSON")
         return result
 
-    def list_missions(self) -> list[dict[str, Any]]:
-        result = self._request("GET", "/api/missions?limit=100")
+    def list_missions(self, dispatch_profile: str) -> list[dict[str, Any]]:
+        query = urllib.parse.urlencode({"dispatch_profile": dispatch_profile, "limit": 1})
+        result = self._request("GET", f"/api/missions?{query}")
         missions = result.get("missions")
         if not isinstance(missions, list) or not all(isinstance(item, dict) for item in missions):
             raise AdapterError("central mission list is invalid")
@@ -386,7 +387,7 @@ def dispatch_pending(
         raise AdapterError("poll requires a profile and non-scratch workspace")
     if activate and not assignee:
         raise AdapterError("activation requires an assignee")
-    for mission in client.list_missions():
+    for mission in client.list_missions(dispatch_profile):
         tasks = mission.get("tasks")
         if not isinstance(tasks, list):
             raise AdapterError("central mission projection has invalid tasks")

@@ -182,11 +182,11 @@ inherit approval for a model/runtime, local inference/GPU, swarm, Spark or destr
 
 ### Phase A7 — Automatic mission intake to build-1
 
-**Goal:** an allowlisted central mission reaches exactly one native Kanban root task without a Codex operator wiring
-the transition. This extends the existing modular monolith and Flow adapter; it does not add an application service,
-workflow engine or mission database.
+**Goal:** a central mission with an exact build-1-configured routing selector reaches one native Kanban root task
+without a Codex operator wiring the transition. This extends the existing modular monolith and Flow adapter; it does
+not add an application service, workflow engine or mission database.
 
-1. **A7.1 — Pull handoff and crash recovery — offline gate.** Central `mission.accepted` carries an immutable optional
+1. **A7.1 — Pull handoff and bounded retry — offline gate.** Central `mission.accepted` carries an immutable optional
    `dispatch_profile`. The build-1 adapter performs one bounded poll, exact-matches the locally configured profile,
    creates/reuses one blocked native Kanban root and publishes its deterministic task event. A fault after Kanban create
    but before central publish must converge after restart to one task/root ID and one producer event. No model runner

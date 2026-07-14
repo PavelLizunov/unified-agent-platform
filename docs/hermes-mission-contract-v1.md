@@ -123,11 +123,18 @@ At the A6.2 checkpoint the adapter was not yet installed into the live build-1 r
 controlled canary. It reuses Flow v2's existing Python runtime and standard library, so it adds no interpreter or
 third-party package.
 
-The post-A6 `poll` command is a bounded pull handoff. It reads at most the 100 latest central projections and accepts
-at most one mission per invocation when all of these are true: its immutable `dispatch_profile` exactly matches the
-locally configured profile, status/stage are `active`/`accepted`, and no task has yet been projected. API credentials
-come from environment variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace;
-mission data never becomes a shell command.
+The post-A6 `poll` command is a bounded pull handoff. It asks Central Hermes for the oldest eligible projection with
+the exact locally configured immutable `dispatch_profile` and accepts at most one mission per invocation. Eligibility
+also requires status/stage `active`/`accepted` and no projected task. Filtering happens before the response limit, so
+an older accepted mission cannot be hidden by more than 100 newer records. API credentials come from environment
+variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace; mission data never
+becomes a shell command.
+
+`dispatch_profile` is a routing selector, not a Central capability or server-side registry. Central validates and
+freezes the label; the owner-approved build-1 invocation supplies the matching profile, workspace and optional
+assignee. A7.1 considers the blocked root handed off once its deterministic `task.upsert` is projected. Reconciliation
+of a future active worker's multi-event stream and recovery from lost local adapter state are A7.3 prerequisites, not
+claims of this single-event blocked handoff.
 
 The safe default creates a blocked, unassigned root and publishes its deterministic `task.upsert`; it cannot launch a
 worker. `--activate` additionally requires an assignee and is the only mode that creates a ready card. A crash after

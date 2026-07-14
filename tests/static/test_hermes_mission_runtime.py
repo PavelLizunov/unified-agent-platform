@@ -68,6 +68,12 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
             stored, created = store.append_producer("mission-retry", event)
             replayed, replay_created = store.append_producer("mission-retry", event)
             assert created and not replay_created and stored == replayed
+            colliding = {**event, "payload": {"stage": "reviewing", "progress_percent": 70}}
+            try:
+                store.append_producer("mission-retry", colliding)
+                raise AssertionError("producer event id collision was accepted")
+            except missions.MissionError as error:
+                assert "collision" in str(error)
 
             deliveries: list[tuple[dict, str]] = []
 
@@ -212,6 +218,23 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             assert "different parameters" in str(error)
 
 
+def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Old eligible mission", mission_id="mission-old", dispatch_profile="build1-uap")
+        store.accept("Second eligible mission", mission_id="mission-second", dispatch_profile="build1-uap")
+        for index in range(101):
+            store.accept(
+                f"Newer unrelated mission {index}",
+                mission_id=f"mission-newer-{index}",
+                dispatch_profile="another-profile",
+            )
+
+        assert all(item["mission_id"] != "mission-old" for item in store.list(100))
+        candidates = store.dispatch_candidates("build1-uap", 1)
+        assert [item["mission_id"] for item in candidates] == ["mission-old"]
+
+
 def test_producer_schema_is_closed_and_all_strings_are_redacted() -> None:
     event = {
         "schema_version": 1,
@@ -306,6 +329,7 @@ def main() -> None:
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
+    test_dispatch_candidates_do_not_starve_behind_newer_missions()
     test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
     test_mission_database_is_owner_only_on_posix()
