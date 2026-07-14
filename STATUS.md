@@ -17,21 +17,23 @@ Last updated: 2026-07-14
   `mission_id`, ordered event envelope, lifecycle and cursor/replay rules. A fake central backend proves that Workspace
   and Telegram projections converge after refresh/reconnect, while the pinned Workspace overlay makes
   `HERMES_CENTRAL_ONLY=1` fail closed instead of selecting local sessions, profiles, tasks, Kanban, jobs or native
-  Conductor state. This repository change has not restarted or redeployed the live Workspace and has not launched a
-  model, swarm or GPU workload.
+  Conductor state. At the A6.1 checkpoint this repository change had not restarted or redeployed the live Workspace;
+  the later owner-approved A6.4 rollout is recorded below.
 - **A6.2 build-1 adapter complete offline 2026-07-14.** `tools/swarm/mission_adapter.py` reuses native Hermes Kanban,
   creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
   workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
-  duplicate work/events. The adapter is not installed live and dispatch remains disabled.
+  duplicate work/events. At the A6.2 checkpoint the adapter was not installed live; A6.4 later installed and exercised
+  it once. Automatic central intake-to-dispatch remains absent.
 - **A6.3 synchronized observation live and A6.4 canary complete 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
   stdlib/SQLite mission log and reducer inside the pinned central Hermes modular monolith. The pinned Hermes overlay
   adds authenticated mission API routes and Telegram `/mission`/notifications; the Workspace overlay adds a compact
   Dashboard projection with stage/progress and expandable tasks, workers, bounded terminal, changes, gates and
   delivery links. After the offline gates passed, PRs #178/#179 rolled out the exact pinned runtime and Workspace
-  overlay. Mission `a6-canary-help-20260714` completed through the approved `openai-codex`/`codex_app_server` route,
-  `gpt-5.6-luna` author and independent exact-SHA read-only `gpt-5.6-sol` reviewer. Target PR #2 passed CI, merged and
-  passed fresh-main verification. Central and Workspace projections matched and Telegram reached the terminal cursor.
-  Qwen/local inference, GPU, Claude, swarm, Spark and destructive tests were not used.
+  overlay. Mission `a6-canary-help-20260714` completed through the approved `openai-codex`/`codex_app_server` route
+  with recorded author label `gpt-5.6-luna` and reviewer label `gpt-5.6-sol`. The current telemetry contract does not
+  derive either model ID from a runtime event or prove the review process was OS-enforced read-only. Target PR #2
+  passed CI, merged and passed fresh-main verification. Central and Workspace projections matched and Telegram reached
+  the terminal cursor. Qwen/local inference, GPU, Claude, swarm, Spark and destructive tests were not used.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

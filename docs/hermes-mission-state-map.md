@@ -1,7 +1,9 @@
 # Hermes Mission State Map
 
-Status: **A6.0 evidence, complete 2026-07-14**. This document describes the current implementation; the target
-behaviour remains the [Product Operating Contract](product-operating-contract.md) and ADR-030.
+Status: **A6.0 pre-rollout evidence, complete 2026-07-14**. This document preserves the implementation snapshot at
+UAP commit `dc9aae7701b8a74d70e962b6e5dfa26e8c797eed`, before A6.1-A6.4. It is not the current live-state summary; use
+`STATUS.md` for that. The target behaviour remains the [Product Operating Contract](product-operating-contract.md)
+and ADR-030.
 
 ## Scope and evidence
 
@@ -178,10 +180,10 @@ ADR-030. Workspace sometimes returns `jobId = missionId` for Conductor; that val
 - Flow result -> central mission -> synchronized Workspace/Telegram result: **missing link**.
 
 A6.1 subsequently fixed the ordered contract and fail-closed authority boundary; A6.2 added the offline idempotent
-central-mission-to-Flow adapter; A6.3 added the offline central SQLite runtime and synchronized Workspace/Telegram
-projections. The live split mapped above remains because none of those artifacts has been installed or deployed.
-A6.4 may roll them out only after the owner's exact model/runtime/test-target/tool approval; it must not add a second
-control plane or replacement dashboard.
+central-mission-to-Flow adapter; A6.3 added the central SQLite runtime and synchronized Workspace/Telegram mission
+projections. Owner-approved A6.4 then installed those artifacts and exercised one explicitly orchestrated canary. The
+remaining gaps are automatic central intake-to-dispatch and complete Workspace/Telegram chat/session/question
+synchronization; the pre-rollout topology and fallback inventory above remain historical evidence.
 
 ## Repository evidence index
 

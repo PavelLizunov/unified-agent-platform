@@ -155,19 +155,23 @@ This phase does **not** replace Hermes and does not create a new control plane.
    Kanban with a central mission tenant and idempotent root-card key, then projects task/worker/terminal/file/test/
    review/PR/deploy evidence into deterministic producer events. It is blocked/unassigned by default and cannot forge
    central mission completion. **Gate: PASS offline:** an injected post-create crash plus backend restart completes one
-   fake mission without duplicate work/events. The adapter has not been installed or dispatched live.
+   fake mission without duplicate work/events. At this A6.2 checkpoint the adapter had not been installed live; A6.4
+   later installed and exercised it once, without adding automatic intake-to-dispatch.
 4. **A6.3 — Compact synchronized observation — ✅ DONE offline (2026-07-14).** A stdlib-only module inside the pinned
    central Hermes source owns one SQLite event log/reducer. The existing gateway API exposes its structured view;
    Workspace adds one compact Dashboard card with bounded two-second polling and expandable tasks, workers, terminal,
    changes, gates and delivery links. Telegram `/mission` plus automatic owner-relevant notifications render the same
    projection hash. **Gate: PASS offline:** the fixture survives store restart/cursor reconnect with identical
-   Workspace/Telegram state; producer retries do not duplicate events or notifications; pinned overlay tamper checks,
-   the patched Workspace production build and an aiohttp API smoke all pass. The overlays are not installed live.
+   Workspace/Telegram state; producer events deduplicate and notifications deduplicate after their cursor checkpoint.
+   Delivery is at-least-once, so a crash after send and before checkpoint may repeat a notification. Pinned overlay
+   tamper checks, the patched Workspace production build and an aiohttp API smoke all pass. At this A6.3 checkpoint the
+   overlays were not installed live; A6.4 later installed them.
 5. **A6.4 — Controlled one-shot canary — ✅ DONE (2026-07-14).** With the owner's explicit approval of the
-   model/runtime and test target, one disposable goal ran through implementation, tests, independent review, PR/CI,
+   model/runtime and test target, one disposable goal ran through implementation, tests, separate review, PR/CI,
    merge and fresh-main verification. The exact route was central
-   `openai-codex`/`codex_app_server`, author `gpt-5.6-luna`, independent exact-SHA read-only reviewer
-   `gpt-5.6-sol`, and private target `PavelLizunov/hermes-flow-v2-pilot`. Qwen/local inference, GPU, Claude, swarm and
+   `openai-codex`/`codex_app_server`, recorded author label `gpt-5.6-luna`, recorded exact-SHA reviewer label
+   `gpt-5.6-sol`, and private target `PavelLizunov/hermes-flow-v2-pilot`. The current artifacts do not derive either
+   model ID from runtime events or prove an OS-enforced read-only reviewer. Qwen/local inference, GPU, Claude, swarm and
    Spark were not used. **Gate: PASS:** [evidence](evidence/a6-4-controlled-canary-2026-07-14.md) links rollout,
    implementation, 4/4 tests, exact-SHA review, PR/CI/merge, fresh-main post-verify, idempotent event replay, equal
    Central/Workspace projection and the caught-up Telegram cursor. No human operator step is hidden.

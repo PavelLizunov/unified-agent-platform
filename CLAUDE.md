@@ -186,18 +186,15 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. A6.0 is complete in `docs/hermes-mission-state-map.md`. Use it as the factual source for current state ownership,
-   fallback behaviour, identifiers and missing central-to-Flow/Telegram joins.
-2. A6.1 is complete offline in `docs/hermes-mission-contract-v1.md`: the fake central backend proves channel/reconnect
-   convergence and the pinned Workspace overlay makes central-only authority selection fail closed. The live
-   Workspace has not been restarted or redeployed for this change.
-3. A6.2 is complete offline: `tools/swarm/mission_adapter.py` reuses native Kanban and passes crash/restart/no-duplicate
-   fixtures. It is not installed live and dispatch stays disabled.
-4. A6.3 is complete offline: `tools/hermes-mission/` installs one central SQLite log/reducer into pinned Hermes;
-   Workspace and Telegram consume the same projection, and the reconnect/API/build gates pass. It is not installed or
-   deployed live.
-5. A6.4 is next but owner-gated. Before any install/restart/deploy/canary, obtain explicit approval for the exact
-   model/runtime, disposable repository/goal and allowed tools. No Qwen/local inference/GPU/Spark Runner is implied.
+1. A6.0 is a pre-rollout snapshot in `docs/hermes-mission-state-map.md`; use `STATUS.md` for current live facts.
+2. A6.1-A6.4 are complete through one controlled canary. The central mission runtime, fail-closed Workspace overlay
+   and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
+3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
+   resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
+4. The next product milestone is automatic central `mission.accepted` to exactly one idempotent build-1 Kanban root
+   task. Reuse MissionStore, `mission_adapter.py` and native Kanban; do not add a new control plane or dashboard.
+5. The A6.4 route approval does not carry forward. No model/runtime change, Qwen/local inference/GPU, Claude, swarm,
+   Spark Runner, live restart/deploy or destructive test is implied.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

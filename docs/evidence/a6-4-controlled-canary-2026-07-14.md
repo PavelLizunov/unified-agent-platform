@@ -11,6 +11,10 @@ The owner approved one disposable end-to-end canary with this exact route:
 - change: add `counter.py --help`, one focused test and README usage;
 - delivery: tests, independent review, PR/CI, merge and fresh-main post-verify.
 
+The model IDs and `read-only` mode below are the approved and recorded route labels. The current
+`flow_contract.py summarize-codex` input does not derive model identity from a runtime event, and the evidence does not
+attest an OS-enforced read-only filesystem or credential boundary for the reviewer.
+
 Qwen, local inference, GPU, Claude, swarm, Spark Runner and destructive tests remained forbidden. The owner did not
 perform an execution step after approving this boundary.
 
@@ -36,9 +40,9 @@ perform an execution step after approving this boundary.
 - Disposable author branch: `agent/a6-canary-help-20260714`.
 - Author result: commit `388b197876d081ff75247e7baa843e0d141cc3ca`, exactly three changed files and 20
   inserted lines. The focused gate passed 4/4 tests.
-- Author telemetry was a completed `gpt-5.6-luna` turn. The first ephemeral transport attempt did not emit
+- Author telemetry recorded a completed turn with label `gpt-5.6-luna`. The first ephemeral transport attempt did not emit
   `turn.completed`, was rejected, left no accepted change and was retried through the same approved model route.
-- Independent review used a different session and `gpt-5.6-sol` in `read-only` mode against exact commit
+- Separate review used a different session and recorded `gpt-5.6-sol` in `read-only` mode against exact commit
   `388b197876d081ff75247e7baa843e0d141cc3ca`. It reran the 4/4 test gate, returned `accept` and reported no findings.
   The worktree remained clean at the reviewed SHA.
 - The machine contract accepted the same-provider degraded review only after proving different exact models,
@@ -67,7 +71,8 @@ perform an execution step after approving this boundary.
 
 ## Honest boundary after the canary
 
-This proves the A6 contract and one owner-approved route end to end. It does not yet make arbitrary future missions
+This proves the A6 mission projection and one owner-approved, explicitly orchestrated route end to end. It does not
+prove runtime-derived model identity or an OS-enforced read-only reviewer, and it does not yet make arbitrary missions
 fully push-button: Codex orchestration explicitly created/claimed the Kanban task, invoked the approved author and
 reviewer routes and published the adapter events. No human operator action was hidden, but automatic central-mission
 dispatch and route selection remain a later product milestone. One canary is also not a soak or HA claim.
