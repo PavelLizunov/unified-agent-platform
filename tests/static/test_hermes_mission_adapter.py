@@ -213,25 +213,48 @@ class MissionAdapterTests(unittest.TestCase):
 
     def test_real_backend_is_shell_free_idempotent_and_dispatch_gated(self):
         commands = []
+        state = {"status": "ready", "events": []}
 
         def runner(command):
             commands.append(command)
+            action = command[command.index("central") + 1]
+            if action == "block":
+                state["status"] = "blocked"
+                state["events"].append({"kind": "blocked"})
+                return subprocess.CompletedProcess(command, 0, stdout="Blocked task-1\n", stderr="")
             return subprocess.CompletedProcess(
                 command, 0,
-                stdout=json.dumps({"id": "task-1", "status": "blocked"}),
+                stdout=json.dumps(
+                    {"id": "task-1", "status": state["status"]}
+                    if action == "create"
+                    else {
+                        "task": {"id": "task-1", "status": state["status"], "assignee": None},
+                        "events": state["events"],
+                        "runs": [],
+                    }
+                ),
                 stderr="",
             )
 
         backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
-        backend.ensure_root(
+        task = backend.ensure_root(
             mission_id="mission-1", goal="Goal", allow_dispatch=False,
             assignee=None, workspace=None,
         )
         command = commands[0]
         self.assertEqual("/opt/hermes", command[0])
         self.assertIn("central-mission:mission-1", command)
-        self.assertEqual("blocked", command[command.index("--initial-status") + 1])
+        self.assertNotIn("--initial-status", command)
         self.assertNotIn("--assignee", command)
+        self.assertEqual("blocked", task["status"])
+        block_commands = [item for item in commands if "block" in item]
+        self.assertEqual(1, len(block_commands))
+        self.assertIn("needs_input", block_commands[0])
+        backend.ensure_root(
+            mission_id="mission-1", goal="Goal", allow_dispatch=False,
+            assignee=None, workspace=None,
+        )
+        self.assertEqual(1, len([item for item in commands if "block" in item]))
         with self.assertRaisesRegex(adapter.AdapterError, "non-scratch workspace"):
             backend.ensure_root(
                 mission_id="mission-2", goal="Goal", allow_dispatch=True,
