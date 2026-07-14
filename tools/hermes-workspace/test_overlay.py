@@ -9,6 +9,7 @@ import tempfile
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
 COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
+UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
 def run(*args: object) -> subprocess.CompletedProcess[str]:
@@ -21,17 +22,24 @@ def run(*args: object) -> subprocess.CompletedProcess[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("checkout", type=pathlib.Path)
+    parser.add_argument("checkout", nargs="?", type=pathlib.Path)
     args = parser.parse_args()
-    source = args.checkout.resolve()
+    source = args.checkout.resolve() if args.checkout else UPSTREAM
     with tempfile.TemporaryDirectory(prefix="hermes-workspace-overlay-") as temp:
         clone = pathlib.Path(temp) / "workspace"
+        clone.mkdir()
         subprocess.run(
-            ["git", "clone", "--no-local", str(source), str(clone)],
+            ["git", "init", "--quiet"],
+            cwd=clone,
             check=True,
             stdout=subprocess.DEVNULL,
         )
-        subprocess.run(["git", "checkout", "--detach", COMMIT], cwd=clone, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            ["git", "fetch", "--quiet", "--depth=1", str(source), COMMIT],
+            cwd=clone,
+            check=True,
+        )
+        subprocess.run(["git", "checkout", "--detach", "FETCH_HEAD"], cwd=clone, check=True, stdout=subprocess.DEVNULL)
 
         before = run(clone, "--check")
         assert before.returncode == 0, before.stderr
