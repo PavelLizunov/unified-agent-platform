@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-14
+Last updated: 2026-07-15
 
 ## Phase
 
@@ -40,6 +40,11 @@ Last updated: 2026-07-14
   reprocessing of the saved A6.4 author/reviewer artifacts confirmed Luna/workspace-write and Sol/read-only on Codex
   CLI `0.144.3`; the addendum is in the canary evidence. The gate is not wired into a live worker yet and does not
   prove an OS-independent read-only filesystem or credential boundary.
+- **A7.1 automatic mission dispatch foundation is prepared offline, not live.** Draft PRs #182/#184/#185/#186 add a
+  blocked-by-default bounded pull handoff, crash convergence, local-only terminal authority, a closed/redacted producer
+  schema and owner-only state files. Every offline/CI gate is green, but none of these drafts is in `master`; Flux,
+  Central Hermes and build-1 were not changed. A7.2 merge/restart/install and one non-activating blocked-task canary
+  require new owner approval. Exact evidence: `docs/evidence/a7-1-automatic-dispatch-foundation-2026-07-15.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
