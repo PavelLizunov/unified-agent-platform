@@ -49,6 +49,10 @@ All four PRs are draft, mergeable and have successful `static-checks`. The three
 - Offline aiohttp API smoke accepted and deduplicated a valid producer event, rejected an unknown payload field and
   rejected producer-created `mission.accepted`.
 - POSIX mode regressions began with deliberately over-permissive files/directories and proved repair to `0600`/`0700`.
+- An offline bottom-up merge rehearsal preserved the exact PR heads with merge commits, completed without conflicts and
+  produced tree `4c1170cc33108d57c1186cf989bfdc65b63750e4`, exactly matching #187. The folded tree again passed
+  `tests/verify-local.ps1 -SkipSmoke`. A sequential squash rehearsal conflicted at #184, so A7.2 must preserve the
+  reviewed stack ancestry with merge commits rather than improvise conflict resolution on `master`.
 - GitHub Actions: [#182](https://github.com/PavelLizunov/unified-agent-platform/actions/runs/29367928747),
   [#184](https://github.com/PavelLizunov/unified-agent-platform/actions/runs/29370027332),
   [#185a](https://github.com/PavelLizunov/unified-agent-platform/actions/runs/29370025614),
@@ -72,6 +76,7 @@ No Qwen, local inference, GPU, Claude, swarm, Spark Runner, model turn or destru
 
 ## Next owner gate
 
-A7.2 requires one explicit approval covering the draft stack merge, Flux verification, controlled Central Hermes
-restart, build-1 adapter update and one disposable poll **without** `--activate`. Acceptance is exactly one blocked,
-unassigned Kanban task and one central `task.upsert`, with no worker/model process. Work stops before activation.
+A7.2 requires one explicit approval covering the draft stack merge **bottom-up with merge commits**, Flux verification,
+controlled Central Hermes restart, build-1 adapter update and one disposable poll **without** `--activate`. Acceptance
+is exactly one blocked, unassigned Kanban task and one central `task.upsert`, with no worker/model process. Work stops
+before activation.
