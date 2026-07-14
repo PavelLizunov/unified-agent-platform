@@ -122,6 +122,25 @@ Every retry emits stable `producer_event_id` values for central deduplication. T
 for file, gate/review and delivery evidence; mission completion remains a central Hermes decision. See
 `docs/hermes-mission-contract-v1.md` for the envelope and metadata schema.
 
+Post-A6 automatic handoff uses one bounded pull iteration:
+
+```bash
+HERMES_API_URL=http://100.94.228.67:30642 \
+python tools/swarm/mission_adapter.py \
+  --state-root /home/uap/swarm-out \
+  --board default \
+  poll \
+  --dispatch-profile <owner-approved-profile-label> \
+  --assignee <owner-approved-kanban-profile> \
+  --workspace <fixed-non-scratch-workspace>
+```
+
+`HERMES_API_TOKEN` and `HERMES_MISSION_PRODUCER_KEY` must come from a protected environment file; never pass either
+secret on argv. One invocation claims at most one exact-profile mission and stops after projecting its idempotent root
+task. An absent/unknown profile, a non-accepted mission or an existing task is skipped. Installing a periodic user
+service/timer is a separate live rollout: enabling it can make the existing Kanban dispatcher launch the configured
+worker, so the exact profile, workspace and model route require owner approval.
+
 ## 4. Durable artifacts
 
 Author writes `/home/uap/swarm-out/<mission>/summary.json`:

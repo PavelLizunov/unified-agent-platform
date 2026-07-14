@@ -11,6 +11,9 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Any, Callable
 
 
@@ -147,6 +150,55 @@ class HermesKanbanBackend:
                 return ""
             raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban log failed")
         return result.stdout
+
+
+class CentralMissionClient:
+    def __init__(self, base_url: str, api_token: str, producer_key: str):
+        parsed = urllib.parse.urlsplit(str(base_url or "").strip())
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise AdapterError("invalid central mission URL")
+        if not api_token.strip() or not producer_key.strip():
+            raise AdapterError("central mission credentials are required")
+        self.base_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
+        self.api_token = api_token.strip()
+        self.producer_key = producer_key.strip()
+
+    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers = {"Authorization": f"Bearer {self.api_token}"}
+        if body is not None:
+            headers.update({
+                "Content-Type": "application/json",
+                "X-Hermes-Mission-Producer-Key": self.producer_key,
+            })
+        request = urllib.request.Request(f"{self.base_url}{path}", data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            raise AdapterError(f"central mission API returned HTTP {error.code}") from error
+        except (urllib.error.URLError, TimeoutError, UnicodeError, json.JSONDecodeError) as error:
+            raise AdapterError("central mission API request failed") from error
+        if not isinstance(result, dict):
+            raise AdapterError("central mission API returned invalid JSON")
+        return result
+
+    def list_missions(self) -> list[dict[str, Any]]:
+        result = self._request("GET", "/api/missions?limit=100")
+        missions = result.get("missions")
+        if not isinstance(missions, list) or not all(isinstance(item, dict) for item in missions):
+            raise AdapterError("central mission list is invalid")
+        return missions
+
+    def publish(self, mission_id: str, event: dict[str, Any]) -> None:
+        self._request("POST", f"/api/missions/{urllib.parse.quote(mission_id, safe='')}/events", event)
 
 
 def accept_mission(
@@ -314,6 +366,56 @@ def sync_mission(mission_id: str, state_root: pathlib.Path, backend: Any) -> lis
     return project_mission(mission_id, backend)
 
 
+def dispatch_pending(
+    client: Any,
+    state_root: pathlib.Path,
+    backend: Any,
+    *,
+    dispatch_profile: str,
+    assignee: str,
+    workspace: str,
+) -> dict[str, Any] | None:
+    if not dispatch_profile or not assignee or not workspace or workspace == "scratch":
+        raise AdapterError("dispatch requires a profile, assignee and non-scratch workspace")
+    for mission in client.list_missions():
+        tasks = mission.get("tasks")
+        if not isinstance(tasks, list):
+            raise AdapterError("central mission projection has invalid tasks")
+        if (
+            mission.get("dispatch_profile") != dispatch_profile
+            or mission.get("status") != "active"
+            or mission.get("stage") != "accepted"
+            or tasks
+        ):
+            continue
+        mission_id = mission.get("mission_id")
+        goal = mission.get("goal")
+        if not isinstance(mission_id, str) or not mission_id or not isinstance(goal, str) or not goal.strip():
+            raise AdapterError("central mission projection is incomplete")
+        accepted = {
+            "schema_version": 1,
+            "mission_id": mission_id,
+            "sequence": 1,
+            "type": "mission.accepted",
+            "source": "central-hermes",
+            "correlation": {},
+            "payload": {"goal": goal, "dispatch_profile": dispatch_profile},
+        }
+        state = accept_mission(
+            accepted,
+            state_root,
+            backend,
+            allow_dispatch=True,
+            assignee=assignee,
+            workspace=workspace,
+        )
+        events = sync_mission(mission_id, state_root, backend)
+        for event in events:
+            client.publish(mission_id, event)
+        return {**state, "published_events": len(events)}
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-bin", default="/home/uap/hermes-agent/.venv/bin/hermes")
@@ -331,6 +433,12 @@ def main(argv: list[str] | None = None) -> int:
     sync.add_argument("--mission-id", required=True)
     sync.add_argument("--output", type=pathlib.Path)
 
+    poll = sub.add_parser("poll")
+    poll.add_argument("--central-url", default=os.environ.get("HERMES_API_URL"))
+    poll.add_argument("--dispatch-profile", required=True)
+    poll.add_argument("--assignee", required=True)
+    poll.add_argument("--workspace", required=True)
+
     args = parser.parse_args(argv)
     backend = HermesKanbanBackend(args.hermes_bin, args.board)
     try:
@@ -339,8 +447,22 @@ def main(argv: list[str] | None = None) -> int:
                 _read_json(args.event), args.state_root, backend,
                 allow_dispatch=args.allow_dispatch, assignee=args.assignee, workspace=args.workspace,
             )
-        else:
+        elif args.command == "sync":
             result = sync_mission(args.mission_id, args.state_root, backend)
+        else:
+            client = CentralMissionClient(
+                args.central_url,
+                os.environ.get("HERMES_API_TOKEN", ""),
+                os.environ.get("HERMES_MISSION_PRODUCER_KEY", ""),
+            )
+            result = dispatch_pending(
+                client,
+                args.state_root,
+                backend,
+                dispatch_profile=args.dispatch_profile,
+                assignee=args.assignee,
+                workspace=args.workspace,
+            )
         if args.command == "sync" and args.output:
             _write_json(args.output, result)
         else:

@@ -182,11 +182,40 @@ def test_producer_cannot_end_mission_or_decrease_progress() -> None:
             assert "progress decreased" in str(error)
 
 
+def test_dispatch_profile_is_projected_and_immutable() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.accept(
+            "Safe mission",
+            mission_id="mission-dispatch",
+            dispatch_profile="build1-uap",
+        )
+        assert created
+        assert accepted["payload"]["dispatch_profile"] == "build1-uap"
+        assert store.projection("mission-dispatch")["dispatch_profile"] == "build1-uap"
+        replayed, replay_created = store.accept(
+            "Safe mission",
+            mission_id="mission-dispatch",
+            dispatch_profile="build1-uap",
+        )
+        assert not replay_created and replayed == accepted
+        try:
+            store.accept(
+                "Safe mission",
+                mission_id="mission-dispatch",
+                dispatch_profile="different-profile",
+            )
+            raise AssertionError("dispatch profile changed after acceptance")
+        except missions.MissionError as error:
+            assert "different parameters" in str(error)
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
+    test_dispatch_profile_is_projected_and_immutable()
     print("hermes mission runtime checks passed")
 
 

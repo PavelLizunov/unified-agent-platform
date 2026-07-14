@@ -96,6 +96,8 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
         progress = payload.get("progress_percent")
         if not isinstance(progress, int) or isinstance(progress, bool) or not 0 <= progress <= 100:
             raise MissionError("invalid mission progress")
+    if event_type == "mission.accepted" and "dispatch_profile" in payload:
+        _require_id(payload.get("dispatch_profile"), "dispatch_profile")
     normalized = {
         "schema_version": SCHEMA_VERSION,
         "mission_id": mission_id,
@@ -117,6 +119,7 @@ def empty_projection() -> dict[str, Any]:
         "stage": None,
         "progress_percent": 0,
         "goal": None,
+        "dispatch_profile": None,
         "question": None,
         "result": None,
         "error": None,
@@ -151,7 +154,12 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
         view["sequence"] = event["sequence"]
         kind, payload = event["type"], event["payload"]
         if kind == "mission.accepted":
-            view.update(status="active", stage="accepted", goal=payload["goal"])
+            view.update(
+                status="active",
+                stage="accepted",
+                goal=payload["goal"],
+                dispatch_profile=payload.get("dispatch_profile"),
+            )
         elif kind == "mission.stage":
             progress = payload["progress_percent"]
             if progress < view["progress_percent"]:
@@ -345,11 +353,14 @@ class MissionStore:
         mission_id: str | None = None,
         session_id: str | None = None,
         run_id: str | None = None,
+        dispatch_profile: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         goal = str(goal or "").strip()
         if not goal or len(goal) > 8_192:
             raise MissionError("invalid mission goal")
         mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
+        if dispatch_profile is not None:
+            dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
         correlation = {
             key: value
             for key, value in (("session_id", session_id), ("run_id", run_id))
@@ -358,9 +369,16 @@ class MissionStore:
         existing = self.events(mission_id)
         if existing:
             first = existing[0]
-            if first["type"] == "mission.accepted" and first["payload"].get("goal") == goal:
+            if (
+                first["type"] == "mission.accepted"
+                and first["payload"].get("goal") == goal
+                and first["payload"].get("dispatch_profile") == dispatch_profile
+            ):
                 return first, False
-            raise MissionError("mission already accepted with different goal")
+            raise MissionError("mission already accepted with different parameters")
+        payload = {"goal": goal}
+        if dispatch_profile is not None:
+            payload["dispatch_profile"] = dispatch_profile
         return self._append(
             mission_id,
             {
@@ -369,7 +387,7 @@ class MissionStore:
                 "type": "mission.accepted",
                 "source": "central-hermes",
                 "correlation": correlation,
-                "payload": {"goal": goal},
+                "payload": payload,
             },
         )
 

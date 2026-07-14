@@ -180,6 +180,25 @@ Each numbered item was delivered as a separate small PR or an explicitly recorde
 controlled-canary boundary. The next product milestone is repeatable automatic mission intake/dispatch and does not
 inherit approval for a model/runtime, local inference/GPU, swarm, Spark or destructive-test expansion.
 
+### Phase A7 — Automatic mission intake to build-1
+
+**Goal:** an allowlisted central mission reaches exactly one native Kanban root task without a Codex operator wiring
+the transition. This extends the existing modular monolith and Flow adapter; it does not add an application service,
+workflow engine or mission database.
+
+1. **A7.1 — Pull handoff and crash recovery — offline gate.** Central `mission.accepted` carries an immutable optional
+   `dispatch_profile`. The build-1 adapter performs one bounded poll, exact-matches the locally configured profile,
+   creates/reuses the native Kanban root and publishes its deterministic task event. A fault after Kanban create but
+   before central publish must converge after restart to one task/root ID and one producer event. No model runner is
+   invoked by the hermetic test.
+2. **A7.2 — Owner-approved live scheduling and canary.** Install a periodic build-1 user service/timer with a protected
+   environment file, one exact dispatch profile, fixed assignee and fixed non-scratch workspace. Enabling it may cause
+   native Kanban to launch that worker, so model/runtime/target approval is required. The canary gate is central create
+   to exactly one visible Kanban task and central `task.upsert`; author/review/delivery remain a later step.
+
+No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
+mission without an exact configured profile remains unclaimed and visible rather than falling back.
+
 ---
 
 ## Track B — Foundation work (independent of the pilot)

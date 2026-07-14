@@ -71,6 +71,38 @@ class DeduplicatingCentralSink:
             self.events.setdefault(producer_id, event)
 
 
+class FakeCentral:
+    def __init__(self, dispatch_profile="build1-uap"):
+        self.mission = {
+            "mission_id": "mission-auto",
+            "status": "active",
+            "stage": "accepted",
+            "goal": "Implement the safe change",
+            "dispatch_profile": dispatch_profile,
+            "tasks": [],
+        }
+        self.events = {}
+        self.fail_publish_once = False
+
+    def list_missions(self):
+        return [copy.deepcopy(self.mission)]
+
+    def publish(self, mission_id, event):
+        if self.fail_publish_once:
+            self.fail_publish_once = False
+            raise adapter.AdapterError("simulated crash before central commit")
+        self.assert_mission(mission_id)
+        producer_id = event["correlation"]["producer_event_id"]
+        if producer_id not in self.events:
+            self.events[producer_id] = copy.deepcopy(event)
+            if event["type"] == "task.upsert":
+                self.mission["tasks"] = [copy.deepcopy(event["payload"])]
+
+    def assert_mission(self, mission_id):
+        if mission_id != self.mission["mission_id"]:
+            raise AssertionError("wrong mission")
+
+
 class MissionAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -204,6 +236,70 @@ class MissionAdapterTests(unittest.TestCase):
                     "type": "mission.completed", "payload": {"result": "forged"},
                 }]},
             )
+
+    def test_pull_dispatch_recovers_after_task_create_before_publish(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        central.fail_publish_once = True
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            with self.assertRaisesRegex(adapter.AdapterError, "simulated crash"):
+                adapter.dispatch_pending(
+                    central,
+                    state_root,
+                    backend,
+                    dispatch_profile="build1-uap",
+                    assignee="approved-profile",
+                    workspace="worktree:/tmp/repo",
+                )
+
+            restarted_backend = FakeKanban(backend.store)
+            result = adapter.dispatch_pending(
+                central,
+                state_root,
+                restarted_backend,
+                dispatch_profile="build1-uap",
+                assignee="approved-profile",
+                workspace="worktree:/tmp/repo",
+            )
+            self.assertEqual("task-1", result["root_task_id"])
+            self.assertEqual(2, restarted_backend.create_calls)
+            self.assertEqual(1, len(restarted_backend.tasks))
+            self.assertEqual(1, len(central.events))
+            self.assertEqual(1, len(central.mission["tasks"]))
+
+            self.assertIsNone(adapter.dispatch_pending(
+                central,
+                state_root,
+                restarted_backend,
+                dispatch_profile="build1-uap",
+                assignee="approved-profile",
+                workspace="worktree:/tmp/repo",
+            ))
+            self.assertEqual(2, restarted_backend.create_calls)
+
+    def test_central_client_keeps_credentials_in_headers(self):
+        listing = mock.MagicMock()
+        listing.__enter__.return_value.read.return_value = b'{"missions": []}'
+        published = mock.MagicMock()
+        published.__enter__.return_value.read.return_value = b'{"created": true}'
+        with mock.patch.object(adapter.urllib.request, "urlopen", side_effect=[listing, published]) as opener:
+            client = adapter.CentralMissionClient(
+                "http://central.example:30642",
+                "api-token",
+                "producer-key",
+            )
+            self.assertEqual([], client.list_missions())
+            client.publish("mission-1", {"type": "task.upsert"})
+
+        first_request = opener.call_args_list[0].args[0]
+        second_request = opener.call_args_list[1].args[0]
+        first_headers = {key.lower(): value for key, value in first_request.header_items()}
+        second_headers = {key.lower(): value for key, value in second_request.header_items()}
+        self.assertEqual("Bearer api-token", first_headers["authorization"])
+        self.assertEqual("producer-key", second_headers["x-hermes-mission-producer-key"])
+        self.assertNotIn("api-token", first_request.full_url)
+        self.assertNotIn("producer-key", second_request.full_url)
 
 
 if __name__ == "__main__":
