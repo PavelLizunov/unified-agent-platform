@@ -1,49 +1,46 @@
-# Веб-командный центр — hermes-workspace на build-1
+# Central Hermes Workspace webcenter
 
-**Развёрнут 2026-07-09.** Первый шаг user-friendly дорожки: чат + kanban-доска роя + память + скиллы +
-терминал в браузере, для владельца (и сестры) — поверх ВАЛИДИРОВАННОГО ядра (SIM-1), как и предписывал
-research-док («Workspace — optional UI после валидации, не source of truth»).
+Workspace runs on `uap-build-1:3000` (tailnet-only) and points to central hermes-agent on
+`100.94.228.67`: gateway API NodePort `30642` and authenticated dashboard NodePort `30911`.
+Build-1's `hermes-gateway`/`hermes-dashboard` remain running for Hermes Flow v2's Kanban dispatcher;
+they are not the Workspace backend.
 
-## Доступ
+## Reproducible rollout
 
-- **UI: http://100.85.56.31:3000** (tailnet-only; build-1 не имеет публичного IP).
-- Пароль: на build-1 в **`~/WORKSPACE-PASSWORD.txt`** (в чат/git не выносим). Сменить: поправить
-  `HERMES_PASSWORD` в `~/hermes-workspace/.env` + `sudo systemctl restart hermes-workspace`.
-- Источник истины при расхождениях — CLI/kanban/gateway, НЕ UI (правило research-дока).
+1. Confirm the external checkout is exactly `c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c`, then run
+   `python3 tools/hermes-workspace/apply_overlay.py /path/to/hermes-workspace` twice. The second run
+   must report an already-applied overlay; any other upstream commit/fingerprint fails closed.
+2. Provision the owner-only runtime file `/home/uap/hermes-workspace/.env` on build-1 with mode `0600`,
+   and configure the systemd unit with `EnvironmentFile=/home/uap/hermes-workspace/.env`. Stream the
+   encrypted-secret-derived values between trusted hosts or into a protected stdin consumer; do not print
+   values, place them in command arguments/history, logs, or documentation. The runtime file is the one
+   deliberate owner-only secret store and is never committed.
+3. Put runtime variables in that file without exposing values:
+   `HERMES_API_URL=http://100.94.228.67:30642`, `HERMES_API_TOKEN` from Secret `hermes-agent-api/api-key`,
+   `HERMES_DASHBOARD_URL=http://100.94.228.67:30911`, `HERMES_DASHBOARD_USERNAME` to the configured
+   dashboard user, and `HERMES_DASHBOARD_PASSWORD` from Secret `hermes-agent-dashboard/password`.
+   Both dashboard credential variables must be present, or both must be absent for loopback ephemeral-token
+   mode. `HERMES_PASSWORD` remains the existing Workspace UI password.
+4. Set build-time variables only in the protected build environment before `pnpm build`:
+   `VITE_HERMESWORLD_ENABLED=0` and `VITE_UPDATE_CENTER_ENABLED=0`. They are compiled into the UI and are
+   not substitutes for the runtime `HERMES_*` variables.
+5. Build and restart only the Workspace unit on build-1 after the overlay and environment are installed:
+   `pnpm install --frozen-lockfile && pnpm build`, then `sudo systemctl restart hermes-workspace`.
+   Do not restart the local gateway/dashboard for this change.
 
-## Архитектура (все — systemd, переживают ребут)
+Secret values must be streamed between trusted hosts or supplied on stdin; never put values in commands,
+shell history, process listings, logs, markdown, or manifests. The encrypted Secret remains GitOps-managed.
 
-| Unit | Порт | Что |
-|---|---|---|
-| `hermes-gateway` | 127.0.0.1:8642 | `hermes gateway run` — messaging-гейтвей + **kanban-диспетчер** + OpenAI-совместимый API-сервер |
-| `hermes-dashboard` | 127.0.0.1:9119 | dashboard API (config/sessions/skills для workspace) |
-| `hermes-workspace` | 0.0.0.0:3000 | UI (node server-entry.js, prod-build vite) |
-
-Код: `~/hermes-workspace` (clone outsourc-e/hermes-workspace, 6k★, zero-fork поверх vanilla hermes-agent);
-Node 22 (nodesource) + pnpm (corepack). Установка шла через VLESS-прокси.
-
-## Гочи (стоили времени — не повторять)
-
-1. **API-сервер гейтвея выключен по умолчанию**: нужны env в `~/.hermes/.env` профиля гейтвея:
-   `API_SERVER_ENABLED=true` + **`API_SERVER_KEY` обязателен** (без него сервер отказывается стартовать,
-   даже на loopback) + `API_SERVER_HOST/PORT`. И запускать **`hermes gateway run`** (подкоманда!).
-2. **prod-start workspace НЕ читает `.env` сам** — systemd-юнит обязан подавать `EnvironmentFile=`
-   (или `set -a; . ./.env`). Без этого fail-closed guard остановит бинд на 0.0.0.0 (и это правильно).
-3. `HERMES_API_TOKEN` в `.env` workspace = `API_SERVER_KEY` гейтвея (bearer).
-4. snap на build-1 обрывается на больших пакетах (RU-сеть) — не тащить через snap ничего тяжёлого.
-
-## Смоки после изменений
+## Smoke sequence
 
 ```bash
-for s in hermes-gateway hermes-dashboard hermes-workspace; do systemctl is-active $s; done
-KEY=$(grep ^API_SERVER_KEY= ~/.hermes/.env | cut -d= -f2)
-curl -s -H "Authorization: Bearer $KEY" http://127.0.0.1:8642/v1/models | head -c 120   # API жив
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000/                          # UI 200
+curl -fsS -H "Authorization: Bearer $HERMES_API_TOKEN" http://100.94.228.67:30642/v1/models
+curl -fsS -o /dev/null -w '%{http_code}\n' http://100.85.56.31:3000/
+curl -fsS -o /dev/null -w '%{http_code}\n' http://100.94.228.67:30911/api/status
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-npc)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-admin)" = 404
 ```
 
-## Дальше по user-friendly дорожке (план)
-
-2. Телефон для сестры: её TG-ID → `TELEGRAM_ALLOWED_USERS` (managed-env прод-пода; ждёт ID от владельца).
-3. Рой из чата: скилл «запусти рой на задачу X» в поде (через build1 → kanban swarm).
-4. «Запомни как знание» из чата → knowledge record add (query уже прошит).
-5. Стартовая страница-лендинг (ссылки: workspace :3000, база знаний :8100, дашборд Hermes, флот-карта).
+Log in to Workspace and verify chat, central dashboard-backed Profiles, and Kanban. Verify no HermesWorld,
+build-1 local-model, or Update Center navigation is present. A dashboard 401 must trigger one in-memory
+password-session refresh; credentials and cookies must never appear in logs.

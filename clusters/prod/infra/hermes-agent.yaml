@@ -175,8 +175,14 @@ spec:
             # A4 - Claude Max OAuth token for the claude -p coding worker (claude reads CLAUDE_CODE_OAUTH_TOKEN)
             - name: CLAUDE_CODE_OAUTH_TOKEN
               valueFrom: { secretKeyRef: { name: hermes-agent-claude, key: oauth-token } }
+            - { name: API_SERVER_ENABLED, value: "true" }
+            - { name: API_SERVER_HOST, value: "0.0.0.0" }
+            - { name: API_SERVER_PORT, value: "8642" }
+            - name: API_SERVER_KEY
+              valueFrom: { secretKeyRef: { name: hermes-agent-api, key: api-key } }
           ports:
             - { name: dashboard, containerPort: 9119 }
+            - { name: api, containerPort: 8642 }
           # Probes (2026-06-28): a TCP connect to the dashboard port proves the gateway is actually
           # listening (Ready != merely "process running"). The dashboard requires basic auth, so an
           # HTTP GET would 401 -- TCP is the safe, auth-free signal. startupProbe gives the gateway's
@@ -253,3 +259,18 @@ spec:
       port: 9119
       targetPort: 9119
       nodePort: 30911
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hermes-agent-api
+  namespace: uap-system
+spec:
+  type: NodePort
+  selector:
+    app: hermes-agent
+  ports:
+    - name: api
+      port: 8642
+      targetPort: 8642
+      nodePort: 30642
