@@ -186,10 +186,11 @@ powershell -ExecutionPolicy Bypass -File .\tests\smoke\run-all.ps1
 
 Good next tasks that do not require redesign:
 
-1. Execute A6.0 as a read-only/repo-only current-state map: central Hermes sessions/events, Workspace proxies and
-   fallbacks, local Flow/Kanban stores, dispatcher and correlation IDs. Do not run a model, swarm, GPU or service.
-2. Convert the A6.0 evidence into the smallest A6.1 contract/test PR; do not build a new dashboard or replacement
-   orchestrator.
+1. A6.0 is complete in `docs/hermes-mission-state-map.md`. Use it as the factual source for current state ownership,
+   fallback behaviour, identifiers and missing central-to-Flow/Telegram joins.
+2. Implement the smallest A6.1 central mission/event contract with a fake backend and reconnect/channel tests. Make
+   central-only authority selection fail closed; do not build a new dashboard or replacement orchestrator, and do not
+   run a model, swarm, GPU workload or live canary.
 3. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 4. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 5. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
