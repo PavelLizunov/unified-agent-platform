@@ -67,6 +67,11 @@ def main() -> None:
             assert "import.meta.env.VITE_HERMESWORLD_ENABLED" in endpoint_source
             assert "process.env.VITE_HERMESWORLD_ENABLED" not in endpoint_source
             assert "if (!HERMESWORLD_ENABLED) return json" in endpoint_source
+        models_source = (clone / "src/routes/api/models.ts").read_text()
+        central_only = models_source.index("process.env.HERMES_CENTRAL_ONLY === '1'")
+        local_catalog = models_source.index("let models = readClaudeModelsJson()")
+        assert central_only < local_catalog
+        assert "source: 'hermes-agent'" in models_source[central_only:local_catalog]
         profiles = (clone / "src/server/profiles-browser.ts").read_text()
         assert profiles.count("dashboardFetch('/api/profiles'") == 2
         assert "fetch(`${dashboardUrl}/api/profiles`" not in profiles
