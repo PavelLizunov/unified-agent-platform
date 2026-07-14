@@ -13,6 +13,10 @@ Last updated: 2026-07-14
   keeping build-1 as the execution plane. This is a documentation/architecture decision only: the live runtime has
   not yet been migrated and the current central-Workspace/local-Flow split remains a known contract gap. Canonical
   behaviour: `docs/product-operating-contract.md`.
+- **A6.0 state map complete 2026-07-14.** `docs/hermes-mission-state-map.md` proves that Workspace chat reaches central
+  Hermes, but Tasks, Jobs, Conductor/native-swarm, browser mission state and local Flow use multiple selectable stores
+  without one enforced correlation ID. The Telegram-to-Workspace session join and central-mission-to-Flow event path
+  are absent from repository evidence. No runtime, model, swarm, GPU or service change was made. A6.1 is next.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -336,7 +340,8 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Current control-flow gap (ADR-030/A6):** Workspace presents central Hermes while local Flow/Kanban on build-1 has
   its own orchestration/state boundary. Sessions/jobs/tasks/workers are not yet one end-to-end mission lifecycle, and
   the owner-facing progress view is incomplete. Build-1 is retained, but its target role is executor for central
-  Hermes missions rather than a second user-visible control plane.
+  Hermes missions rather than a second user-visible control plane. A6.0 mapped the concrete stores, fallbacks and
+  missing joins in `docs/hermes-mission-state-map.md`.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through

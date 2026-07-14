@@ -139,9 +139,12 @@ The owner supplies the goal and material product trade-offs; the platform perfor
 The normative behaviour is [Product Operating Contract](product-operating-contract.md); architecture is ADR-030.
 This phase does **not** replace Hermes and does not create a new control plane.
 
-1. **A6.0 — Contract and current-state map.** Document the exact central/local session, task, job, Kanban and event
-   stores; mark every fallback and ownership boundary. No service/model/GPU action. **Gate:** one repo-backed map can
-   trace or honestly declare the missing link from a Workspace/Telegram request to Flow output.
+1. **A6.0 — Contract and current-state map — ✅ DONE (2026-07-14).** The
+   [repo-backed state map](hermes-mission-state-map.md) records every current session, task, job, Kanban, Conductor,
+   browser and Flow store, plus the active fallback paths and identifiers. It traces Workspace chat to central
+   sessions and direct build-1 delegation, and explicitly proves the missing Telegram-session and
+   central-mission-to-Flow links. No service/model/GPU action was used. **Gate: PASS for the map; the product contract
+   remains unmet.**
 2. **A6.1 — Central mission contract.** Define the smallest stable `mission_id`, lifecycle and event envelope at the
    Hermes boundary; use a fake backend for offline tests. Disable ambiguous local fallback in central-only mode.
    **Gate:** refresh/reconnect and both UI channels produce the same ordered mission state in hermetic tests.
@@ -157,7 +160,7 @@ This phase does **not** replace Hermes and does not create a new control plane.
    destructive test or Spark Runner. **Gate:** evidence links every state transition and no operator step is hidden.
 
 Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
-Do not start A6.1 before A6.0 is green, and do not build a new dashboard before the mission/event contract is proven.
+A6.1 is now the next phase. Do not build a new dashboard before the mission/event contract is proven.
 
 ---
 
@@ -243,8 +246,8 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **B0** and the **gate-enforcement** hardening are ✅ DONE — both removed live risk.
 - **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
-  "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** first map and
-  unify the mission plane; do not launch models, swarms or a live canary during A6.0.
+  "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** A6.0 mapped
+  the split state plane; A6.1 is the next offline contract/test step. Do not launch models, swarms or a live canary.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
