@@ -21,6 +21,7 @@ FILES = {
 "src/routes/api/hermes-tasks.ts": "c20eb57f7d87fc444168032d78f87a0e3ceca54664463f573f9c188b3311e904",
 "src/routes/api/claude-jobs.ts": "cd47fd163f669070210d0bcb1f181ae08454665ca1806704b0211bdfcfdaa803",
 "src/routes/api/conductor-spawn.ts": "cac908c034a5dc21a88330838eb7d84f8ce77033012fe4df0606abb87acc2271",
+"src/screens/dashboard/dashboard-screen.tsx": "3e562694308922351aee07bc5bbb7908e752d3c9a6211e896e90dec284bcc7c4",
 }
 PATCHED_FILES = {
 "src/server/gateway-capabilities.ts": "8d37e5895ff40899242200d24f88e2e2e17ea0651f8575581bbc1c2a829c91c7",
@@ -39,7 +40,13 @@ PATCHED_FILES = {
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
+"src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 }
+ADDED_FILES = {
+    "src/routes/api/missions.ts": "src/routes/api/missions.ts",
+    "src/screens/dashboard/components/mission-overview-card.tsx": "src/screens/dashboard/components/mission-overview-card.tsx",
+}
+ASSET_ROOT = pathlib.Path(__file__).with_name("files")
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def replace(text, old, new, name):
     if old not in text: raise SystemExit(f"overlay fragment mismatch: {name}")
@@ -392,6 +399,15 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
             text = replace(text, "GET: async ({ request }) => {", "GET: async ({ request }) => {\n        if (!HERMESWORLD_ENABLED) return json({ error: 'HermesWorld is disabled' }, { status: 404 })", "game GET guard")
         if "POST: async ({ request }) => {" in text:
             text = replace(text, "POST: async ({ request }) => {", "POST: async ({ request }) => {\n        if (!HERMESWORLD_ENABLED) return json({ error: 'HermesWorld is disabled' }, { status: 404 })", "game POST guard")
+    elif rel == "src/screens/dashboard/dashboard-screen.tsx":
+        text = replace(text, "import { LogsTailCard } from './components/logs-tail-card'", "import { LogsTailCard } from './components/logs-tail-card'\nimport { MissionOverviewCard } from './components/mission-overview-card'", "mission card import")
+        text = replace(text, """      </div>
+
+      {/* ── Attention marquee ──""", """      </div>
+
+      <MissionOverviewCard />
+
+      {/* ── Attention marquee ──""", "mission card placement")
     return text
 
 def main():
@@ -416,6 +432,17 @@ def main():
             statuses.append(f"{rel}: exact-patched")
         else:
             raise SystemExit(f"upstream fingerprint mismatch: {rel}")
+    added_paths = []
+    for rel, asset_rel in ADDED_FILES.items():
+        path = root / rel
+        asset = ASSET_ROOT / asset_rel
+        if not path.exists():
+            statuses.append(f"{rel}: source-needs-overlay")
+            added_paths.append((path, asset))
+        elif sha(path) == sha(asset):
+            statuses.append(f"{rel}: exact-patched")
+        else:
+            raise SystemExit(f"upstream fingerprint mismatch: {rel}")
     if args.check:
         print("\n".join(statuses))
     else:
@@ -423,6 +450,10 @@ def main():
             path.write_text(transform(rel, path.read_text()), encoding="utf-8")
             if sha(path) != PATCHED_FILES[rel]:
                 raise SystemExit(f"overlay output fingerprint mismatch: {rel}")
+            changed = True
+        for path, asset in added_paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(asset.read_bytes())
             changed = True
         print("overlay applied" if changed else "overlay already applied")
 if __name__ == "__main__":

@@ -155,17 +155,21 @@ This phase does **not** replace Hermes and does not create a new control plane.
    review/PR/deploy evidence into deterministic producer events. It is blocked/unassigned by default and cannot forge
    central mission completion. **Gate: PASS offline:** an injected post-create crash plus backend restart completes one
    fake mission without duplicate work/events. The adapter has not been installed or dispatched live.
-4. **A6.3 — Compact synchronized observation.** Workspace renders stage/progress with expandable tasks, workers,
-   terminal, changes, gates and delivery links; Telegram carries the same questions/status/result. Reuse the current
-   web/PWA before considering a replacement UI. **Gate:** one fixture timeline has identical mission status in both
-   channels after reconnect.
+4. **A6.3 — Compact synchronized observation — ✅ DONE offline (2026-07-14).** A stdlib-only module inside the pinned
+   central Hermes source owns one SQLite event log/reducer. The existing gateway API exposes its structured view;
+   Workspace adds one compact Dashboard card with bounded two-second polling and expandable tasks, workers, terminal,
+   changes, gates and delivery links. Telegram `/mission` plus automatic owner-relevant notifications render the same
+   projection hash. **Gate: PASS offline:** the fixture survives store restart/cursor reconnect with identical
+   Workspace/Telegram state; producer retries do not duplicate events or notifications; pinned overlay tamper checks,
+   the patched Workspace production build and an aiohttp API smoke all pass. The overlays are not installed live.
 5. **A6.4 — Controlled one-shot canary.** With the owner's explicit approval of the model/runtime and test target,
    run one disposable goal through implementation, tests, independent review, PR/CI and final verification. No GPU,
    destructive test or Spark Runner. **Gate:** evidence links every state transition and no operator step is hidden.
 
 Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
-A6.3 is now the next phase. Do not build a new dashboard; project the same canonical fixture/events through the
-existing Workspace and Telegram surfaces.
+A6.4 is now the next phase and remains owner-gated. Do not install/restart/deploy the overlays or launch a model,
+worker, swarm, GPU workload or disposable canary until the owner explicitly approves the exact model/runtime, test
+repository/goal and allowed tools.
 
 ---
 
@@ -252,8 +256,10 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 - **Track A** (the pilot) proceeded **in parallel**: it mostly uses the RTX, the subscriptions, and one
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
   "self-test passed" is real (north-star demo PASSED, PR #25). **A6 is now the active Track A phase:** A6.0 mapped
-  the split state plane, A6.1 fixed the offline mission contract/fail-closed authority boundary, and A6.2 added the
-  offline idempotent build-1 adapter. A6.3 is next. Do not launch models, swarms or a live canary.
+  the split state plane, A6.1 fixed the offline mission contract/fail-closed authority boundary, A6.2 added the
+  offline idempotent build-1 adapter, and A6.3 added the offline central runtime plus synchronized channel
+  projections. A6.4 is owner-gated. Do not install/deploy it or launch models, swarms or a live canary without the
+  exact approval recorded in that step.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.

@@ -1,0 +1,518 @@
+"""Central Hermes mission log and the two owner-facing projections.
+
+This module is copied into the pinned Hermes checkout by ``apply_overlay.py``.
+It intentionally uses only the Python standard library already present in
+Hermes: SQLite is the authority, Workspace receives the structured view, and
+Telegram renders that same view as compact text.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import re
+import sqlite3
+import uuid
+from collections import OrderedDict
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Awaitable, Callable
+
+
+SCHEMA_VERSION = 1
+STAGES = (
+    "accepted",
+    "planning",
+    "implementing",
+    "testing",
+    "reviewing",
+    "delivering",
+    "verifying",
+    "complete",
+)
+TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
+NOTIFY_TYPES = {"mission.stage", "mission.question", *TERMINAL_TYPES}
+REQUIRED_PAYLOAD = {
+    "mission.accepted": {"goal"},
+    "mission.stage": {"stage", "progress_percent"},
+    "mission.question": {"question_id", "text"},
+    "task.upsert": {"task_id", "title", "status"},
+    "worker.upsert": {"worker_id", "status"},
+    "terminal.append": {"stream", "text"},
+    "change.upsert": {"path", "status"},
+    "gate.upsert": {"gate_id", "status"},
+    "delivery.upsert": {"kind", "status", "url"},
+    "mission.completed": {"result"},
+    "mission.failed": {"error"},
+    "mission.cancelled": {"reason"},
+}
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MAX_EVENT_JSON = 65_536
+_MAX_TERMINAL_ENTRIES = 200
+_MAX_TERMINAL_CHARS = 65_536
+
+
+class MissionError(ValueError):
+    """A mission request violated the v1 contract."""
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _require_id(value: Any, name: str) -> str:
+    text = str(value or "").strip()
+    if not _ID.fullmatch(text):
+        raise MissionError(f"invalid {name}")
+    return text
+
+
+def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(submission, dict) or submission.get("schema_version") != SCHEMA_VERSION:
+        raise MissionError("invalid mission event version")
+    if submission.get("mission_id") != mission_id:
+        raise MissionError("mission event identity mismatch")
+    event_type = str(submission.get("type") or "").strip()
+    source = str(submission.get("source") or "").strip()
+    correlation = submission.get("correlation", {})
+    payload = submission.get("payload", {})
+    if not event_type or len(event_type) > 64 or not source or len(source) > 64:
+        raise MissionError("invalid mission event type/source")
+    if not isinstance(correlation, dict) or not isinstance(payload, dict):
+        raise MissionError("correlation and payload must be objects")
+    missing = REQUIRED_PAYLOAD.get(event_type, set()) - payload.keys()
+    if missing:
+        raise MissionError(f"missing payload fields: {', '.join(sorted(missing))}")
+    if event_type == "mission.stage":
+        if payload.get("stage") not in STAGES:
+            raise MissionError("invalid mission stage")
+        progress = payload.get("progress_percent")
+        if not isinstance(progress, int) or isinstance(progress, bool) or not 0 <= progress <= 100:
+            raise MissionError("invalid mission progress")
+    normalized = {
+        "schema_version": SCHEMA_VERSION,
+        "mission_id": mission_id,
+        "type": event_type,
+        "source": source,
+        "correlation": correlation,
+        "payload": payload,
+    }
+    if len(_json(normalized).encode("utf-8")) > _MAX_EVENT_JSON:
+        raise MissionError("mission event too large")
+    return normalized
+
+
+def empty_projection() -> dict[str, Any]:
+    return {
+        "mission_id": None,
+        "sequence": 0,
+        "status": None,
+        "stage": None,
+        "progress_percent": 0,
+        "goal": None,
+        "question": None,
+        "result": None,
+        "error": None,
+        "tasks": [],
+        "workers": [],
+        "terminal": [],
+        "changes": [],
+        "gates": [],
+        "deliveries": [],
+    }
+
+
+def project(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reduce one ordered log. Unknown event types are retained by SQLite but ignored here."""
+    view = empty_projection()
+    tasks: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    workers: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    changes: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    gates: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    deliveries: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    terminal: list[dict[str, Any]] = []
+    expected = 1
+    terminal_chars = 0
+
+    for event in events:
+        if event.get("sequence") != expected:
+            raise MissionError("mission event sequence gap")
+        expected += 1
+        if view["mission_id"] not in (None, event.get("mission_id")):
+            raise MissionError("projection mission mismatch")
+        view["mission_id"] = event["mission_id"]
+        view["sequence"] = event["sequence"]
+        kind, payload = event["type"], event["payload"]
+        if kind == "mission.accepted":
+            view.update(status="active", stage="accepted", goal=payload["goal"])
+        elif kind == "mission.stage":
+            progress = payload["progress_percent"]
+            if progress < view["progress_percent"]:
+                raise MissionError("mission progress decreased")
+            view.update(status="active", stage=payload["stage"], progress_percent=progress)
+        elif kind == "mission.question":
+            view.update(
+                status="waiting_owner",
+                question={"question_id": payload["question_id"], "text": payload["text"]},
+            )
+        elif kind == "task.upsert":
+            tasks[str(payload["task_id"])] = dict(payload)
+        elif kind == "worker.upsert":
+            workers[str(payload["worker_id"])] = dict(payload)
+        elif kind == "terminal.append":
+            text = str(payload["text"])
+            entry = {"sequence": event["sequence"], "stream": payload["stream"], "text": text}
+            terminal.append(entry)
+            terminal_chars += len(text)
+            while len(terminal) > _MAX_TERMINAL_ENTRIES or terminal_chars > _MAX_TERMINAL_CHARS:
+                terminal_chars -= len(terminal.pop(0)["text"])
+        elif kind == "change.upsert":
+            changes[str(payload["path"])] = dict(payload)
+        elif kind == "gate.upsert":
+            gates[str(payload["gate_id"])] = dict(payload)
+        elif kind == "delivery.upsert":
+            deliveries[str(payload["kind"])] = dict(payload)
+        elif kind == "mission.completed":
+            view.update(status="completed", stage="complete", progress_percent=100, result=payload["result"])
+        elif kind == "mission.failed":
+            view.update(status="failed", error=payload["error"])
+        elif kind == "mission.cancelled":
+            view.update(status="cancelled", error=payload["reason"])
+
+    view.update(
+        tasks=list(tasks.values()),
+        workers=list(workers.values()),
+        terminal=terminal,
+        changes=list(changes.values()),
+        gates=list(gates.values()),
+        deliveries=list(deliveries.values()),
+    )
+    stable = {key: value for key, value in view.items() if key != "projection_id"}
+    view["projection_id"] = hashlib.sha256(_json(stable).encode("utf-8")).hexdigest()[:16]
+    return view
+
+
+def telegram_text(view: dict[str, Any]) -> str:
+    """Render the compact Telegram view from the exact Workspace projection."""
+    status = view.get("status") or "unknown"
+    stage = view.get("stage") or "unknown"
+    lines = [
+        f"Mission {view.get('mission_id') or 'unknown'}",
+        f"{stage} · {view.get('progress_percent', 0)}% · {status}",
+    ]
+    if view.get("question"):
+        lines.append(f"Question: {view['question']['text']}")
+    if view.get("result"):
+        lines.append(f"Result: {view['result']}")
+    if view.get("error"):
+        lines.append(f"Error: {view['error']}")
+    lines.append(
+        "Tasks {tasks} · Workers {workers} · Gates {gates} · Deliveries {deliveries}".format(
+            tasks=len(view.get("tasks", [])),
+            workers=len(view.get("workers", [])),
+            gates=len(view.get("gates", [])),
+            deliveries=len(view.get("deliveries", [])),
+        )
+    )
+    return "\n".join(lines)
+
+
+class MissionStore:
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    @classmethod
+    def default(cls) -> "MissionStore":
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+        return cls(home / "missions-v1.sqlite3")
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=10)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA busy_timeout=10000")
+        return connection
+
+    @contextmanager
+    def _db(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _init_schema(self) -> None:
+        with self._db() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS mission_events (
+                    mission_id TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    event_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    correlation_json TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    producer_event_id TEXT,
+                    PRIMARY KEY (mission_id, sequence),
+                    UNIQUE (mission_id, event_id)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS mission_producer_event
+                    ON mission_events(mission_id, producer_event_id)
+                    WHERE producer_event_id IS NOT NULL;
+                CREATE TABLE IF NOT EXISTS mission_subscriptions (
+                    platform TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    mission_id TEXT NOT NULL,
+                    last_notified_sequence INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (platform, chat_id, thread_id)
+                );
+                """
+            )
+
+    @staticmethod
+    def _row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mission_id": row["mission_id"],
+            "sequence": row["sequence"],
+            "event_id": row["event_id"],
+            "occurred_at": row["occurred_at"],
+            "type": row["type"],
+            "source": row["source"],
+            "correlation": json.loads(row["correlation_json"]),
+            "payload": json.loads(row["payload_json"]),
+        }
+
+    def events(self, mission_id: str, after: int = 0) -> list[dict[str, Any]]:
+        mission_id = _require_id(mission_id, "mission_id")
+        if not isinstance(after, int) or after < 0:
+            raise MissionError("invalid mission cursor")
+        with self._db() as connection:
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? AND sequence > ? ORDER BY sequence",
+                (mission_id, after),
+            ).fetchall()
+        return [self._row(row) for row in rows]
+
+    def projection(self, mission_id: str) -> dict[str, Any]:
+        events = self.events(mission_id)
+        if not events:
+            raise MissionError("mission not found")
+        return project(events)
+
+    def workspace_payload(self, mission_id: str, after: int = 0) -> dict[str, Any]:
+        view = self.projection(mission_id)
+        return {
+            "mission": view,
+            "events": self.events(mission_id, after),
+            "cursor": view["sequence"],
+        }
+
+    def list(self, limit: int = 20) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 100))
+        with self._db() as connection:
+            rows = connection.execute(
+                """SELECT mission_id, MAX(rowid) AS last_row
+                   FROM mission_events GROUP BY mission_id
+                   ORDER BY last_row DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [self.projection(row["mission_id"]) for row in rows]
+
+    def latest(self) -> str | None:
+        missions = self.list(1)
+        return missions[0]["mission_id"] if missions else None
+
+    def accept(
+        self,
+        goal: str,
+        *,
+        mission_id: str | None = None,
+        session_id: str | None = None,
+        run_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        goal = str(goal or "").strip()
+        if not goal or len(goal) > 8_192:
+            raise MissionError("invalid mission goal")
+        mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
+        correlation = {
+            key: value
+            for key, value in (("session_id", session_id), ("run_id", run_id))
+            if value
+        }
+        existing = self.events(mission_id)
+        if existing:
+            first = existing[0]
+            if first["type"] == "mission.accepted" and first["payload"].get("goal") == goal:
+                return first, False
+            raise MissionError("mission already accepted with different goal")
+        return self._append(
+            mission_id,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "mission_id": mission_id,
+                "type": "mission.accepted",
+                "source": "central-hermes",
+                "correlation": correlation,
+                "payload": {"goal": goal},
+            },
+        )
+
+    def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        normalized = dict(submission)
+        normalized["source"] = "central-hermes"
+        return self._append(mission_id, normalized)
+
+    def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        correlation = submission.get("correlation") if isinstance(submission, dict) else None
+        producer_id = correlation.get("producer_event_id") if isinstance(correlation, dict) else None
+        _require_id(producer_id, "producer_event_id")
+        if submission.get("type") in TERMINAL_TYPES or submission.get("source") == "central-hermes":
+            raise MissionError("producer cannot publish central mission events")
+        return self._append(mission_id, submission)
+
+    def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+        mission_id = _require_id(mission_id, "mission_id")
+        event = _validate_submission(mission_id, submission)
+        producer_id = event["correlation"].get("producer_event_id")
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if producer_id:
+                duplicate = connection.execute(
+                    "SELECT * FROM mission_events WHERE mission_id = ? AND producer_event_id = ?",
+                    (mission_id, producer_id),
+                ).fetchone()
+                if duplicate:
+                    return self._row(duplicate), False
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence", (mission_id,)
+            ).fetchall()
+            previous = [self._row(row) for row in rows]
+            if not previous and event["type"] != "mission.accepted":
+                raise MissionError("mission must start with mission.accepted")
+            if previous and event["type"] == "mission.accepted":
+                raise MissionError("mission already accepted")
+            if previous:
+                current = project(previous)
+                if current["status"] in {"completed", "failed", "cancelled"}:
+                    raise MissionError("mission is terminal")
+                if event["type"] == "mission.stage" and event["payload"]["progress_percent"] < current["progress_percent"]:
+                    raise MissionError("mission progress decreased")
+            sequence = len(previous) + 1
+            event.update(
+                sequence=sequence,
+                event_id=f"{mission_id}:{sequence}",
+                occurred_at=_utc_now(),
+            )
+            connection.execute(
+                """INSERT INTO mission_events
+                   (mission_id, sequence, event_id, occurred_at, type, source,
+                    correlation_json, payload_json, producer_event_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mission_id,
+                    sequence,
+                    event["event_id"],
+                    event["occurred_at"],
+                    event["type"],
+                    event["source"],
+                    _json(event["correlation"]),
+                    _json(event["payload"]),
+                    producer_id,
+                ),
+            )
+        return event, True
+
+    def bind(self, mission_id: str, platform: str, chat_id: str, thread_id: str | None = None) -> None:
+        self.projection(mission_id)
+        platform = _require_id(platform, "platform")
+        chat_id = str(chat_id or "").strip()
+        thread_id = str(thread_id or "").strip()
+        if not chat_id or len(chat_id) > 256 or len(thread_id) > 256:
+            raise MissionError("invalid mission subscription")
+        with self._db() as connection:
+            connection.execute(
+                """INSERT INTO mission_subscriptions(platform, chat_id, thread_id, mission_id)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(platform, chat_id, thread_id)
+                   DO UPDATE SET mission_id = excluded.mission_id, last_notified_sequence = 0""",
+                (platform, chat_id, thread_id, mission_id),
+            )
+
+    def bound_mission(self, platform: str, chat_id: str, thread_id: str | None = None) -> str | None:
+        with self._db() as connection:
+            row = connection.execute(
+                """SELECT mission_id FROM mission_subscriptions
+                   WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
+                (str(platform), str(chat_id), str(thread_id or "")),
+            ).fetchone()
+        return row["mission_id"] if row else None
+
+    def pending_subscriptions(self, mission_id: str, sequence: int) -> list[dict[str, Any]]:
+        with self._db() as connection:
+            rows = connection.execute(
+                """SELECT * FROM mission_subscriptions
+                   WHERE mission_id = ? AND last_notified_sequence < ?""",
+                (mission_id, sequence),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_notified(self, subscription: dict[str, Any], sequence: int) -> None:
+        with self._db() as connection:
+            connection.execute(
+                """UPDATE mission_subscriptions SET last_notified_sequence = ?
+                   WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                     AND last_notified_sequence < ?""",
+                (
+                    sequence,
+                    subscription["platform"],
+                    subscription["chat_id"],
+                    subscription["thread_id"],
+                    sequence,
+                ),
+            )
+
+
+async def notify_subscribers(
+    store: MissionStore,
+    event: dict[str, Any],
+    sender: Callable[[dict[str, Any], str], Awaitable[None]],
+) -> int:
+    """Deliver only owner-relevant updates; a retry never duplicates a notification."""
+    if event["type"] not in NOTIFY_TYPES:
+        return 0
+    view = store.projection(event["mission_id"])
+    text = telegram_text(view)
+    sent = 0
+    first_error: Exception | None = None
+    for subscription in store.pending_subscriptions(event["mission_id"], event["sequence"]):
+        try:
+            await sender(subscription, text)
+        except Exception as error:
+            first_error = first_error or error
+        else:
+            store.mark_notified(subscription, event["sequence"])
+            sent += 1
+    if first_error is not None and sent == 0:
+        raise first_error
+    return sent
+
+
+def producer_key_valid(provided: str | None) -> bool:
+    expected = os.environ.get("HERMES_MISSION_PRODUCER_KEY", "").strip()
+    return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))

@@ -116,3 +116,32 @@ cannot forge a terminal mission event. Expected metadata shape:
 the same store and proves that one task completes without duplicate work or producer events. This is an offline gate;
 the adapter is not installed into the live build-1 runtime by this phase. It reuses Flow v2's existing Python runtime
 and standard library, so it adds no interpreter or third-party package.
+
+## Central runtime and channel projections
+
+A6.3 adds a stdlib-only module at `tools/hermes-mission/runtime.py`, installed only into the exact pinned external
+Hermes source by `tools/hermes-mission/apply_overlay.py`. It is part of the existing Hermes modular monolith, not a new
+service:
+
+- SQLite at `$HERMES_HOME/missions-v1.sqlite3` owns the canonical log and Telegram subscriptions;
+- the existing authenticated gateway API exposes mission list/create/read and producer-event endpoints;
+- producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
+  mission event;
+- the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
+- Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
+  render from the exact same projection and `projection_id`;
+- terminal/question text is force-redacted at the Hermes API boundary and all stored/event frames are bounded.
+
+The Workspace card uses native expand/collapse and shows stage/progress first; tasks, workers, terminal, changes,
+gates and delivery links are secondary detail. It deliberately uses bounded polling instead of adding another SSE
+stream: refresh/reconnect simply re-fetches the authoritative projection.
+
+`tests/static/test_hermes_mission_runtime.py` reopens the SQLite file, replays the canonical fixture from a cursor and
+proves that Workspace and Telegram reach the same projection hash. It also proves producer retry and Telegram
+notification idempotency, central-only completion, monotonic progress and terminal authority. Both pinned overlays
+pass idempotency/tamper checks; the patched Workspace production build and an aiohttp mission API smoke pass on
+build-1 without touching live services.
+
+This remains an offline rollout artifact. No live Hermes/Workspace checkout, service, model, GPU, swarm or Kubernetes
+manifest was changed by A6.3. Wiring secrets, installing the overlays and executing a disposable mission belong to
+owner-approved A6.4.

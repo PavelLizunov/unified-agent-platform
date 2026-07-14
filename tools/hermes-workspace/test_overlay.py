@@ -117,6 +117,19 @@ def main() -> None:
         assert "const nativeMission = CENTRAL_ONLY ? null : getSwarmMission(missionId)" in conductor
         assert conductor.count("Central Conductor unavailable in central-only mode") == 2
 
+        dashboard = (clone / "src/screens/dashboard/dashboard-screen.tsx").read_text()
+        assert "import { MissionOverviewCard }" in dashboard
+        assert "<MissionOverviewCard />" in dashboard
+        mission_route = (clone / "src/routes/api/missions.ts").read_text()
+        assert "gatewayFetch" in mission_route
+        assert "Central mission API unavailable" in mission_route
+        mission_card = (
+            clone / "src/screens/dashboard/components/mission-overview-card.tsx"
+        ).read_text()
+        assert "refetchInterval: 2_000" in mission_card
+        assert "mission.projection_id" in mission_card
+        assert "mission.terminal" in mission_card
+
         target = clone / "src/server/gateway-capabilities.ts"
         target.write_bytes(target.read_bytes() + b"\n// tamper\n")
         tampered = run(clone)
