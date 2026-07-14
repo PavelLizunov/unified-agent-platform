@@ -23,8 +23,8 @@ PATCHED_FILES = {
 "src/components/mobile-hamburger-menu.tsx": "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
 "src/components/mobile-tab-bar.tsx": "8e699f2c2fe547001a3d0c42bcaf0c9b737bb681fe2817d689865d6110b1c08c",
 "src/routes/__root.tsx": "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
-"src/routes/api/playground-admin.ts": "1f92db5976f9ac223ef9fce1fe31d22b37cc308557c95e1ae952e9dee5f06cc3",
-"src/routes/api/playground-npc.ts": "55365b5826bf41b1bf407db0a51c72f383a20b75753d47f8a3ac429aa5e4586d",
+"src/routes/api/playground-admin.ts": "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
+"src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
 }
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def replace(text, old, new, name):
@@ -210,7 +210,7 @@ async function fetchDashboardCookie(force = false): Promise<string> {
         text = replace(text, "        <>\n          <GlobalShortcutListener />", "        <>\n          {redirectDisabledGame ? <Navigate to=\"/dashboard\" replace /> : null}\n          {!redirectDisabledGame ? <>\n          <GlobalShortcutListener />", "root redirect")
         text = replace(text, "          ) : null}\n        </>\n      ) : null", "          ) : null}\n          </> : null}\n        </>\n      ) : null", "root redirect close")
     elif rel in ("src/routes/api/playground-admin.ts", "src/routes/api/playground-npc.ts"):
-        text = replace(text, "export const Route = createFileRoute", "const HERMESWORLD_ENABLED = process.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const Route = createFileRoute", "game endpoint flag")
+        text = replace(text, "export const Route = createFileRoute", "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const Route = createFileRoute", "game endpoint flag")
         if "GET: async ({ request }) => {" in text:
             text = replace(text, "GET: async ({ request }) => {", "GET: async ({ request }) => {\n        if (!HERMESWORLD_ENABLED) return json({ error: 'HermesWorld is disabled' }, { status: 404 })", "game GET guard")
         if "POST: async ({ request }) => {" in text:

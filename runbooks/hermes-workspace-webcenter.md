@@ -37,6 +37,8 @@ shell history, process listings, logs, markdown, or manifests. The encrypted Sec
 curl -fsS -H "Authorization: Bearer $HERMES_API_TOKEN" http://100.94.228.67:30642/v1/models
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.85.56.31:3000/
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.94.228.67:30911/api/status
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-npc)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-admin)" = 404
 ```
 
 Log in to Workspace and verify chat, central dashboard-backed Profiles, and Kanban. Verify no HermesWorld,

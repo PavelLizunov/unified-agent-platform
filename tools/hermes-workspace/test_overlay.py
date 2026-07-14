@@ -63,7 +63,10 @@ def main() -> None:
         assert "DISABLED_GAME_PATHS" in root_source and "<Navigate to=\"/dashboard\" replace />" in root_source
         assert all(path in root_source for path in ("/reserve", "/reserve/confirm", "/early-access"))
         for endpoint in ("src/routes/api/playground-admin.ts", "src/routes/api/playground-npc.ts"):
-            assert "if (!HERMESWORLD_ENABLED) return json" in (clone / endpoint).read_text()
+            endpoint_source = (clone / endpoint).read_text()
+            assert "import.meta.env.VITE_HERMESWORLD_ENABLED" in endpoint_source
+            assert "process.env.VITE_HERMESWORLD_ENABLED" not in endpoint_source
+            assert "if (!HERMESWORLD_ENABLED) return json" in endpoint_source
         profiles = (clone / "src/server/profiles-browser.ts").read_text()
         assert profiles.count("dashboardFetch('/api/profiles'") == 2
         assert "fetch(`${dashboardUrl}/api/profiles`" not in profiles
