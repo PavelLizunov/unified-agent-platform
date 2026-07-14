@@ -36,13 +36,19 @@ def _read_json(path: str | pathlib.Path) -> Any:
         return json.load(handle)
 
 
-def _write_json(path: pathlib.Path, value: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_json(path: pathlib.Path, value: Any, *, private_parent: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700 if private_parent else 0o755)
+    if os.name == "posix" and private_parent:
+        os.chmod(path.parent, 0o700)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
         handle.write("\n")
         temporary = pathlib.Path(handle.name)
+    if os.name == "posix":
+        os.chmod(temporary, 0o600)
     os.replace(temporary, path)
+    if os.name == "posix":
+        os.chmod(path, 0o600)
 
 
 def _accepted_event(document: Any) -> dict[str, Any]:
@@ -190,8 +196,9 @@ class CentralMissionClient:
             raise AdapterError("central mission API returned invalid JSON")
         return result
 
-    def list_missions(self) -> list[dict[str, Any]]:
-        result = self._request("GET", "/api/missions?limit=100")
+    def list_missions(self, dispatch_profile: str) -> list[dict[str, Any]]:
+        query = urllib.parse.urlencode({"dispatch_profile": dispatch_profile, "limit": 1})
+        result = self._request("GET", f"/api/missions?{query}")
         missions = result.get("missions")
         if not isinstance(missions, list) or not all(isinstance(item, dict) for item in missions):
             raise AdapterError("central mission list is invalid")
@@ -226,7 +233,7 @@ def accept_mission(
         "tenant": mission_id,
         "idempotency_key": f"central-mission:{mission_id}",
     }
-    _write_json(_state_path(state_root, mission_id), state)
+    _write_json(_state_path(state_root, mission_id), state, private_parent=True)
     return state
 
 
@@ -282,7 +289,7 @@ def _worker_metadata_events(
         event_type = item["type"]
         if (
             not isinstance(payload, dict)
-            or not REQUIRED_PAYLOAD[event_type].issubset(payload)
+            or set(payload) != REQUIRED_PAYLOAD[event_type]
             or any(not isinstance(payload[key], str) or not payload[key] for key in REQUIRED_PAYLOAD[event_type])
         ):
             raise AdapterError("worker mission event payload is invalid")
@@ -380,7 +387,7 @@ def dispatch_pending(
         raise AdapterError("poll requires a profile and non-scratch workspace")
     if activate and not assignee:
         raise AdapterError("activation requires an assignee")
-    for mission in client.list_missions():
+    for mission in client.list_missions(dispatch_profile):
         tasks = mission.get("tasks")
         if not isinstance(tasks, list):
             raise AdapterError("central mission projection has invalid tasks")

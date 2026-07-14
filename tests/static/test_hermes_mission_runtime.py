@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import stat
 import tempfile
 from pathlib import Path
 
@@ -66,6 +68,12 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
             stored, created = store.append_producer("mission-retry", event)
             replayed, replay_created = store.append_producer("mission-retry", event)
             assert created and not replay_created and stored == replayed
+            colliding = {**event, "payload": {"stage": "reviewing", "progress_percent": 70}}
+            try:
+                store.append_producer("mission-retry", colliding)
+                raise AssertionError("producer event id collision was accepted")
+            except missions.MissionError as error:
+                assert "collision" in str(error)
 
             deliveries: list[tuple[dict, str]] = []
 
@@ -210,12 +218,121 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             assert "different parameters" in str(error)
 
 
+def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Old eligible mission", mission_id="mission-old", dispatch_profile="build1-uap")
+        store.accept("Second eligible mission", mission_id="mission-second", dispatch_profile="build1-uap")
+        for index in range(101):
+            store.accept(
+                f"Newer unrelated mission {index}",
+                mission_id=f"mission-newer-{index}",
+                dispatch_profile="another-profile",
+            )
+
+        assert all(item["mission_id"] != "mission-old" for item in store.list(100))
+        candidates = store.dispatch_candidates("build1-uap", 1)
+        assert [item["mission_id"] for item in candidates] == ["mission-old"]
+
+
+def test_producer_schema_is_closed_and_all_strings_are_redacted() -> None:
+    event = {
+        "schema_version": 1,
+        "mission_id": "mission-schema",
+        "type": "task.upsert",
+        "source": "build1-flow",
+        "correlation": {
+            "session_id": "session-token",
+            "task_id": "task-1",
+            "producer_event_id": "flow:schema:event",
+        },
+        "payload": {"task_id": "task-1", "title": "token title", "status": "queued"},
+    }
+    sanitized = missions.sanitize_producer_submission(
+        "mission-schema", event, lambda value: value.replace("token", "redacted")
+    )
+    assert sanitized["correlation"]["session_id"] == "session-redacted"
+    assert sanitized["correlation"]["producer_event_id"] == "flow:schema:event"
+    assert sanitized["payload"]["title"] == "redacted title"
+
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Schema mission", mission_id="mission-schema")
+        stored, created = store.append_producer("mission-schema", sanitized)
+        assert created and stored["payload"]["title"] == "redacted title"
+
+        invalid = [
+            {**event, "unexpected": True},
+            {**event, "payload": {**event["payload"], "details": "not allowed"}},
+            {**event, "correlation": {**event["correlation"], "extra_id": "nope"}},
+            {**event, "source": "untrusted-producer"},
+        ]
+        for submission in invalid:
+            try:
+                store.append_producer("mission-schema", submission)
+                raise AssertionError("producer schema accepted an unknown field/source")
+            except missions.MissionError:
+                pass
+
+        sensitive_id = {
+            **event,
+            "correlation": {**event["correlation"], "producer_event_id": "flow:schema:token"},
+        }
+        try:
+            missions.sanitize_producer_submission(
+                "mission-schema", sensitive_id, lambda value: value.replace("token", "redacted")
+            )
+            raise AssertionError("sensitive producer_event_id was stored")
+        except missions.MissionError as error:
+            assert "sensitive producer_event_id" in str(error)
+
+        try:
+            store.append_producer(
+                "mission-forged",
+                {
+                    "schema_version": 1,
+                    "mission_id": "mission-forged",
+                    "type": "mission.accepted",
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": "flow:forged:accepted"},
+                    "payload": {"goal": "Forged"},
+                },
+            )
+            raise AssertionError("producer created mission.accepted")
+        except missions.MissionError as error:
+            assert "producer cannot" in str(error)
+        assert store.events("mission-forged") == []
+
+
+def test_terminal_authority_is_loopback_only() -> None:
+    assert missions.terminal_request_allowed("127.0.0.1")
+    assert missions.terminal_request_allowed("::1")
+    assert not missions.terminal_request_allowed("10.42.1.9")
+    assert not missions.terminal_request_allowed(None)
+    assert not missions.terminal_request_allowed("not-an-address")
+
+
+def test_mission_database_is_owner_only_on_posix() -> None:
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as temp:
+        database = Path(temp) / "missions.sqlite3"
+        database.touch(mode=0o666)
+        os.chmod(database, 0o666)
+        missions.MissionStore(database)
+        assert stat.S_IMODE(database.stat().st_mode) == 0o600
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
+    test_dispatch_candidates_do_not_starve_behind_newer_missions()
+    test_producer_schema_is_closed_and_all_strings_are_redacted()
+    test_terminal_authority_is_loopback_only()
+    test_mission_database_is_owner_only_on_posix()
     print("hermes mission runtime checks passed")
 
 

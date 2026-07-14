@@ -40,6 +40,18 @@ async def smoke(checkout: pathlib.Path) -> None:
             }
         )
         assert created.status == 201, await created.text()
+        eligible = await client.get(
+            "/api/missions?dispatch_profile=build1-smoke&limit=1"
+        )
+        eligible_body = await eligible.json()
+        assert eligible.status == 200
+        assert [item["mission_id"] for item in eligible_body["missions"]] == ["mission-smoke"]
+        wrong_profile = await client.get(
+            "/api/missions?dispatch_profile=another-profile&limit=1"
+        )
+        assert (await wrong_profile.json())["missions"] == []
+        invalid_profile = await client.get("/api/missions?dispatch_profile=&limit=1")
+        assert invalid_profile.status == 400
         bad = await client.post("/api/missions/mission-smoke/events", json={})
         assert bad.status == 401
         event = {
@@ -60,6 +72,33 @@ async def smoke(checkout: pathlib.Path) -> None:
         )
         replay_body = await replay.json()
         assert replay.status == 200 and replay_body["created"] is False
+        collision = {**event, "payload": {"stage": "reviewing", "progress_percent": 70}}
+        collision_response = await client.post(
+            "/api/missions/mission-smoke/events", json=collision, headers=headers
+        )
+        assert collision_response.status == 400, await collision_response.text()
+        unknown = {
+            **event,
+            "correlation": {"producer_event_id": "flow:smoke:unknown"},
+            "payload": {**event["payload"], "details": "not allowed"},
+        }
+        rejected = await client.post(
+            "/api/missions/mission-smoke/events", json=unknown, headers=headers
+        )
+        assert rejected.status == 400, await rejected.text()
+        forged = await client.post(
+            "/api/missions/mission-forged/events",
+            json={
+                "schema_version": 1,
+                "mission_id": "mission-forged",
+                "type": "mission.accepted",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:smoke:forged"},
+                "payload": {"goal": "Forged"},
+            },
+            headers=headers,
+        )
+        assert forged.status == 400, await forged.text()
         listing = await client.get("/api/missions")
         view = (await listing.json())["missions"][0]
         assert view["stage"] == "testing" and view["progress_percent"] == 60

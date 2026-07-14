@@ -36,15 +36,18 @@ build-1 are clients or producers, never alternate authorities.
 }
 ```
 
-Required fields are fixed for v1. `correlation` and `payload` are objects and may be empty. Unknown payload fields must
-be preserved. Unknown event types may be retained for forward compatibility but do not change a v1 projection.
+Fields and event types are closed for v1: unknown top-level, correlation or payload fields and unknown event types are
+rejected before persistence. Schema expansion therefore requires an explicit contract revision rather than silent
+forward-compatible storage.
 
 ### Producer submission
 
 Build-1 submits the same envelope without the central-only fields `sequence`, `event_id` and `occurred_at`. It must
 include a deterministic `correlation.producer_event_id`. Central Hermes deduplicates that value, then assigns the
 canonical sequence, event ID and timestamp. A producer retry is therefore safe after a crash between execution and
-checkpoint persistence.
+checkpoint persistence. Producer submissions must use source `build1-flow`; they cannot create `mission.accepted` or
+any terminal mission event. Every allowed string is inspected before SQLite storage: normal fields are force-redacted,
+while a sensitive idempotency key is rejected instead of being mutated and breaking retry identity.
 
 ## Event types
 
@@ -120,11 +123,18 @@ At the A6.2 checkpoint the adapter was not yet installed into the live build-1 r
 controlled canary. It reuses Flow v2's existing Python runtime and standard library, so it adds no interpreter or
 third-party package.
 
-The post-A6 `poll` command is a bounded pull handoff. It reads at most the 100 latest central projections and accepts
-at most one mission per invocation when all of these are true: its immutable `dispatch_profile` exactly matches the
-locally configured profile, status/stage are `active`/`accepted`, and no task has yet been projected. API credentials
-come from environment variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace;
-mission data never becomes a shell command.
+The post-A6 `poll` command is a bounded pull handoff. It asks Central Hermes for the oldest eligible projection with
+the exact locally configured immutable `dispatch_profile` and accepts at most one mission per invocation. Eligibility
+also requires status/stage `active`/`accepted` and no projected task. Filtering happens before the response limit, so
+an older accepted mission cannot be hidden by more than 100 newer records. API credentials come from environment
+variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace; mission data never
+becomes a shell command.
+
+`dispatch_profile` is a routing selector, not a Central capability or server-side registry. Central validates and
+freezes the label; the owner-approved build-1 invocation supplies the matching profile, workspace and optional
+assignee. A7.1 considers the blocked root handed off once its deterministic `task.upsert` is projected. Reconciliation
+of a future active worker's multi-event stream and recovery from lost local adapter state are A7.3 prerequisites, not
+claims of this single-event blocked handoff.
 
 The safe default creates a blocked, unassigned root and publishes its deterministic `task.upsert`; it cannot launch a
 worker. `--activate` additionally requires an assignee and is the only mode that creates a ready card. A crash after
@@ -144,8 +154,11 @@ service:
   endpoints;
 - producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
   mission event;
-- only the normal authenticated central API may publish `completed`, `failed` or `cancelled`; terminal retries with
-  the same status and redacted message are idempotent;
+- the central mission SQLite file and build-1 adapter JSON are owner-only (`0600`); adapter-created mission state
+  directories are `0700` on POSIX;
+- only an authenticated direct loopback caller inside the Central Hermes process boundary may publish `completed`,
+  `failed` or `cancelled`; forwarded client headers are ignored, and terminal retries with the same status and
+  redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
   render from the exact same projection and `projection_id`;

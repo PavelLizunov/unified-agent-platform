@@ -2,7 +2,9 @@
 import copy
 import importlib.util
 import json
+import os
 import pathlib
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -83,8 +85,13 @@ class FakeCentral:
         }
         self.events = {}
         self.fail_publish_once = False
+        self.fail_after_commit_once = False
+        self.requested_profiles = []
 
-    def list_missions(self):
+    def list_missions(self, dispatch_profile):
+        self.requested_profiles.append(dispatch_profile)
+        if self.mission["dispatch_profile"] != dispatch_profile:
+            return []
         return [copy.deepcopy(self.mission)]
 
     def publish(self, mission_id, event):
@@ -97,6 +104,9 @@ class FakeCentral:
             self.events[producer_id] = copy.deepcopy(event)
             if event["type"] == "task.upsert":
                 self.mission["tasks"] = [copy.deepcopy(event["payload"])]
+        if self.fail_after_commit_once:
+            self.fail_after_commit_once = False
+            raise adapter.AdapterError("simulated lost response after central commit")
 
     def assert_mission(self, mission_id):
         if mission_id != self.mission["mission_id"]:
@@ -237,6 +247,33 @@ class MissionAdapterTests(unittest.TestCase):
                 }]},
             )
 
+    def test_worker_metadata_rejects_unknown_payload_fields(self):
+        with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
+            adapter._worker_metadata_events(
+                "mission-1", "task-1", "worker-1",
+                {"mission_events": [{
+                    "type": "change.upsert",
+                    "payload": {
+                        "path": "src/lib.rs",
+                        "status": "modified",
+                        "details": "arbitrary producer data",
+                    },
+                }]},
+            )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX mode invariant")
+    def test_adapter_state_is_owner_only(self):
+        backend = FakeKanban()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            mission_dir = adapter._mission_dir(state_root, self.document["mission_id"])
+            mission_dir.mkdir(mode=0o777)
+            os.chmod(mission_dir, 0o777)
+            adapter.accept_mission(self.document, state_root, backend)
+            state_path = adapter._state_path(state_root, self.document["mission_id"])
+            self.assertEqual(0o700, stat.S_IMODE(state_path.parent.stat().st_mode))
+            self.assertEqual(0o600, stat.S_IMODE(state_path.stat().st_mode))
+
     def test_pull_dispatch_recovers_after_task_create_before_publish(self):
         backend = FakeKanban()
         central = FakeCentral()
@@ -265,6 +302,7 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(1, len(restarted_backend.tasks))
             self.assertEqual(1, len(central.events))
             self.assertEqual(1, len(central.mission["tasks"]))
+            self.assertEqual(["build1-uap", "build1-uap"], central.requested_profiles)
             self.assertEqual("blocked", restarted_backend.tasks["task-1"]["task"]["status"])
             self.assertIsNone(restarted_backend.tasks["task-1"]["task"]["assignee"])
 
@@ -286,6 +324,27 @@ class MissionAdapterTests(unittest.TestCase):
                     activate=True,
                 )
 
+    def test_pull_converges_when_central_response_is_lost_after_commit(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        central.fail_after_commit_once = True
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            with self.assertRaisesRegex(adapter.AdapterError, "lost response"):
+                adapter.dispatch_pending(
+                    central, state_root, backend,
+                    dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+                )
+
+            self.assertIsNone(adapter.dispatch_pending(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            ))
+            self.assertEqual(1, backend.create_calls)
+            self.assertEqual(1, len(backend.tasks))
+            self.assertEqual(1, len(central.events))
+            self.assertEqual(1, len(central.mission["tasks"]))
+
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()
         listing.__enter__.return_value.read.return_value = b'{"missions": []}'
@@ -297,7 +356,7 @@ class MissionAdapterTests(unittest.TestCase):
                 "api-token",
                 "producer-key",
             )
-            self.assertEqual([], client.list_missions())
+            self.assertEqual([], client.list_missions("build1-uap"))
             client.publish("mission-1", {"type": "task.upsert"})
 
         first_request = opener.call_args_list[0].args[0]
@@ -306,6 +365,8 @@ class MissionAdapterTests(unittest.TestCase):
         second_headers = {key.lower(): value for key, value in second_request.header_items()}
         self.assertEqual("Bearer api-token", first_headers["authorization"])
         self.assertEqual("producer-key", second_headers["x-hermes-mission-producer-key"])
+        self.assertIn("dispatch_profile=build1-uap", first_request.full_url)
+        self.assertIn("limit=1", first_request.full_url)
         self.assertNotIn("api-token", first_request.full_url)
         self.assertNotIn("producer-key", second_request.full_url)
 
