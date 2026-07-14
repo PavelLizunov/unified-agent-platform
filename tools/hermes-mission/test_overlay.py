@@ -62,11 +62,13 @@ def main() -> None:
             '"/api/missions"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
+            '"/api/missions/{mission_id}/terminal"',
         ):
             assert route in api
         assert "X-Hermes-Mission-Producer-Key" in api
         assert "producer_key_valid" in api
         assert "notify_subscribers" in api
+        assert "_handle_finish_mission" in api
 
         subprocess.run(
             [
@@ -80,6 +82,22 @@ def main() -> None:
             ],
             check=True,
         )
+
+        image_root = pathlib.Path(temp) / "image-root"
+        for relative in (
+            "hermes_cli/commands.py",
+            "gateway/run.py",
+            "gateway/platforms/api_server.py",
+        ):
+            target = image_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(
+                subprocess.check_output(["git", "show", f"{COMMIT}:{relative}"], cwd=clone)
+            )
+        image_apply = run(image_root, "--source-commit", COMMIT)
+        assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
+        image_check = run(image_root, "--source-commit", COMMIT, "--check")
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 4
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")

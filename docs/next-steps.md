@@ -164,12 +164,14 @@ This phase does **not** replace Hermes and does not create a new control plane.
    the patched Workspace production build and an aiohttp API smoke all pass. The overlays are not installed live.
 5. **A6.4 — Controlled one-shot canary.** With the owner's explicit approval of the model/runtime and test target,
    run one disposable goal through implementation, tests, independent review, PR/CI and final verification. No GPU,
-   destructive test or Spark Runner. **Gate:** evidence links every state transition and no operator step is hidden.
+   destructive test or Spark Runner. The owner approved the exact route on 2026-07-14: central
+   `openai-codex`/`codex_app_server`, author `gpt-5.6-luna`, independent exact-SHA read-only reviewer
+   `gpt-5.6-sol`, and private target `PavelLizunov/hermes-flow-v2-pilot`. Qwen/local inference, GPU, Claude, swarm and
+   Spark remain forbidden. **Gate:** evidence links every state transition and no operator step is hidden.
 
 Each numbered item is a separate small PR unless an earlier read-only audit proves that no code change is needed.
-A6.4 is now the next phase and remains owner-gated. Do not install/restart/deploy the overlays or launch a model,
-worker, swarm, GPU workload or disposable canary until the owner explicitly approves the exact model/runtime, test
-repository/goal and allowed tools.
+A6.4 is now the active owner-approved phase. Stay inside the exact route and target recorded above; any model/runtime,
+test target, local inference/GPU, swarm, Spark or destructive-test expansion requires a new explicit approval.
 
 ---
 

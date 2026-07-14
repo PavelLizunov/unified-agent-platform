@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: hermes-agent-mission
+    namespace: uap-system
+type: Opaque
+stringData:
+    producer-key: ENC[AES256_GCM,data:gwXwno0jF/6YO3hICA/MBjQ7BCeVWxcfUtEb0oby7jwSA5zIj870Y5dahElaOZyK8vXlDfYfYAzXHJkU/x7z3w==,iv:3ypFnDkbirGCd8ONR+Mjg1be25qcZf5KqjlWsm7HBRc=,tag:8UfEHbn1GxpB8DxzpQUVkw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBqVmNNMUhxZmEyOWlnaDJI
+            cVI2cWZvUUlnUm12QkRZV1VobSt1VndWTVRJCjN6eUZIT2F2WHFLdXc1RGtKeTFO
+            dVc1a1FyTk95emZrQjVUZ3p5bFpsNm8KLS0tIFJ6am9UOTRiZEhpZnRCcDRHNzVh
+            bG1DZjgyaFhla2tVakM0blp1RUZUMEkK5/Z9EFhKyvq4hrLyrCt7wKzJB9lhWdc2
+            Im49owni2edXL+zUz8fAkHBBWDRJokApKxJ+73D28RcZsogIXdi05w==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-07-14T17:16:21Z"
+    mac: ENC[AES256_GCM,data:spLvLoK41OhmWWbsk2m3xYMVhKcK0iGUOJLdAK6TMl/yX8BkDIxOCUcjDojsHoG8lkvgN4FQCqFyUsu80ydpLMHqNFmmXbeaShTrJe+71MglATyg35i4i1hEHZK/QNDyVPGgSWmNWMN+hm4DBT+K4m1/M7M7zWHl/ZDcopfSKdk=,iv:cdP4SMlSD18Fu7bQ23JG4iH/6DD9rf8g2qQ+DlU79RQ=,tag:U5YJfrmU2BK9vKsKpQqrvw==,type:str]
+    version: 3.13.1

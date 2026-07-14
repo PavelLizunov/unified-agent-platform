@@ -29,7 +29,9 @@ Last updated: 2026-07-14
   Dashboard projection with stage/progress and expandable tasks, workers, bounded terminal, changes, gates and
   delivery links. Restart/cursor fixtures reach the same projection hash in both channels; retry/notification
   idempotency, overlay tamper checks, the patched Workspace production build and an aiohttp API smoke pass. Nothing is
-  installed or deployed live. A6.4 requires the owner's explicit model/runtime/test-target/tool approval.
+  installed or deployed live. A6.4 is owner-approved for the exact `openai-codex`/`codex_app_server` route,
+  `gpt-5.6-luna` author, exact-SHA read-only `gpt-5.6-sol` reviewer and private
+  `PavelLizunov/hermes-flow-v2-pilot` target; rollout and the single canary are still pending.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

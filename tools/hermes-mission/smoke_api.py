@@ -26,6 +26,9 @@ async def smoke(checkout: pathlib.Path) -> None:
     app.router.add_post(
         "/api/missions/{mission_id}/events", adapter._handle_append_mission_event
     )
+    app.router.add_post(
+        "/api/missions/{mission_id}/terminal", adapter._handle_finish_mission
+    )
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
@@ -56,6 +59,19 @@ async def smoke(checkout: pathlib.Path) -> None:
         listing = await client.get("/api/missions")
         view = (await listing.json())["missions"][0]
         assert view["stage"] == "testing" and view["progress_percent"] == 60
+        completed = await client.post(
+            "/api/missions/mission-smoke/terminal",
+            json={"status": "completed", "message": "Smoke delivered"},
+        )
+        assert completed.status == 201, await completed.text()
+        completed_replay = await client.post(
+            "/api/missions/mission-smoke/terminal",
+            json={"status": "completed", "message": "Smoke delivered"},
+        )
+        replay_body = await completed_replay.json()
+        assert completed_replay.status == 200 and replay_body["created"] is False
+        assert replay_body["mission"]["status"] == "completed"
+        assert replay_body["mission"]["result"] == "Smoke delivered"
     finally:
         await client.close()
 

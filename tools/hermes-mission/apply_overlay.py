@@ -19,7 +19,7 @@ FILES = {
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "f03c8bc2282eafa10d57feb3197d23a4ffa05e51012468938d7ad31d3706572e",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "a02d71135009d791f487f5c76124c2c920977f53aef653fad2a7fdc9c35b5063",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -192,6 +192,48 @@ def transform(relative: str, text: str) -> str:
         except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
             return web.json_response({"error": str(error)}, status=400)
 
+    async def _handle_finish_mission(self, request: "web.Request") -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        try:
+            body = await request.json()
+            status = str(body.get("status") or "").strip()
+            terminal = {
+                "completed": ("mission.completed", "result"),
+                "failed": ("mission.failed", "error"),
+                "cancelled": ("mission.cancelled", "reason"),
+            }.get(status)
+            if terminal is None:
+                raise MissionError("invalid mission terminal status")
+            message = redact_sensitive_text(body.get("message"), force=True).strip()
+            if not message:
+                raise MissionError("mission terminal message is required")
+            event_type, payload_field = terminal
+            fingerprint = hashlib.sha256(
+                f"{status}:{message}".encode("utf-8")
+            ).hexdigest()[:32]
+            store = self._missions()
+            event, created = store.append_central(
+                request.match_info["mission_id"],
+                {
+                    "schema_version": 1,
+                    "mission_id": request.match_info["mission_id"],
+                    "type": event_type,
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": f"central:{fingerprint}"},
+                    "payload": {payload_field: message},
+                },
+            )
+            if created:
+                await self._notify_mission(store, event)
+            return web.json_response({
+                "created": created,
+                "event": event,
+                "mission": store.projection(event["mission_id"]),
+            }, status=201 if created else 200)
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            return web.json_response({"error": str(error)}, status=400)
+
 '''
         text = replace(
             text,
@@ -208,6 +250,7 @@ def transform(relative: str, text: str) -> str:
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
             self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
+            self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
             self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
             "mission routes",
         )
@@ -218,10 +261,13 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkout", type=pathlib.Path)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--source-commit", help=argparse.SUPPRESS)
     parser.add_argument("--print-patched-hashes", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     root = args.checkout.resolve()
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    head = args.source_commit or subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=root, text=True
+    ).strip()
     if head != UPSTREAM_COMMIT:
         raise SystemExit("upstream commit fingerprint mismatch")
 

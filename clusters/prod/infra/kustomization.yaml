@@ -23,7 +23,9 @@ resources:
   - hermes-agent-telegram.sops.yaml     # A3 — Telegram bot token
   - hermes-agent-dashboard.sops.yaml    # web dashboard basic-auth password
   - hermes-agent-api.sops.yaml           # central Workspace API bearer key
+  - hermes-agent-mission.sops.yaml       # build-1 mission producer credential
   - hermes-agent-claude.sops.yaml       # A4 - Claude Max OAuth token for the claude -p coding worker
+  - hermes-mission-runtime.yaml          # generated pinned A6 mission overlay
   - hermes-agent-config.yaml
   - hermes-agent.yaml
   - hermes-agent-backup-r2.sops.yaml    # PR B - R2 rclone creds for the DR backup CronJob
