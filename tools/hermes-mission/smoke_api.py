@@ -60,6 +60,28 @@ async def smoke(checkout: pathlib.Path) -> None:
         )
         replay_body = await replay.json()
         assert replay.status == 200 and replay_body["created"] is False
+        unknown = {
+            **event,
+            "correlation": {"producer_event_id": "flow:smoke:unknown"},
+            "payload": {**event["payload"], "details": "not allowed"},
+        }
+        rejected = await client.post(
+            "/api/missions/mission-smoke/events", json=unknown, headers=headers
+        )
+        assert rejected.status == 400, await rejected.text()
+        forged = await client.post(
+            "/api/missions/mission-forged/events",
+            json={
+                "schema_version": 1,
+                "mission_id": "mission-forged",
+                "type": "mission.accepted",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:smoke:forged"},
+                "payload": {"goal": "Forged"},
+            },
+            headers=headers,
+        )
+        assert forged.status == 400, await forged.text()
         listing = await client.get("/api/missions")
         view = (await listing.json())["missions"][0]
         assert view["stage"] == "testing" and view["progress_percent"] == 60

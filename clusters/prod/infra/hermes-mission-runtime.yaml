@@ -27,7 +27,7 @@ data:
     PATCHED_FILES = {
         "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
         "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-        "gateway/platforms/api_server.py": "66fb90e5b015e156d09e5deb7df238d6b42a2afde6295ffd8687a7c7a3b0a26c",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "cbad6f7d32622c3fd53ed6af426a88746822caef5c61880bb47869c9de70d8d6",  # gitleaks:allow -- pinned patched SHA-256
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -91,7 +91,7 @@ data:
                 "from agent.redact import redact_sensitive_text\n"
                 "from hermes_cli.uap_missions import (\n"
                 "    MissionError, MissionStore, notify_subscribers, producer_key_valid,\n"
-                "    terminal_request_allowed,\n"
+                "    sanitize_producer_submission, terminal_request_allowed,\n"
                 ")",
                 "mission imports",
             )
@@ -182,16 +182,14 @@ data:
             if not producer_key_valid(request.headers.get("X-Hermes-Mission-Producer-Key")):
                 return web.json_response({"error": "Invalid mission producer key"}, status=401)
             try:
-                body = await request.json()
-                if body.get("type") in {"terminal.append", "mission.question"}:
-                    payload = dict(body.get("payload") or {})
-                    field = "text"
-                    payload[field] = redact_sensitive_text(payload.get(field), force=True)
-                    body = {**body, "payload": payload}
-                store = self._missions()
-                event, created = store.append_producer(
-                    request.match_info["mission_id"], body
+                mission_id = request.match_info["mission_id"]
+                body = sanitize_producer_submission(
+                    mission_id,
+                    await request.json(),
+                    lambda value: redact_sensitive_text(value, force=True),
                 )
+                store = self._missions()
+                event, created = store.append_producer(mission_id, body)
                 if created:
                     await self._notify_mission(store, event)
                 return web.json_response({
@@ -384,6 +382,21 @@ data:
         "mission.failed": {"error"},
         "mission.cancelled": {"reason"},
     }
+    PAYLOAD_FIELDS = {
+        **REQUIRED_PAYLOAD,
+        "mission.accepted": {"goal", "dispatch_profile"},
+        "task.upsert": {"task_id", "title", "status", "assignee"},
+        "worker.upsert": {"worker_id", "status", "run_id", "profile"},
+        "terminal.append": {"stream", "text", "offset"},
+    }
+    CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
+    PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {"mission.accepted", *TERMINAL_TYPES}
+    _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
+    _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
+    _ID_PAYLOAD_FIELDS = {
+        "assignee", "dispatch_profile", "gate_id", "kind", "profile", "question_id",
+        "run_id", "status", "stream", "task_id", "worker_id",
+    }
     _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
     _MAX_EVENT_JSON = 65_536
     _MAX_TERMINAL_ENTRIES = 200
@@ -410,8 +423,14 @@ data:
 
 
     def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
-        if not isinstance(submission, dict) or submission.get("schema_version") != SCHEMA_VERSION:
+        if (
+            not isinstance(submission, dict)
+            or isinstance(submission.get("schema_version"), bool)
+            or submission.get("schema_version") != SCHEMA_VERSION
+        ):
             raise MissionError("invalid mission event version")
+        if unknown := set(submission) - _EVENT_FIELDS:
+            raise MissionError(f"unknown mission event fields: {', '.join(sorted(unknown))}")
         if submission.get("mission_id") != mission_id:
             raise MissionError("mission event identity mismatch")
         event_type = str(submission.get("type") or "").strip()
@@ -420,11 +439,32 @@ data:
         payload = submission.get("payload", {})
         if not event_type or len(event_type) > 64 or not source or len(source) > 64:
             raise MissionError("invalid mission event type/source")
+        if event_type not in REQUIRED_PAYLOAD:
+            raise MissionError("unsupported mission event type")
         if not isinstance(correlation, dict) or not isinstance(payload, dict):
             raise MissionError("correlation and payload must be objects")
-        missing = REQUIRED_PAYLOAD.get(event_type, set()) - payload.keys()
+        if unknown := set(correlation) - CORRELATION_FIELDS:
+            raise MissionError(f"unknown correlation fields: {', '.join(sorted(unknown))}")
+        if unknown := set(payload) - PAYLOAD_FIELDS[event_type]:
+            raise MissionError(f"unknown payload fields: {', '.join(sorted(unknown))}")
+        missing = REQUIRED_PAYLOAD[event_type] - payload.keys()
         if missing:
             raise MissionError(f"missing payload fields: {', '.join(sorted(missing))}")
+        for name, value in correlation.items():
+            _require_id(value, f"correlation.{name}")
+        for name, value in payload.items():
+            if value is None and (event_type, name) in _NULLABLE_PAYLOAD:
+                continue
+            if name == "progress_percent":
+                continue
+            if name == "offset":
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    raise MissionError("invalid payload.offset")
+                continue
+            if not isinstance(value, str) or not value.strip():
+                raise MissionError(f"invalid payload.{name}")
+            if name in _ID_PAYLOAD_FIELDS:
+                _require_id(value, f"payload.{name}")
         if event_type == "mission.stage":
             if payload.get("stage") not in STAGES:
                 raise MissionError("invalid mission stage")
@@ -444,6 +484,36 @@ data:
         if len(_json(normalized).encode("utf-8")) > _MAX_EVENT_JSON:
             raise MissionError("mission event too large")
         return normalized
+
+
+    def _producer_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
+        normalized = _validate_submission(mission_id, submission)
+        if normalized["type"] not in PRODUCER_TYPES or normalized["source"] != "build1-flow":
+            raise MissionError("producer cannot publish this mission event")
+        _require_id(normalized["correlation"].get("producer_event_id"), "producer_event_id")
+        return normalized
+
+
+    def sanitize_producer_submission(
+        mission_id: str,
+        submission: dict[str, Any],
+        redactor: Callable[[str], str],
+    ) -> dict[str, Any]:
+        """Validate the closed producer schema and protect every producer string."""
+        normalized = _producer_submission(mission_id, submission)
+        for group in ("correlation", "payload"):
+            normalized[group] = dict(normalized[group])
+            for name, value in normalized[group].items():
+                if isinstance(value, str):
+                    redacted = redactor(value)
+                    if not isinstance(redacted, str):
+                        raise MissionError("producer redactor returned a non-string")
+                    if group == "correlation" and name == "producer_event_id":
+                        if redacted != value:
+                            raise MissionError("sensitive producer_event_id is not allowed")
+                        continue
+                    normalized[group][name] = redacted
+        return _producer_submission(mission_id, normalized)
 
 
     def empty_projection() -> dict[str, Any]:
@@ -732,12 +802,7 @@ data:
             return self._append(mission_id, normalized)
 
         def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-            correlation = submission.get("correlation") if isinstance(submission, dict) else None
-            producer_id = correlation.get("producer_event_id") if isinstance(correlation, dict) else None
-            _require_id(producer_id, "producer_event_id")
-            if submission.get("type") in TERMINAL_TYPES or submission.get("source") == "central-hermes":
-                raise MissionError("producer cannot publish central mission events")
-            return self._append(mission_id, submission)
+            return self._append(mission_id, _producer_submission(mission_id, submission))
 
         def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             mission_id = _require_id(mission_id, "mission_id")

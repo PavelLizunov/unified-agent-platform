@@ -19,7 +19,7 @@ FILES = {
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "66fb90e5b015e156d09e5deb7df238d6b42a2afde6295ffd8687a7c7a3b0a26c",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "cbad6f7d32622c3fd53ed6af426a88746822caef5c61880bb47869c9de70d8d6",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -83,7 +83,7 @@ def transform(relative: str, text: str) -> str:
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
             "    MissionError, MissionStore, notify_subscribers, producer_key_valid,\n"
-            "    terminal_request_allowed,\n"
+            "    sanitize_producer_submission, terminal_request_allowed,\n"
             ")",
             "mission imports",
         )
@@ -174,16 +174,14 @@ def transform(relative: str, text: str) -> str:
         if not producer_key_valid(request.headers.get("X-Hermes-Mission-Producer-Key")):
             return web.json_response({"error": "Invalid mission producer key"}, status=401)
         try:
-            body = await request.json()
-            if body.get("type") in {"terminal.append", "mission.question"}:
-                payload = dict(body.get("payload") or {})
-                field = "text"
-                payload[field] = redact_sensitive_text(payload.get(field), force=True)
-                body = {**body, "payload": payload}
-            store = self._missions()
-            event, created = store.append_producer(
-                request.match_info["mission_id"], body
+            mission_id = request.match_info["mission_id"]
+            body = sanitize_producer_submission(
+                mission_id,
+                await request.json(),
+                lambda value: redact_sensitive_text(value, force=True),
             )
+            store = self._missions()
+            event, created = store.append_producer(mission_id, body)
             if created:
                 await self._notify_mission(store, event)
             return web.json_response({

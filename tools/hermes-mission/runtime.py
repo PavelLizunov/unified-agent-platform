@@ -50,6 +50,21 @@ REQUIRED_PAYLOAD = {
     "mission.failed": {"error"},
     "mission.cancelled": {"reason"},
 }
+PAYLOAD_FIELDS = {
+    **REQUIRED_PAYLOAD,
+    "mission.accepted": {"goal", "dispatch_profile"},
+    "task.upsert": {"task_id", "title", "status", "assignee"},
+    "worker.upsert": {"worker_id", "status", "run_id", "profile"},
+    "terminal.append": {"stream", "text", "offset"},
+}
+CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
+PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {"mission.accepted", *TERMINAL_TYPES}
+_EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
+_NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
+_ID_PAYLOAD_FIELDS = {
+    "assignee", "dispatch_profile", "gate_id", "kind", "profile", "question_id",
+    "run_id", "status", "stream", "task_id", "worker_id",
+}
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
 _MAX_TERMINAL_ENTRIES = 200
@@ -76,8 +91,14 @@ def _require_id(value: Any, name: str) -> str:
 
 
 def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(submission, dict) or submission.get("schema_version") != SCHEMA_VERSION:
+    if (
+        not isinstance(submission, dict)
+        or isinstance(submission.get("schema_version"), bool)
+        or submission.get("schema_version") != SCHEMA_VERSION
+    ):
         raise MissionError("invalid mission event version")
+    if unknown := set(submission) - _EVENT_FIELDS:
+        raise MissionError(f"unknown mission event fields: {', '.join(sorted(unknown))}")
     if submission.get("mission_id") != mission_id:
         raise MissionError("mission event identity mismatch")
     event_type = str(submission.get("type") or "").strip()
@@ -86,11 +107,32 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     payload = submission.get("payload", {})
     if not event_type or len(event_type) > 64 or not source or len(source) > 64:
         raise MissionError("invalid mission event type/source")
+    if event_type not in REQUIRED_PAYLOAD:
+        raise MissionError("unsupported mission event type")
     if not isinstance(correlation, dict) or not isinstance(payload, dict):
         raise MissionError("correlation and payload must be objects")
-    missing = REQUIRED_PAYLOAD.get(event_type, set()) - payload.keys()
+    if unknown := set(correlation) - CORRELATION_FIELDS:
+        raise MissionError(f"unknown correlation fields: {', '.join(sorted(unknown))}")
+    if unknown := set(payload) - PAYLOAD_FIELDS[event_type]:
+        raise MissionError(f"unknown payload fields: {', '.join(sorted(unknown))}")
+    missing = REQUIRED_PAYLOAD[event_type] - payload.keys()
     if missing:
         raise MissionError(f"missing payload fields: {', '.join(sorted(missing))}")
+    for name, value in correlation.items():
+        _require_id(value, f"correlation.{name}")
+    for name, value in payload.items():
+        if value is None and (event_type, name) in _NULLABLE_PAYLOAD:
+            continue
+        if name == "progress_percent":
+            continue
+        if name == "offset":
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise MissionError("invalid payload.offset")
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise MissionError(f"invalid payload.{name}")
+        if name in _ID_PAYLOAD_FIELDS:
+            _require_id(value, f"payload.{name}")
     if event_type == "mission.stage":
         if payload.get("stage") not in STAGES:
             raise MissionError("invalid mission stage")
@@ -110,6 +152,36 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if len(_json(normalized).encode("utf-8")) > _MAX_EVENT_JSON:
         raise MissionError("mission event too large")
     return normalized
+
+
+def _producer_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
+    normalized = _validate_submission(mission_id, submission)
+    if normalized["type"] not in PRODUCER_TYPES or normalized["source"] != "build1-flow":
+        raise MissionError("producer cannot publish this mission event")
+    _require_id(normalized["correlation"].get("producer_event_id"), "producer_event_id")
+    return normalized
+
+
+def sanitize_producer_submission(
+    mission_id: str,
+    submission: dict[str, Any],
+    redactor: Callable[[str], str],
+) -> dict[str, Any]:
+    """Validate the closed producer schema and protect every producer string."""
+    normalized = _producer_submission(mission_id, submission)
+    for group in ("correlation", "payload"):
+        normalized[group] = dict(normalized[group])
+        for name, value in normalized[group].items():
+            if isinstance(value, str):
+                redacted = redactor(value)
+                if not isinstance(redacted, str):
+                    raise MissionError("producer redactor returned a non-string")
+                if group == "correlation" and name == "producer_event_id":
+                    if redacted != value:
+                        raise MissionError("sensitive producer_event_id is not allowed")
+                    continue
+                normalized[group][name] = redacted
+    return _producer_submission(mission_id, normalized)
 
 
 def empty_projection() -> dict[str, Any]:
@@ -398,12 +470,7 @@ class MissionStore:
         return self._append(mission_id, normalized)
 
     def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-        correlation = submission.get("correlation") if isinstance(submission, dict) else None
-        producer_id = correlation.get("producer_event_id") if isinstance(correlation, dict) else None
-        _require_id(producer_id, "producer_event_id")
-        if submission.get("type") in TERMINAL_TYPES or submission.get("source") == "central-hermes":
-            raise MissionError("producer cannot publish central mission events")
-        return self._append(mission_id, submission)
+        return self._append(mission_id, _producer_submission(mission_id, submission))
 
     def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         mission_id = _require_id(mission_id, "mission_id")

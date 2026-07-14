@@ -237,6 +237,20 @@ class MissionAdapterTests(unittest.TestCase):
                 }]},
             )
 
+    def test_worker_metadata_rejects_unknown_payload_fields(self):
+        with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
+            adapter._worker_metadata_events(
+                "mission-1", "task-1", "worker-1",
+                {"mission_events": [{
+                    "type": "change.upsert",
+                    "payload": {
+                        "path": "src/lib.rs",
+                        "status": "modified",
+                        "details": "arbitrary producer data",
+                    },
+                }]},
+            )
+
     def test_pull_dispatch_recovers_after_task_create_before_publish(self):
         backend = FakeKanban()
         central = FakeCentral()

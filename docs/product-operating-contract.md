@@ -113,8 +113,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 5. The offline Flow contract can now derive model and sandbox policy from the exact Codex rollout `turn_context`, but
    the live route has not yet adopted that gate and it does not prove an OS-independent read-only filesystem or
    credential boundary.
-6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Structured
-   producer payload validation/redaction and local state file permissions are not yet complete security invariants.
+6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Producer
+   events use a closed schema and force-redact every allowed string before storage. Local state file permissions are
+   not yet a complete security invariant.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 
