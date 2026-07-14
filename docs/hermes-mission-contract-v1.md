@@ -126,11 +126,12 @@ locally configured profile, status/stage are `active`/`accepted`, and no task ha
 come from environment variables rather than argv. The caller supplies the fixed assignee and non-scratch workspace;
 mission data never becomes a shell command.
 
-After the idempotent Kanban create, the adapter immediately publishes the deterministic `task.upsert`. A crash after
+The safe default creates a blocked, unassigned root and publishes its deterministic `task.upsert`; it cannot launch a
+worker. `--activate` additionally requires an assignee and is the only mode that creates a ready card. A crash after
 Kanban commit but before the central POST repeats the same Kanban idempotency key and producer event ID, so it converges
 to one root task and one central task event without a dispatch lease table. The hermetic test uses a fake Kanban and
 fake central API and invokes no model. A periodic service/timer and its exact assignee/profile remain a separate
-owner-approved live rollout because making the card ready can cause the existing Kanban dispatcher to launch a worker.
+owner-approved live rollout; enabling `--activate` can cause the existing Kanban dispatcher to launch a worker.
 
 ## Central runtime and channel projections
 

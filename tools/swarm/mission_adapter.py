@@ -372,11 +372,14 @@ def dispatch_pending(
     backend: Any,
     *,
     dispatch_profile: str,
-    assignee: str,
     workspace: str,
+    assignee: str | None = None,
+    activate: bool = False,
 ) -> dict[str, Any] | None:
-    if not dispatch_profile or not assignee or not workspace or workspace == "scratch":
-        raise AdapterError("dispatch requires a profile, assignee and non-scratch workspace")
+    if not dispatch_profile or not workspace or workspace == "scratch":
+        raise AdapterError("poll requires a profile and non-scratch workspace")
+    if activate and not assignee:
+        raise AdapterError("activation requires an assignee")
     for mission in client.list_missions():
         tasks = mission.get("tasks")
         if not isinstance(tasks, list):
@@ -405,7 +408,7 @@ def dispatch_pending(
             accepted,
             state_root,
             backend,
-            allow_dispatch=True,
+            allow_dispatch=activate,
             assignee=assignee,
             workspace=workspace,
         )
@@ -436,8 +439,9 @@ def main(argv: list[str] | None = None) -> int:
     poll = sub.add_parser("poll")
     poll.add_argument("--central-url", default=os.environ.get("HERMES_API_URL"))
     poll.add_argument("--dispatch-profile", required=True)
-    poll.add_argument("--assignee", required=True)
     poll.add_argument("--workspace", required=True)
+    poll.add_argument("--assignee")
+    poll.add_argument("--activate", action="store_true")
 
     args = parser.parse_args(argv)
     backend = HermesKanbanBackend(args.hermes_bin, args.board)
@@ -460,8 +464,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.state_root,
                 backend,
                 dispatch_profile=args.dispatch_profile,
-                assignee=args.assignee,
                 workspace=args.workspace,
+                assignee=args.assignee,
+                activate=args.activate,
             )
         if args.command == "sync" and args.output:
             _write_json(args.output, result)

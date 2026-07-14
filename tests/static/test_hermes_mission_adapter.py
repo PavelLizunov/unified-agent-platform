@@ -249,7 +249,6 @@ class MissionAdapterTests(unittest.TestCase):
                     state_root,
                     backend,
                     dispatch_profile="build1-uap",
-                    assignee="approved-profile",
                     workspace="worktree:/tmp/repo",
                 )
 
@@ -259,7 +258,6 @@ class MissionAdapterTests(unittest.TestCase):
                 state_root,
                 restarted_backend,
                 dispatch_profile="build1-uap",
-                assignee="approved-profile",
                 workspace="worktree:/tmp/repo",
             )
             self.assertEqual("task-1", result["root_task_id"])
@@ -267,16 +265,26 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(1, len(restarted_backend.tasks))
             self.assertEqual(1, len(central.events))
             self.assertEqual(1, len(central.mission["tasks"]))
+            self.assertEqual("blocked", restarted_backend.tasks["task-1"]["task"]["status"])
+            self.assertIsNone(restarted_backend.tasks["task-1"]["task"]["assignee"])
 
             self.assertIsNone(adapter.dispatch_pending(
                 central,
                 state_root,
                 restarted_backend,
                 dispatch_profile="build1-uap",
-                assignee="approved-profile",
                 workspace="worktree:/tmp/repo",
             ))
             self.assertEqual(2, restarted_backend.create_calls)
+
+    def test_pull_activation_requires_explicit_assignee(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(adapter.AdapterError, "activation requires an assignee"):
+                adapter.dispatch_pending(
+                    FakeCentral(), pathlib.Path(directory), FakeKanban(),
+                    dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+                    activate=True,
+                )
 
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()

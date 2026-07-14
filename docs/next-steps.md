@@ -188,13 +188,15 @@ workflow engine or mission database.
 
 1. **A7.1 — Pull handoff and crash recovery — offline gate.** Central `mission.accepted` carries an immutable optional
    `dispatch_profile`. The build-1 adapter performs one bounded poll, exact-matches the locally configured profile,
-   creates/reuses the native Kanban root and publishes its deterministic task event. A fault after Kanban create but
-   before central publish must converge after restart to one task/root ID and one producer event. No model runner is
-   invoked by the hermetic test.
-2. **A7.2 — Owner-approved live scheduling and canary.** Install a periodic build-1 user service/timer with a protected
-   environment file, one exact dispatch profile, fixed assignee and fixed non-scratch workspace. Enabling it may cause
-   native Kanban to launch that worker, so model/runtime/target approval is required. The canary gate is central create
-   to exactly one visible Kanban task and central `task.upsert`; author/review/delivery remain a later step.
+   creates/reuses one blocked native Kanban root and publishes its deterministic task event. A fault after Kanban create
+   but before central publish must converge after restart to one task/root ID and one producer event. No model runner
+   is invoked by the hermetic test, and blocked is the default live-safe behavior.
+2. **A7.2 — Owner-approved live blocked-task canary.** Deploy/reload the central field, install the updated adapter and
+   run one exact-profile poll without `--activate`. The gate is central create to exactly one blocked Kanban task and
+   central `task.upsert`; no worker/model route is selected.
+3. **A7.3 — Owner-approved activation and delivery.** Only after exact assignee, model/runtime and target approval,
+   enable `--activate` and the periodic build-1 timer. This may cause native Kanban to launch the configured worker;
+   author/review/PR/CI/merge/post-verify are proven by a separate real-project canary.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.
