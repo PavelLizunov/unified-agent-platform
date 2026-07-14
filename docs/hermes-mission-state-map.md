@@ -177,10 +177,11 @@ ADR-030. Workspace sometimes returns `jobId = missionId` for Conductor; that val
 - One authoritative Tasks/Jobs/Kanban view: **not present**; current source selection and fallbacks are listed above.
 - Flow result -> central mission -> synchronized Workspace/Telegram result: **missing link**.
 
-A6.1 subsequently fixed the offline boundary in `docs/hermes-mission-contract-v1.md`: one ordered mission contract,
-hermetic channel/reconnect projections and fail-closed central-only authority selection. The live split mapped above
-remains until the later adapter/projection phases are implemented and separately rolled out. A6.2 is next; it must not
-add a replacement dashboard or start a live model/swarm canary.
+A6.1 subsequently fixed the ordered contract and fail-closed authority boundary; A6.2 added the offline idempotent
+central-mission-to-Flow adapter; A6.3 added the offline central SQLite runtime and synchronized Workspace/Telegram
+projections. The live split mapped above remains because none of those artifacts has been installed or deployed.
+A6.4 may roll them out only after the owner's exact model/runtime/test-target/tool approval; it must not add a second
+control plane or replacement dashboard.
 
 ## Repository evidence index
 
@@ -191,6 +192,8 @@ add a replacement dashboard or start a live model/swarm canary.
 - Workspace pin and operation: `runbooks/hermes-workspace-webcenter.md`.
 - Workspace fail-closed overlay and tests: `tools/hermes-workspace/apply_overlay.py`,
   `tools/hermes-workspace/test_overlay.py`.
+- Central mission runtime/overlay and reconnect gate: `tools/hermes-mission/`,
+  `tests/static/test_hermes_mission_runtime.py`.
 - Local Flow lifecycle and artifacts: `runbooks/hermes-flow-v2.md`, `tools/swarm/hermes-flow-v2/SKILL.md`,
   `tools/swarm/flow_contract.py`.
 - Local Flow/Workspace boundary: `docs/codex-brain-onboarding.md`.

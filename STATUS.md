@@ -22,7 +22,14 @@ Last updated: 2026-07-14
 - **A6.2 build-1 adapter complete offline 2026-07-14.** `tools/swarm/mission_adapter.py` reuses native Hermes Kanban,
   creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
   workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
-  duplicate work/events. The adapter is not installed live and dispatch remains disabled. A6.3 is next.
+  duplicate work/events. The adapter is not installed live and dispatch remains disabled.
+- **A6.3 synchronized observation complete offline 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
+  stdlib/SQLite mission log and reducer inside the pinned central Hermes modular monolith. The pinned Hermes overlay
+  adds authenticated mission API routes and Telegram `/mission`/notifications; the Workspace overlay adds a compact
+  Dashboard projection with stage/progress and expandable tasks, workers, bounded terminal, changes, gates and
+  delivery links. Restart/cursor fixtures reach the same projection hash in both channels; retry/notification
+  idempotency, overlay tamper checks, the patched Workspace production build and an aiohttp API smoke pass. Nothing is
+  installed or deployed live. A6.4 requires the owner's explicit model/runtime/test-target/tool approval.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

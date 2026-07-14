@@ -193,16 +193,18 @@ Good next tasks that do not require redesign:
    Workspace has not been restarted or redeployed for this change.
 3. A6.2 is complete offline: `tools/swarm/mission_adapter.py` reuses native Kanban and passes crash/restart/no-duplicate
    fixtures. It is not installed live and dispatch stays disabled.
-4. Implement A6.3 as synchronized projections of the same canonical mission events in the existing Workspace and
-   Telegram surfaces. Do not add a second control plane, replacement dashboard, model, swarm, GPU workload or live
-   canary.
-5. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
-6. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
-7. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
+4. A6.3 is complete offline: `tools/hermes-mission/` installs one central SQLite log/reducer into pinned Hermes;
+   Workspace and Telegram consume the same projection, and the reconnect/API/build gates pass. It is not installed or
+   deployed live.
+5. A6.4 is next but owner-gated. Before any install/restart/deploy/canary, obtain explicit approval for the exact
+   model/runtime, disposable repository/goal and allowed tools. No Qwen/local inference/GPU/Spark Runner is implied.
+6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
+7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
+8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
    restore are done. Owner accepted the current R2 credential scope/lifecycle as-is; do not rotate or alter it
    without a new decision. Off-homelab age-key escrow remains open.
-8. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
-9. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
+9. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
+10. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
 
 ## Things That Need Owner Input
 
