@@ -110,7 +110,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
    complete retention/cleanup lifecycle.
-5. Recorded model IDs and reviewer mode are not derived from runtime events or an OS-enforced read-only boundary.
+5. The offline Flow contract can now derive model and sandbox policy from the exact Codex rollout `turn_context`, but
+   the live route has not yet adopted that gate and it does not prove an OS-independent read-only filesystem or
+   credential boundary.
 6. The central terminal endpoint uses the general API bearer; structured producer payload validation/redaction and
    local state file permissions are not yet complete security invariants.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.

@@ -34,6 +34,12 @@ Last updated: 2026-07-14
   derive either model ID from a runtime event or prove the review process was OS-enforced read-only. Target PR #2
   passed CI, merged and passed fresh-main verification. Central and Workspace projections matched and Telegram reached
   the terminal cursor. Qwen/local inference, GPU, Claude, swarm, Spark and destructive tests were not used.
+- **Post-A6 Codex telemetry attestation is complete offline.** `flow_contract.py summarize-codex` now binds the
+  `codex exec --json` thread ID to the matching local rollout and derives the exact model, provider and sandbox policy
+  from its single runtime `turn_context`. Declared-label, wrong-sandbox and reroute mismatches fail closed. Read-only
+  reprocessing of the saved A6.4 author/reviewer artifacts confirmed Luna/workspace-write and Sol/read-only on Codex
+  CLI `0.144.3`; the addendum is in the canary evidence. The gate is not wired into a live worker yet and does not
+  prove an OS-independent read-only filesystem or credential boundary.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
