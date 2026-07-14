@@ -49,8 +49,9 @@ All four PRs are draft, mergeable and have successful `static-checks`. The three
 - Offline aiohttp API smoke accepted and deduplicated a valid producer event, rejected an unknown payload field and
   rejected producer-created `mission.accepted`.
 - POSIX mode regressions began with deliberately over-permissive files/directories and proved repair to `0600`/`0700`.
-- An offline bottom-up merge rehearsal preserved the exact PR heads with merge commits, completed without conflicts and
-  produced tree `4c1170cc33108d57c1186cf989bfdc65b63750e4`, exactly matching #187. The folded tree again passed
+- An offline bottom-up merge rehearsal through #187 head `e15166ad9449a51a47d3d3fc6836df90368a7ebc` preserved the
+  exact PR heads with merge commits, completed without conflicts and produced tree
+  `4c1170cc33108d57c1186cf989bfdc65b63750e4`, exactly matching that candidate stack head. The folded tree again passed
   `tests/verify-local.ps1 -SkipSmoke`. A sequential squash rehearsal conflicted at #184, so A7.2 must preserve the
   reviewed stack ancestry with merge commits rather than improvise conflict resolution on `master`.
 - GitHub Actions: [#182](https://github.com/PavelLizunov/unified-agent-platform/actions/runs/29367928747),
