@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v21-reconnect-session-key"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v22-central-mission-runtime"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -113,6 +113,18 @@ spec:
               cp /opt/hermes/hermes_cli/dashboard_auth/middleware.py /runtime-compat/dashboard_auth_middleware.py
               cp /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js /runtime-compat/web_index.js
               /opt/hermes/.venv/bin/python /config/runtime-compat.py /runtime-compat
+              # 2d) ADR-030: stage the exact pinned mission overlay in a second emptyDir.
+              # The overlay fingerprints upstream before modifying it and fails closed on drift.
+              mkdir -p /mission-runtime/root/hermes_cli /mission-runtime/root/gateway/platforms
+              cp /opt/hermes/hermes_cli/commands.py /mission-runtime/root/hermes_cli/commands.py
+              cp /opt/hermes/gateway/run.py /mission-runtime/root/gateway/run.py
+              cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
+              /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
+                --source-commit 7c1a029553d87c43ecff8a3821336bc95872213b
+              cp /mission-runtime/root/hermes_cli/commands.py /mission-runtime/commands.py
+              cp /mission-runtime/root/hermes_cli/uap_missions.py /mission-runtime/uap_missions.py
+              cp /mission-runtime/root/gateway/run.py /mission-runtime/gateway_run.py
+              cp /mission-runtime/root/gateway/platforms/api_server.py /mission-runtime/api_server.py
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
               #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
               if [ ! -f /opt/data/auth.json ]; then
@@ -152,6 +164,8 @@ spec:
             - { name: telegram-seed, mountPath: /telegram, readOnly: true }
             - { name: root-ssh, mountPath: /root/.ssh }
             - { name: runtime-compat, mountPath: /runtime-compat }
+            - { name: mission-overlay, mountPath: /mission-overlay, readOnly: true }
+            - { name: mission-runtime, mountPath: /mission-runtime }
       containers:
         - name: gateway
           image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
@@ -180,6 +194,8 @@ spec:
             - { name: API_SERVER_PORT, value: "8642" }
             - name: API_SERVER_KEY
               valueFrom: { secretKeyRef: { name: hermes-agent-api, key: api-key } }
+            - name: HERMES_MISSION_PRODUCER_KEY
+              valueFrom: { secretKeyRef: { name: hermes-agent-mission, key: producer-key } }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }
@@ -219,6 +235,11 @@ spec:
             - { name: runtime-compat, mountPath: /opt/hermes/cli.py, subPath: cli.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/dashboard_auth/middleware.py, subPath: dashboard_auth_middleware.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js, subPath: web_index.js, readOnly: true }
+            # ADR-030 central mission runtime, generated from the exact A6.3 overlay sources.
+            - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/commands.py, subPath: commands.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_missions.py, subPath: uap_missions.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/gateway/platforms/api_server.py, subPath: api_server.py, readOnly: true }
           resources:
             # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod
             # fits (agent ~1.1GB + chromium ~2GB) instead of OOM-killing the gateway. Norm is still heavy->build-1.
@@ -241,6 +262,11 @@ spec:
           emptyDir: {}
         - name: runtime-compat
           emptyDir: {}
+        - name: mission-runtime
+          emptyDir: {}
+        - name: mission-overlay
+          configMap:
+            name: hermes-mission-runtime
 ---
 # Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
 # tailscale-serve proxy can't reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy

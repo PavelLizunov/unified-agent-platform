@@ -124,9 +124,12 @@ Hermes source by `tools/hermes-mission/apply_overlay.py`. It is part of the exis
 service:
 
 - SQLite at `$HERMES_HOME/missions-v1.sqlite3` owns the canonical log and Telegram subscriptions;
-- the existing authenticated gateway API exposes mission list/create/read and producer-event endpoints;
+- the existing authenticated gateway API exposes mission list/create/read, central-terminal and producer-event
+  endpoints;
 - producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
   mission event;
+- only the normal authenticated central API may publish `completed`, `failed` or `cancelled`; terminal retries with
+  the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
   render from the exact same projection and `projection_id`;
@@ -142,6 +145,6 @@ notification idempotency, central-only completion, monotonic progress and termin
 pass idempotency/tamper checks; the patched Workspace production build and an aiohttp mission API smoke pass on
 build-1 without touching live services.
 
-This remains an offline rollout artifact. No live Hermes/Workspace checkout, service, model, GPU, swarm or Kubernetes
-manifest was changed by A6.3. Wiring secrets, installing the overlays and executing a disposable mission belong to
-owner-approved A6.4.
+A6.3 remained offline. Owner-approved A6.4 adds a generated ConfigMap for the exact pinned overlay, a SOPS-encrypted
+producer key and fail-closed Deployment mounts. The live runtime is still unchanged until the rollout PR is merged
+and Flux reports that exact merge revision; the disposable mission may start only after that post-deploy check.
