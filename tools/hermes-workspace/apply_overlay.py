@@ -15,18 +15,30 @@ FILES = {
 "src/routes/api/playground-admin.ts": "19b98cbed55f4ab874532e978484b4abebd14ec855d54461cb46ce965581113c",
 "src/routes/api/playground-npc.ts": "7e90a3a801ac7dbb85c5a97f3d51500c23d0296809b2f7497a034bf3cc97df30",
 "src/routes/api/models.ts": "0a8a94a277b3fe654c85d11def4283c9001639d1f9a80c55dfd7534c5e6e7b4a",
+"src/routes/api/sessions.ts": "209be41f615751d160af8b908bf938bed5db747fd393aab7f2a1d99e4d4cd720",
+"src/routes/api/send-stream.ts": "95e182b21253fd1d7a37a2338e2df6f66761b4ded99063258a71b80a43e6f5a0",
+"src/server/kanban-backend.ts": "4987b6ea35d7eaf296f1d57a7cbb4da74a08cfb20d5958c4b43267de6193b93e",
+"src/routes/api/hermes-tasks.ts": "c20eb57f7d87fc444168032d78f87a0e3ceca54664463f573f9c188b3311e904",
+"src/routes/api/claude-jobs.ts": "cd47fd163f669070210d0bcb1f181ae08454665ca1806704b0211bdfcfdaa803",
+"src/routes/api/conductor-spawn.ts": "cac908c034a5dc21a88330838eb7d84f8ce77033012fe4df0606abb87acc2271",
 }
 PATCHED_FILES = {
-"src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
+"src/server/gateway-capabilities.ts": "8d37e5895ff40899242200d24f88e2e2e17ea0651f8575581bbc1c2a829c91c7",
 "src/server/kanban-dashboard-proxy.ts": "ba981a50148a0d75b6a02d873646fd0371e116a266a907b56b4c5b4eb10ac6f7",
 "src/routes/api/claude-tasks-assignees.ts": "001e870c6db2294ad73315de09b4a8f5337061a9bb179af63f01489d148fa0e9",
-"src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
+"src/server/profiles-browser.ts": "e397c6712bc265a21cf8046eff778557d7f9d4a1c2cef529bd863edb8e1915e5",
 "src/components/mobile-hamburger-menu.tsx": "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
 "src/components/mobile-tab-bar.tsx": "8e699f2c2fe547001a3d0c42bcaf0c9b737bb681fe2817d689865d6110b1c08c",
 "src/routes/__root.tsx": "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
 "src/routes/api/playground-admin.ts": "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
 "src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
+"src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
+"src/routes/api/send-stream.ts": "d61df1f062067cf9991ce33cf6d754c041e44148355423af28dc68d343c85f37",
+"src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
+"src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
+"src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
+"src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
 }
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def replace(text, old, new, name):
@@ -87,6 +99,16 @@ async function fetchDashboardCookie(force = false): Promise<string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }""", "dashboard auth headers")
         text = replace(text, "    dashboardTokenCache = ''\n    res = await doFetch(true)", "    dashboardTokenCache = ''\n    dashboardCookieCache = ''\n    res = await doFetch(true)", "dashboard retry")
+        text = replace(text, "const _initialOverrides = readOverrides()", "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'\nconst _initialOverrides = CENTRAL_ONLY ? {} : readOverrides()", "central-only overrides")
+        text = replace(text, """export function setGatewayUrl(input: string | null | undefined): string {
+  const normalized""", """export function setGatewayUrl(input: string | null | undefined): string {
+  if (CENTRAL_ONLY) throw new Error('Gateway URL is environment-managed in central-only mode')
+  const normalized""", "central-only gateway setter")
+        text = replace(text, """export function setDashboardUrl(input: string | null | undefined): string {
+  const normalized""", """export function setDashboardUrl(input: string | null | undefined): string {
+  if (CENTRAL_ONLY) throw new Error('Dashboard URL is environment-managed in central-only mode')
+  const normalized""", "central-only dashboard setter")
+        text = replace(text, "  const overrides = readOverrides()\n  const source = overrides.claudeApiUrl", "  const overrides = CENTRAL_ONLY ? {} : readOverrides()\n  const source = overrides.claudeApiUrl", "central-only resolved source")
     elif rel == "src/server/kanban-dashboard-proxy.ts":
         text = replace(text, """  CLAUDE_DASHBOARD_URL,
   fetchDashboardToken,""", """  CLAUDE_DASHBOARD_URL,
@@ -123,7 +145,7 @@ async function fetchDashboardCookie(force = false): Promise<string> {
       : await dashboardFetch(url, { signal: AbortSignal.timeout(2000) })""", "assignee fetch")
         text = replace(text, "await fetchJson(`${CLAUDE_DASHBOARD_URL}/api/plugins/kanban/assignees`) ??", "await fetchJson('/api/plugins/kanban/assignees') ??", "assignee dashboard path")
     elif rel == "src/server/profiles-browser.ts":
-        text = replace(text, "import YAML from 'yaml'", "import YAML from 'yaml'\nimport { dashboardFetch } from './gateway-capabilities'", "profiles dashboard import")
+        text = replace(text, "import YAML from 'yaml'", "import YAML from 'yaml'\nimport { dashboardFetch } from './gateway-capabilities'\n\nconst CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'", "profiles dashboard import")
         token_start = text.index("function getDashboardToken(): string | undefined {")
         token_end = text.index("\n}\n\nasync function fetchDashboardProfiles", token_start) + 2
         text = text[:token_start] + text[token_end:]
@@ -137,6 +159,14 @@ async function fetchDashboardCookie(force = false): Promise<string> {
     })""", """    const response = await dashboardFetch('/api/profiles', {
       signal: AbortSignal.timeout(5000),
     })""", "profiles list dashboard fetch")
+        text = replace(text, """  const dashboardResult = await fetchDashboardProfiles()
+  if (dashboardResult) return dashboardResult
+
+  // Fall back to filesystem (colocated deployment)""", """  const dashboardResult = await fetchDashboardProfiles()
+  if (dashboardResult) return dashboardResult
+  if (CENTRAL_ONLY) throw new Error('Central profile source unavailable')
+
+  // Fall back to filesystem (colocated deployment)""", "profiles central-only list")
         start = text.index("export async function readProfileWithFallback(")
         end = text.index("\nexport function getActiveProfileName", start)
         replacement = """export async function readProfileWithFallback(
@@ -187,6 +217,8 @@ async function fetchDashboardCookie(force = false): Promise<string> {
     }
   }
 
+  if (CENTRAL_ONLY) throw new Error('Central profile not found or unavailable')
+
   const profilePath =
     normalized === 'default'
       ? getClaudeRoot()
@@ -223,6 +255,123 @@ async function fetchDashboardCookie(force = false): Promise<string> {
           }
 
           // Primary: read user-configured models from ~/.hermes/models.json""", "central-only models")
+    elif rel == "src/routes/api/sessions.ts":
+        text = replace(text, """} from '../../server/local-session-store'
+
+export const Route""", """} from '../../server/local-session-store'
+
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+export const Route""", "sessions central-only flag")
+        text = replace(text, """          // Merge local portable sessions (Ollama, Atomic Chat, etc.)
+          const localSessions = listLocalSessions()""", """          // Portable sessions are never an authority in central-only mode.
+          const localSessions = CENTRAL_ONLY ? [] : listLocalSessions()""", "sessions local list")
+        text = replace(text, """        if (!capabilities.sessions) {
+          const friendlyId = randomUUID()""", """        if (!capabilities.sessions) {
+          if (CENTRAL_ONLY) {
+            return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
+          }
+          const friendlyId = randomUUID()""", "sessions unavailable")
+        text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+            return json({""", """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+            if (CENTRAL_ONLY) {
+              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
+            }
+            return json({""", "sessions unpersisted")
+        text = replace(text, "          if (localSession) {", "          if (!CENTRAL_ONLY && localSession) {", "sessions local update")
+        text = replace(text, "        if (getLocalSession(sessionKey)) {", "        if (!CENTRAL_ONLY && getLocalSession(sessionKey)) {", "sessions local delete")
+    elif rel == "src/routes/api/send-stream.ts":
+        text = replace(text, """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
+
+function readString""", """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+function readString""", "send stream central-only flag")
+        text = replace(text, """        if (chatMode === 'portable' && sessionKey === 'new') {""", """        if (CENTRAL_ONLY && chatMode === 'portable') {
+          return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (chatMode === 'portable' && sessionKey === 'new') {""", "send stream portable fallback")
+    elif rel == "src/server/kanban-backend.ts":
+        text = replace(text, """export type KanbanBackendId = 'local' | 'claude' | 'hermes-proxy'""", """const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+export type KanbanBackendId = 'local' | 'claude' | 'hermes-proxy'""", "kanban central-only flag")
+        text = replace(text, """export function resolveKanbanBackend(): KanbanBackend {
+  const preference""", """export function resolveKanbanBackend(): KanbanBackend {
+  if (CENTRAL_ONLY) {
+    if (getCapabilities().kanban) return dashboardProxyBackend
+    throw new Error('Central Kanban unavailable in central-only mode')
+  }
+  const preference""", "kanban central-only selection")
+    elif rel == "src/routes/api/hermes-tasks.ts":
+        text = replace(text, """import type { TaskColumn, TaskPriority } from '../../server/tasks-store'
+
+function jsonResponse""", """import type { TaskColumn, TaskPriority } from '../../server/tasks-store'
+
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+function jsonResponse""", "tasks central-only flag")
+        text = replace(text, """        const url = new URL(request.url)
+        const tasks = listTasks({""", """        if (CENTRAL_ONLY) return jsonResponse({ error: 'Local task store disabled in central-only mode' }, 503)
+
+        const url = new URL(request.url)
+        const tasks = listTasks({""", "tasks central-only read")
+        text = replace(text, """        try {
+          const body = (await request.json()) as Record<string, unknown>""", """        if (CENTRAL_ONLY) return jsonResponse({ error: 'Local task store disabled in central-only mode' }, 503)
+
+        try {
+          const body = (await request.json()) as Record<string, unknown>""", "tasks central-only write")
+    elif rel == "src/routes/api/claude-jobs.ts":
+        text = replace(text, """import { createCapabilityUnavailablePayload } from '@/lib/feature-gates'
+
+function authHeaders""", """import { createCapabilityUnavailablePayload } from '@/lib/feature-gates'
+
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+function authHeaders""", "jobs central-only flag")
+        text = replace(text, "const aggregateProfiles = url.searchParams.get('profiles') !== 'active'", "const aggregateProfiles = !CENTRAL_ONLY && url.searchParams.get('profiles') !== 'active'", "jobs local aggregation")
+        text = replace(text, """        if (!capabilities.jobs) {
+          return new Response(""", """        if (!capabilities.jobs) {
+          if (CENTRAL_ONLY) {
+            return new Response(JSON.stringify({ ok: false, error: 'Central jobs unavailable' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          return new Response(""", "jobs unavailable")
+        text = replace(text, """        if (profile) {
+          try {""", """        if (profile) {
+          if (CENTRAL_ONLY) {
+            return new Response(JSON.stringify({ ok: false, error: 'Local profile jobs disabled in central-only mode' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
+          try {""", "jobs local write")
+    elif rel == "src/routes/api/conductor-spawn.ts":
+        text = replace(text, """let cachedSkill: string | null = null
+
+export const NATIVE_CONDUCTOR_MODE_NOTE""", """let cachedSkill: string | null = null
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+
+export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
+        text = replace(text, "const nativeMission = getSwarmMission(missionId)", "const nativeMission = CENTRAL_ONLY ? null : getSwarmMission(missionId)", "conductor local mission read")
+        text = replace(text, """        if (!capabilities.dashboard.available || !capabilities.conductor) {
+          return json({ ok: false, error: 'Conductor mission not found in native swarm store and dashboard Conductor API is unavailable' }, { status: 404 })
+        }""", """        if (!capabilities.dashboard.available || !capabilities.conductor) {
+          const error = CENTRAL_ONLY
+            ? 'Central Conductor unavailable in central-only mode'
+            : 'Conductor mission not found in native swarm store and dashboard Conductor API is unavailable'
+          return json({ ok: false, error }, { status: CENTRAL_ONLY ? 503 : 404 })
+        }""", "conductor unavailable read")
+        text = replace(text, """          if (!capabilities.dashboard.available || !capabilities.conductor) {
+            const native = createNativeConductorMission({""", """          if (!capabilities.dashboard.available || !capabilities.conductor) {
+            if (CENTRAL_ONLY) {
+              return json({ ok: false, error: 'Central Conductor unavailable in central-only mode' }, { status: 503 })
+            }
+            const native = createNativeConductorMission({""", "conductor local fallback")
     elif rel in ("src/components/mobile-hamburger-menu.tsx", "src/components/mobile-tab-bar.tsx"):
         is_h = "hamburger" in rel
         needle = "export const MOBILE_HAMBURGER_NAV_ITEMS = [" if is_h else "export const MOBILE_NAV_TABS: Array<TabItem> = ["
