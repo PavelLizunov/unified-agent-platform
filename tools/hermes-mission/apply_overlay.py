@@ -19,7 +19,7 @@ FILES = {
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "cbad6f7d32622c3fd53ed6af426a88746822caef5c61880bb47869c9de70d8d6",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "0504003cea0d3f5663b17e16a602738ad25ab8dbdd4f7e4b72836286866b4775",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -104,7 +104,13 @@ def transform(relative: str, text: str) -> str:
             return auth_error
         try:
             limit = int(request.query.get("limit", "20"))
-            return web.json_response({"missions": self._missions().list(limit)})
+            store = self._missions()
+            missions = (
+                store.dispatch_candidates(request.query.get("dispatch_profile"), limit)
+                if "dispatch_profile" in request.query
+                else store.list(limit)
+            )
+            return web.json_response({"missions": missions})
         except (MissionError, TypeError, ValueError) as error:
             return web.json_response({"error": str(error)}, status=400)
 

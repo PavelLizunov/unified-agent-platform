@@ -4,8 +4,8 @@ Status: **design only; no target, model, activation, fault injection, merge or d
 
 ## Scope
 
-The canary must use one owner-approved existing repository and one server-side allowlisted dispatch profile. Mission
-input never supplies a shell command, local path, credential or model ID.
+The canary must use one owner-approved existing repository and one owner-approved, build-1-configured routing profile.
+Mission input never supplies a shell command, local path, credential or model ID.
 
 The approved change must:
 

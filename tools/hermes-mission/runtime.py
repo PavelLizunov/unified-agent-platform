@@ -418,6 +418,29 @@ class MissionStore:
             ).fetchall()
         return [self.projection(row["mission_id"]) for row in rows]
 
+    def dispatch_candidates(self, dispatch_profile: str, limit: int = 1) -> list[dict[str, Any]]:
+        dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
+        limit = max(1, min(int(limit), 100))
+        with self._db() as connection:
+            rows = connection.execute(
+                """SELECT mission_id, payload_json FROM mission_events
+                   WHERE sequence = 1 AND type = 'mission.accepted'
+                   ORDER BY rowid"""
+            ).fetchall()
+        candidates = []
+        # ponytail: this full accepted-row scan is enough at single-owner scale;
+        # add a durable dispatch index only after measured volume justifies it.
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if payload.get("dispatch_profile") != dispatch_profile:
+                continue
+            view = self.projection(row["mission_id"])
+            if view["status"] == "active" and view["stage"] == "accepted" and not view["tasks"]:
+                candidates.append(view)
+                if len(candidates) == limit:
+                    break
+        return candidates
+
     def latest(self) -> str | None:
         missions = self.list(1)
         return missions[0]["mission_id"] if missions else None
@@ -487,7 +510,10 @@ class MissionStore:
                     (mission_id, producer_id),
                 ).fetchone()
                 if duplicate:
-                    return self._row(duplicate), False
+                    stored = self._row(duplicate)
+                    if any(stored[key] != event[key] for key in ("type", "source", "correlation", "payload")):
+                        raise MissionError("producer event id collision")
+                    return stored, False
             rows = connection.execute(
                 "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence", (mission_id,)
             ).fetchall()
