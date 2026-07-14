@@ -100,7 +100,7 @@ else
 fi
 
 known_hosts="${key_dir}/known_hosts"
-ssh-keyscan github.com >"${known_hosts}" 2>/dev/null
+ssh-keyscan -p 443 ssh.github.com >"${known_hosts}" 2>/dev/null
 chmod 0644 "${known_hosts}"
 
 kubectl -n flux-system create secret generic uap-platform-git-auth \
@@ -111,7 +111,7 @@ kubectl -n flux-system create secret generic uap-platform-git-auth \
 echo "flux-git-auth-secret-ok"
 
 if [[ ! -f "${sync_manifest}" ]]; then
-  sed "s#ssh://git@REPLACE_WITH_GIT_HOST/REPLACE_WITH_OWNER/unified-agent-platform.git#ssh://git@github.com/${repo}.git#" \
+  sed "s#ssh://git@REPLACE_WITH_GIT_HOST/REPLACE_WITH_OWNER/unified-agent-platform.git#ssh://git@ssh.github.com:443/${repo}.git#" \
     "${sync_example}" >"${sync_manifest}"
 fi
 
