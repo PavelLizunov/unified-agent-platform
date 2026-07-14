@@ -8,8 +8,9 @@ Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
-Repository status (2026-07-14): the A6.2 central mission adapter is implemented and tested offline, but is not yet
-installed on live build-1. Installation or dispatch belongs to the later owner-approved canary/rollout.
+Repository status (2026-07-14): the A6.2 central mission adapter is implemented, tested, installed on live build-1 and
+was exercised once by the owner-approved A6.4 canary. Automatic central intake-to-dispatch is not installed; the
+canary orchestrator invoked the adapter explicitly.
 
 ## When to use
 

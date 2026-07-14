@@ -99,19 +99,22 @@ known debt.
 
 ## 8. Current contract gaps
 
-The following are known gaps, not accepted end-state behaviour:
+The A6.4 controlled canary added one central mission log, fail-closed central-only Workspace views and correlated
+build-1 execution evidence. The remaining gaps are not accepted end-state behaviour:
 
-1. ADR-029 currently describes central Hermes for Workspace and a separate local Hermes for Flow. This creates two
-   control/state boundaries instead of one mission plane.
-2. Workspace sessions, scheduled jobs, local Task Lite and Flow/Kanban tasks are separate entities and do not yet form
-   one correlated `mission_id` lifecycle.
-3. Workspace does not yet provide a dependable unified view of tasks, workers, live output, tests, review and delivery
-   progress; direct logs/tmux are still needed.
-4. Workspace has local fallback/state paths that can expose stale or ambiguous data when the central source is
-   unavailable.
-5. The demonstrated coding path still contains operator/orchestrator steps; phone/Workspace goal to autonomous
-   PR/CI/merge/deploy/post-verify is not yet a proven unattended loop.
-6. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
+1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
+   answer-and-resume loop for owner questions.
+2. Central `mission.accepted` does not automatically reach build-1. The A6.4 orchestrator explicitly created and
+   claimed the Kanban task, invoked the approved routes, published events and completed delivery.
+3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
+   update, and direct logs/tmux may still be needed for full live detail.
+4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
+   complete retention/cleanup lifecycle.
+5. Recorded model IDs and reviewer mode are not derived from runtime events or an OS-enforced read-only boundary.
+6. The central terminal endpoint uses the general API bearer; structured producer payload validation/redaction and
+   local state file permissions are not yet complete security invariants.
+7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
+8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 
-These gaps are addressed in `docs/next-steps.md`, Phase A6. Spark Runner remains parked until the UAP mission plane is
-coherent and the owner explicitly resumes it.
+These gaps drive the post-A6 milestones in `docs/next-steps.md`. Spark Runner remains parked until the UAP mission
+plane is coherent and the owner explicitly resumes it.

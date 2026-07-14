@@ -140,10 +140,11 @@ gates and delivery links are secondary detail. It deliberately uses bounded poll
 stream: refresh/reconnect simply re-fetches the authoritative projection.
 
 `tests/static/test_hermes_mission_runtime.py` reopens the SQLite file, replays the canonical fixture from a cursor and
-proves that Workspace and Telegram reach the same projection hash. It also proves producer retry and Telegram
-notification idempotency, central-only completion, monotonic progress and terminal authority. Both pinned overlays
-pass idempotency/tamper checks; the patched Workspace production build and an aiohttp mission API smoke pass on
-build-1 without touching live services.
+proves that Workspace and Telegram reach the same projection hash. It also proves producer-event idempotency,
+notification deduplication after the cursor checkpoint, central-only completion, monotonic progress and terminal
+authority. Telegram delivery is at-least-once: a crash after the remote send but before `last_notified_sequence` is
+stored can repeat that notification. Both pinned overlays pass idempotency/tamper checks; the patched Workspace
+production build and an aiohttp mission API smoke pass on build-1 without touching live services.
 
 A6.3 remained offline until owner-approved A6.4. UAP PR #178 added the generated ConfigMap, SOPS-encrypted producer
 key and fail-closed Deployment mounts; Flux reconciled its exact merge revision. UAP PR #179 then migrated the two

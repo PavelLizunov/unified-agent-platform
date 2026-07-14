@@ -49,7 +49,7 @@ def test_reconnect_projects_one_canonical_state() -> None:
         assert len(telegram_view["projection_id"]) == 16
 
 
-def test_producer_retry_and_telegram_notification_are_idempotent() -> None:
+def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
     async def scenario() -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -92,6 +92,44 @@ def test_producer_retry_and_telegram_notification_are_idempotent() -> None:
             )
             assert await missions.notify_subscribers(store, completed, sender) == 1
             assert "Result: Delivered" in deliveries[-1][1]
+
+    asyncio.run(scenario())
+
+
+def test_notification_can_repeat_after_delivery_before_checkpoint() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            store.accept("Deliver the change", mission_id="mission-notify-window")
+            store.bind("mission-notify-window", "telegram", "42")
+            event, _ = store.append_central(
+                "mission-notify-window",
+                {
+                    "schema_version": 1,
+                    "mission_id": "mission-notify-window",
+                    "type": "mission.stage",
+                    "source": "central-hermes",
+                    "correlation": {},
+                    "payload": {"stage": "testing", "progress_percent": 60},
+                },
+            )
+            deliveries: list[str] = []
+
+            async def delivered_then_failed(_target: dict, text: str) -> None:
+                deliveries.append(text)
+                raise RuntimeError("simulated crash after remote delivery")
+
+            try:
+                await missions.notify_subscribers(store, event, delivered_then_failed)
+                raise AssertionError("delivery failure was hidden")
+            except RuntimeError:
+                pass
+
+            async def retry_sender(_target: dict, text: str) -> None:
+                deliveries.append(text)
+
+            assert await missions.notify_subscribers(store, event, retry_sender) == 1
+            assert len(deliveries) == 2
 
     asyncio.run(scenario())
 
@@ -146,7 +184,8 @@ def test_producer_cannot_end_mission_or_decrease_progress() -> None:
 
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
-    test_producer_retry_and_telegram_notification_are_idempotent()
+    test_producer_retry_and_notification_checkpoint_are_idempotent()
+    test_notification_can_repeat_after_delivery_before_checkpoint()
     test_producer_cannot_end_mission_or_decrease_progress()
     print("hermes mission runtime checks passed")
 
