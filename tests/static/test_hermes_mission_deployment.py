@@ -25,8 +25,11 @@ def main() -> None:
         "name: mission-runtime",
         "--source-commit 7c1a029553d87c43ecff8a3821336bc95872213b",
         "HERMES_MISSION_PRODUCER_KEY",
+        "cp /opt/hermes/hermes_cli/kanban_db.py /mission-runtime/root/hermes_cli/kanban_db.py",
+        "cp /mission-runtime/root/hermes_cli/kanban_db.py /mission-runtime/kanban_db.py",
         "mountPath: /opt/hermes/hermes_cli/uap_missions.py",
         "mountPath: /opt/hermes/hermes_cli/commands.py",
+        "mountPath: /opt/hermes/hermes_cli/kanban_db.py",
         "mountPath: /opt/hermes/gateway/run.py",
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
     ):
