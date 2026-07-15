@@ -44,6 +44,9 @@ _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
+_AUTHOR_CHECKS_RESULT = "author_checks_failed"
+_AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
+_MAX_CHECK_FAILURE_CHARS = 4000
 
 
 def _required_text(value: Any, name: str) -> str:
@@ -509,16 +512,35 @@ class DeliveryCoordinator:
         self._reconcile_completed(state)
         return True
 
+    def _failure_contract(
+        self, state: dict[str, Any]
+    ) -> tuple[str, str, list[dict[str, Any]]]:
+        if state.get("failure_kind") == "author_checks":
+            return (
+                _AUTHOR_CHECKS_RESULT,
+                _AUTHOR_CHECKS_SUMMARY,
+                [
+                    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "failed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+                ],
+            )
+        return (
+            _REJECTION_RESULT,
+            _REJECTION_SUMMARY,
+            [
+                {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "failed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+            ],
+        )
+
     def _rejection_events(self) -> list[dict[str, Any]]:
-        return [
-            {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
-            {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "failed"}},
-            {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
-        ]
+        return self._failure_contract({})[2]
 
     def _validate_rejection_snapshot(
         self, state: dict[str, Any], snapshot: dict[str, Any]
     ) -> bool:
+        result, summary, events = self._failure_contract(state)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
         if not isinstance(task, dict) or not isinstance(runs, list):
@@ -528,12 +550,12 @@ class DeliveryCoordinator:
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         if (
             task.get("status") != "done"
-            or task.get("result") != _REJECTION_RESULT
+            or task.get("result") != result
             or len(matching) != 1
             or matching[0].get("status") not in {"done", "completed"}
             or matching[0].get("outcome") != "completed"
-            or matching[0].get("summary") != _REJECTION_SUMMARY
-            or matching[0].get("metadata") != {"mission_events": self._rejection_events()}
+            or matching[0].get("summary") != summary
+            or matching[0].get("metadata") != {"mission_events": events}
         ):
             raise DeliveryError("Kanban task ended outside the approved rejection contract")
         return True
@@ -585,7 +607,8 @@ class DeliveryCoordinator:
     def _finish_rejection(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
-        if state["phase"] == "review_rejected":
+        result, summary, events = self._failure_contract(state)
+        if state["phase"] in {"review_rejected", "author_checks_failed"}:
             self._cleanup(state, paths)
             state["phase"] = "rejection_cleaned"
             self._save(paths, state)
@@ -594,9 +617,9 @@ class DeliveryCoordinator:
                 self._assert_claim(state)
                 self.backend.complete(
                     state["root_task_id"],
-                    result=_REJECTION_RESULT,
-                    summary=_REJECTION_SUMMARY,
-                    metadata={"mission_events": self._rejection_events()},
+                    result=result,
+                    summary=summary,
+                    metadata={"mission_events": events},
                 )
                 if not self._recover_rejection_completion(state, paths):
                     raise DeliveryError("Kanban rejection did not reach terminal state")
@@ -604,7 +627,7 @@ class DeliveryCoordinator:
             self._reconcile_rejected(state)
             if self.client.get_mission(state["mission_id"]).get("status") != "failed":
                 raise DeliveryError("Central did not fail the rejected mission")
-            state.update(phase="complete", outcome=_REJECTION_RESULT)
+            state.update(phase="complete", outcome=result)
             self._save(paths, state)
         return {"action": state["phase"], "mission_id": state["mission_id"], "state": state}
 
@@ -642,6 +665,28 @@ class DeliveryCoordinator:
             for line in result.stdout.splitlines()
             if len(line) > 3
         }
+
+    def _candidate_fingerprint(self, checkout: pathlib.Path) -> str:
+        digest = hashlib.sha256()
+        diff = self._run(
+            ["git", "-C", str(checkout), "diff", "--binary", "--no-ext-diff", "HEAD", "--"]
+        ).stdout
+        digest.update(diff.encode("utf-8"))
+        untracked = self._run(
+            ["git", "-C", str(checkout), "ls-files", "--others", "--exclude-standard", "-z"]
+        ).stdout
+        for relative in sorted(item for item in untracked.split("\0") if item):
+            path = checkout / relative
+            digest.update(relative.encode("utf-8"))
+            if path.is_symlink():
+                digest.update(os.readlink(path).encode("utf-8"))
+            elif path.is_file():
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(chunk)
+            else:
+                digest.update(b"missing")
+        return digest.hexdigest()
 
     def _rollout(self, events_path: pathlib.Path) -> pathlib.Path:
         session_id = None
@@ -717,8 +762,32 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> bool:
         """Checkpoint an already committed author turn without starting another model."""
-        if self._changed_files(paths["author"]):
-            raise DeliveryError("uncheckpointed author worktree is dirty; refusing a second model")
+        changed = self._changed_files(paths["author"])
+        if changed:
+            fingerprint = self._candidate_fingerprint(paths["author"])
+            cycle = state["review_cycle"]
+            events = paths["directory"] / f"author-{cycle}.jsonl"
+            if not changed <= set(self.profile["required_files"]):
+                raise DeliveryError("uncheckpointed author worktree escaped the exact allowlist")
+            if state["phase"] == "needs_fix" and not events.is_file():
+                return False
+            if not events.is_file():
+                raise DeliveryError("uncheckpointed author worktree is unsafe; refusing a second model")
+            try:
+                checks = self._checks("author_checks", paths["author"], state, paths)
+            except DeliveryError as error:
+                preserved = self._candidate_fingerprint(paths["author"]) == fingerprint
+                if not preserved:
+                    error = DeliveryError("author checks mutated the exact candidate")
+                self._record_author_check_failure(state, paths, error, retryable=preserved)
+                return True
+            if self._candidate_fingerprint(paths["author"]) != fingerprint:
+                raise DeliveryError("author recovery checks changed the exact candidate")
+            self._git(paths["author"], "add", "--", *sorted(changed))
+            self._assert_claim(state)
+            self._git(paths["author"], "commit", "-m", self.profile["commit_message"])
+            self._record_author(state, paths, checks)
+            return True
         count_text = self._git(
             paths["author"], "rev-list", "--count", f"{state['base_sha']}..HEAD"
         )
@@ -740,6 +809,29 @@ class DeliveryCoordinator:
         self._assert_claim(state)
         self._record_author(state, paths, checks)
         return True
+
+    def _record_author_check_failure(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        error: DeliveryError,
+        *,
+        retryable: bool = True,
+    ) -> None:
+        failure = str(error).strip()[-_MAX_CHECK_FAILURE_CHARS:] or "author checks failed"
+        if retryable and state["review_cycle"] < self.profile["max_review_cycles"]:
+            state.update(
+                phase="needs_fix",
+                review_cycle=state["review_cycle"] + 1,
+                review_findings=[failure],
+            )
+        else:
+            state.update(
+                phase="author_checks_failed",
+                failure_kind="author_checks",
+                failure_error=failure,
+            )
+        self._save(paths, state)
 
     def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
         cycle = state["review_cycle"]
@@ -775,10 +867,17 @@ class DeliveryCoordinator:
         allowed = set(self.profile["required_files"])
         if not changed or not changed <= allowed:
             raise DeliveryError("author changed no files or escaped the exact allowlist")
-        checks = self._checks("author_checks", paths["author"], state, paths)
-        changed = self._changed_files(paths["author"])
-        if not changed <= allowed:
-            raise DeliveryError("author checks left files outside the exact allowlist")
+        fingerprint = self._candidate_fingerprint(paths["author"])
+        try:
+            checks = self._checks("author_checks", paths["author"], state, paths)
+        except DeliveryError as error:
+            preserved = self._candidate_fingerprint(paths["author"]) == fingerprint
+            if not preserved:
+                error = DeliveryError("author checks mutated the exact candidate")
+            self._record_author_check_failure(state, paths, error, retryable=preserved)
+            return
+        if self._candidate_fingerprint(paths["author"]) != fingerprint:
+            raise DeliveryError("author checks changed the exact candidate")
         self._git(paths["author"], "add", "--", *sorted(changed))
         self._assert_claim(state)
         self._git(paths["author"], "commit", "-m", self.profile["commit_message"])
@@ -1084,7 +1183,8 @@ class DeliveryCoordinator:
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
             if state["phase"] in {
-                "review_rejected", "rejection_cleaned", "rejection_task_completed"
+                "review_rejected", "author_checks_failed", "rejection_cleaned",
+                "rejection_task_completed",
             }:
                 return self._finish_rejection(state, paths)
             if mission.get("status") == "completed":

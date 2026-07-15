@@ -344,7 +344,7 @@ def completion_ready(view: dict[str, Any]) -> bool:
 
 
 def rejection_ready(view: dict[str, Any]) -> bool:
-    """Apply the narrow A7.3 exhausted-review failure policy."""
+    """Apply the narrow A7.3 exhausted-cycle failure policy."""
     if (
         view.get("status") != "active"
         or view.get("question") is not None
@@ -367,7 +367,10 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         for item in view.get("gates", [])
         if isinstance(item, dict)
     }
-    return gates == {"tests": "passed", "review": "failed", "cleanup": "passed"}
+    return gates in (
+        {"tests": "passed", "review": "failed", "cleanup": "passed"},
+        {"tests": "failed", "cleanup": "passed"},
+    )
 
 
 class MissionStore:
@@ -610,8 +613,17 @@ class MissionStore:
                 payload = {"result": "Delivery completed, merged, and verified"}
             elif rejection_ready(view):
                 event_type = "mission.failed"
-                producer_event_id = "central:auto-review-rejected:v1"
-                payload = {"error": "Independent review rejected the candidate"}
+                gates = {
+                    item.get("gate_id"): item.get("status")
+                    for item in view.get("gates", [])
+                    if isinstance(item, dict)
+                }
+                if gates.get("tests") == "failed":
+                    producer_event_id = "central:auto-author-checks-failed:v1"
+                    payload = {"error": "Author checks failed after the approved cycle limit"}
+                else:
+                    producer_event_id = "central:auto-review-rejected:v1"
+                    payload = {"error": "Independent review rejected the candidate"}
             else:
                 return None
             event = _validate_submission(

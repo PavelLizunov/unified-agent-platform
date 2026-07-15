@@ -50,6 +50,32 @@ def profile(root: pathlib.Path) -> dict:
     }
 
 
+def dirty_git_checkout(checkout: pathlib.Path, files: list[str], branch: str) -> str:
+    checkout.mkdir(parents=True)
+    for command in (
+        ["git", "init", "-b", branch],
+        ["git", "config", "user.name", "Test"],
+        ["git", "config", "user.email", "test@example.invalid"],
+    ):
+        subprocess.run(command, cwd=checkout, check=True, capture_output=True, text=True)
+    for name in files:
+        (checkout / name).write_text("base\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "."], cwd=checkout, check=True, capture_output=True, text=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "base"],
+        cwd=checkout, check=True, capture_output=True, text=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=checkout, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    for name in files:
+        (checkout / name).write_text("first turn\n", encoding="utf-8")
+    return base_sha
+
+
 class FakeClient:
     def __init__(self):
         self.mission = {
@@ -188,7 +214,10 @@ class RejectionClient(FakeClient):
             for item in self.stages
             if item.get("type") == "gate.upsert"
         }
-        if gates == {"tests": "passed", "review": "failed", "cleanup": "passed"}:
+        if gates in (
+            {"tests": "passed", "review": "failed", "cleanup": "passed"},
+            {"tests": "failed", "cleanup": "passed"},
+        ):
             self.mission["status"] = "failed"
 
     def get_mission(self, _mission_id):
@@ -700,6 +729,220 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("review_rejected", persisted["phase"])
             self.assertEqual(["still broken"], persisted["review_findings"])
             self.assertEqual("reject", persisted["review_verification"]["verdict"])
+
+    def test_failed_author_checks_checkpoint_one_bounded_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            paths["author"].mkdir(parents=True)
+            paths["directory"].mkdir(parents=True)
+            (paths["directory"] / "author-1.jsonl").write_text(
+                '{"type":"turn.completed"}\n', encoding="utf-8"
+            )
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": False,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "base_sha": "base-sha",
+            }
+            failure = "compile failed: " + ("x" * 5000)
+            with (
+                mock.patch.object(instance, "_changed_files", return_value=set(approved["required_files"])),
+                mock.patch.object(instance, "_candidate_fingerprint", return_value="candidate-v1"),
+                mock.patch.object(
+                    instance, "_checks", side_effect=coordinator.DeliveryError(failure)
+                ),
+            ):
+                self.assertTrue(instance._recover_author_commit(state, paths))
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("needs_fix", persisted["phase"])
+            self.assertEqual(2, persisted["review_cycle"])
+            self.assertEqual(4000, len(persisted["review_findings"][0]))
+            with mock.patch.object(
+                instance, "_changed_files", return_value=set(approved["required_files"])
+            ), mock.patch.object(
+                instance, "_candidate_fingerprint", return_value="candidate-v1"
+            ):
+                self.assertFalse(instance._recover_author_commit(persisted, paths))
+
+    def test_author_check_mutation_fails_without_reusing_the_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["codex_home"] = str(root / "codex")
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            base_sha = dirty_git_checkout(
+                paths["author"], approved["required_files"], "codex/a7-3-vpnrouter-deadbeef"
+            )
+            paths["directory"].mkdir(parents=True)
+            (paths["directory"] / "author-1.jsonl").write_text(
+                '{"type":"turn.completed"}\n', encoding="utf-8"
+            )
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": False,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "base_sha": base_sha,
+            }
+
+            def mutating_check(*_args):
+                target = paths["author"] / approved["required_files"][0]
+                target.write_text(target.read_text(encoding="utf-8") + "check mutation\n", encoding="utf-8")
+                raise coordinator.DeliveryError("compile failed")
+
+            with mock.patch.object(instance, "_checks", side_effect=mutating_check):
+                self.assertTrue(instance._recover_author_commit(state, paths))
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("author_checks_failed", persisted["phase"])
+            self.assertEqual("author_checks", persisted["failure_kind"])
+            self.assertEqual("author checks mutated the exact candidate", persisted["failure_error"])
+
+    def test_dirty_claimed_restart_uses_one_retry_then_stays_model_inert(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                author_checks=[["fail-check"]],
+                codex_bin="codex",
+                codex_home=str(root / "codex"),
+            )
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            state_root = root / "state"
+            author_calls = 0
+
+            def runner(command, **kwargs):
+                nonlocal author_calls
+                if command[0] == "codex":
+                    author_calls += 1
+                    checkout = pathlib.Path(kwargs["cwd"])
+                    for name in approved["required_files"]:
+                        path = checkout / name
+                        path.write_text(path.read_text(encoding="utf-8") + "retry\n", encoding="utf-8")
+                    last = pathlib.Path(command[command.index("--output-last-message") + 1])
+                    last.write_text("retry complete", encoding="utf-8")
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=(
+                            '{"type":"thread.started","thread_id":"author-retry"}\n'
+                            '{"type":"turn.completed"}\n'
+                        ),
+                        stderr="",
+                    )
+                if command[0] == "fail-check":
+                    return subprocess.CompletedProcess(command, 1, stdout="", stderr="compile failed")
+                return subprocess.run(command, **kwargs)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root, runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            base_sha = dirty_git_checkout(
+                paths["author"], approved["required_files"], "codex/a7-3-vpnrouter-deadbeef"
+            )
+            paths["directory"].mkdir(parents=True)
+            (paths["directory"] / "author-1.jsonl").write_text(
+                '{"type":"turn.completed"}\n', encoding="utf-8"
+            )
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": False,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "base_sha": base_sha,
+            })
+
+            with mock.patch.object(instance, "_ensure_worktree"):
+                first = instance.tick()
+                second = instance.tick()
+
+            self.assertEqual("needs_fix", first["action"])
+            self.assertEqual("author_checks_failed", second["action"])
+            self.assertEqual(1, author_calls)
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root, runner=runner
+            )
+            with mock.patch.object(restarted, "_cleanup") as cleanup:
+                terminal = restarted.tick()
+                self.assertIsNone(restarted.tick())
+
+            self.assertEqual("complete", terminal["action"])
+            self.assertEqual("author_checks_failed", terminal["state"]["outcome"])
+            self.assertEqual(1, author_calls)
+            self.assertEqual(1, cleanup.call_count)
+
+    def test_exhausted_author_checks_use_terminal_failure_contract(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "author_checks_failed",
+                "failure_kind": "author_checks",
+                "failure_error": "compile failed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 2,
+                "crash_injected": False,
+                "root_task_id": "task-1",
+                "run_id": "7",
+            })
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                with self.assertRaisesRegex(
+                    coordinator.mission_adapter.AdapterError, "lost completion response"
+                ):
+                    instance.tick()
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("author_checks_failed", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(1, cleanup.call_count)
+            self.assertEqual(
+                instance._failure_contract(result["state"])[2],
+                backend.runs[0]["metadata"]["mission_events"],
+            )
 
     def test_lost_native_completion_response_recovers_without_manual_state_repair(self):
         with tempfile.TemporaryDirectory() as directory:
