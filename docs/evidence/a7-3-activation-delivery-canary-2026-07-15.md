@@ -6,21 +6,22 @@ Status: **AUTONOMOUS FAILURE PATH PASS; SUCCESSFUL DELIVERY NOT YET PROVEN**
 
 ## Accepted boundary
 
-The owner approved one real-project A7.3 route, explicitly approved a second clean attempt, and later approved a third
-attempt after the first two candidates exposed platform and target defects. All three used:
+The owner approved one real-project A7.3 route, explicitly approved a second clean attempt, later approved a third
+attempt after the first two candidates exposed platform and target defects, and approved a fourth after the
+cross-process product rule was made explicit. All four used:
 
 - target `PavelLizunov/VPNRouter`, issue #39, base
   `c51f619fa98792c1726c1eadc2796f4e067048ba`;
 - exactly one native Kanban root and one run, with no swarm;
 - author `gpt-5.6-luna` and separate exact-SHA read-only reviewer `gpt-5.6-sol`;
 - at most two author/review cycles per mission;
-- exactly three allowlisted target files;
+- exactly three allowlisted target files for attempts 1-3 and four for attempt 4;
 - the Windows test VM through `windows-brat`, never the owner's Windows computer;
 - one approved crash after a durable author commit and before Central acknowledgement;
 - PR/CI/merge/post-verify authority only after an accepted review;
 - no Claude, Qwen, Ollama, vLLM, local inference, GPU, Spark Runner, tag, release or destructive test.
 
-The owner did not run commands or repair any attempt. The quality gate stopped all three candidates before a target
+The owner did not run commands or repair any attempt. The quality gate stopped all four candidates before a target
 PR was opened.
 
 ## Landed UAP foundation and corrections
@@ -126,6 +127,41 @@ manager boot produced `active (elapsed)` with no next trigger; Codex started the
 PR #209 replaced that condition with `OnActiveSec=1min`. Live post-install verification then showed a future first
 trigger immediately after `enable --now`; the timer was disabled before that verification trigger fired.
 
+## Attempt 4 — cross-process rule pinned; custom-path liveness still rejected
+
+| Identity | Value |
+|---|---|
+| Mission | `a7-vpnrouter-issue39-20260715-04` |
+| Root / run | `t_8ca3b0bf` / `24` |
+| First candidate | `6effd671bfb5ba38651c26bd2f86e1fa86363de9` |
+| Final candidate | `bed49e9f24813bb286aa26a2ed92f4a111371377` |
+| Luna sessions | `019f6634-e21e-7eb3-a746-3fc3075774b4`, `019f663b-8fbd-7c40-8dd6-b1529910a945` |
+| Sol sessions | `019f6638-ede3-7db1-9bb4-20a057ce674d`, `019f663e-3c7a-7672-aace-020e59e345a5` |
+| Final state SHA-256 | `dec6b1aa23a7042a9dadd84bcfd2d92d8f14d4f71c64de6783c91e53c6315f59` |
+
+The fourth contract made the missing product behavior explicit: a process-owned `sing-box` is an external running
+tunnel only while the existing system-wide TUN ownership lock is also held. A deep-verification probe in another
+process holds no TUN lock and must remain non-running. No new IPC, service, cache or dependency was permitted. The
+candidate changed exactly the two production files plus the two existing regression suites in the four-file allowlist.
+
+Both author cycles and both independent reviewer checkpoints passed the authoritative Windows VM gate. After the
+first candidate committed, the approved crash fired before Central acknowledgement; the next tick reused exact SHA
+`6effd67...` without a duplicate Luna turn. Sol cycle 1 found that a missing, unreadable or malformed YAML poll could
+clear the custom executable path already registered by the running manager. Luna cycle 2 preserved that path on read
+failure. Sol cycle 2 then found the remaining valid-rewrite case: config path A can be replaced by valid path B while
+the live tunnel still runs A, and overwriting the registered path makes the healthy tunnel appear stopped. This needs
+separate runtime-registered and config-derived ownership candidates, not another process-local probe signal.
+
+The two-cycle limit terminated fail-closed. No target branch or PR was pushed. The coordinator removed both disposable
+worktrees and the local branch, completed task `t_8ca3b0bf`/run `24` with result `review_rejected`, and Central reached
+sequence `12`, projection `71ca91d0119aba2e`, status `failed`, one `done` task, one `completed` worker and exact gates
+`tests=passed`, `review=failed`, `cleanup=passed`. The timer is disabled/inactive, no Codex, local-model, swarm or Spark
+process remains, and no GPU route was configured or invoked.
+
+Before mission creation, one shell `curl` reached the tailnet URL through the build-1 ambient HTTP proxy and returned
+`502`. Direct health was `200`; an existence check showed no committed mission, then a single `--noproxy` POST created
+and verified the mission. The installed coordinator's direct Central transport was unaffected.
+
 ## Failure recovery and cleanup
 
 The original coordinator saved the final review files but raised before updating `delivery-state.json`. Because the
@@ -161,14 +197,15 @@ Proven:
 - a pre-commit test failure resumes through exactly one bounded author repair without manual state or target edits;
 - review rejection autonomously closes native and Central state and removes branch/worktrees without another model;
 - a newly enabled timer is now scheduled from activation rather than a historical boot;
-- the owner did not become a command, test or cleanup operator.
+- the owner did not become a command, test or cleanup operator;
+- the cross-process probe false positive is now a pinned product invariant, while Sol stopped a distinct live-path defect.
 
 Not proven:
 
 - one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
 - detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- authority for another live author/reviewer mission. The approved third attempt is exhausted.
+- authority for another live author/reviewer mission. The approved fourth attempt is exhausted.
 
 ## Gate
 
@@ -184,6 +221,7 @@ Not proven:
 | A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
 
 Before another live canary, obtain fresh owner approval for its model turns and revise the target contract around the
-cross-process deep-verification false positive. A successful PR/CI/merge/fresh-main post-verify route remains the A7.3
-completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central and
-verify Telegram delivery; neither requires claiming that the success path is complete.
+remaining custom-runtime liveness rule: retain the executable path actually launched by the running manager while
+evaluating a new config-derived path separately. A successful PR/CI/merge/fresh-main post-verify route remains the
+A7.3 completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central
+and verify Telegram delivery; neither requires claiming that the success path is complete.

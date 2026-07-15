@@ -197,12 +197,15 @@ not add an application service, workflow engine or mission database.
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
 3. **A7.3 — Owner-approved activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
-   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by three live attempts.
+   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts.
    Attempt 3 recovered a failed pre-commit gate through exactly one Luna repair, recovered the approved author-commit
    crash, reached exact-SHA Sol review and then autonomously closed native/Central state and cleanup when Sol rejected
-   a real cross-process false positive. No target PR was opened. Before another canary, obtain fresh owner approval and
-   pin that product behavior; also project the actionable finding/terminal stage and verify Telegram delivery. One
-   successful PR/CI/merge/post-verify route is still required by the executable
+   a real cross-process false positive. Attempt 4 pinned that behavior to the global TUN lock and again passed the
+   crash/Windows-gate path, but two exact-SHA Sol reviews found that config polling can forget a live custom runtime
+   after transient invalid YAML or a valid path A-to-B rewrite. No target PR was opened. Before another canary, obtain
+   fresh owner approval and preserve the running registered path while evaluating the configured candidate separately;
+   also project the actionable finding/terminal stage and verify Telegram delivery. One successful
+   PR/CI/merge/post-verify route is still required by the executable
    [A7.3 contract](a7-real-project-canary.md). See the exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 
