@@ -484,6 +484,27 @@ class MissionAdapterTests(unittest.TestCase):
                     central, state_root, backend, dispatch_profile="build1-uap"
                 )
 
+    def test_coordinator_tick_reconciles_before_dispatch(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            first = adapter.coordinator_tick(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            self.assertEqual("dispatched", first["action"])
+            self.assertEqual(1, backend.create_calls)
+
+            central.mission["status"] = "waiting_owner"
+            second = adapter.coordinator_tick(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            self.assertEqual("reconciled", second["action"])
+            self.assertEqual(1, backend.create_calls)
+            self.assertEqual(1, len(central.events))
+
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()
         listing.__enter__.return_value.read.return_value = b'{"missions": []}'

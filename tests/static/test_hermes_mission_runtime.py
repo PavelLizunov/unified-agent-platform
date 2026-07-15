@@ -248,6 +248,21 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
         assert [item["mission_id"] for item in store.dispatch_candidates(
             "build1-uap", 1, reconcile=True
         )] == ["mission-old"]
+        store.append_central(
+            "mission-old",
+            {
+                "schema_version": 1,
+                "mission_id": "mission-old",
+                "type": "mission.question",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {"question_id": "q-1", "text": "Owner decision"},
+            },
+        )
+        assert store.projection("mission-old")["status"] == "waiting_owner"
+        assert [item["mission_id"] for item in store.dispatch_candidates(
+            "build1-uap", 1, reconcile=True
+        )] == ["mission-old"]
         assert [item["mission_id"] for item in store.dispatch_candidates("build1-uap", 1)] == [
             "mission-second"
         ]

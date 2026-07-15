@@ -438,9 +438,14 @@ class MissionStore:
                 continue
             view = self.projection(row["mission_id"])
             eligible = (
-                view["status"] == "active"
-                and bool(view["tasks"]) == reconcile
-                and (reconcile or view["stage"] == "accepted")
+                reconcile
+                and view["status"] in {"active", "waiting_owner"}
+                and bool(view["tasks"])
+            ) or (
+                not reconcile
+                and view["status"] == "active"
+                and view["stage"] == "accepted"
+                and not view["tasks"]
             )
             if eligible:
                 candidates.append(view)

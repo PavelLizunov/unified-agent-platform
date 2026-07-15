@@ -138,6 +138,10 @@ mission, reconstructs a missing local cache only from one exact native root, and
 Kanban projection. A committed prefix is therefore deduplicated and a partially published multi-event suffix is
 retried. This primitive does not install a timer, activate a task, run a worker or complete a mission.
 
+The `tick` command is the smallest coordinator: reconcile one existing active mission first, otherwise poll and hand
+off one new mission. It preserves a single execution lane per configured invocation and remains non-spawning unless
+the separately owner-approved caller passes both `--activate` and an exact assignee.
+
 The safe default creates an unassigned root with `--initial-status blocked`. The exact pinned Hermes overlay records
 the sticky native `needs_input` block in the same SQLite transaction as the task, so a concurrent dispatcher sees
 either no task or the complete blocked task and never a dispatchable intermediate state. The adapter verifies exact
