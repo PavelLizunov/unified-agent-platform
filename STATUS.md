@@ -63,10 +63,18 @@ Last updated: 2026-07-15
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
   retry and escalation require no owner confirmation. Unknown signals and genuinely privileged flags remain blocked;
-  Claude, local inference and GPU are outside this route. The repository coordinator now consumes and durably records
-  this decision for author/reviewer execution, enforces the exact provider/model/effort tuples and requires an atomic
-  schema-v3 three-cycle profile migration. The change is not installed live yet; no seventh canary or successful
-  autonomous delivery is claimed.
+  Claude, local inference and GPU are outside this route. PR #216 installed `openai-autonomy-v1` and atomically
+  migrated the stopped build-1 profile to schema v3/three cycles. Current source `openai-autonomy-v2` additionally
+  treats independent-review and required-CI failures as durable quality failures: the next tick automatically raises
+  the OpenAI route and repairs the same durably bound PR. Both successful and failed CI retain only bounded
+  name/outcome metadata. PR number/head/base are durable identity and repair pushes use an exact prior-head lease.
+  Final failure requires a live Kanban claim and exact PR identity. Because GitHub has no server-side conditional close,
+  an open failed PR and exact remote branch are preserved as bounded evidence while local disposable state is cleaned;
+  if the PR is already closed, only its unchanged branch/head is lease-deleted. Compatible in-progress v1 route
+  and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
+  repair push.
+  It then cleans disposable state and records terminal failure. This v2 revision still requires merge/install verification;
+  no seventh canary or successful autonomous delivery is claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

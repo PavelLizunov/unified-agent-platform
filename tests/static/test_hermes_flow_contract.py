@@ -83,17 +83,17 @@ def route_decision(summary):
     if summary.get("task_class") == "complex_code":
         signals = {
             "schema_version": 1, "changed_files": 6,
-            "prior_review_rejections": 0, "flags": [],
+            "prior_quality_failures": 0, "flags": [],
         }
     elif summary.get("task_class") == "escalated_code":
         signals = {
             "schema_version": 1, "changed_files": 1,
-            "prior_review_rejections": 2, "flags": [],
+            "prior_quality_failures": 2, "flags": [],
         }
     else:
         signals = {
             "schema_version": 1, "changed_files": 1,
-            "prior_review_rejections": 0, "flags": [],
+            "prior_quality_failures": 0, "flags": [],
         }
     return flow.choose_delivery_route(POLICY, signals)
 
@@ -163,13 +163,41 @@ class FlowContractTests(unittest.TestCase):
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
             )
 
+    def test_exact_v1_review_artifacts_remain_valid_during_v2_recovery(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        legacy = flow._choose_delivery_route(
+            flow._legacy_delivery_policy(self.policy),
+            {
+                "schema_version": 1,
+                "changed_files": 1,
+                "prior_review_rejections": 0,
+                "flags": [],
+            },
+            policy_id="openai-autonomy-v1",
+        )
+        summary["route_decision_id"] = legacy["decision_id"]
+        verification["route_decision_id"] = legacy["decision_id"]
+
+        flow.validate_review(
+            summary,
+            verification,
+            telemetry(summary, "author", "workspace-write"),
+            telemetry(verification, "reviewer", "read-only"),
+            legacy,
+            self.policy,
+            expected_repo=summary["repo"],
+            current_head="aaa",
+            ci_green=True,
+        )
+
     def test_delivery_policy_uses_the_approved_standard_route(self):
         decision = flow.choose_delivery_route(
             self.policy,
             {
                 "schema_version": 1,
                 "changed_files": 3,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": [],
             },
         )
@@ -188,7 +216,7 @@ class FlowContractTests(unittest.TestCase):
             {
                 "schema_version": 1,
                 "changed_files": 6,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": ["cross_process", "multi_platform"],
             },
         )
@@ -206,7 +234,7 @@ class FlowContractTests(unittest.TestCase):
         signals = {
             "schema_version": 1,
             "changed_files": 6,
-            "prior_review_rejections": 5,
+            "prior_quality_failures": 5,
             "flags": ["cross_process", "durable_state", "multi_platform"],
         }
         first = flow.choose_delivery_route(self.policy, signals)
@@ -214,7 +242,7 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual("ready", first["status"])
         self.assertEqual("escalated", first["route"])
-        self.assertEqual(["prior_review_rejections>=2"], first["reasons"])
+        self.assertEqual(["prior_quality_failures>=2"], first["reasons"])
         self.assertEqual("gpt-5.6-terra", first["author"]["model"])
         self.assertEqual("gpt-5.6-sol", first["reviewer"]["model"])
         self.assertEqual(64, len(first["decision_id"]))
@@ -223,7 +251,7 @@ class FlowContractTests(unittest.TestCase):
         signals = {
             "schema_version": 1,
             "changed_files": 1,
-            "prior_review_rejections": 0,
+            "prior_quality_failures": 0,
             "flags": ["concurrency", "cross_process"],
         }
         first = flow.choose_delivery_route(self.policy, signals)
@@ -248,7 +276,7 @@ class FlowContractTests(unittest.TestCase):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 1,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": [],
             })
 
@@ -259,7 +287,7 @@ class FlowContractTests(unittest.TestCase):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 1,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": [],
             })
 
@@ -269,7 +297,7 @@ class FlowContractTests(unittest.TestCase):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 6,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": ["cross_process"],
             })
 
@@ -279,12 +307,12 @@ class FlowContractTests(unittest.TestCase):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 6,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": ["cross_process"],
             })
 
     def test_delivery_policy_rejects_non_openai_delivery_actor(self):
-        signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
+        signals = {"schema_version": 1, "changed_files": 1, "prior_quality_failures": 0, "flags": []}
         changed = json.loads(json.dumps(self.policy))
         changed["delivery_model_policy"]["routes"]["standard"]["reviewer"]["engine"] = "external"
         with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
@@ -299,7 +327,7 @@ class FlowContractTests(unittest.TestCase):
             flow.choose_delivery_route(self.policy, {
                 "schema_version": True,
                 "changed_files": 1,
-                "prior_review_rejections": 0,
+                "prior_quality_failures": 0,
                 "flags": [],
             })
 
@@ -307,7 +335,7 @@ class FlowContractTests(unittest.TestCase):
         base = {
             "schema_version": 1,
             "changed_files": 1,
-            "prior_review_rejections": 0,
+            "prior_quality_failures": 0,
             "flags": ["local_or_gpu"],
         }
         gated = flow.choose_delivery_route(self.policy, base)

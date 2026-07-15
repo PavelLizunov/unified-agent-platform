@@ -29,6 +29,12 @@ class InjectedCrash(RuntimeError):
     pass
 
 
+class CIFailed(DeliveryError):
+    def __init__(self, message: str, checks: Any):
+        super().__init__(message)
+        self.checks = checks
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
@@ -46,6 +52,8 @@ _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
 _AUTHOR_CHECKS_RESULT = "author_checks_failed"
 _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
+_CI_RESULT = "ci_failed"
+_CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _MAX_CHECK_FAILURE_CHARS = 4000
 
 
@@ -199,6 +207,20 @@ def _ci_decision(checks: Any, required: list[str]) -> str:
     return "passed"
 
 
+def _ci_summaries(checks: Any) -> list[dict[str, str]]:
+    summaries = []
+    for item in checks[:50] if isinstance(checks, list) else []:
+        if not isinstance(item, dict):
+            continue
+        summaries.append({
+            "name": str(item.get("name") or item.get("context") or "unknown")[:200],
+            "outcome": str(
+                item.get("conclusion") or item.get("state") or item.get("status") or "unknown"
+            )[:100],
+        })
+    return summaries
+
+
 @contextlib.contextmanager
 def exclusive_lock(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -299,9 +321,19 @@ class DeliveryCoordinator:
         return {
             "schema_version": 1,
             "changed_files": len(self.profile["required_files"]),
-            "prior_review_rejections": state.get("prior_review_rejections", 0),
+            "prior_quality_failures": self._quality_failures(state),
             "flags": self.profile["route_flags"],
         }
+
+    @staticmethod
+    def _quality_failures(state: dict[str, Any]) -> int:
+        values = [
+            state.get("prior_review_rejections", 0),
+            state.get("prior_ci_failures", 0),
+        ]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in values):
+            raise DeliveryError("durable quality-failure counters are invalid")
+        return sum(values)
 
     def _ensure_route(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
@@ -311,16 +343,21 @@ class DeliveryCoordinator:
         )
         if decision.get("status") != "ready":
             raise DeliveryError("mission requires a capability outside the configured OpenAI policy")
-        key = str(state.get("prior_review_rejections", 0))
+        key = str(self._quality_failures(state))
         decisions = state.setdefault("route_decisions", {})
-        if key in decisions and decisions[key] != decision:
-            raise DeliveryError("routing policy changed during a durable mission cycle")
+        if key in decisions:
+            recovered = flow_contract.validate_stored_delivery_route(
+                self.policy, decisions[key]
+            )
+            if recovered != decision:
+                raise DeliveryError("routing policy changed during a durable mission cycle")
+            return decisions[key]
         decisions[key] = decision
         self._save(paths, state)
         return decision
 
     def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
-        key = str(state.get("prior_review_rejections", 0))
+        key = str(self._quality_failures(state))
         decision = state.get("route_decisions", {}).get(key)
         if not isinstance(decision, dict) or decision.get("status") != "ready":
             raise DeliveryError("durable OpenAI route decision is missing")
@@ -388,7 +425,24 @@ class DeliveryCoordinator:
             ):
                 raise DeliveryError("delivery state identity mismatch")
             state.setdefault("prior_review_rejections", 0)
+            state.setdefault("prior_ci_failures", 0)
             state.setdefault("route_decisions", {})
+            migrated = False
+            if state.get("pr_number") is not None and "pr_base_branch" not in state:
+                state["pr_base_branch"] = self.profile["default_branch"]
+                migrated = True
+            if (
+                state.get("pr_number") is not None
+                and state.get("phase") in {"pr_open", "ci_green"}
+                and "pr_head_sha" not in state
+            ):
+                candidate = state.get("candidate_sha")
+                if not isinstance(candidate, str) or not candidate:
+                    raise DeliveryError("legacy PR state has no candidate identity")
+                state["pr_head_sha"] = candidate
+                migrated = True
+            if migrated:
+                self._save(paths, state)
             return state
         digest = hashlib.sha256(mission_id.encode()).hexdigest()[:12]
         return {
@@ -399,6 +453,7 @@ class DeliveryCoordinator:
             "branch": f"{self.profile['branch_prefix']}-{digest}",
             "review_cycle": 1,
             "prior_review_rejections": 0,
+            "prior_ci_failures": 0,
             "route_decisions": {},
             "crash_injected": False,
         }
@@ -569,8 +624,30 @@ class DeliveryCoordinator:
     def _failure_contract(
         self, state: dict[str, Any]
     ) -> tuple[str, str, list[dict[str, Any]]]:
+        def finish(
+            result: str, summary: str, events: list[dict[str, Any]]
+        ) -> tuple[str, str, list[dict[str, Any]]]:
+            pr_url = state.get("pr_url")
+            if isinstance(pr_url, str) and pr_url:
+                events.insert(-1, {
+                    "type": "delivery.upsert",
+                    "payload": {"kind": "pull_request", "status": "failed", "url": pr_url},
+                })
+            return result, summary, events
+
+        if state.get("failure_kind") == "ci":
+            return finish(
+                _CI_RESULT,
+                _CI_SUMMARY,
+                [
+                    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "failed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+                ],
+            )
         if state.get("failure_kind") == "author_checks":
-            return (
+            return finish(
                 _AUTHOR_CHECKS_RESULT,
                 _AUTHOR_CHECKS_SUMMARY,
                 [
@@ -578,7 +655,7 @@ class DeliveryCoordinator:
                     {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
                 ],
             )
-        return (
+        return finish(
             _REJECTION_RESULT,
             _REJECTION_SUMMARY,
             [
@@ -662,8 +739,12 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
-        if state["phase"] in {"review_rejected", "author_checks_failed"}:
-            self._cleanup(state, paths)
+        if state["phase"] in {"review_rejected", "author_checks_failed", "ci_failed"}:
+            preserve_remote = False
+            if state.get("pr_number") is not None:
+                preserve_remote = self._finalize_failed_pr(state)
+            self._cleanup(state, paths, preserve_remote=preserve_remote)
+            state["failed_pr_preserved"] = preserve_remote
             state["phase"] = "rejection_cleaned"
             self._save(paths, state)
         if state["phase"] == "rejection_cleaned":
@@ -1060,12 +1141,64 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        self._git(paths["author"], "push", "--set-upstream", "origin", state["branch"])
+        fields = "number,url,state,headRefName,headRefOid,baseRefName"
+        bound = state.get("pr_number")
+        if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
+            raise DeliveryError("durable PR identity is invalid")
+        if bound is not None:
+            previous_head = state.get("pr_head_sha")
+            if not isinstance(previous_head, str) or not previous_head:
+                raise DeliveryError("durable PR head identity is missing")
+            previous_base = state.get("pr_base_branch")
+            if previous_base != self.profile["default_branch"]:
+                raise DeliveryError("durable PR base identity is invalid")
+            previous = json.loads(self._run([
+                self.profile["gh_bin"], "pr", "view", str(bound),
+                "--repo", self.profile["repo"], "--json", fields,
+            ]).stdout)
+            if (
+                previous.get("number") != bound
+                or previous.get("state") != "OPEN"
+                or previous.get("headRefName") != state["branch"]
+                or previous.get("baseRefName") != previous_base
+            ):
+                raise DeliveryError("durable PR changed before repair push")
+            observed_head = previous.get("headRefOid")
+            if observed_head not in {previous_head, state["candidate_sha"]}:
+                raise DeliveryError("durable PR changed before repair push")
+        else:
+            remote = self._git(
+                paths["author"], "ls-remote", "--heads", "origin", state["branch"]
+            )
+            if remote:
+                remote_fields = remote.split()
+                if remote_fields != [
+                    state["candidate_sha"], f"refs/heads/{state['branch']}"
+                ]:
+                    raise DeliveryError("initial PR branch identity is already occupied")
+                observed_head = state["candidate_sha"]
+            else:
+                observed_head = None
+        if observed_head != state["candidate_sha"]:
+            self._assert_claim(
+                state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+            )
+            self._git(
+                paths["author"], "push",
+                f"--force-with-lease=refs/heads/{state['branch']}:{observed_head or ''}",
+                "--set-upstream", "origin", state["branch"],
+            )
         view = self._run(
-            [self.profile["gh_bin"], "pr", "view", state["branch"], "--repo", self.profile["repo"], "--json", "number,url"],
+            [
+                self.profile["gh_bin"], "pr", "view",
+                str(bound) if bound is not None else state["branch"],
+                "--repo", self.profile["repo"], "--json", fields,
+            ],
             check=False,
         )
         if view.returncode:
+            if bound is not None:
+                raise DeliveryError("durable PR could not be loaded for repair")
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
             )
@@ -1078,28 +1211,43 @@ class DeliveryCoordinator:
                 cwd=paths["author"],
             )
             view = self._run(
-                [self.profile["gh_bin"], "pr", "view", state["branch"], "--repo", self.profile["repo"], "--json", "number,url"]
+                [
+                    self.profile["gh_bin"], "pr", "view", state["branch"],
+                    "--repo", self.profile["repo"], "--json", fields,
+                ]
             )
         info = json.loads(view.stdout)
-        if not isinstance(info.get("number"), int) or not isinstance(info.get("url"), str):
+        if (
+            not isinstance(info.get("number"), int)
+            or not isinstance(info.get("url"), str)
+            or info.get("state") != "OPEN"
+            or info.get("headRefName") != state["branch"]
+            or info.get("headRefOid") != state["candidate_sha"]
+            or info.get("baseRefName") != self.profile["default_branch"]
+            or (bound is not None and info.get("number") != bound)
+        ):
             raise DeliveryError("GitHub returned invalid PR identity")
-        state.update(phase="pr_open", pr_number=info["number"], pr_url=info["url"])
+        state.update(
+            phase="pr_open", pr_number=info["number"], pr_url=info["url"],
+            pr_head_sha=state["candidate_sha"], pr_base_branch=info["baseRefName"],
+        )
         self._save(paths, state)
 
     def _wait_ci(self, state: dict[str, Any]) -> None:
         deadline = time.monotonic() + self.profile["ci_timeout_seconds"]
+        checks: Any = []
         while time.monotonic() < deadline:
             self._assert_claim(state)
             self._assert_pr_head(state)
             checks = self._ci_rollup(state)
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
-                state["ci_checks"] = checks
+                state["ci_checks"] = _ci_summaries(checks)
                 return
             if decision == "failed":
-                raise DeliveryError("PR CI failed or did not satisfy the exact required checks")
+                raise CIFailed("PR CI failed or did not satisfy the exact required checks", checks)
             time.sleep(10)
-        raise DeliveryError("PR CI timed out")
+        raise CIFailed("PR CI timed out", checks)
 
     def _ci_rollup(self, state: dict[str, Any]) -> Any:
         value = json.loads(self._run(
@@ -1112,19 +1260,105 @@ class DeliveryCoordinator:
 
     def _require_ci_green_now(self, state: dict[str, Any]) -> None:
         checks = self._ci_rollup(state)
-        if _ci_decision(checks, self.profile["required_ci_checks"]) != "passed":
+        decision = _ci_decision(checks, self.profile["required_ci_checks"])
+        if decision == "failed":
+            raise CIFailed("required PR CI failed at the merge boundary", checks)
+        if decision != "passed":
             raise DeliveryError("required PR CI is not green at the merge boundary")
-        state["ci_checks"] = checks
+        state["ci_checks"] = _ci_summaries(checks)
+
+    def _record_ci_failure(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], error: CIFailed
+    ) -> None:
+        summaries = _ci_summaries(error.checks)
+        details = ", ".join(f"{item['name']}={item['outcome']}" for item in summaries)
+        finding = f"{error}: {details or 'invalid check rollup'}"
+        self._quality_failures(state)
+        state["ci_checks"] = summaries
+        state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
+        if state["review_cycle"] < self.profile["max_review_cycles"]:
+            state.update(
+                phase="needs_fix",
+                review_cycle=state["review_cycle"] + 1,
+                review_findings=[finding[:_MAX_CHECK_FAILURE_CHARS]],
+            )
+        else:
+            state.update(
+                phase="ci_failed",
+                failure_kind="ci",
+                failure_error=finding[:_MAX_CHECK_FAILURE_CHARS],
+            )
+        self._save(paths, state)
+
+    def _finalize_failed_pr(self, state: dict[str, Any]) -> bool:
+        self._assert_claim(
+            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+        )
+        fields = "state,headRefName,headRefOid,baseRefName"
+        expected_head = state.get("pr_head_sha")
+        if not isinstance(expected_head, str) or not expected_head:
+            raise DeliveryError("failed PR has no durable head identity")
+        expected_base = state.get("pr_base_branch")
+        if expected_base != self.profile["default_branch"]:
+            raise DeliveryError("failed PR has no durable base identity")
+
+        def inspect() -> dict[str, Any]:
+            return json.loads(self._run(
+                [
+                    self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
+                    "--repo", self.profile["repo"], "--json", fields,
+                ]
+            ).stdout)
+
+        def require_identity(info: dict[str, Any], *states: str) -> None:
+            if (
+                info.get("headRefName") != state["branch"]
+                or info.get("headRefOid") != expected_head
+                or info.get("baseRefName") != expected_base
+                or info.get("state") not in states
+            ):
+                raise DeliveryError("failed PR identity no longer matches the durable candidate")
+
+        info = inspect()
+        require_identity(info, "OPEN", "CLOSED")
+        source = pathlib.Path(self.profile["source_checkout"])
+        remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
+        if remote:
+            remote_fields = remote.split()
+            if remote_fields != [expected_head, f"refs/heads/{state['branch']}"]:
+                raise DeliveryError("failed PR branch moved before cleanup")
+        if info.get("state") == "OPEN":
+            if not remote:
+                raise DeliveryError("open failed PR has no exact remote branch")
+            return True
+        self._assert_claim(
+            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+        )
+        if remote:
+            self._git(
+                source, "push",
+                f"--force-with-lease=refs/heads/{state['branch']}:{expected_head}",
+                "origin", "--delete", state["branch"],
+            )
+            if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+                raise DeliveryError("failed PR branch cleanup did not converge")
+        info = inspect()
+        require_identity(info, "CLOSED")
+        return False
 
     def _assert_pr_head(self, state: dict[str, Any]) -> None:
-        head = self._run(
+        info = json.loads(self._run(
             [
-                self.profile["gh_bin"], "api",
-                f"repos/{self.profile['repo']}/pulls/{state['pr_number']}", "--jq", ".head.sha",
+                self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
+                "--repo", self.profile["repo"], "--json", "headRefOid,baseRefName",
             ]
-        ).stdout.strip()
-        if head != state["candidate_sha"]:
-            raise DeliveryError("PR head no longer matches the reviewed candidate")
+        ).stdout)
+        if (
+            info.get("headRefOid") != state["candidate_sha"]
+            or info.get("baseRefName") != state.get("pr_base_branch")
+            or info.get("baseRefName") != self.profile["default_branch"]
+        ):
+            raise DeliveryError("PR identity no longer matches the reviewed candidate")
 
     def _validate_review(self, state: dict[str, Any]) -> None:
         flow_contract.validate_review(
@@ -1149,7 +1383,8 @@ class DeliveryCoordinator:
         info = json.loads(self._run(
             [
                 self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
-                "--repo", self.profile["repo"], "--json", "state,mergedAt,mergeCommit,url",
+                "--repo", self.profile["repo"],
+                "--json", "state,mergedAt,mergeCommit,url,headRefOid,baseRefName",
             ]
         ).stdout)
         if info.get("state") != "MERGED":
@@ -1168,10 +1403,17 @@ class DeliveryCoordinator:
             info = json.loads(self._run(
                 [
                     self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
-                    "--repo", self.profile["repo"], "--json", "state,mergedAt,mergeCommit,url",
+                    "--repo", self.profile["repo"],
+                    "--json", "state,mergedAt,mergeCommit,url,headRefOid,baseRefName",
                 ]
             ).stdout)
-        if info.get("state") != "MERGED" or not info.get("mergedAt"):
+        if (
+            info.get("state") != "MERGED"
+            or not info.get("mergedAt")
+            or info.get("headRefOid") != state["candidate_sha"]
+            or info.get("baseRefName") != state.get("pr_base_branch")
+            or info.get("baseRefName") != self.profile["default_branch"]
+        ):
             raise DeliveryError("PR did not reach merged state")
         merge_sha = (info.get("mergeCommit") or {}).get("oid")
         if not isinstance(merge_sha, str) or not merge_sha:
@@ -1227,7 +1469,13 @@ class DeliveryCoordinator:
             events.append({"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}})
         return events
 
-    def _cleanup(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+    def _cleanup(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        preserve_remote: bool = False,
+    ) -> None:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
@@ -1240,7 +1488,13 @@ class DeliveryCoordinator:
             raise DeliveryError("disposable worktree cleanup did not converge")
         if self._git(source, "branch", "--list", state["branch"]):
             raise DeliveryError("disposable local branch still exists")
-        if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+        remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
+        if preserve_remote:
+            if remote.split() != [
+                state.get("pr_head_sha"), f"refs/heads/{state['branch']}"
+            ]:
+                raise DeliveryError("preserved failed PR branch identity changed")
+        elif remote:
             raise DeliveryError("disposable remote branch still exists")
 
     def tick(self) -> dict[str, Any] | None:
@@ -1252,7 +1506,7 @@ class DeliveryCoordinator:
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
             if state["phase"] in {
-                "review_rejected", "author_checks_failed", "rejection_cleaned",
+                "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
                 "rejection_task_completed",
             }:
                 return self._finish_rejection(state, paths)
@@ -1325,19 +1579,25 @@ class DeliveryCoordinator:
                 self._pr(state, paths)
                 self._publish_stage(state, "delivering", 80)
 
-            if state["phase"] == "pr_open":
-                self._assert_claim(state)
-                self._wait_ci(state)
-                self._validate_review(state)
-                state["phase"] = "ci_green"
-                self._save(paths, state)
+            try:
+                if state["phase"] == "pr_open":
+                    self._assert_claim(state)
+                    self._wait_ci(state)
+                    self._validate_review(state)
+                    state["phase"] = "ci_green"
+                    self._save(paths, state)
 
-            if state["phase"] == "ci_green":
-                self._assert_claim(state)
-                self._merge(state)
-                state["phase"] = "merged"
-                self._save(paths, state)
-                self._publish_stage(state, "verifying", 90)
+                if state["phase"] == "ci_green":
+                    self._assert_claim(state)
+                    self._merge(state)
+                    state["phase"] = "merged"
+                    self._save(paths, state)
+                    self._publish_stage(state, "verifying", 90)
+            except CIFailed as error:
+                self._record_ci_failure(state, paths, error)
+                if state["phase"] == "ci_failed":
+                    return self._finish_rejection(state, paths)
+                return {"action": state["phase"], "mission_id": mission_id, "state": state}
 
             if state["phase"] == "merged":
                 self._assert_claim(state)

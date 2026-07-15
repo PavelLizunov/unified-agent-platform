@@ -12,10 +12,10 @@
     }
   },
   "delivery_model_policy": {
-    "policy_id": "openai-autonomy-v1",
+    "policy_id": "openai-autonomy-v2",
     "complex_changed_files_at": 6,
-    "complex_prior_review_rejections_at": 1,
-    "escalated_prior_review_rejections_at": 2,
+    "complex_prior_quality_failures_at": 1,
+    "escalated_prior_quality_failures_at": 2,
     "complex_flags": [
       "concurrency",
       "cross_process",

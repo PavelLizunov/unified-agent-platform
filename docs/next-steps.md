@@ -205,10 +205,17 @@ not add an application service, workflow engine or mission database.
    recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
    Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
    name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. ADR-031
-   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. The repository
-   coordinator consumes and persists the fail-closed `openai-autonomy-v1` decision; before another canary, land and
-   install that exact revision, atomically migrate the stopped profile to schema v3/three cycles, and behaviorally
-   cover a differently named custom executable; also project the actionable
+   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. PR #216 installed the
+   fail-closed `openai-autonomy-v1` decision and atomically migrated the stopped profile to schema v3/three cycles.
+   Before another canary, land and install `openai-autonomy-v2`: independent-review or required-CI failure must
+   durably select the next OpenAI route and repair the same PR. The durable PR number/head/base may not be rebound;
+   each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. On final failure a live
+   claim and exact identity are required. GitHub has no conditional unsafe close, so an open failed PR/branch is kept
+   as bounded evidence and local disposables are removed; an already closed PR's unchanged branch is exact-lease
+   deleted. Compatible v1 in-progress
+   route/PR identity evidence and lost initial-push, PR-create or repair-push responses recover automatically. Also
+   behaviorally cover a differently named custom
+   executable and project the actionable
    finding/terminal stage and verify Telegram
    delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable
