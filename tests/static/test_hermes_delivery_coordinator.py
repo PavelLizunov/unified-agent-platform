@@ -662,6 +662,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(["still broken"], persisted["review_findings"])
             self.assertEqual("reject", persisted["review_verification"]["verdict"])
 
+            client.mission["status"] = "failed"
             with (
                 mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")),
                 mock.patch.object(

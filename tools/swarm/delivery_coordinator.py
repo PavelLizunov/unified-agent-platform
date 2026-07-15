@@ -982,6 +982,8 @@ class DeliveryCoordinator:
         paths = self._paths(mission_id)
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
+            if state["phase"] == "review_rejected":
+                return {"action": "review_rejected", "mission_id": mission_id, "state": state}
             if mission.get("status") == "completed":
                 if state.get("phase") == "cleaned":
                     self._recover_task_completion(state, paths)
@@ -992,8 +994,6 @@ class DeliveryCoordinator:
                 return {"action": "complete", "mission_id": mission_id, "state": state}
             if mission.get("status") in {"failed", "cancelled"}:
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
-            if state["phase"] == "review_rejected":
-                return {"action": "review_rejected", "mission_id": mission_id, "state": state}
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)
             if state["phase"] not in {
