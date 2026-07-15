@@ -6,6 +6,8 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 
+import yaml
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GENERATOR = ROOT / "tools/hermes-mission/render_configmap.py"
@@ -31,6 +33,44 @@ def main() -> None:
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
     ):
         assert fragment in deployment, fragment
+
+    manifest = next(
+        document for document in yaml.safe_load_all(deployment)
+        if document.get("kind") == "Deployment"
+        and document.get("metadata", {}).get("name") == "hermes-agent"
+    )
+    template = manifest["spec"]["template"]
+    assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
+        "v23-atomic-mission-block"
+    )
+    bootstrap = next(
+        container for container in template["spec"]["initContainers"]
+        if container["name"] == "bootstrap"
+    )
+    bootstrap_script = "\n".join(bootstrap["args"])
+    assert (
+        "cp /opt/hermes/hermes_cli/kanban_db.py "
+        "/mission-runtime/root/hermes_cli/kanban_db.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/hermes_cli/kanban_db.py "
+        "/mission-runtime/kanban_db.py"
+    ) in bootstrap_script
+    gateway = next(
+        container for container in template["spec"]["containers"]
+        if container["name"] == "gateway"
+    )
+    assert {
+        "name": "mission-runtime",
+        "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",
+        "subPath": "kanban_db.py",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
+    mission_runtime = next(
+        volume for volume in template["spec"]["volumes"]
+        if volume["name"] == "mission-runtime"
+    )
+    assert mission_runtime == {"name": "mission-runtime", "emptyDir": {}}
 
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
     assert "hermes-mission-runtime.yaml" in resources
