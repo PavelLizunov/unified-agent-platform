@@ -254,6 +254,32 @@ def main() -> None:
                     sidecar = Path(f"{database}{suffix}")
                     assert sidecar.exists(), sidecar
                     assert (sidecar.stat().st_mode & 0o777) == 0o600
+
+            legacy = Path(os.environ["HERMES_HOME"]) / "legacy-duplicates.db"
+            with kb.connect_closing(legacy) as conn:
+                original = kb.create_task(
+                    conn,
+                    title="Legacy duplicate root",
+                    tenant="mission-legacy",
+                    idempotency_key="central-mission:mission-legacy",
+                    initial_status="blocked",
+                )
+                conn.execute("DROP INDEX uq_tasks_active_idempotency")
+                columns = [row["name"] for row in conn.execute("PRAGMA table_info(tasks)")]
+                values = list(conn.execute(
+                    "SELECT * FROM tasks WHERE id = ?", (original,)
+                ).fetchone())
+                values[columns.index("id")] = "legacy-duplicate"
+                conn.execute(
+                    f"INSERT INTO tasks ({','.join(columns)}) VALUES "
+                    f"({','.join('?' for _ in columns)})",
+                    values,
+                )
+            try:
+                kb.init_db(legacy)
+                raise AssertionError("legacy duplicate migration did not fail closed")
+            except RuntimeError as error:
+                assert "duplicates must be resolved before migration" in str(error), error
             """
         )
         race_env = os.environ.copy()

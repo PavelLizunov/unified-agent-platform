@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import pathlib
 import subprocess
 import sys
+import uuid
 from typing import Any
 
 
@@ -201,6 +203,14 @@ def _validate_runtime_attestation(
     sha_key = "head_sha" if component == "author" else "reviewed_sha"
     if telemetry.get("head_sha") != artifact.get(sha_key) or telemetry.get("worktree_clean") is not True:
         raise ContractError(f"{where}: clean exact-SHA worktree attestation required")
+    expected_repo_attestation = (
+        "post_turn_clean_head" if component == "author" else "codex_rollout_prompt_sha256"
+    )
+    if telemetry.get("repo_attestation") != expected_repo_attestation:
+        raise ContractError(f"{where}: source-bound exact-SHA attestation required")
+    _required_text(telemetry, "tree_sha", where)
+    if component == "reviewer":
+        _required_text(telemetry, "source_attestation_sha256", where)
     if (
         telemetry.get("model_attestation") != "codex_rollout_turn_context"
         or telemetry.get("sandbox_attestation") != "codex_rollout_turn_context"
@@ -278,10 +288,17 @@ def terminal_complete(
 
 
 def _codex_rollout_context(
-    path: str | pathlib.Path, *, session_id: str, expected_model: str, expected_sandbox: str
+    path: str | pathlib.Path,
+    *,
+    session_id: str,
+    expected_model: str,
+    expected_sandbox: str,
+    expected_worktree: str | pathlib.Path,
+    source_attestation: dict[str, Any] | None,
 ) -> dict[str, str]:
     session_meta: list[dict[str, Any]] = []
     turn_context: list[dict[str, Any]] = []
+    user_texts: list[str] = []
     with open(path, encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             try:
@@ -294,6 +311,12 @@ def _codex_rollout_context(
                 session_meta.append(event["payload"])
             elif event.get("type") == "turn_context":
                 turn_context.append(event["payload"])
+            elif event.get("type") == "response_item":
+                payload = event["payload"]
+                if payload.get("type") == "message" and payload.get("role") == "user":
+                    for item in payload.get("content", []):
+                        if isinstance(item, dict) and isinstance(item.get("text"), str):
+                            user_texts.append(item["text"])
     if len(session_meta) != 1 or len(turn_context) != 1:
         raise ContractError("rollout must contain exactly one session_meta and one turn_context")
     meta, context = session_meta[0], turn_context[0]
@@ -302,6 +325,9 @@ def _codex_rollout_context(
     persisted_session = meta.get("session_id")
     if persisted_session is not None and persisted_session != session_id:
         raise ContractError("rollout persisted session does not match telemetry thread")
+    worktree = pathlib.Path(expected_worktree).resolve()
+    if pathlib.Path(_required_text(meta, "cwd", "rollout.session_meta")).resolve() != worktree:
+        raise ContractError("rollout cwd does not match attested worktree")
     actual_model = _exact_model(context, "rollout.turn_context")
     if actual_model != expected_model:
         raise ContractError(
@@ -315,12 +341,23 @@ def _codex_rollout_context(
         raise ContractError(
             f"runtime sandbox mismatch: expected {expected_sandbox!r}, observed {actual_sandbox!r}"
         )
-    return {
+    result = {
         "model": actual_model,
         "model_provider": _required_text(meta, "model_provider", "rollout.session_meta"),
         "sandbox": actual_sandbox,
         "codex_cli_version": _required_text(meta, "cli_version", "rollout.session_meta"),
     }
+    if source_attestation is not None:
+        digest = _required_text(source_attestation, "sha256", "source_attestation")
+        marker = f"UAP_SOURCE_ATTESTATION_SHA256={digest}"
+        if sum(text.count(marker) for text in user_texts) != 1:
+            raise ContractError("source attestation marker must appear exactly once in rollout user input")
+        created = _parse_time(_required_text(source_attestation, "created_at", "source_attestation"))
+        started = _parse_time(_required_text(meta, "timestamp", "rollout.session_meta"))
+        if created is None or started is None or not dt.timedelta(0) <= started - created <= dt.timedelta(minutes=5):
+            raise ContractError("source attestation must immediately precede the Codex session")
+        result["source_attestation_sha256"] = digest
+    return result
 
 
 def _repo_attestation(path: str | pathlib.Path, expected_head: str) -> dict[str, Any]:
@@ -335,7 +372,39 @@ def _repo_attestation(path: str | pathlib.Path, expected_head: str) -> dict[str,
         )
     if _git(root, "status", "--porcelain=v1"):
         raise ContractError("worktree must be clean for runtime attestation")
-    return {"head_sha": actual_head, "worktree_clean": True}
+    return {
+        "worktree": str(root),
+        "head_sha": actual_head,
+        "tree_sha": _git(root, "rev-parse", "HEAD^{tree}"),
+        "worktree_clean": True,
+    }
+
+
+def source_attestation(path: str | pathlib.Path, expected_head: str) -> dict[str, Any]:
+    value = {
+        "schema_version": 1,
+        **_repo_attestation(path, expected_head),
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "nonce": str(uuid.uuid4()),
+    }
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    value["sha256"] = hashlib.sha256(encoded).hexdigest()
+    return value
+
+
+def _validate_source_attestation(
+    value: dict[str, Any], *, worktree: str | pathlib.Path, head: str
+) -> dict[str, Any]:
+    digest = _required_text(value, "sha256", "source_attestation")
+    unsigned = {key: item for key, item in value.items() if key != "sha256"}
+    encoded = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise ContractError("source attestation digest mismatch")
+    current = _repo_attestation(worktree, head)
+    for key in ("worktree", "head_sha", "tree_sha", "worktree_clean"):
+        if value.get(key) != current[key]:
+            raise ContractError(f"source attestation {key} no longer matches worktree")
+    return value
 
 
 def summarize_codex_events(
@@ -347,6 +416,7 @@ def summarize_codex_events(
     sandbox: str,
     worktree: str | pathlib.Path,
     head: str,
+    source_attestation_path: str | pathlib.Path | None = None,
 ) -> dict[str, Any]:
     _exact_model({"model": model}, "telemetry")
     session_id = None
@@ -386,10 +456,22 @@ def summarize_codex_events(
         raise ContractError("telemetry: turn.completed event missing")
     if rerouted:
         raise ContractError("telemetry: model reroute is not an exact-model run")
-    runtime = _codex_rollout_context(
-        rollout, session_id=session_id, expected_model=model, expected_sandbox=sandbox
-    )
     repo = _repo_attestation(worktree, head)
+    source = None
+    if component == "reviewer":
+        if source_attestation_path is None:
+            raise ContractError("reviewer telemetry requires a source attestation")
+        source = _validate_source_attestation(
+            load_json(source_attestation_path), worktree=worktree, head=head
+        )
+    runtime = _codex_rollout_context(
+        rollout,
+        session_id=session_id,
+        expected_model=model,
+        expected_sandbox=sandbox,
+        expected_worktree=worktree,
+        source_attestation=source,
+    )
     return {
         "schema_version": 1,
         "component": component,
@@ -401,6 +483,10 @@ def summarize_codex_events(
         "sandbox": runtime["sandbox"],
         "sandbox_attestation": "codex_rollout_turn_context",
         "codex_cli_version": runtime["codex_cli_version"],
+        "repo_attestation": (
+            "codex_rollout_prompt_sha256" if source is not None else "post_turn_clean_head"
+        ),
+        "source_attestation_sha256": runtime.get("source_attestation_sha256"),
         **repo,
         "session_id": session_id,
         "status": "completed",
@@ -502,6 +588,11 @@ def main(argv: list[str] | None = None) -> int:
     terminal.add_argument("--branch-deleted", action="store_true")
     terminal.add_argument("--worktree-removed", action="store_true")
 
+    attest = sub.add_parser("attest-source")
+    attest.add_argument("--worktree", required=True)
+    attest.add_argument("--head", required=True)
+    attest.add_argument("--output", required=True)
+
     telemetry = sub.add_parser("summarize-codex")
     telemetry.add_argument("--events", required=True)
     telemetry.add_argument("--component", required=True)
@@ -509,6 +600,7 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.add_argument("--rollout", required=True)
     telemetry.add_argument("--worktree", required=True)
     telemetry.add_argument("--head", required=True)
+    telemetry.add_argument("--source-attestation")
     telemetry.add_argument(
         "--sandbox", required=True,
         choices=("read-only", "workspace-write", "danger-full-access"),
@@ -551,11 +643,17 @@ def main(argv: list[str] | None = None) -> int:
                 raise ContractError("terminal state requires merge, default-branch proof and cleanup")
             print("hermes-flow-terminal-ok")
             return 0
+        if args.command == "attest-source":
+            value = source_attestation(args.worktree, args.head)
+            write_json(args.output, value)
+            print(f"UAP_SOURCE_ATTESTATION_SHA256={value['sha256']}")
+            return 0
         if args.command == "summarize-codex":
             result = summarize_codex_events(
                 args.events, component=args.component, model=args.model,
                 rollout=args.rollout, sandbox=args.sandbox,
                 worktree=args.worktree, head=args.head,
+                source_attestation_path=args.source_attestation,
             )
             write_json(args.output, result)
             print("hermes-flow-telemetry-ok")
