@@ -418,7 +418,9 @@ class MissionStore:
             ).fetchall()
         return [self.projection(row["mission_id"]) for row in rows]
 
-    def dispatch_candidates(self, dispatch_profile: str, limit: int = 1) -> list[dict[str, Any]]:
+    def dispatch_candidates(
+        self, dispatch_profile: str, limit: int = 1, *, reconcile: bool = False
+    ) -> list[dict[str, Any]]:
         dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
         limit = max(1, min(int(limit), 100))
         with self._db() as connection:
@@ -435,7 +437,12 @@ class MissionStore:
             if payload.get("dispatch_profile") != dispatch_profile:
                 continue
             view = self.projection(row["mission_id"])
-            if view["status"] == "active" and view["stage"] == "accepted" and not view["tasks"]:
+            eligible = (
+                view["status"] == "active"
+                and bool(view["tasks"]) == reconcile
+                and (reconcile or view["stage"] == "accepted")
+            )
+            if eligible:
                 candidates.append(view)
                 if len(candidates) == limit:
                     break

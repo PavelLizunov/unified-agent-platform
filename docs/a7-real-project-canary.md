@@ -2,6 +2,10 @@
 
 Status: **design only; no target, model, activation, fault injection, merge or deploy is authorized**.
 
+The pre-activation foundation may be prepared without that bundle. It is limited to offline, non-spawning recovery
+primitives such as deterministic event reconciliation and reconstruction of disposable adapter cache from native
+Kanban authority; it must not install a periodic poller or pass `--activate`.
+
 ## Scope
 
 The canary must use one owner-approved existing repository and one owner-approved, build-1-configured routing profile.

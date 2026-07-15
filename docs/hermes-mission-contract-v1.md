@@ -133,8 +133,10 @@ becomes a shell command.
 `dispatch_profile` is a routing selector, not a Central capability or server-side registry. Central validates and
 freezes the label; the owner-approved build-1 invocation supplies the matching profile, workspace and optional
 assignee. A7.1 considers the blocked root handed off once its deterministic `task.upsert` is projected. Reconciliation
-of a future active worker's multi-event stream and recovery from lost local adapter state are A7.3 prerequisites, not
-claims of this single-event blocked handoff.
+uses a separate bounded `reconcile` command and `reconcile=1` Central selector: it finds one already handed-off active
+mission, reconstructs a missing local cache only from one exact native root, and republishes the current deterministic
+Kanban projection. A committed prefix is therefore deduplicated and a partially published multi-event suffix is
+retried. This primitive does not install a timer, activate a task, run a worker or complete a mission.
 
 The safe default creates an unassigned root with `--initial-status blocked`. The exact pinned Hermes overlay records
 the sticky native `needs_input` block in the same SQLite transaction as the task, so a concurrent dispatcher sees
