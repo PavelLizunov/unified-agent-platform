@@ -96,10 +96,14 @@ class HermesKanbanBackend:
     def _command(self, *args: str) -> list[str]:
         return [self.hermes_bin, "kanban", "--board", self.board, *args]
 
-    def _json(self, *args: str) -> Any:
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         result = self.runner(self._command(*args))
         if result.returncode:
             raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban command failed")
+        return result
+
+    def _json(self, *args: str) -> Any:
+        result = self._run(*args)
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -130,6 +134,31 @@ class HermesKanbanBackend:
         task = self._json(*command)
         if not isinstance(task, dict) or not isinstance(task.get("id"), str):
             raise AdapterError("Hermes Kanban create response has no task id")
+        if not allow_dispatch:
+            snapshot = self.show(task["id"])
+            current = snapshot["task"]
+            if (
+                current.get("id") != task["id"]
+                or "assignee" not in current
+                or current["assignee"] is not None
+            ):
+                raise AdapterError("blocked handoff task identity/assignee mismatch")
+            events = snapshot.get("events", [])
+            if not isinstance(events, list):
+                raise AdapterError("Hermes Kanban task events are invalid")
+            sticky = next(
+                (event.get("kind") for event in reversed(events)
+                 if isinstance(event, dict) and event.get("kind") in {"blocked", "unblocked"}),
+                None,
+            )
+            if (
+                current.get("status") != "blocked"
+                or sticky != "blocked"
+            ):
+                raise AdapterError("safe handoff is not atomically sticky-blocked")
+            if not isinstance(snapshot.get("runs"), list) or snapshot["runs"]:
+                raise AdapterError("safe handoff unexpectedly created a Kanban run")
+            task = current
         return task
 
     def list_task_ids(self, mission_id: str) -> list[str]:

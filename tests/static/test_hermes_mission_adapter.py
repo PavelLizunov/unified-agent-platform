@@ -216,14 +216,23 @@ class MissionAdapterTests(unittest.TestCase):
 
         def runner(command):
             commands.append(command)
+            action = command[command.index("central") + 1]
             return subprocess.CompletedProcess(
                 command, 0,
-                stdout=json.dumps({"id": "task-1", "status": "blocked"}),
+                stdout=json.dumps(
+                    {"id": "task-1", "status": "blocked"}
+                    if action == "create"
+                    else {
+                        "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                        "events": [{"kind": "created"}, {"kind": "blocked"}],
+                        "runs": [],
+                    }
+                ),
                 stderr="",
             )
 
         backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
-        backend.ensure_root(
+        task = backend.ensure_root(
             mission_id="mission-1", goal="Goal", allow_dispatch=False,
             assignee=None, workspace=None,
         )
@@ -232,6 +241,12 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertIn("central-mission:mission-1", command)
         self.assertEqual("blocked", command[command.index("--initial-status") + 1])
         self.assertNotIn("--assignee", command)
+        self.assertEqual("blocked", task["status"])
+        backend.ensure_root(
+            mission_id="mission-1", goal="Goal", allow_dispatch=False,
+            assignee=None, workspace=None,
+        )
+        self.assertEqual([], [item for item in commands if "block" in item])
         with self.assertRaisesRegex(adapter.AdapterError, "non-scratch workspace"):
             backend.ensure_root(
                 mission_id="mission-2", goal="Goal", allow_dispatch=True,
@@ -246,6 +261,52 @@ class MissionAdapterTests(unittest.TestCase):
                     "type": "mission.completed", "payload": {"result": "forged"},
                 }]},
             )
+
+    def test_safe_backend_rejects_malformed_final_native_state(self):
+        cases = {
+            "missing-assignee": {
+                "task": {"id": "task-1", "status": "blocked"},
+                "events": [{"kind": "blocked"}], "runs": [],
+            },
+            "missing-id": {
+                "task": {"status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
+            },
+            "mismatched-id": {
+                "task": {"id": "task-other", "status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
+            },
+            "malformed-runs": {
+                "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": None,
+            },
+            "missing-sticky-block": {
+                "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                "events": [{"kind": "created"}], "runs": [],
+            },
+            "ready": {
+                "task": {"id": "task-1", "status": "ready", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
+            },
+        }
+        for name, malformed in cases.items():
+            with self.subTest(name=name):
+                def runner(command):
+                    action = command[command.index("central") + 1]
+                    if action == "create":
+                        output = {"id": "task-1", "status": "blocked"}
+                    else:
+                        output = malformed
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=json.dumps(output), stderr=""
+                    )
+
+                backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+                with self.assertRaises(adapter.AdapterError):
+                    backend.ensure_root(
+                        mission_id="mission-malformed", goal="Goal", allow_dispatch=False,
+                        assignee=None, workspace=None,
+                    )
 
     def test_worker_metadata_rejects_unknown_payload_fields(self):
         with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):

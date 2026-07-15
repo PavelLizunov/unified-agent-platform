@@ -136,8 +136,12 @@ assignee. A7.1 considers the blocked root handed off once its deterministic `tas
 of a future active worker's multi-event stream and recovery from lost local adapter state are A7.3 prerequisites, not
 claims of this single-event blocked handoff.
 
-The safe default creates a blocked, unassigned root and publishes its deterministic `task.upsert`; it cannot launch a
-worker. `--activate` additionally requires an assignee and is the only mode that creates a ready card. A crash after
+The safe default creates an unassigned root with `--initial-status blocked`. The exact pinned Hermes overlay records
+the sticky native `needs_input` block in the same SQLite transaction as the task, so a concurrent dispatcher sees
+either no task or the complete blocked task and never a dispatchable intermediate state. The adapter verifies exact
+task identity, blocked status, null assignee, the sticky event and no runs before returning; legacy/non-sticky state
+fails closed. `--activate` additionally requires an
+assignee and is the only mode that leaves a ready card. A crash after
 Kanban commit but before the central POST repeats the same Kanban idempotency key and producer event ID, so it converges
 to one root task and one central task event without a dispatch lease table. The hermetic test uses a fake Kanban and
 fake central API and invokes no model. A periodic service/timer and its exact assignee/profile remain a separate
