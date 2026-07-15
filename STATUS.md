@@ -68,8 +68,9 @@ Last updated: 2026-07-15
   treats independent-review and required-CI failures as durable quality failures: the next tick automatically raises
   the OpenAI route and repairs the same durably bound PR. Both successful and failed CI retain only bounded
   name/outcome metadata. PR number/head/base are durable identity and repair pushes use an exact prior-head lease.
-  Final failure requires a live Kanban claim, conditionally closes only that matching PR, verifies it closed, and then
-  lease-deletes the unchanged branch/head; it never issues an unconditional close. Compatible in-progress v1 route
+  Final failure requires a live Kanban claim and exact PR identity. Because GitHub has no server-side conditional close,
+  an open failed PR and exact remote branch are preserved as bounded evidence while local disposable state is cleaned;
+  if the PR is already closed, only its unchanged branch/head is lease-deleted. Compatible in-progress v1 route
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
   repair push.
   It then cleans disposable state and records terminal failure. This v2 revision still requires merge/install verification;

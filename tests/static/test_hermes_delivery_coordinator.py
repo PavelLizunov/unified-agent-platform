@@ -1008,7 +1008,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("gpt-5.6-terra", decision["reviewer"]["model"])
             self.assertEqual(decision, recovered["route_decisions"]["1"])
 
-    def test_final_ci_failure_closes_pr_and_converges_to_terminal_failure(self):
+    def test_final_ci_failure_preserves_pr_and_converges_to_terminal_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -1035,10 +1035,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "run_id": "7",
                 "pr_number": 39,
                 "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
             })
 
             with (
-                mock.patch.object(instance, "_close_failed_pr") as close,
+                mock.patch.object(
+                    instance, "_finalize_failed_pr", return_value=True
+                ) as finalize,
                 mock.patch.object(instance, "_cleanup") as cleanup,
             ):
                 result = instance.tick()
@@ -1046,14 +1050,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("complete", result["action"])
             self.assertEqual("ci_failed", result["state"]["outcome"])
             self.assertEqual("failed", client.mission["status"])
-            close.assert_called_once()
+            self.assertTrue(result["state"]["failed_pr_preserved"])
+            finalize.assert_called_once()
             cleanup.assert_called_once()
+            self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
             self.assertEqual(
                 instance._failure_contract(result["state"])[2],
                 backend.runs[0]["metadata"]["mission_events"],
             )
 
-    def test_final_review_failure_closes_the_pr_from_an_earlier_ci_cycle(self):
+    def test_final_review_failure_preserves_the_pr_from_an_earlier_ci_cycle(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -1079,20 +1085,26 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "run_id": "7",
                 "pr_number": 39,
                 "pr_head_sha": "last-pushed-candidate",
+                "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
             })
 
             with (
-                mock.patch.object(instance, "_close_failed_pr") as close,
+                mock.patch.object(
+                    instance, "_finalize_failed_pr", return_value=True
+                ) as finalize,
                 mock.patch.object(instance, "_cleanup") as cleanup,
             ):
                 result = instance.tick()
 
             self.assertEqual("complete", result["action"])
             self.assertEqual("review_rejected", result["state"]["outcome"])
-            close.assert_called_once()
+            self.assertTrue(result["state"]["failed_pr_preserved"])
+            finalize.assert_called_once()
             cleanup.assert_called_once()
+            self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
 
-    def test_failed_pr_cleanup_is_bound_to_exact_branch_and_sha(self):
+    def test_open_failed_pr_is_preserved_without_an_unsafe_close(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -1105,35 +1117,15 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "state": "OPEN", "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
-                {
-                    "state": "OPEN", "headRefName": "codex/fix",
-                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
-                },
-                {
-                    "state": "CLOSED", "headRefName": "codex/fix",
-                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
-                },
-                {
-                    "state": "CLOSED", "headRefName": "codex/fix",
-                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
-                },
             ]
-            remote_heads = [
-                "candidate-sha\trefs/heads/codex/fix\n",
-                "candidate-sha\trefs/heads/codex/fix\n",
-                "",
-            ]
+            remote_heads = ["candidate-sha\trefs/heads/codex/fix\n"]
 
             def runner(command, **_kwargs):
                 commands.append(command)
                 if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps(views.pop(0))
-                elif command[0:3] == ["gh", "pr", "close"]:
-                    output = ""
                 elif "ls-remote" in command:
                     output = remote_heads.pop(0)
-                elif "push" in command and "--delete" in command:
-                    output = ""
                 else:
                     raise AssertionError(command)
                 return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
@@ -1141,7 +1133,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             instance = coordinator.DeliveryCoordinator(
                 approved, FakeClient(), backend, root / "state", runner=runner
             )
-            instance._close_failed_pr({
+            preserved = instance._finalize_failed_pr({
                 "root_task_id": "task-1",
                 "run_id": "7",
                 "pr_number": 39,
@@ -1150,11 +1142,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_head_sha": "candidate-sha",
                 "pr_base_branch": approved["default_branch"],
             })
-            deletion = next(command for command in commands if command[0] == "git" and "--delete" in command)
-            self.assertIn(
-                "--force-with-lease=refs/heads/codex/fix:candidate-sha", deletion
-            )
-            self.assertTrue(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
+            self.assertTrue(preserved)
+            self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
+            self.assertFalse(any(command[0] == "git" and "push" in command for command in commands))
 
             commands.clear()
             views.append({
@@ -1162,7 +1152,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "baseRefName": approved["default_branch"],
             })
             with self.assertRaisesRegex(coordinator.DeliveryError, "identity"):
-                instance._close_failed_pr({
+                instance._finalize_failed_pr({
                     "root_task_id": "task-1",
                     "run_id": "7",
                     "pr_number": 39,
@@ -1173,6 +1163,63 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 })
             self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
             self.assertFalse(any(command[0] == "git" for command in commands))
+
+    def test_already_closed_failed_pr_lease_deletes_only_the_exact_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = [
+                {
+                    "state": "CLOSED", "headRefName": "codex/fix",
+                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+                },
+                {
+                    "state": "CLOSED", "headRefName": "codex/fix",
+                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+                },
+            ]
+            remote_heads = ["candidate-sha\trefs/heads/codex/fix\n", ""]
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(views.pop(0))
+                elif "ls-remote" in command:
+                    output = remote_heads.pop(0)
+                elif "push" in command and "--delete" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=output, stderr=""
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            preserved = instance._finalize_failed_pr({
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            })
+
+            self.assertFalse(preserved)
+            deletion = next(
+                command for command in commands
+                if command[0] == "git" and "--delete" in command
+            )
+            self.assertIn(
+                "--force-with-lease=refs/heads/codex/fix:candidate-sha", deletion
+            )
+            self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
 
     def test_failed_pr_cleanup_refuses_a_moved_remote_branch(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1203,7 +1250,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 approved, FakeClient(), backend, root / "state", runner=runner
             )
             with self.assertRaisesRegex(coordinator.DeliveryError, "branch moved"):
-                instance._close_failed_pr({
+                instance._finalize_failed_pr({
                     "root_task_id": "task-1",
                     "run_id": "7",
                     "pr_number": 39,
@@ -1231,7 +1278,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 coordinator.mission_adapter.AdapterError, "stale claim"
             ):
-                instance._close_failed_pr({
+                instance._finalize_failed_pr({
                     "root_task_id": "task-1",
                     "run_id": "7",
                     "pr_number": 39,

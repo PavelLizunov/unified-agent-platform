@@ -203,8 +203,9 @@ Good next tasks that do not require redesign:
    mission remain gated. `openai-autonomy-v1` and the schema-v3 profile are installed. Land, install and verify
    `openai-autonomy-v2`, which turns independent-review or required-CI failure into durable automatic route
    escalation and same-PR repair, before the next canary. The same PR number and pushed head are durable identity;
-   final cleanup validates the durable PR number/head/base under a live claim, conditionally closes that exact PR,
-   then lease-deletes the unchanged branch. CI persistence is bounded, repair pushes use an exact prior-head lease,
+   final failure validates the durable PR number/head/base under a live claim and preserves an open exact PR/branch as
+   bounded evidence because GitHub has no conditional close; an already closed PR's unchanged branch is lease-deleted.
+   CI persistence is bounded, repair pushes use an exact prior-head lease,
    initial push/PR-create and repair-push response loss converge, and compatible v1 in-progress routes/PR identities
    resume.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.

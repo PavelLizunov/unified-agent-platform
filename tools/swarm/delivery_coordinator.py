@@ -624,8 +624,19 @@ class DeliveryCoordinator:
     def _failure_contract(
         self, state: dict[str, Any]
     ) -> tuple[str, str, list[dict[str, Any]]]:
+        def finish(
+            result: str, summary: str, events: list[dict[str, Any]]
+        ) -> tuple[str, str, list[dict[str, Any]]]:
+            pr_url = state.get("pr_url")
+            if isinstance(pr_url, str) and pr_url:
+                events.insert(-1, {
+                    "type": "delivery.upsert",
+                    "payload": {"kind": "pull_request", "status": "failed", "url": pr_url},
+                })
+            return result, summary, events
+
         if state.get("failure_kind") == "ci":
-            return (
+            return finish(
                 _CI_RESULT,
                 _CI_SUMMARY,
                 [
@@ -636,7 +647,7 @@ class DeliveryCoordinator:
                 ],
             )
         if state.get("failure_kind") == "author_checks":
-            return (
+            return finish(
                 _AUTHOR_CHECKS_RESULT,
                 _AUTHOR_CHECKS_SUMMARY,
                 [
@@ -644,7 +655,7 @@ class DeliveryCoordinator:
                     {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
                 ],
             )
-        return (
+        return finish(
             _REJECTION_RESULT,
             _REJECTION_SUMMARY,
             [
@@ -729,9 +740,11 @@ class DeliveryCoordinator:
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
         if state["phase"] in {"review_rejected", "author_checks_failed", "ci_failed"}:
+            preserve_remote = False
             if state.get("pr_number") is not None:
-                self._close_failed_pr(state)
-            self._cleanup(state, paths)
+                preserve_remote = self._finalize_failed_pr(state)
+            self._cleanup(state, paths, preserve_remote=preserve_remote)
+            state["failed_pr_preserved"] = preserve_remote
             state["phase"] = "rejection_cleaned"
             self._save(paths, state)
         if state["phase"] == "rejection_cleaned":
@@ -1276,7 +1289,7 @@ class DeliveryCoordinator:
             )
         self._save(paths, state)
 
-    def _close_failed_pr(self, state: dict[str, Any]) -> None:
+    def _finalize_failed_pr(self, state: dict[str, Any]) -> bool:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
@@ -1314,25 +1327,13 @@ class DeliveryCoordinator:
             if remote_fields != [expected_head, f"refs/heads/{state['branch']}"]:
                 raise DeliveryError("failed PR branch moved before cleanup")
         if info.get("state") == "OPEN":
-            self._assert_claim(
-                state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-            )
-            info = inspect()
-            require_identity(info, "OPEN")
-            self._run([
-                self.profile["gh_bin"], "pr", "close", str(state["pr_number"]),
-                "--repo", self.profile["repo"],
-            ])
-            info = inspect()
-            require_identity(info, "CLOSED")
+            if not remote:
+                raise DeliveryError("open failed PR has no exact remote branch")
+            return True
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
         if remote:
-            remote_fields = remote.split()
-            if remote_fields != [expected_head, f"refs/heads/{state['branch']}"]:
-                raise DeliveryError("failed PR branch moved before cleanup")
             self._git(
                 source, "push",
                 f"--force-with-lease=refs/heads/{state['branch']}:{expected_head}",
@@ -1342,6 +1343,7 @@ class DeliveryCoordinator:
                 raise DeliveryError("failed PR branch cleanup did not converge")
         info = inspect()
         require_identity(info, "CLOSED")
+        return False
 
     def _assert_pr_head(self, state: dict[str, Any]) -> None:
         info = json.loads(self._run(
@@ -1466,7 +1468,13 @@ class DeliveryCoordinator:
             events.append({"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}})
         return events
 
-    def _cleanup(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+    def _cleanup(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        preserve_remote: bool = False,
+    ) -> None:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
@@ -1479,7 +1487,13 @@ class DeliveryCoordinator:
             raise DeliveryError("disposable worktree cleanup did not converge")
         if self._git(source, "branch", "--list", state["branch"]):
             raise DeliveryError("disposable local branch still exists")
-        if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+        remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
+        if preserve_remote:
+            if remote.split() != [
+                state.get("pr_head_sha"), f"refs/heads/{state['branch']}"
+            ]:
+                raise DeliveryError("preserved failed PR branch identity changed")
+        elif remote:
             raise DeliveryError("disposable remote branch still exists")
 
     def tick(self) -> dict[str, Any] | None:

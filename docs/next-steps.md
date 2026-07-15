@@ -209,9 +209,10 @@ not add an application service, workflow engine or mission database.
    fail-closed `openai-autonomy-v1` decision and atomically migrated the stopped profile to schema v3/three cycles.
    Before another canary, land and install `openai-autonomy-v2`: independent-review or required-CI failure must
    durably select the next OpenAI route and repair the same PR. The durable PR number/head/base may not be rebound;
-   each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. Any final failure under
-   a live claim conditionally closes only that exact PR, confirms the closed identity, and then deletes only the
-   unchanged branch with an exact-SHA lease, without an unconditional close call. Compatible v1 in-progress
+   each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. On final failure a live
+   claim and exact identity are required. GitHub has no conditional unsafe close, so an open failed PR/branch is kept
+   as bounded evidence and local disposables are removed; an already closed PR's unchanged branch is exact-lease
+   deleted. Compatible v1 in-progress
    route/PR identity evidence and lost initial-push, PR-create or repair-push responses recover automatically. Also
    behaviorally cover a differently named custom
    executable and project the actionable

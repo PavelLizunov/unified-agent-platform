@@ -90,9 +90,10 @@ A failed required CI check is a normal autonomous repair signal. The coordinator
 name/outcome metadata, increments the durable quality-failure count, selects the next route, reruns the author and
 independent exact-SHA review, verifies the previously bound PR number/branch/head/base before the repair push, pushes
 with an exact prior-head lease to that same PR and verifies the new head. It never sends raw CI logs to a model. If the
-third cycle still fails, every failure kind requires a live claim, conditionally closes only the exact bound PR,
-confirms its closed identity, then lease-deletes only the unchanged branch/SHA; it never sends an unconditional close
-mutation. Compatible exact v1 route and PR identity remain usable for their in-progress cycle. Restarts after a
+third cycle still fails, every failure kind requires a live claim and exact PR identity. GitHub does not support
+conditional requests for unsafe PR-close mutations, so an open exact failed PR/branch is preserved as bounded evidence;
+if the PR is already closed, only its unchanged branch/SHA is lease-deleted. Local disposable state is still cleaned and
+the failed delivery is projected. Compatible exact v1 route and PR identity remain usable for their in-progress cycle. Restarts after a
 successful initial push, PR create or repair push reconcile only the exact branch/candidate/base identity and converge
 without repeating the successful mutation. New cycles use v2. The coordinator then removes local worktrees and publishes the
 terminal failure contract.
@@ -301,8 +302,8 @@ Use a separate disposable repository. Required behavioral evidence:
 - repeated review or required-CI failure automatically escalates the OpenAI route and reuses the same PR;
 - successful/failed CI state contains only bounded name/outcome metadata;
 - lost responses after initial push, PR create or repair push reconcile the exact remote identity without duplication;
-- any final failure under a live claim closes only the exact durable PR number/head/base, verifies closure and then
-  lease-deletes only its unchanged branch/SHA;
+- any final failure under a live claim preserves an open exact PR/branch as bounded evidence, while an already closed
+  PR permits exact-lease deletion of only its unchanged branch/SHA;
 - an exact compatible v1 in-progress decision resumes under v2 while a tampered decision fails closed;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.

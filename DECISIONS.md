@@ -511,10 +511,11 @@
   `openai-autonomy-v2` считает независимый review rejection и required-CI failure одним quality-failure signal:
   после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
   счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. Номер PR, head SHA и
-  base branch являются durable identity; repair push использует exact-head lease. После трёх циклов coordinator с
-  действующим Kanban claim повторно проверяет эту identity, условно закрывает только совпадающий PR, подтверждает
-  закрытие и затем lease-защищённо удаляет только неизменившуюся branch/SHA. После этого он удаляет disposable state
-  и завершает mission честным failure; безусловный PR-close запрещён.
+  base branch являются durable identity; repair push использует exact-head lease. GitHub не предоставляет server-side
+  compare-and-swap для unsafe PR-close, поэтому после трёх циклов coordinator с действующим Kanban claim повторно
+  проверяет identity и сохраняет открытый failed PR вместе с exact remote branch как bounded evidence, не пытаясь
+  закрыть его после локального read/check. Если PR уже закрыт внешне, совпадающая branch/SHA удаляется exact lease.
+  Локальный disposable state удаляется, delivery публикуется как failed, mission завершается честным failure.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой

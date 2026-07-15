@@ -112,7 +112,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
-   complete retention/cleanup lifecycle.
+   complete retention/cleanup lifecycle. An open PR that exhausts all autonomous repair cycles is intentionally retained
+   with its exact remote branch as bounded failure evidence because GitHub offers no conditional PR-close mutation.
 5. The Flow contract derives model and sandbox policy from the exact Codex rollout `turn_context`; the OpenAI-only
    v1 route is installed and the v2 quality-failure route is validated in source but still awaits exact live rollout.
    OS-independent read-only filesystem and credential isolation remain unproven.
