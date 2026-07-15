@@ -191,9 +191,10 @@ Good next tasks that do not require redesign:
    and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
 3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
    resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
-4. The next product milestone is automatic central `mission.accepted` to exactly one idempotent build-1 Kanban root
-   task. Reuse MissionStore, `mission_adapter.py` and native Kanban; do not add a new control plane or dashboard.
-5. The A6.4 route approval does not carry forward. No model/runtime change, Qwen/local inference/GPU, Claude, swarm,
+4. A7.1/A7.2 are complete through one live non-activating blocked handoff. The poll is still manually invoked; the
+   next milestone is A7.3 periodic intake plus owner-approved activation/delivery. Reuse MissionStore,
+   `mission_adapter.py` and native Kanban; do not add a new control plane or dashboard.
+5. The A6.4/A7.2 approvals do not carry forward. No model/runtime change, Qwen/local inference/GPU, Claude, swarm,
    Spark Runner, live restart/deploy or destructive test is implied.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.

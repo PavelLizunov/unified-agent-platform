@@ -40,11 +40,13 @@ Last updated: 2026-07-15
   reprocessing of the saved A6.4 author/reviewer artifacts confirmed Luna/workspace-write and Sol/read-only on Codex
   CLI `0.144.3`; the addendum is in the canary evidence. The gate is not wired into a live worker yet and does not
   prove an OS-independent read-only filesystem or credential boundary.
-- **A7.1 automatic mission dispatch foundation is prepared offline, not live.** Draft PRs #182/#184/#185/#186 add a
-  blocked-by-default bounded pull handoff, crash convergence, local-only terminal authority, a closed/redacted producer
-  schema and owner-only state files. Every offline/CI gate is green, but none of these drafts is in `master`; Flux,
-  Central Hermes and build-1 were not changed. A7.2 merge/restart/install and one non-activating blocked-task canary
-  require new owner approval. Exact evidence: `docs/evidence/a7-1-automatic-dispatch-foundation-2026-07-15.md`.
+- **A7.1 merged and A7.2 live blocked handoff complete 2026-07-15.** PR #189 folded the reviewed bounded pull,
+  starvation fix, retry/collision guards, local terminal authority, closed/redacted producer schema and owner-only
+  state into `master`. PRs #190/#191 made the no-activate native root atomically sticky-blocked in pinned Hermes and
+  fixed exact deployment staging. Flux is Ready at `7214ad78`; Central and build-1 carry the exact Kanban patch. Mission
+  `a7-blocked-20260715-7214ad7-03` produced one blocked/unassigned root, one `task.upsert`, zero runs and a null second
+  poll, with no worker/model process. The poll is still manually invoked: no timer, activation or autonomous delivery
+  loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -365,11 +367,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
-- **Remaining automation gap after ADR-030/A6:** one live mission now correlated central Hermes, Workspace, Telegram
-  and build-1 Flow/Kanban state through completion. Build-1 remains the executor rather than a second user-visible
-  control plane. Arbitrary future goals are not yet automatically dispatched from central mission intake: the A6.4
-  Codex orchestrator explicitly created/claimed the task and invoked the approved routes. This is the next product
-  milestone, not a hidden human operator step.
+- **Remaining automation gap after A7.2:** Central can now hand one exact-profile mission to one blocked build-1 root
+  through a manually invoked bounded poll. Build-1 remains the executor rather than a second user-visible control
+  plane. Arbitrary goals still do not run unattended: there is no periodic intake, activation, worker/reviewer,
+  delivery or completion coordinator. A7.3 is the next owner-gated product milestone, not a hidden human operator step.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

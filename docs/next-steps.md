@@ -186,14 +186,16 @@ inherit approval for a model/runtime, local inference/GPU, swarm, Spark or destr
 without a Codex operator wiring the transition. This extends the existing modular monolith and Flow adapter; it does
 not add an application service, workflow engine or mission database.
 
-1. **A7.1 — Pull handoff and bounded retry — offline gate.** Central `mission.accepted` carries an immutable optional
+1. **A7.1 — Pull handoff and bounded retry — ✅ MERGED (2026-07-15).** Central `mission.accepted` carries an immutable optional
    `dispatch_profile`. The build-1 adapter performs one bounded poll, exact-matches the locally configured profile,
    creates/reuses one atomically sticky-blocked native Kanban root and publishes its deterministic task event. A fault after Kanban create
    but before central publish must converge after restart to one task/root ID and one producer event. No model runner
    is invoked by the hermetic test, and blocked is the default live-safe behavior.
-2. **A7.2 — Owner-approved live blocked-task canary.** Deploy/reload the central field, install the updated adapter and
-   run one exact-profile poll without `--activate`. The gate is central create to exactly one blocked Kanban task and
-   central `task.upsert`; no worker/model route is selected.
+2. **A7.2 — Owner-approved live blocked-task canary — ✅ DONE (2026-07-15).** Flux applied exact master, Central and
+   build-1 installed the pinned atomic Kanban overlay, and one exact-profile poll without `--activate` produced exactly
+   one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
+   worker/model processes stayed empty. See
+   [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
 3. **A7.3 — Owner-approved activation and delivery.** Only after exact assignee, model/runtime and target approval,
    enable `--activate` and the periodic build-1 timer. This may cause native Kanban to launch the configured worker;
    author/review/PR/CI/merge/post-verify are proven by a separate real-project canary under the executable
