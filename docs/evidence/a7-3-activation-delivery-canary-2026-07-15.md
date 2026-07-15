@@ -8,20 +8,23 @@ Status: **AUTONOMOUS FAILURE PATH PASS; SUCCESSFUL DELIVERY NOT YET PROVEN**
 
 The owner approved one real-project A7.3 route, explicitly approved a second clean attempt, later approved a third
 attempt after the first two candidates exposed platform and target defects, approved a fourth after the cross-process
-product rule was made explicit, and explicitly approved a fifth after the runtime/config-path split was defined. All five used:
+product rule was made explicit, explicitly approved a fifth after the runtime/config-path split was defined, and
+approved a sixth model-strength comparison after the tri-state lock rule was fixed. All six used:
 
 - target `PavelLizunov/VPNRouter`, issue #39, base
   `c51f619fa98792c1726c1eadc2796f4e067048ba`;
 - exactly one native Kanban root and one run, with no swarm;
-- author `gpt-5.6-luna` and separate exact-SHA read-only reviewer `gpt-5.6-sol`;
+- attempts 1-5 used author `gpt-5.6-luna` and exact-SHA read-only reviewer `gpt-5.6-sol`;
+- attempt 6 used author `gpt-5.6-sol` and exact-SHA read-only reviewer `gpt-5.6-terra`, both at runtime-attested
+  `xhigh` reasoning effort;
 - at most two author/review cycles per mission;
-- exactly three allowlisted target files for attempts 1-3, four for attempt 4 and five for attempt 5;
+- exactly three allowlisted target files for attempts 1-3, four for attempt 4, five for attempt 5 and six for attempt 6;
 - the Windows test VM through `windows-brat`, never the owner's Windows computer;
 - one approved crash after a durable author commit and before Central acknowledgement;
 - PR/CI/merge/post-verify authority only after an accepted review;
 - no Claude, Qwen, Ollama, vLLM, local inference, GPU, Spark Runner, tag, release or destructive test.
 
-The owner did not run commands or repair any attempt. The quality gate stopped all five candidates before a target
+The owner did not run commands or repair any attempt. The quality gate stopped all six candidates before a target
 PR was opened.
 
 ## Landed UAP foundation and corrections
@@ -38,6 +41,7 @@ PR was opened.
 | [#207](https://github.com/PavelLizunov/unified-agent-platform/pull/207) author-check retry | `46af67e0887746ebaa9cddb70ce490d0f24b8309` | `7964b9a76078655a01bbba0317454134ad674d2a` | A failed pre-commit gate becomes one bounded repair cycle; exact candidate content is fingerprinted and exhaustion terminates safely |
 | [#208](https://github.com/PavelLizunov/unified-agent-platform/pull/208) author-check rollout | `bad5ef9c59bf97e741305c82cb020e3d8fa335c6` | `7ef3eff619617c71e8b3a3e332e653b8fc2c6b19` | Config revision `v27-a7-3-author-checks` rolled the live Central failure policy |
 | [#209](https://github.com/PavelLizunov/unified-agent-platform/pull/209) first-tick timer arming | `6c7ccbc402c30aaebd716fb854454fc82850e7cb` | `da3ec15526c60b9c76a33b0234178f17f2b80e28` | `OnActiveSec` arms a newly enabled timer independently of the old user-manager boot time |
+| [#213](https://github.com/PavelLizunov/unified-agent-platform/pull/213) exact reasoning effort | `ee1317cfe8eb333c281bf2e6c657b1a3a3129cdc` | `040ac6053f0db2eb8abd2638c0635ac7dfe9d561` | Profile-bound author/reviewer effort is passed with strict Codex config and attested from rollout `turn_context` |
 
 Every PR passed required `static-checks`. The #207 correction passed the full local gate with `secret-scan-ok`,
 `iac-static-ok` and `verify-local-ok`, 20 Windows/Linux coordinator tests and the mission-runtime checks. After two
@@ -203,6 +207,48 @@ Before mission creation, the first helper used the wrong bearer variable name an
 briefly ran one empty poll and returned `null`; it was disabled before the helper was corrected. A single verified
 POST then created the mission. No task, worker or model existed before that successful creation.
 
+## Attempt 6 - stronger Sol/Terra route rejected after one autonomous repair
+
+| Identity | Value |
+|---|---|
+| Mission | `a7-vpnrouter-issue39-20260715-06` |
+| Profile | `build1-vpnrouter-a7-3f` |
+| Root / run | `t_0a751dfd` / `26` |
+| First candidate | `74d293320274dc1e9757e26df1f72e821f96d3cd` |
+| Final candidate | `43bffe06e86593c2b6dac5322ffda21df5efcbee` |
+| Sol author sessions | `019f66da-4cb9-7e23-b4df-c6ae2b211183`, `019f66ea-1a3b-71c3-91cf-a9dd9367e9fd` |
+| Terra reviewer sessions | `019f66e4-ff3d-7920-b35b-c99b9665068a`, `019f6703-cd78-7500-a7df-7ebef213252d` |
+| Final state SHA-256 | `88974a82187c434e5b1f6cca170a18498bfddf3ad32b141059faafebcedb969a` |
+
+PR #213 first made reasoning effort part of the delivery profile and machine contract. Both Sol author turns ran with
+`gpt-5.6-sol`, `xhigh`, `workspace-write`; both Terra reviews ran in separate sessions with `gpt-5.6-terra`, `xhigh`,
+`read-only`. Model and effort came from the matching Codex rollout `turn_context`, not a caller-provided label. The
+profile allowed exactly six target files, one worker, two review cycles and no swarm.
+
+The first Sol candidate changed exactly those six files and passed the Windows author gate. The approved crash fired
+after durable commit `74d2933...`; the next timer tick recovered the same mission, task, run, worktree and SHA without
+another cycle-1 author. Terra cycle 1 rejected three correctness/security defects: configuration observation had been
+promoted into destructive lifecycle ownership, the runtime path was still process-local, and an unavailable TUN lock
+was incorrectly treated as proof that any observed process represented a live tunnel.
+
+The coordinator automatically persisted those findings as cycle-2 input and invoked one Sol repair. The repair added
+a durable owner record, separated observation from lifecycle cleanup and made the lock decision tri-state. Focused
+checks and every authoritative Windows author/reviewer command exited zero. Candidate `43bffe0...` was then reviewed
+from an exact-SHA clean worktree by a new Terra session. Terra found one remaining P1: runtime observation enumerated
+only processes named `sing-box`, so an owner-recorded custom executable with another basename, such as
+`sing-box-lx.exe`, would still be missed by a fresh CLI process despite the held TUN lock.
+
+The two-cycle ceiling terminated fail-closed. The coordinator pushed no target branch, opened no PR and performed no
+merge or post-verify. It removed both disposable worktrees and the local branch, completed the native task/run and
+closed Central automatically. The terminal Central projection is sequence `12`, projection `f72235846c1c00f7`,
+status `failed`, one `done` task, one `completed` worker and exact gates `tests=passed`, `review=failed`,
+`cleanup=passed`. As in the prior attempts, the projection remains at generic stage `testing`, progress `50%`, with
+the generic error `Independent review rejected the candidate`; the actionable Terra finding is not projected.
+
+VPNRouter issue #39 remains open, target `main` remains
+`c51f619fa98792c1726c1eadc2796f4e067048ba`, and PR lookup for the candidate branch is empty. The profile timer is
+disabled/inactive. No Codex, Qwen, Ollama, vLLM, local-model, GPU, swarm or Spark process remained after cleanup.
+
 ## Failure recovery and cleanup
 
 The original coordinator saved the final review files but raised before updating `delivery-state.json`. Because the
@@ -220,8 +266,8 @@ archived and active runs reclaimed. Their timers are disabled/inactive, disposab
 absent, and target PR lookup is empty. Their Central projections are sequence `7`, status `failed`, stage `testing`,
 progress `50%`; projection IDs are `825d56543d2fb5d0` and `9232b99540b6e45f`.
 
-Those historical gaps are closed for attempts 3-5. Two observation limitations remain: Central exposes only the generic
-error `Independent review rejected the candidate`, not the actionable Sol finding, and the failed projection retains
+Those historical gaps are closed for attempts 3-6. Two observation limitations remain: Central exposes only the generic
+error `Independent review rejected the candidate`, not the actionable reviewer finding, and the failed projection retains
 stage `testing` at `50%` with an empty terminal list. Telegram delivery of this terminal update was not independently
 verified.
 
@@ -240,14 +286,16 @@ Proven:
 - a newly enabled timer is now scheduled from activation rather than a historical boot;
 - the owner did not become a command, test or cleanup operator;
 - the runtime-registered and config-derived executable paths can remain separate, while Sol stopped a distinct
-  fail-open lock-liveness defect.
+  fail-open lock-liveness defect;
+- a stronger Sol/Terra route with explicit `xhigh` effort still failed closed safely: it improved the candidate and
+  independently found a remaining custom-executable enumeration defect instead of opening a PR.
 
 Not proven:
 
 - one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
 - detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- authority for another live author/reviewer mission. The approved fifth attempt is exhausted.
+- authority for another live author/reviewer mission. The approved sixth attempt is exhausted.
 
 ## Gate
 
@@ -256,16 +304,17 @@ Not proven:
 | A7.3 coordinator foundation | **PASS, installed** |
 | Crash/restart checkpoint | **PASS** |
 | Runtime model/sandbox attestation | **PASS** |
+| Runtime reasoning-effort attestation | **PASS after #213** |
 | Independent quality rejection | **PASS (fail-closed)** |
 | Autonomous failure closure and cleanup | **PASS** |
 | Newly enabled timer self-arms | **PASS after #209** |
 | Successful target delivery | **FAIL / NOT DEMONSTRATED** |
 | A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
 
-Before another live canary, obtain fresh owner approval for its model turns and revise the target contract around the
-remaining lock-liveness rule: preserve the existing fail-open startup behavior when semaphore observation is
-unavailable, while still requiring the lock in the normal observable path so a cross-process deep-verification probe
-cannot masquerade as a tunnel. The smallest likely seam is a tri-state ownership probe in the existing lock class,
-with a behavioral regression for the unavailable state. A successful PR/CI/merge/fresh-main post-verify route remains
-the A7.3 completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central
-and verify Telegram delivery; neither requires claiming that the success path is complete.
+Before another live canary, obtain fresh owner approval for its model turns and make route selection an explicit
+machine policy rather than an ad-hoc model choice. The next target contract must also enumerate verified executable
+basenames/paths from the durable owner record instead of hard-coding `sing-box`, with a cross-process behavioral test
+using a differently named custom executable. Do not silently promote Terra to author or increase review cycles.
+A successful PR/CI/merge/fresh-main post-verify route remains the A7.3 completion gate. Separately, project the
+actionable review finding and a terminal stage/progress into Central and verify Telegram delivery; neither requires
+claiming that the success path is complete.

@@ -191,12 +191,13 @@ Good next tasks that do not require redesign:
    and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
 3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
    resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
-4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator is installed. A third approved VPNRouter canary proved
-   bounded author-check retry, crash recovery and autonomous rejected-run closure/cleanup; independent review found a
-   real cross-process deep-probe false positive before target PR creation. PRs #205-#209 close the platform defects,
-   including newly enabled timer arming. A successful PR/CI/merge/post-verify canary is still required. Evidence:
+4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator is installed. Six approved VPNRouter canaries proved
+   bounded author-check retry, crash recovery and autonomous rejected-run closure/cleanup. The sixth used Sol author
+   plus exact-SHA read-only Terra review at runtime-attested `xhigh`; Terra rejected the final candidate because a
+   differently named custom executable remained invisible to the hard-coded process enumeration. PRs #205-#209 and
+   #213 close the platform defects exposed so far. A successful PR/CI/merge/post-verify canary is still required. Evidence:
    `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
-5. The approved third A7.3 model attempt is exhausted. No additional model/runtime turn, Qwen/local inference/GPU,
+5. The approved sixth A7.3 model attempt is exhausted. No additional model/runtime turn, Qwen/local inference/GPU,
    Claude, swarm, Spark Runner, live cluster restart/deploy or destructive test is implied without a new owner gate.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
