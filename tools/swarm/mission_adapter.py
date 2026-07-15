@@ -236,6 +236,7 @@ class HermesKanbanBackend:
             if (
                 isinstance(event, dict)
                 and event.get("kind") == "claimed"
+                and str(event.get("run_id")) == str(run_id)
                 and isinstance(event.get("payload"), dict)
                 and str(event["payload"].get("run_id")) == str(run_id)
             )
