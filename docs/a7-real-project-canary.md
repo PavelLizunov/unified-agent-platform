@@ -1,6 +1,12 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **design only; no target, model, activation, fault injection, merge or deploy is authorized**.
+Status: **executed twice on 2026-07-15; both attempts failed at independent review, so A7.3 is not accepted**.
+
+The two owner approvals are exhausted and are not standing authorization for another model turn. The coordinator
+foundation and exact failure evidence are recorded in
+[`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
+Before another canary, the rejected-run terminal/notification/cleanup path must become autonomous and a fresh owner
+approval bundle is required.
 
 The pre-activation foundation may be prepared without that bundle. It is limited to offline, non-spawning recovery
 primitives such as deterministic event reconciliation and reconstruction of disposable adapter cache from native

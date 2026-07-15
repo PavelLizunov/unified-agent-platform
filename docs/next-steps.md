@@ -196,10 +196,14 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Owner-approved activation and delivery.** Only after exact assignee, model/runtime and target approval,
-   enable `--activate` and the periodic build-1 timer. This may cause native Kanban to launch the configured worker;
-   author/review/PR/CI/merge/post-verify are proven by a separate real-project canary under the executable
-   [A7.3 contract](a7-real-project-canary.md).
+3. **A7.3 — Owner-approved activation and delivery — ⚠️ FOUNDATION LIVE; CANARY FAILED (2026-07-15).** PRs #199-#203
+   installed the bounded coordinator and fixed the defects found by two live attempts. Both attempts recovered the
+   approved author-commit crash and passed Windows gates, but separate Sol review rejected both final VPNRouter
+   candidates before PR creation. Final review exhaustion is now durable/model-inert. Next, add autonomous rejected-run
+   task/Central closure, notification and cleanup, then obtain a fresh owner approval for another real-project canary.
+   One successful PR/CI/merge/post-verify route is still required by the executable
+   [A7.3 contract](a7-real-project-canary.md). See the exact
+   [failed-canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.
