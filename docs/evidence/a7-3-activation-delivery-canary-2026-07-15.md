@@ -7,21 +7,21 @@ Status: **AUTONOMOUS FAILURE PATH PASS; SUCCESSFUL DELIVERY NOT YET PROVEN**
 ## Accepted boundary
 
 The owner approved one real-project A7.3 route, explicitly approved a second clean attempt, later approved a third
-attempt after the first two candidates exposed platform and target defects, and approved a fourth after the
-cross-process product rule was made explicit. All four used:
+attempt after the first two candidates exposed platform and target defects, approved a fourth after the cross-process
+product rule was made explicit, and explicitly approved a fifth after the runtime/config-path split was defined. All five used:
 
 - target `PavelLizunov/VPNRouter`, issue #39, base
   `c51f619fa98792c1726c1eadc2796f4e067048ba`;
 - exactly one native Kanban root and one run, with no swarm;
 - author `gpt-5.6-luna` and separate exact-SHA read-only reviewer `gpt-5.6-sol`;
 - at most two author/review cycles per mission;
-- exactly three allowlisted target files for attempts 1-3 and four for attempt 4;
+- exactly three allowlisted target files for attempts 1-3, four for attempt 4 and five for attempt 5;
 - the Windows test VM through `windows-brat`, never the owner's Windows computer;
 - one approved crash after a durable author commit and before Central acknowledgement;
 - PR/CI/merge/post-verify authority only after an accepted review;
 - no Claude, Qwen, Ollama, vLLM, local inference, GPU, Spark Runner, tag, release or destructive test.
 
-The owner did not run commands or repair any attempt. The quality gate stopped all four candidates before a target
+The owner did not run commands or repair any attempt. The quality gate stopped all five candidates before a target
 PR was opened.
 
 ## Landed UAP foundation and corrections
@@ -162,6 +162,47 @@ Before mission creation, one shell `curl` reached the tailnet URL through the bu
 `502`. Direct health was `200`; an existence check showed no committed mission, then a single `--noproxy` POST created
 and verified the mission. The installed coordinator's direct Central transport was unaffected.
 
+## Attempt 5 — runtime/config split passed; fail-open lock semantics rejected
+
+| Identity | Value |
+|---|---|
+| Mission | `a7-vpnrouter-issue39-20260715-05` |
+| Root / run | `t_2bfdf8e2` / `25` |
+| Final candidate | `97cd9df93b4cb7ef2eb30f9e48429f0c8a9b5a00` |
+| Luna sessions | `019f6658-5f74-7621-9c4f-1bc051a8f8bc`, `019f665c-0dbe-7632-a88a-4903147bb8a9` |
+| Sol session | `019f665e-c0a9-7b82-a37c-9a68f27912fd` |
+| Final state SHA-256 | `304bacfc28e8a14726ac042519e873c44675fdc6206a0f971fcaaa6997b0b8eb` |
+
+The fifth contract preserved `ProcessOwnership.ConfiguredExePath` as the actual executable registered by the running
+manager and passed a freshly read config path as a separate ownership candidate. Missing or malformed YAML contributed
+no candidate and could not erase the registered path; a valid A-to-B rewrite left the live path A intact. The allowlist
+contained exactly the CLI status command, runtime detector, process ownership helper and two existing regression suites.
+No cache, IPC, service, dependency, release or unrelated target file was allowed.
+
+The first Luna turn produced the five-file change, but the Windows gate rejected it before commit because an overloaded
+ownership method made an existing method-group caller fail compilation. The coordinator persisted `needs_fix` and
+started exactly one bounded Luna repair. The second turn restored the one-argument compatibility seam, passed every
+author Windows command and committed exact candidate `97cd9df...`. The approved crash then fired before Central ACK;
+the next timer tick recovered that exact task, run and SHA without a third Luna turn. The exact-SHA read-only Sol
+checkpoint reran the Windows gate successfully.
+
+Sol rejected the candidate for one distinct P1. `TunOwnershipLock.TryAcquire()` intentionally returns success when
+semaphore creation or `WaitOne` throws, allowing the tunnel to continue without owning the semaphore. The candidate
+made `TunOwnershipLock.IsOwnedByAnyone()` a mandatory second signal and would therefore report that supported
+fail-open tunnel as stopped. Its new assertions only pinned source shape and did not behaviorally cover the unavailable
+lock state. A correct next contract needs an observable tri-state lock result or another minimal way to preserve the
+existing fail-open behavior without reopening the normal cross-process probe false positive.
+
+The two-cycle limit terminated fail-closed. No target branch or PR was pushed. The coordinator removed both worktrees
+and the local branch, completed task `t_2bfdf8e2`/run `25` with result `review_rejected`, and Central reached
+sequence `12`, status `failed`, one `done` task, one `completed` worker and exact gates `tests=passed`,
+`review=failed`, `cleanup=passed`. VPNRouter issue #39 remains open and target `main` remains `c51f619...`.
+The timer is disabled/inactive and no Codex, local-model, GPU, swarm or Spark process remains.
+
+Before mission creation, the first helper used the wrong bearer variable name and failed before any POST. The timer
+briefly ran one empty poll and returned `null`; it was disabled before the helper was corrected. A single verified
+POST then created the mission. No task, worker or model existed before that successful creation.
+
 ## Failure recovery and cleanup
 
 The original coordinator saved the final review files but raised before updating `delivery-state.json`. Because the
@@ -174,12 +215,12 @@ Post-install verification repaired attempt 2's historical state from the exact s
 the installed systemd coordinator once with the timer disabled. It returned success from `review_rejected`, launched
 no model and recreated no worktree.
 
-Both Central missions were terminated as `failed` by authenticated loopback authority. Both native tasks were
-archived and their active runs reclaimed. Both timers are disabled/inactive, disposable worktrees and local branches
-are absent, and target PR lookup is empty. The current Central projections are sequence `7`, status `failed`, stage
-`testing`, progress `50%`; projection IDs are `825d56543d2fb5d0` and `9232b99540b6e45f`.
+Historical attempts 1 and 2 were terminated as `failed` by authenticated loopback authority, their native tasks were
+archived and active runs reclaimed. Their timers are disabled/inactive, disposable worktrees and local branches are
+absent, and target PR lookup is empty. Their Central projections are sequence `7`, status `failed`, stage `testing`,
+progress `50%`; projection IDs are `825d56543d2fb5d0` and `9232b99540b6e45f`.
 
-Those historical gaps are closed for attempt 3. Two observation limitations remain: Central exposes only the generic
+Those historical gaps are closed for attempts 3-5. Two observation limitations remain: Central exposes only the generic
 error `Independent review rejected the candidate`, not the actionable Sol finding, and the failed projection retains
 stage `testing` at `50%` with an empty terminal list. Telegram delivery of this terminal update was not independently
 verified.
@@ -198,14 +239,15 @@ Proven:
 - review rejection autonomously closes native and Central state and removes branch/worktrees without another model;
 - a newly enabled timer is now scheduled from activation rather than a historical boot;
 - the owner did not become a command, test or cleanup operator;
-- the cross-process probe false positive is now a pinned product invariant, while Sol stopped a distinct live-path defect.
+- the runtime-registered and config-derived executable paths can remain separate, while Sol stopped a distinct
+  fail-open lock-liveness defect.
 
 Not proven:
 
 - one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
 - detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- authority for another live author/reviewer mission. The approved fourth attempt is exhausted.
+- authority for another live author/reviewer mission. The approved fifth attempt is exhausted.
 
 ## Gate
 
@@ -221,7 +263,9 @@ Not proven:
 | A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
 
 Before another live canary, obtain fresh owner approval for its model turns and revise the target contract around the
-remaining custom-runtime liveness rule: retain the executable path actually launched by the running manager while
-evaluating a new config-derived path separately. A successful PR/CI/merge/fresh-main post-verify route remains the
-A7.3 completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central
+remaining lock-liveness rule: preserve the existing fail-open startup behavior when semaphore observation is
+unavailable, while still requiring the lock in the normal observable path so a cross-process deep-verification probe
+cannot masquerade as a tunnel. The smallest likely seam is a tri-state ownership probe in the existing lock class,
+with a behavioral regression for the unavailable state. A successful PR/CI/merge/fresh-main post-verify route remains
+the A7.3 completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central
 and verify Telegram delivery; neither requires claiming that the success path is complete.
