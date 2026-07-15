@@ -75,6 +75,8 @@ def main() -> None:
         assert "_handle_finish_mission" in api
         assert "atomic sticky initial block" not in kanban
         assert '"blocked",\n                        {"reason": None, "kind": "needs_input"}' in kanban
+        assert "uq_tasks_active_idempotency" in kanban
+        assert "def _harden_db_permissions" in kanban
 
         subprocess.run(
             [
@@ -92,6 +94,7 @@ def main() -> None:
 
         race = textwrap.dedent(
             """
+            import contextlib
             import os
             import threading
             import time
@@ -191,6 +194,66 @@ def main() -> None:
                 assert kb._has_sticky_block(conn, task.id)
                 assert kb.list_runs(conn, task.id) == []
             assert spawned == []
+
+            creator_barrier = threading.Barrier(2)
+            concurrent_ids = []
+            original_write_txn = kb.write_txn
+
+            @contextlib.contextmanager
+            def synchronized_write_txn(conn, *args, **kwargs):
+                creator_barrier.wait(5)
+                with original_write_txn(conn, *args, **kwargs):
+                    yield
+
+            kb.write_txn = synchronized_write_txn
+
+            def create_same_root():
+                try:
+                    with kb.connect_closing(database) as conn:
+                        concurrent_ids.append(kb.create_task(
+                            conn,
+                            title="Concurrent root",
+                            tenant="mission-concurrent",
+                            idempotency_key="central-mission:mission-concurrent",
+                            initial_status="blocked",
+                        ))
+                except BaseException as error:
+                    failures.append(error)
+
+            creators = [threading.Thread(target=create_same_root) for _ in range(2)]
+            for thread in creators:
+                thread.start()
+            for thread in creators:
+                thread.join(5)
+            kb.write_txn = original_write_txn
+            assert all(not thread.is_alive() for thread in creators)
+            assert not failures, failures
+            assert len(concurrent_ids) == 2
+            assert len(set(concurrent_ids)) == 1, concurrent_ids
+            with kb.connect_closing(database) as conn:
+                count = conn.execute(
+                    "SELECT COUNT(*) FROM tasks WHERE idempotency_key = ? "
+                    "AND status != 'archived'",
+                    ("central-mission:mission-concurrent",),
+                ).fetchone()[0]
+                task = kb.get_task(conn, concurrent_ids[0])
+                assert count == 1
+                assert task is not None and task.status == "blocked"
+                assert kb._has_sticky_block(conn, task.id)
+                assert kb.list_runs(conn, task.id) == []
+
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET priority = priority WHERE id = ?",
+                        (concurrent_ids[0],),
+                    )
+                assert (database.parent.stat().st_mode & 0o777) == 0o700
+                assert (database.stat().st_mode & 0o777) == 0o600
+                for suffix in ("-wal", "-shm"):
+                    sidecar = Path(f"{database}{suffix}")
+                    assert sidecar.exists(), sidecar
+                    assert (sidecar.stat().st_mode & 0o777) == 0o600
             """
         )
         race_env = os.environ.copy()
