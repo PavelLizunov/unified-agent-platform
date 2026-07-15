@@ -156,6 +156,45 @@ class LostCompleteResponseBackend(FakeBackend):
         return snapshot
 
 
+class RejectionBackend(LostCompleteResponseBackend):
+    def list_tasks(self, mission_id):
+        return [{
+            **self.task,
+            "title": f"Mission {mission_id}",
+            "created_by": "central-hermes",
+            "tenant": mission_id,
+        }]
+
+    def read_log(self, _task_id):
+        return "review rejected\n"
+
+
+class RejectionClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.mission["tasks"] = [{"task_id": "task-1"}]
+
+    def list_missions(self, _profile, *, reconcile=False):
+        if self.mission["status"] != "active":
+            return []
+        return [self.mission] if reconcile else []
+
+    def publish(self, _mission_id, event):
+        if self.mission["status"] != "active":
+            raise coordinator.mission_adapter.AdapterError("mission is terminal")
+        self.stages.append(event)
+        gates = {
+            item["payload"]["gate_id"]: item["payload"]["status"]
+            for item in self.stages
+            if item.get("type") == "gate.upsert"
+        }
+        if gates == {"tests": "passed", "review": "failed", "cleanup": "passed"}:
+            self.mission["status"] = "failed"
+
+    def get_mission(self, _mission_id):
+        return dict(self.mission)
+
+
 class HermeticCoordinator(coordinator.DeliveryCoordinator):
     def __init__(self, *args, counters: dict, **kwargs):
         super().__init__(*args, **kwargs)
@@ -596,7 +635,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
             self.assertTrue(result["state"]["crash_injected"])
 
-    def test_final_review_rejection_is_durable_and_does_not_rerun_a_model(self):
+    def test_final_review_rejection_checkpoint_is_durable(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -662,16 +701,6 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(["still broken"], persisted["review_findings"])
             self.assertEqual("reject", persisted["review_verification"]["verdict"])
 
-            client.mission["status"] = "failed"
-            with (
-                mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")),
-                mock.patch.object(
-                    instance, "_ensure_worktree", side_effect=AssertionError("worktree mutation")
-                ),
-            ):
-                result = instance.tick()
-            self.assertEqual("review_rejected", result["action"])
-
     def test_lost_native_completion_response_recovers_without_manual_state_repair(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -714,6 +743,51 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
                 backend.runs[0]["metadata"]["mission_events"],
             )
+
+    def test_rejected_review_cleans_and_converges_after_lost_completion_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "review_rejected",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 2,
+                "crash_injected": True,
+                "root_task_id": "task-1",
+                "run_id": "7",
+            })
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                with self.assertRaisesRegex(
+                    coordinator.mission_adapter.AdapterError, "lost completion response"
+                ):
+                    instance.tick()
+                self.assertEqual(
+                    "rejection_cleaned",
+                    coordinator.mission_adapter._read_json(paths["state"])["phase"],
+                )
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("review_rejected", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(1, cleanup.call_count)
+            self.assertEqual(
+                instance._rejection_events(),
+                backend.runs[0]["metadata"]["mission_events"],
+            )
+            with mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")):
+                self.assertIsNone(instance.tick())
 
 
 if __name__ == "__main__":

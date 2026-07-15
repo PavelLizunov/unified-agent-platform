@@ -343,6 +343,33 @@ def completion_ready(view: dict[str, Any]) -> bool:
     )
 
 
+def rejection_ready(view: dict[str, Any]) -> bool:
+    """Apply the narrow A7.3 exhausted-review failure policy."""
+    if (
+        view.get("status") != "active"
+        or view.get("question") is not None
+        or view.get("deliveries")
+    ):
+        return False
+    tasks = view.get("tasks")
+    workers = view.get("workers")
+    if (
+        not isinstance(tasks, list)
+        or len(tasks) != 1
+        or tasks[0].get("status") not in {"done", "archived"}
+        or not isinstance(workers, list)
+        or len(workers) != 1
+        or workers[0].get("status") != "completed"
+    ):
+        return False
+    gates = {
+        item.get("gate_id"): item.get("status")
+        for item in view.get("gates", [])
+        if isinstance(item, dict)
+    }
+    return gates == {"tests": "passed", "review": "failed", "cleanup": "passed"}
+
+
 class MissionStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -567,17 +594,6 @@ class MissionStore:
     def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
         """Let Central, never the producer, append the terminal delivery event."""
         mission_id = _require_id(mission_id, "mission_id")
-        event = _validate_submission(
-            mission_id,
-            {
-                "schema_version": SCHEMA_VERSION,
-                "mission_id": mission_id,
-                "type": "mission.completed",
-                "source": "central-hermes",
-                "correlation": {"producer_event_id": "central:auto-complete:v1"},
-                "payload": {"result": "Delivery completed, merged, and verified"},
-            },
-        )
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
@@ -587,8 +603,28 @@ class MissionStore:
             previous = [self._row(row) for row in rows]
             if not previous:
                 raise MissionError("mission not found")
-            if not completion_ready(project(previous)):
+            view = project(previous)
+            if completion_ready(view):
+                event_type = "mission.completed"
+                producer_event_id = "central:auto-complete:v1"
+                payload = {"result": "Delivery completed, merged, and verified"}
+            elif rejection_ready(view):
+                event_type = "mission.failed"
+                producer_event_id = "central:auto-review-rejected:v1"
+                payload = {"error": "Independent review rejected the candidate"}
+            else:
                 return None
+            event = _validate_submission(
+                mission_id,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": producer_event_id},
+                    "payload": payload,
+                },
+            )
             sequence = len(previous) + 1
             event.update(
                 sequence=sequence,

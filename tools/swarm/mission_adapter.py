@@ -521,6 +521,7 @@ def project_task_snapshot(
     runs = snapshot.get("runs", [])
     if not isinstance(runs, list):
         raise AdapterError("Kanban runs must be an array")
+    metadata_events = []
     for run in sorted(runs, key=lambda value: str(value.get("id"))):
         if not isinstance(run, dict) or run.get("id") is None:
             raise AdapterError("Kanban run is invalid")
@@ -533,12 +534,13 @@ def project_task_snapshot(
         }
         correlation = {"task_id": task_id, "worker_id": worker_id}
         events.append(_producer_event(mission_id, "worker.upsert", worker_payload, correlation))
-        events.extend(_worker_metadata_events(
+        metadata_events.extend(_worker_metadata_events(
             mission_id, task_id, worker_id, run.get("metadata")
         ))
 
     terminal = task_payload["status"] in {"done", "archived"}
     events.extend(_terminal_events(mission_id, task_id, log_text, terminal))
+    events.extend(metadata_events)
     return events
 
 

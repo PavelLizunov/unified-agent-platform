@@ -425,6 +425,52 @@ def test_auto_completion_rejects_multiple_workers() -> None:
     assert not missions.completion_ready(view)
 
 
+def test_auto_failure_requires_one_cleaned_review_rejection() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        store = missions.MissionStore(pathlib.Path(directory) / "missions.sqlite3")
+        mission_id = "mission-review-rejected"
+        store.accept(
+            "Fix issue 39",
+            mission_id=mission_id,
+            dispatch_profile="build1-vpnrouter-a7-3",
+        )
+
+        def publish(event_type: str, payload: dict, number: int) -> None:
+            store.append_producer(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:reject:{number}"},
+                    "payload": payload,
+                },
+            )
+
+        publish(
+            "task.upsert",
+            {"task_id": "task-1", "title": "Root", "status": "done", "assignee": "coordinator"},
+            1,
+        )
+        publish(
+            "worker.upsert",
+            {"worker_id": "task-1:run:1", "run_id": "1", "profile": "coordinator", "status": "completed"},
+            2,
+        )
+        publish("gate.upsert", {"gate_id": "tests", "status": "passed"}, 3)
+        publish("gate.upsert", {"gate_id": "review", "status": "failed"}, 4)
+        assert store.complete_if_ready(mission_id) is None
+        publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, 5)
+
+        failed = store.complete_if_ready(mission_id)
+        assert failed is not None and failed[1]
+        assert failed[0]["source"] == "central-hermes"
+        assert failed[0]["type"] == "mission.failed"
+        assert store.projection(mission_id)["status"] == "failed"
+        assert store.complete_if_ready(mission_id) is None
+
+
 def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> None:
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "missions.sqlite3"
