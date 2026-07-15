@@ -108,11 +108,14 @@ def main() -> None:
 
             created_inside_txn = threading.Event()
             release_create = threading.Event()
-            dispatch_started = threading.Event()
+            dispatcher_connected = threading.Event()
+            dispatch_go = threading.Event()
+            dispatch_entered = threading.Event()
             spawned = []
             failures = []
             task_ids = []
             original_append = kb._append_event
+            original_dispatch_locked = kb._dispatch_once_locked
 
             def observed_append(*args, **kwargs):
                 original_append(*args, **kwargs)
@@ -122,6 +125,12 @@ def main() -> None:
                         raise AssertionError("dispatcher overlap was not released")
 
             kb._append_event = observed_append
+
+            def observed_dispatch_locked(*args, **kwargs):
+                dispatch_entered.set()
+                return original_dispatch_locked(*args, **kwargs)
+
+            kb._dispatch_once_locked = observed_dispatch_locked
 
             def create_blocked():
                 try:
@@ -138,8 +147,10 @@ def main() -> None:
 
             def dispatch_during_create():
                 try:
-                    dispatch_started.set()
                     with kb.connect_closing(database) as conn:
+                        dispatcher_connected.set()
+                        if not dispatch_go.wait(5):
+                            raise AssertionError("dispatcher was not released")
                         kb.dispatch_once(
                             conn,
                             default_assignee="default",
@@ -148,14 +159,16 @@ def main() -> None:
                 except BaseException as error:
                     failures.append(error)
 
+            dispatcher = threading.Thread(target=dispatch_during_create)
+            dispatcher.start()
+            assert dispatcher_connected.wait(5)
             creator = threading.Thread(target=create_blocked)
             creator.start()
             assert created_inside_txn.wait(5)
-            dispatcher = threading.Thread(target=dispatch_during_create)
-            dispatcher.start()
-            assert dispatch_started.wait(5)
+            dispatch_go.set()
+            assert dispatch_entered.wait(5)
             time.sleep(0.05)
-            assert dispatcher.is_alive(), "dispatcher did not overlap the create transaction"
+            assert dispatcher.is_alive(), "dispatch_once did not block on the create transaction"
             release_create.set()
             creator.join(5)
             dispatcher.join(5)
