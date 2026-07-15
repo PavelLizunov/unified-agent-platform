@@ -1235,6 +1235,7 @@ class DeliveryCoordinator:
 
     def _wait_ci(self, state: dict[str, Any]) -> None:
         deadline = time.monotonic() + self.profile["ci_timeout_seconds"]
+        checks: Any = []
         while time.monotonic() < deadline:
             self._assert_claim(state)
             self._assert_pr_head(state)
@@ -1246,7 +1247,7 @@ class DeliveryCoordinator:
             if decision == "failed":
                 raise CIFailed("PR CI failed or did not satisfy the exact required checks", checks)
             time.sleep(10)
-        raise DeliveryError("PR CI timed out")
+        raise CIFailed("PR CI timed out", checks)
 
     def _ci_rollup(self, state: dict[str, Any]) -> Any:
         value = json.loads(self._run(

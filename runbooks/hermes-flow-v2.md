@@ -299,7 +299,8 @@ Use a separate disposable repository. Required behavioral evidence:
 - wrong remote is rejected before write;
 - author commit after `accept` makes review stale;
 - same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
-- repeated review or required-CI failure automatically escalates the OpenAI route and reuses the same PR;
+- repeated review rejection, required-CI failure or bounded CI timeout automatically escalates the OpenAI route
+  and reuses the same PR;
 - successful/failed CI state contains only bounded name/outcome metadata;
 - lost responses after initial push, PR create or repair push reconcile the exact remote identity without duplication;
 - any final failure under a live claim preserves an open exact PR/branch as bounded evidence, while an already closed

@@ -528,6 +528,27 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             self.assertNotIn("detailsUrl", json.dumps(state))
 
+    def test_pending_ci_timeout_enters_the_bounded_quality_failure_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(ci_timeout_seconds=1, gh_bin="gh", codex_home=str(root / "codex"))
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            pending = [{"name": "test", "status": "IN_PROGRESS"}]
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_pr_head"),
+                mock.patch.object(instance, "_ci_rollup", return_value=pending),
+                mock.patch.object(coordinator.time, "monotonic", side_effect=[0, 0, 2]),
+                mock.patch.object(coordinator.time, "sleep"),
+            ):
+                with self.assertRaisesRegex(coordinator.CIFailed, "timed out") as raised:
+                    instance._wait_ci({"pr_number": 39})
+
+            self.assertEqual(pending, raised.exception.checks)
+
     def test_repair_cycle_reuses_exact_durable_pr(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

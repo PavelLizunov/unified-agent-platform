@@ -11,7 +11,7 @@ independent rejection and native/Central cleanup without a target PR. The coordi
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
 owner record. PR #216 installed deterministic `openai-autonomy-v1` plus the atomic schema-v3/three-cycle profile.
 The next exact revision must install `openai-autonomy-v2`, which durably escalates after independent-review or
-required-CI failure and repairs the same durably bound PR without owner intervention. It preserves only bounded CI
+required-CI failure or bounded CI timeout and repairs the same durably bound PR without owner intervention. It preserves only bounded CI
 name/outcome metadata, accepts exact compatible v1 attestations for an in-progress cycle, and refuses PR rebinding.
 
 No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain

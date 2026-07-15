@@ -508,7 +508,8 @@
   Платформа детерминированно выбирает сложность, reasoning effort, retry и escalation. Все reviewer runs используют
   отдельную read-only session, exact candidate SHA и runtime-derived model/sandbox attestation. Один OpenAI provider
   является принятой продуктовой политикой, а не degraded mode.
-  `openai-autonomy-v2` считает независимый review rejection и required-CI failure одним quality-failure signal:
+  `openai-autonomy-v2` считает independent-review rejection, required-CI failure или истечение bounded CI timeout
+  одним quality-failure signal:
   после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
   счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. Номер PR, head SHA и
   base branch являются durable identity; repair push использует exact-head lease. GitHub не предоставляет server-side
