@@ -63,8 +63,9 @@ Last updated: 2026-07-15
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
   retry and escalation require no owner confirmation. Unknown signals and genuinely privileged flags remain blocked;
-  Claude, local inference and GPU are outside this route. The policy is not yet consumed by the installed coordinator,
-  so no seventh canary or successful autonomous delivery is claimed.
+  Claude, local inference and GPU are outside this route. The repository coordinator now consumes and durably records
+  this decision for author/reviewer execution, but the change is not installed live yet; no seventh canary or successful
+  autonomous delivery is claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

@@ -200,7 +200,8 @@ Good next tasks that do not require redesign:
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the
-   mission remain gated. Next: wire `openai-autonomy-v1` into the coordinator before the next canary.
+   mission remain gated. The source coordinator now consumes and persists `openai-autonomy-v1`; land, install and
+   verify that exact revision before the next canary.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

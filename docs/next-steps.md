@@ -205,9 +205,9 @@ not add an application service, workflow engine or mission database.
    recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
    Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
    name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. ADR-031
-   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. Before another canary,
-   wire the fail-closed `openai-autonomy-v1` decision into the coordinator and behaviorally cover a differently named
-   custom executable; also project the actionable
+   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. The repository
+   coordinator consumes and persists the fail-closed `openai-autonomy-v1` decision; before another canary, land and
+   install that exact revision and behaviorally cover a differently named custom executable; also project the actionable
    finding/terminal stage and verify Telegram
    delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable

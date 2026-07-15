@@ -313,12 +313,18 @@ def validate_review(
     verification: dict[str, Any],
     author_telemetry: dict[str, Any],
     reviewer_telemetry: dict[str, Any],
+    route_decision: dict[str, Any],
+    policy: dict[str, Any],
     *,
     expected_repo: str,
     current_head: str,
     ci_green: bool,
-    allow_same_provider_review: bool = False,
 ) -> None:
+    if not isinstance(route_decision, dict) or not isinstance(route_decision.get("signals"), dict):
+        raise ContractError("route decision with canonical signals required")
+    expected_decision = choose_delivery_route(policy, route_decision["signals"])
+    if route_decision != expected_decision or expected_decision.get("status") != "ready":
+        raise ContractError("route decision does not match the current fail-closed policy")
     if summary.get("schema_version") != 1 or verification.get("schema_version") != 1:
         raise ContractError("summary and verification schema_version must be 1")
     if _required_text(summary, "repo", "summary") != expected_repo:
@@ -334,25 +340,37 @@ def validate_review(
     reviewer_model = _exact_model(verification, "verification")
     author_session = _required_text(summary, "session_id", "summary")
     reviewer_session = _required_text(verification, "session_id", "verification")
+    decision_id = _required_text(expected_decision, "decision_id", "route_decision")
+    if (
+        summary.get("route_decision_id") != decision_id
+        or verification.get("route_decision_id") != decision_id
+    ):
+        raise ContractError("author and reviewer must bind the exact route decision")
+    if summary.get("task_class") != expected_decision["task_class"]:
+        raise ContractError("summary.task_class does not match the route decision")
+    for artifact, actor, where in (
+        (summary, expected_decision["author"], "summary"),
+        (verification, expected_decision["reviewer"], "verification"),
+    ):
+        if (
+            artifact.get("engine_family") != "openai"
+            or artifact.get("model") != actor["model"]
+            or artifact.get("reasoning_effort") != actor["reasoning_effort"]
+        ):
+            raise ContractError(f"{where} does not match the exact OpenAI route actor")
     _validate_runtime_attestation(
         summary, author_telemetry, component="author", sandbox="workspace-write"
     )
     _validate_runtime_attestation(
         verification, reviewer_telemetry, component="reviewer", sandbox="read-only"
     )
-    same_family = summary.get("engine_family") == verification.get("engine_family")
     review_mode = _required_text(verification, "review_mode", "verification")
-    if same_family:
-        if not allow_same_provider_review:
-            raise ContractError("author and reviewer must use different engine families")
-        if review_mode != "same_provider_independent":
-            raise ContractError("same-provider review must declare same_provider_independent")
-        if author_model == reviewer_model:
-            raise ContractError("same-provider author and reviewer must use different exact models")
-        if author_session == reviewer_session:
-            raise ContractError("same-provider author and reviewer must use different sessions")
-    elif review_mode != "cross_family":
-        raise ContractError("cross-family review must declare cross_family")
+    if review_mode != expected_decision["review_mode"]:
+        raise ContractError("review mode does not match the route decision")
+    if author_model == reviewer_model:
+        raise ContractError("same-provider author and reviewer must use different exact models")
+    if author_session == reviewer_session:
+        raise ContractError("same-provider author and reviewer must use different sessions")
     changed_files = summary.get("changed_files")
     if not isinstance(changed_files, list) or not changed_files or not all(
         isinstance(item, str) and item for item in changed_files
@@ -363,8 +381,8 @@ def validate_review(
     _validate_checks(summary.get("checks"), "summary.checks")
     _validate_checks(verification.get("checks"), "verification.checks")
     cycles = verification.get("review_cycle")
-    if not isinstance(cycles, int) or not 1 <= cycles <= 2:
-        raise ContractError("verification.review_cycle must be 1 or 2")
+    if not isinstance(cycles, int) or not 1 <= cycles <= 3:
+        raise ContractError("verification.review_cycle must be between 1 and 3")
     if not ci_green:
         raise ContractError("required CI is not green")
 
@@ -658,10 +676,11 @@ def main(argv: list[str] | None = None) -> int:
     review.add_argument("--verification", required=True)
     review.add_argument("--author-telemetry", required=True)
     review.add_argument("--reviewer-telemetry", required=True)
+    review.add_argument("--route-decision", required=True)
+    review.add_argument("--policy", required=True)
     review.add_argument("--repo", required=True)
     review.add_argument("--head", required=True)
     review.add_argument("--ci-green", action="store_true")
-    review.add_argument("--allow-same-provider-review", action="store_true")
 
     guard = sub.add_parser("guard-repo")
     guard.add_argument("--path", required=True)
@@ -709,9 +728,9 @@ def main(argv: list[str] | None = None) -> int:
             validate_review(
                 load_json(args.summary), load_json(args.verification),
                 load_json(args.author_telemetry), load_json(args.reviewer_telemetry),
+                load_json(args.route_decision), load_json(args.policy),
                 expected_repo=args.repo,
                 current_head=args.head, ci_green=args.ci_green,
-                allow_same_provider_review=args.allow_same_provider_review,
             )
             print("hermes-flow-review-ok")
             return 0

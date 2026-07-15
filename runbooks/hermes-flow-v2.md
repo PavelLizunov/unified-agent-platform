@@ -8,9 +8,10 @@ Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
-Repository status (2026-07-14): the A6.2 central mission adapter is implemented, tested, installed on live build-1 and
-was exercised once by the owner-approved A6.4 canary. Automatic central intake-to-dispatch is not installed; the
-canary orchestrator invoked the adapter explicitly.
+Repository status (2026-07-15): the A6 adapter and profile-bound A7 coordinator are implemented and installed on
+build-1; six A7.3 attempts proved failure/recovery but not a successful delivery. ADR-031's policy-bound coordinator
+change is implemented offline and must be landed and installed before the next canary. Generic arbitrary-repository
+intake remains outside the current fixed-profile boundary.
 
 ## When to use
 
@@ -48,7 +49,8 @@ Evaluate it without starting a model:
 ```bash
 python tools/swarm/flow_contract.py delivery-route \
   --policy tools/swarm/flow-policy.json \
-  --signals /home/uap/swarm-out/<mission>/route-signals.json
+  --signals /home/uap/swarm-out/<mission>/route-signals.json \
+  > /home/uap/swarm-out/<mission>/route-decision.json
 ```
 
 The installed policy has three standing-approved outcomes:
@@ -158,6 +160,7 @@ Author writes `/home/uap/swarm-out/<mission>/summary.json`:
   "engine_family": "openai",
   "model": "gpt-5.6-luna",
   "reasoning_effort": "medium",
+  "route_decision_id": "sha256-of-the-canonical-policy-decision",
   "session_id": "exact-author-session-id",
   "task_class": "standard_code",
   "changed_files": ["src/lib.rs"],
@@ -175,6 +178,7 @@ Reviewer reads the actual worktree/diff and writes `verification.json`:
   "engine_family": "openai",
   "model": "gpt-5.6-sol",
   "reasoning_effort": "low",
+  "route_decision_id": "sha256-of-the-canonical-policy-decision",
   "session_id": "exact-reviewer-session-id",
   "review_mode": "same_provider_independent",
   "verdict": "accept",
@@ -192,16 +196,16 @@ python tools/swarm/flow_contract.py validate-review \
   --verification /home/uap/swarm-out/<mission>/verification.json \
   --author-telemetry /home/uap/swarm-out/<mission>/author-telemetry.json \
   --reviewer-telemetry /home/uap/swarm-out/<mission>/reviewer-telemetry.json \
+  --route-decision /home/uap/swarm-out/<mission>/route-decision.json \
+  --policy tools/swarm/flow-policy.json \
   --repo <owner/repo> --head "$(git rev-parse HEAD)" --ci-green
 ```
 
-The gate cross-checks each artifact's exact model/session against runtime-derived Codex telemetry and requires the
-author `workspace-write` and reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
-verification.
-
-For every OpenAI route, use the distinct reviewer model/session returned by `delivery-route`, set
-`"review_mode": "same_provider_independent"`, and add `--allow-same-provider-review` to `validate-review`. The flag
-does not waive SHA, tests, CI, cycle, exact-model, sandbox, or session checks.
+The gate recomputes the canonical decision from its persisted signals/policy, requires both artifacts to bind the same
+`decision_id`, cross-checks exact model/session/effort against runtime-derived Codex telemetry, and requires author
+`workspace-write` plus reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
+verification. Every route uses the distinct reviewer model/session and `same_provider_independent` mode returned by
+`delivery-route`; no manual review waiver exists.
 
 ## 5. Terminal state
 

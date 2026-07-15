@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot, crash-recoverable delivery coordinator for one approved mission profile."""
+"""One-shot, crash-recoverable delivery coordinator for one configured mission profile."""
 
 from __future__ import annotations
 
@@ -34,19 +34,16 @@ _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
     "source_checkout", "default_branch", "worktree_root", "branch_prefix",
     "assignee", "author_model", "reviewer_model", "author_reasoning_effort",
-    "reviewer_reasoning_effort", "required_files",
+    "reviewer_reasoning_effort", "route_flags", "required_files",
     "author_checks", "review_checks", "post_verify_checks", "required_ci_checks", "commit_message",
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
-    "author_reasoning_effort", "reviewer_reasoning_effort",
+    "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",
+    "route_flags",
     "codex_bin", "gh_bin", "codex_home",
-}
-_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
-_LEGACY_REASONING_EFFORTS = {
-    ("gpt-5.6-luna", "gpt-5.6-sol"): ("medium", "low"),
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -71,33 +68,24 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         raise DeliveryError(f"missing profile fields: {', '.join(sorted(missing))}")
     for name in (
         "dispatch_profile", "goal", "repo", "remote", "source_checkout",
-        "default_branch", "worktree_root", "branch_prefix", "assignee",
-        "author_model", "reviewer_model", "commit_message",
+        "default_branch", "worktree_root", "branch_prefix", "assignee", "commit_message",
         "pull_request_title", "pull_request_body",
     ):
         profile[name] = _required_text(profile.get(name), name)
-    if profile["author_model"] == profile["reviewer_model"]:
-        raise DeliveryError("author and reviewer exact models must differ")
-    effort_fields = ("author_reasoning_effort", "reviewer_reasoning_effort")
-    present_efforts = [name for name in effort_fields if name in profile]
-    missing_efforts = [name for name in effort_fields if name not in profile]
-    if profile["schema_version"] == 2 and missing_efforts:
-        raise DeliveryError(f"missing profile fields: {', '.join(missing_efforts)}")
-    if profile["schema_version"] == 1:
-        legacy = _LEGACY_REASONING_EFFORTS.get(
-            (profile["author_model"], profile["reviewer_model"])
-        )
-        if present_efforts or legacy is None:
-            raise DeliveryError("schema 1 is reserved for the exact legacy Luna/Sol profile")
-        profile["author_reasoning_effort"], profile["reviewer_reasoning_effort"] = legacy
-    for name in effort_fields:
-        if name not in profile:
-            continue
-        profile[name] = _required_text(profile[name], name)
-        if profile[name] not in _REASONING_EFFORTS:
-            raise DeliveryError(
-                f"profile.{name}: expected one of {', '.join(sorted(_REASONING_EFFORTS))}"
-            )
+    # Legacy model fields remain parseable for live profile migration but are never execution authority.
+    for name in (
+        "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort"
+    ):
+        if name in profile:
+            profile[name] = _required_text(profile[name], name)
+    route_flags = profile.get("route_flags", [])
+    if (
+        not isinstance(route_flags, list)
+        or not all(isinstance(flag, str) and flag for flag in route_flags)
+        or len(route_flags) != len(set(route_flags))
+    ):
+        raise DeliveryError("profile.route_flags: unique non-empty strings required")
+    profile["route_flags"] = sorted(route_flags)
     if not re.fullmatch(r"coordinator-[A-Za-z0-9._-]{1,80}", profile["assignee"]):
         raise DeliveryError("profile.assignee must be a reserved non-routable coordinator identity")
     for name in ("required_files",):
@@ -144,8 +132,8 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         value = profile.get(name)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise DeliveryError(f"profile.{name}: positive integer required")
-    if profile["max_review_cycles"] > 2:
-        raise DeliveryError("profile.max_review_cycles cannot exceed 2")
+    if profile["max_review_cycles"] > 3:
+        raise DeliveryError("profile.max_review_cycles cannot exceed 3")
     if profile["claim_ttl_seconds"] < (
         profile["command_timeout_seconds"] + profile["ci_timeout_seconds"] + 600
     ):
@@ -256,12 +244,16 @@ class DeliveryCoordinator:
         state_root: pathlib.Path,
         *,
         runner: Runner = subprocess.run,
+        policy: dict[str, Any] | None = None,
     ):
-        self.profile = profile
+        self.profile = {**profile, "route_flags": sorted(profile.get("route_flags", []))}
         self.client = client
         self.backend = backend
         self.state_root = state_root
         self.runner = runner
+        self.policy = policy or flow_contract.load_json(
+            pathlib.Path(__file__).with_name("flow-policy.json")
+        )
 
     def _safe_env(self) -> dict[str, str]:
         allowed = {
@@ -312,10 +304,45 @@ class DeliveryCoordinator:
         )
         return environment
 
-    def _reasoning_args(self, component: str) -> list[str]:
-        effort = self.profile.get(f"{component}_reasoning_effort")
-        if effort is None:
-            return []
+    def _route_signals(self, state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "changed_files": len(self.profile["required_files"]),
+            "prior_review_rejections": state.get("prior_review_rejections", 0),
+            "flags": self.profile["route_flags"],
+        }
+
+    def _ensure_route(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any]:
+        decision = flow_contract.choose_delivery_route(
+            self.policy, self._route_signals(state)
+        )
+        if decision.get("status") != "ready":
+            raise DeliveryError("mission requires a capability outside the configured OpenAI policy")
+        key = str(state.get("prior_review_rejections", 0))
+        decisions = state.setdefault("route_decisions", {})
+        if key in decisions and decisions[key] != decision:
+            raise DeliveryError("routing policy changed during a durable mission cycle")
+        decisions[key] = decision
+        self._save(paths, state)
+        return decision
+
+    def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
+        key = str(state.get("prior_review_rejections", 0))
+        decision = state.get("route_decisions", {}).get(key)
+        if not isinstance(decision, dict) or decision.get("status") != "ready":
+            raise DeliveryError("durable OpenAI route decision is missing")
+        return decision
+
+    def _actor(self, state: dict[str, Any], component: str) -> dict[str, str]:
+        actor = self._current_route(state).get(component)
+        if not isinstance(actor, dict):
+            raise DeliveryError(f"route has no {component} actor")
+        return actor
+
+    def _reasoning_args(self, state: dict[str, Any], component: str) -> list[str]:
+        effort = self._actor(state, component)["reasoning_effort"]
         return ["--strict-config", "-c", f'model_reasoning_effort="{effort}"']
 
     def _git(self, checkout: pathlib.Path, *arguments: str, check: bool = True) -> str:
@@ -369,6 +396,8 @@ class DeliveryCoordinator:
                 or state.get("dispatch_profile") != self.profile["dispatch_profile"]
             ):
                 raise DeliveryError("delivery state identity mismatch")
+            state.setdefault("prior_review_rejections", 0)
+            state.setdefault("route_decisions", {})
             return state
         digest = hashlib.sha256(mission_id.encode()).hexdigest()[:12]
         return {
@@ -378,6 +407,8 @@ class DeliveryCoordinator:
             "phase": "new",
             "branch": f"{self.profile['branch_prefix']}-{digest}",
             "review_cycle": 1,
+            "prior_review_rejections": 0,
+            "route_decisions": {},
             "crash_injected": False,
         }
 
@@ -744,6 +775,8 @@ class DeliveryCoordinator:
         checks: list[dict[str, Any]],
     ) -> None:
         cycle = state["review_cycle"]
+        route = self._current_route(state)
+        actor = route["author"]
         events = paths["directory"] / f"author-{cycle}.jsonl"
         candidate = self._git(paths["author"], "rev-parse", "HEAD")
         cumulative = set(
@@ -757,8 +790,8 @@ class DeliveryCoordinator:
         telemetry = flow_contract.summarize_codex_events(
             events,
             component="author",
-            model=self.profile["author_model"],
-            reasoning_effort=self.profile.get("author_reasoning_effort"),
+            model=actor["model"],
+            reasoning_effort=actor["reasoning_effort"],
             rollout=rollout,
             sandbox="workspace-write",
             worktree=paths["author"],
@@ -769,7 +802,8 @@ class DeliveryCoordinator:
             "repo": self.profile["repo"],
             "branch": state["branch"],
             "head_sha": candidate,
-            "task_class": "standard_code",
+            "task_class": route["task_class"],
+            "route_decision_id": route["decision_id"],
             "engine_family": "openai",
             "model": telemetry["model"],
             "reasoning_effort": telemetry.get("reasoning_effort"),
@@ -869,6 +903,7 @@ class DeliveryCoordinator:
 
     def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
         cycle = state["review_cycle"]
+        actor = self._actor(state, "author")
         events = paths["directory"] / f"author-{cycle}.jsonl"
         last = paths["directory"] / f"author-{cycle}-last.txt"
         findings = state.get("review_findings", [])
@@ -888,8 +923,8 @@ class DeliveryCoordinator:
         result = self._run(
             [
                 self.profile["codex_bin"], "exec", "--ignore-user-config",
-                *self._reasoning_args("author"),
-                "--model", self.profile["author_model"], "--sandbox", "workspace-write",
+                *self._reasoning_args(state, "author"),
+                "--model", actor["model"], "--sandbox", "workspace-write",
                 "--cd", str(paths["author"]), "--json", "--output-last-message", str(last), "-",
             ],
             cwd=paths["author"], input_text=prompt,
@@ -923,6 +958,8 @@ class DeliveryCoordinator:
             self._git(pathlib.Path(self.profile["source_checkout"]), "worktree", "remove", "--force", str(path))
 
     def _review(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool:
+        route = self._current_route(state)
+        actor = route["reviewer"]
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
@@ -964,8 +1001,8 @@ class DeliveryCoordinator:
         result = self._run(
             [
                 self.profile["codex_bin"], "exec", "--ignore-user-config",
-                *self._reasoning_args("reviewer"),
-                "--model", self.profile["reviewer_model"], "--sandbox", "read-only",
+                *self._reasoning_args(state, "reviewer"),
+                "--model", actor["model"], "--sandbox", "read-only",
                 "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
                 "--output-last-message", str(last), "-",
             ],
@@ -987,8 +1024,8 @@ class DeliveryCoordinator:
         telemetry = flow_contract.summarize_codex_events(
             events,
             component="reviewer",
-            model=self.profile["reviewer_model"],
-            reasoning_effort=self.profile.get("reviewer_reasoning_effort"),
+            model=actor["model"],
+            reasoning_effort=actor["reasoning_effort"],
             rollout=self._rollout(events),
             sandbox="read-only",
             worktree=paths["review"],
@@ -1003,7 +1040,8 @@ class DeliveryCoordinator:
             "model": telemetry["model"],
             "reasoning_effort": telemetry.get("reasoning_effort"),
             "session_id": telemetry["session_id"],
-            "review_mode": "same_provider_degraded",
+            "review_mode": route["review_mode"],
+            "route_decision_id": route["decision_id"],
             "findings": response["findings"],
             "checks": checks,
             "review_cycle": cycle,
@@ -1015,6 +1053,7 @@ class DeliveryCoordinator:
             state["phase"] = "reviewed"
             self._save(paths, state)
             return True
+        state["prior_review_rejections"] = state.get("prior_review_rejections", 0) + 1
         if cycle >= self.profile["max_review_cycles"]:
             state.update(
                 phase="review_rejected",
@@ -1102,10 +1141,11 @@ class DeliveryCoordinator:
             state["review_verification"],
             state["author_telemetry"],
             state["reviewer_telemetry"],
+            self._current_route(state),
+            self.policy,
             expected_repo=self.profile["repo"],
             current_head=state["candidate_sha"],
             ci_green=True,
-            allow_same_provider_review=True,
         )
 
     def _merge(self, state: dict[str, Any]) -> None:
@@ -1235,6 +1275,7 @@ class DeliveryCoordinator:
                 return {"action": "complete", "mission_id": mission_id, "state": state}
             if mission.get("status") in {"failed", "cancelled"}:
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
+            self._ensure_route(state, paths)
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)
             if state["phase"] not in {

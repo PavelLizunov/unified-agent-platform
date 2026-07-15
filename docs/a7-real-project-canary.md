@@ -9,8 +9,8 @@ proved the same bounded crash recovery, one autonomous review repair, runtime-at
 independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
-owner record. Route selection now has deterministic `openai-autonomy-v1`; the coordinator must consume it before the
-next canary.
+owner record. Route selection now has deterministic `openai-autonomy-v1`; the source coordinator consumes and
+persists it, and that exact revision must be installed before the next canary.
 
 No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
 outside the standing authority.

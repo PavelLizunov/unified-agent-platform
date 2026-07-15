@@ -106,14 +106,14 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
    answer-and-resume loop for owner questions.
-2. The installed profile-bound A7 coordinator can reach build-1 automatically, but generic Central intake is not yet
-   wired to deterministic route selection and a successful PR/CI/merge/post-verify delivery is still unproven.
+2. The source profile-bound A7 coordinator consumes deterministic route selection, but that revision is not installed
+   live yet; generic Central intake and a successful PR/CI/merge/post-verify delivery remain unproven.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
    complete retention/cleanup lifecycle.
 5. The Flow contract derives model and sandbox policy from the exact Codex rollout `turn_context`; the OpenAI-only
-   route policy is deterministic but is not yet consumed by the live coordinator. OS-independent read-only filesystem
+   route decision is durable and validated in source but is not installed live yet. OS-independent read-only filesystem
    and credential isolation remain unproven.
 6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Producer
    events use a closed schema and protect every allowed string before storage; mission DB and adapter state are

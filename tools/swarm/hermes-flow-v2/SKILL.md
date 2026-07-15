@@ -30,9 +30,9 @@ not continue such work through a chain of `chat --resume` sessions.
    the resolved route and role. For
    `same_provider_independent`, the exact reviewer model must differ from the author model. The reviewer reads the real
    diff, runs checks, and produces `verification.json`; it never edits, commits, pushes, or merges.
-6. Validate `summary.json` and `verification.json` against the current HEAD and green required CI. Use
-   `--allow-same-provider-review` only when the route explicitly returned `same_provider_independent`.
-7. At most two review/fix cycles. Complete the root card only after merge, default-branch proof, remote/local branch
+6. Validate `summary.json` and `verification.json` against the persisted canonical route decision, current HEAD and
+   green required CI. No manual model/review waiver exists.
+7. At most three review/fix cycles so two independent rejections can reach the escalated route. Complete the root card only after merge, default-branch proof, remote/local branch
    deletion, disposable worktree removal, and a green `terminal-check`.
 8. When the task belongs to a central Hermes mission, use the installed `mission_adapter.py` ingress/sync boundary and
    preserve its `mission_id`/tenant. Never bypass its idempotency key. `--allow-dispatch` additionally requires the
