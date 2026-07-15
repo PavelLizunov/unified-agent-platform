@@ -11,6 +11,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -124,7 +125,7 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
-            "--initial-status", "running" if allow_dispatch else "blocked",
+            "--initial-status", "ready" if allow_dispatch else "blocked",
         ]
         if workspace:
             command.extend(["--workspace", workspace])
@@ -134,9 +135,9 @@ class HermesKanbanBackend:
         task = self._json(*command)
         if not isinstance(task, dict) or not isinstance(task.get("id"), str):
             raise AdapterError("Hermes Kanban create response has no task id")
+        snapshot = self.show(task["id"])
+        current = snapshot["task"]
         if not allow_dispatch:
-            snapshot = self.show(task["id"])
-            current = snapshot["task"]
             if (
                 current.get("id") != task["id"]
                 or "assignee" not in current
@@ -158,6 +159,16 @@ class HermesKanbanBackend:
                 raise AdapterError("safe handoff is not atomically sticky-blocked")
             if not isinstance(snapshot.get("runs"), list) or snapshot["runs"]:
                 raise AdapterError("safe handoff unexpectedly created a Kanban run")
+            task = current
+        elif (
+            current.get("id") != task["id"]
+            or current.get("status") != "ready"
+            or current.get("assignee") != assignee
+            or not isinstance(snapshot.get("runs"), list)
+            or snapshot["runs"]
+        ):
+            raise AdapterError("active handoff did not persist one unclaimed ready task")
+        else:
             task = current
         return task
 
@@ -187,6 +198,75 @@ class HermesKanbanBackend:
                 return ""
             raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban log failed")
         return result.stdout
+
+    def claim(self, task_id: str, *, ttl_seconds: int) -> dict[str, Any]:
+        if ttl_seconds <= 0:
+            raise AdapterError("Kanban claim TTL must be positive")
+        self._run("claim", task_id, "--ttl", str(ttl_seconds))
+        snapshot = self.show(task_id)
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "running"
+            or not isinstance(runs, list)
+            or len(runs) != 1
+            or not isinstance(runs[0], dict)
+            or runs[0].get("status") != "running"
+        ):
+            raise AdapterError("Hermes Kanban claim did not create one running task/run")
+        return snapshot
+
+    def verify_claim(
+        self, task_id: str, run_id: str, *, min_remaining_seconds: int = 60
+    ) -> dict[str, Any]:
+        snapshot = self.show(task_id)
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        matching = [
+            run for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) == str(run_id)
+        ]
+        minimum = int(time.time()) + min_remaining_seconds
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "running"
+            or len(matching) != 1
+            or matching[0].get("status") != "running"
+            or not isinstance(task.get("claim_expires"), int)
+            or task["claim_expires"] <= minimum
+            or not isinstance(matching[0].get("claim_expires"), int)
+            or matching[0]["claim_expires"] <= minimum
+        ):
+            raise AdapterError("Hermes Kanban claim is absent, stale, or expired")
+        return snapshot
+
+    def complete(
+        self, task_id: str, *, result: str, summary: str, metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._run(
+            "complete", task_id,
+            "--result", result,
+            "--summary", summary,
+            "--metadata", json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+        )
+        snapshot = self.show(task_id)
+        if snapshot.get("task", {}).get("status") != "done":
+            raise AdapterError("Hermes Kanban completion did not persist done status")
+        return snapshot
+
+    def edit_metadata(
+        self, task_id: str, *, result: str, summary: str, metadata: dict[str, Any]
+    ) -> dict[str, Any]:
+        self._run(
+            "edit", task_id,
+            "--result", result,
+            "--summary", summary,
+            "--metadata", json.dumps(metadata, ensure_ascii=False, separators=(",", ":")),
+        )
+        return self.show(task_id)
 
 
 class CentralMissionClient:
@@ -239,6 +319,15 @@ class CentralMissionClient:
         if not isinstance(missions, list) or not all(isinstance(item, dict) for item in missions):
             raise AdapterError("central mission list is invalid")
         return missions
+
+    def get_mission(self, mission_id: str) -> dict[str, Any]:
+        result = self._request(
+            "GET", f"/api/missions/{urllib.parse.quote(mission_id, safe='')}"
+        )
+        mission = result.get("mission")
+        if not isinstance(mission, dict):
+            raise AdapterError("central mission API returned an invalid projection")
+        return mission
 
     def publish(self, mission_id: str, event: dict[str, Any]) -> None:
         self._request("POST", f"/api/missions/{urllib.parse.quote(mission_id, safe='')}/events", event)
@@ -392,45 +481,60 @@ def _terminal_events(mission_id: str, task_id: str, text: str, terminal: bool) -
     return events
 
 
+def project_task_snapshot(
+    mission_id: str,
+    task_id: str,
+    snapshot: dict[str, Any],
+    log_text: str,
+) -> list[dict[str, Any]]:
+    events = []
+    task = snapshot.get("task")
+    if not isinstance(task, dict) or task.get("id") != task_id:
+        raise AdapterError("Kanban task id mismatch")
+    task_payload = {
+        "task_id": task_id,
+        "title": task.get("title") or task_id,
+        "status": task.get("status") or "unknown",
+        "assignee": task.get("assignee"),
+    }
+    events.append(_producer_event(mission_id, "task.upsert", task_payload, {"task_id": task_id}))
+
+    runs = snapshot.get("runs", [])
+    if not isinstance(runs, list):
+        raise AdapterError("Kanban runs must be an array")
+    for run in sorted(runs, key=lambda value: str(value.get("id"))):
+        if not isinstance(run, dict) or run.get("id") is None:
+            raise AdapterError("Kanban run is invalid")
+        worker_id = f"{task_id}:run:{run['id']}"
+        worker_payload = {
+            "worker_id": worker_id,
+            "run_id": str(run["id"]),
+            "profile": run.get("profile"),
+            "status": run.get("outcome") or run.get("status") or "unknown",
+        }
+        correlation = {"task_id": task_id, "worker_id": worker_id}
+        events.append(_producer_event(mission_id, "worker.upsert", worker_payload, correlation))
+        events.extend(_worker_metadata_events(
+            mission_id, task_id, worker_id, run.get("metadata")
+        ))
+
+    terminal = task_payload["status"] in {"done", "archived"}
+    events.extend(_terminal_events(mission_id, task_id, log_text, terminal))
+    return events
+
+
 def project_mission(mission_id: str, backend: Any) -> list[dict[str, Any]]:
     events = []
     task_ids = backend.list_task_ids(mission_id)
     if not task_ids:
         raise AdapterError("mission has no Kanban tasks")
     for task_id in task_ids:
-        snapshot = backend.show(task_id)
-        task = snapshot["task"]
-        if task.get("id") != task_id:
-            raise AdapterError("Kanban task id mismatch")
-        task_payload = {
-            "task_id": task_id,
-            "title": task.get("title") or task_id,
-            "status": task.get("status") or "unknown",
-            "assignee": task.get("assignee"),
-        }
-        events.append(_producer_event(mission_id, "task.upsert", task_payload, {"task_id": task_id}))
-
-        runs = snapshot.get("runs", [])
-        if not isinstance(runs, list):
-            raise AdapterError("Kanban runs must be an array")
-        for run in sorted(runs, key=lambda value: str(value.get("id"))):
-            if not isinstance(run, dict) or run.get("id") is None:
-                raise AdapterError("Kanban run is invalid")
-            worker_id = f"{task_id}:run:{run['id']}"
-            worker_payload = {
-                "worker_id": worker_id,
-                "run_id": str(run["id"]),
-                "profile": run.get("profile"),
-                "status": run.get("outcome") or run.get("status") or "unknown",
-            }
-            correlation = {"task_id": task_id, "worker_id": worker_id}
-            events.append(_producer_event(mission_id, "worker.upsert", worker_payload, correlation))
-            events.extend(_worker_metadata_events(
-                mission_id, task_id, worker_id, run.get("metadata")
-            ))
-
-        terminal = task_payload["status"] in {"done", "archived"}
-        events.extend(_terminal_events(mission_id, task_id, backend.read_log(task_id), terminal))
+        events.extend(project_task_snapshot(
+            mission_id,
+            task_id,
+            backend.show(task_id),
+            backend.read_log(task_id),
+        ))
     unique = {}
     for event in events:
         unique.setdefault(event["correlation"]["producer_event_id"], event)
@@ -448,6 +552,8 @@ def reconcile_pending(
     backend: Any,
     *,
     dispatch_profile: str,
+    before_publish: Callable[[str, dict[str, Any]], None] | None = None,
+    event_source: Callable[[str, dict[str, Any]], list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any] | None:
     if not dispatch_profile:
         raise AdapterError("reconcile requires a profile")
@@ -472,8 +578,14 @@ def reconcile_pending(
         projected_ids = {task["task_id"] for task in tasks}
         if state["root_task_id"] not in projected_ids:
             raise AdapterError("central projection does not contain the exact Kanban root")
-        events = sync_mission(mission_id, state_root, backend)
+        events = (
+            sync_mission(mission_id, state_root, backend)
+            if event_source is None
+            else event_source(mission_id, state)
+        )
         for event in events:
+            if before_publish is not None:
+                before_publish(mission_id, event)
             client.publish(mission_id, event)
         return {**state, "published_events": len(events)}
     return None

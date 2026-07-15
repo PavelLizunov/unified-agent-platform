@@ -1,0 +1,16 @@
+[Unit]
+Description=UAP delivery coordinator (%i)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/uap/delivery-%i.json
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+EnvironmentFile=%h/hermes-workspace/.env
+ExecStart=/usr/bin/python3 %h/swarm-bin/delivery_coordinator.py --profile %h/.config/uap/delivery-%i.json
+SuccessExitStatus=75
+TimeoutStartSec=8h
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

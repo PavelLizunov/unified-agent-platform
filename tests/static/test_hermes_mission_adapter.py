@@ -7,6 +7,7 @@ import pathlib
 import stat
 import subprocess
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -221,18 +222,25 @@ class MissionAdapterTests(unittest.TestCase):
 
     def test_real_backend_is_shell_free_idempotent_and_dispatch_gated(self):
         commands = []
+        active_created = False
 
         def runner(command):
+            nonlocal active_created
             commands.append(command)
             action = command[command.index("central") + 1]
+            active = "--initial-status" in command and command[command.index("--initial-status") + 1] == "ready"
+            active_created = active_created or active
             return subprocess.CompletedProcess(
                 command, 0,
                 stdout=json.dumps(
-                    {"id": "task-1", "status": "blocked"}
+                    {"id": "task-1", "status": "ready" if active else "blocked"}
                     if action == "create"
                     else {
-                        "task": {"id": "task-1", "status": "blocked", "assignee": None},
-                        "events": [{"kind": "created"}, {"kind": "blocked"}],
+                        "task": {
+                            "id": "task-1", "status": "ready" if active_created else "blocked",
+                            "assignee": "approved-profile" if active_created else None,
+                        },
+                        "events": [{"kind": "created"}] + ([] if active_created else [{"kind": "blocked"}]),
                         "runs": [],
                     }
                 ),
@@ -264,8 +272,8 @@ class MissionAdapterTests(unittest.TestCase):
             mission_id="mission-2", goal="Goal", allow_dispatch=True,
             assignee="approved-profile", workspace="worktree:/tmp/repo",
         )
-        active_command = commands[-1]
-        self.assertEqual("running", active_command[active_command.index("--initial-status") + 1])
+        active_command = next(command for command in reversed(commands) if "--initial-status" in command)
+        self.assertEqual("ready", active_command[active_command.index("--initial-status") + 1])
 
     def test_worker_cannot_publish_terminal_mission_event(self):
         with self.assertRaisesRegex(adapter.AdapterError, "not allowed"):
@@ -275,6 +283,65 @@ class MissionAdapterTests(unittest.TestCase):
                     "type": "mission.completed", "payload": {"result": "forged"},
                 }]},
             )
+
+    def test_native_claim_and_completion_are_fail_closed(self):
+        commands = []
+
+        def runner(command):
+            commands.append(command)
+            action = command[command.index("central") + 1]
+            if action == "show":
+                output = {
+                    "task": {"id": "task-1", "status": "done" if any("complete" in item for item in commands) else "running"},
+                    "runs": [{"id": 9, "status": "completed" if any("complete" in item for item in commands) else "running"}],
+                }
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(output), stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        claimed = backend.claim("task-1", ttl_seconds=60)
+        self.assertEqual("running", claimed["task"]["status"])
+        completed = backend.complete(
+            "task-1", result="success", summary="done", metadata={"mission_events": []}
+        )
+        self.assertEqual("done", completed["task"]["status"])
+        self.assertTrue(all(isinstance(command, list) for command in commands))
+        complete_command = next(command for command in commands if "complete" in command)
+        self.assertIn("--metadata", complete_command)
+
+    def test_native_claim_verification_rejects_expired_or_wrong_run(self):
+        expires = int(time.time()) + 600
+
+        def runner(command):
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps({
+                    "task": {
+                        "id": "task-1",
+                        "status": "running",
+                        "claim_expires": expires,
+                    },
+                    "runs": [{
+                        "id": 9,
+                        "status": "running",
+                        "claim_expires": expires,
+                    }],
+                }),
+                stderr="",
+            )
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        self.assertEqual(
+            "running",
+            backend.verify_claim("task-1", "9", min_remaining_seconds=60)["task"]["status"],
+        )
+        with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
+            backend.verify_claim("task-1", "other", min_remaining_seconds=60)
+
+        expires = int(time.time()) - 1
+        with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
+            backend.verify_claim("task-1", "9", min_remaining_seconds=60)
 
     def test_safe_backend_rejects_malformed_final_native_state(self):
         cases = {

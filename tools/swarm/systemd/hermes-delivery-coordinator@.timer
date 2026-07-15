@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll one approved UAP delivery profile (%i)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+RandomizedDelaySec=5s
+Persistent=true
+Unit=hermes-delivery-coordinator@%i.service
+
+[Install]
+WantedBy=timers.target
