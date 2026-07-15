@@ -588,6 +588,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("SuccessExitStatus=75", service)
         self.assertIn("UMask=0077", service)
         self.assertIn("OnUnitActiveSec=1min", timer)
+        self.assertIn("OnActiveSec=1min", timer)
+        self.assertNotIn("OnBootSec=", timer)
         self.assertIn("Persistent=true", timer)
 
     def test_profile_lock_rejects_an_overlapping_tick(self):
