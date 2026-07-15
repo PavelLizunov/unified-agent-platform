@@ -18,11 +18,12 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "swarm"))
 coordinator = importlib.import_module("delivery_coordinator")
+installer = importlib.import_module("install_flow_v2")
 
 
 def profile(root: pathlib.Path) -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "dispatch_profile": "build1-vpnrouter-a7-3",
         "goal": "Fix issue 39",
         "repo": "PavelLizunov/VPNRouter",
@@ -32,11 +33,9 @@ def profile(root: pathlib.Path) -> dict:
         "worktree_root": str(root / "worktrees"),
         "branch_prefix": "codex/a7-3-vpnrouter",
         "assignee": "coordinator-codex-luna-a7",
-        "author_model": "gpt-5.6-luna",
-        "reviewer_model": "gpt-5.6-sol",
-        "author_reasoning_effort": "xhigh",
-        "reviewer_reasoning_effort": "xhigh",
-        "required_files": ["Cli.cs", "Core.cs", "Tests.cs"],
+        "required_files": [
+            "Cli.cs", "Config.cs", "Core.cs", "Runtime.cs", "Tests.cs", "WindowsTests.cs"
+        ],
         "author_checks": [["dotnet", "test"]],
         "review_checks": [["dotnet", "test"]],
         "post_verify_checks": [["dotnet", "test"], ["windows-brat", "status"]],
@@ -44,7 +43,7 @@ def profile(root: pathlib.Path) -> dict:
         "commit_message": "fix(cli): detect active runtime",
         "pull_request_title": "fix(cli): report active runtime",
         "pull_request_body": "Closes #39",
-        "max_review_cycles": 2,
+        "max_review_cycles": 3,
         "claim_ttl_seconds": 28800,
         "command_timeout_seconds": 900,
         "ci_timeout_seconds": 900,
@@ -291,18 +290,48 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
-    def test_profile_is_closed_and_requires_distinct_exact_models(self):
+    def test_route_escalates_durably_without_profile_model_authority(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-route")
+            state = {"prior_review_rejections": 0, "route_decisions": {}}
+
+            standard = instance._ensure_route(state, paths)
+            self.assertEqual("gpt-5.6-luna", standard["author"]["model"])
+            self.assertEqual("gpt-5.6-sol", standard["reviewer"]["model"])
+
+            state["prior_review_rejections"] = 1
+            complex_route = instance._ensure_route(state, paths)
+            self.assertEqual("gpt-5.6-sol", complex_route["author"]["model"])
+            self.assertEqual("gpt-5.6-terra", complex_route["reviewer"]["model"])
+
+            state["prior_review_rejections"] = 2
+            escalated = instance._ensure_route(state, paths)
+            self.assertEqual("gpt-5.6-terra", escalated["author"]["model"])
+            self.assertEqual("gpt-5.6-sol", escalated["reviewer"]["model"])
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(escalated, persisted["route_decisions"]["2"])
+
+    def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "profile.json"
             value = profile(pathlib.Path(directory))
             path.write_text(json.dumps(value), encoding="utf-8")
             loaded = coordinator.load_profile(path)
-            self.assertEqual("gpt-5.6-luna", loaded["author_model"])
-            self.assertEqual("xhigh", loaded["author_reasoning_effort"])
-            value["reviewer_model"] = value["author_model"]
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(coordinator.DeliveryError, "must differ"):
-                coordinator.load_profile(path)
+            instance = coordinator.DeliveryCoordinator(
+                loaded, FakeClient(), FakeBackend(), pathlib.Path(directory) / "state"
+            )
+            state = {"prior_review_rejections": 0}
+            decision = coordinator.flow_contract.choose_delivery_route(
+                instance.policy, instance._route_signals(state)
+            )
+            self.assertEqual("gpt-5.6-sol", decision["author"]["model"])
+            self.assertEqual("gpt-5.6-terra", decision["reviewer"]["model"])
 
             value = profile(pathlib.Path(directory))
             value["assignee"] = "real-hermes-profile"
@@ -311,49 +340,75 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 coordinator.load_profile(path)
 
             value = profile(pathlib.Path(directory))
-            value["reviewer_reasoning_effort"] = "ultra"
+            value["route_flags"] = ["cross_process", "cross_process"]
             path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(coordinator.DeliveryError, "expected one of"):
+            with self.assertRaisesRegex(coordinator.DeliveryError, "route_flags"):
                 coordinator.load_profile(path)
 
             value = profile(pathlib.Path(directory))
-            value.pop("author_reasoning_effort")
+            value["author_model"] = "gpt-9-unapproved"
             path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(coordinator.DeliveryError, "missing profile fields"):
-                coordinator.load_profile(path)
-
-            value = profile(pathlib.Path(directory))
-            value["schema_version"] = 1
-            value.pop("author_reasoning_effort")
-            value.pop("reviewer_reasoning_effort")
-            path.write_text(json.dumps(value), encoding="utf-8")
-            loaded = coordinator.load_profile(path)
-            self.assertEqual("medium", loaded["author_reasoning_effort"])
-            self.assertEqual("low", loaded["reviewer_reasoning_effort"])
-
-            value["reviewer_model"] = "gpt-5.6-terra"
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(coordinator.DeliveryError, "reserved for the exact legacy"):
-                coordinator.load_profile(path)
-
-            value = profile(pathlib.Path(directory))
-            value["schema_version"] = 1
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(coordinator.DeliveryError, "reserved for the exact legacy"):
+            with self.assertRaisesRegex(coordinator.DeliveryError, "unknown profile fields"):
                 coordinator.load_profile(path)
 
             loaded = profile(pathlib.Path(directory))
             instance = coordinator.DeliveryCoordinator(
                 loaded, FakeClient(), FakeBackend(), pathlib.Path(directory) / "state"
             )
+            state = {
+                "prior_review_rejections": 0,
+                "route_decisions": {"0": decision},
+            }
             self.assertEqual(
                 ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
-                instance._reasoning_args("author"),
+                instance._reasoning_args(state, "author"),
             )
             self.assertEqual(
                 ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
-                instance._reasoning_args("reviewer"),
+                instance._reasoning_args(state, "reviewer"),
             )
+
+    def test_legacy_two_cycle_profile_requires_atomic_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "delivery-test.json"
+            value = profile(pathlib.Path(directory))
+            value.update(
+                schema_version=2,
+                max_review_cycles=2,
+                author_model="gpt-5.6-sol",
+                reviewer_model="gpt-5.6-terra",
+                author_reasoning_effort="xhigh",
+                reviewer_reasoning_effort="xhigh",
+            )
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "migrate before activation"):
+                coordinator.load_profile(path)
+
+            inactive = lambda _unit: "inactive"
+            self.assertTrue(installer.migrate_profile(path, unit_state=inactive))
+            migrated = coordinator.load_profile(path)
+            self.assertEqual(3, migrated["schema_version"])
+            self.assertEqual(3, migrated["max_review_cycles"])
+            self.assertFalse(set(migrated) & installer._LEGACY_MODEL_FIELDS)
+            self.assertFalse(installer.migrate_profile(path, unit_state=inactive))
+            if os.name != "nt":
+                self.assertEqual(0o600, path.stat().st_mode & 0o777)
+
+    def test_profile_migration_refuses_active_timer_or_service(self):
+        for active_kind in ("timer", "service"):
+            with self.subTest(active_kind=active_kind), tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory) / "delivery-test.json"
+                value = profile(pathlib.Path(directory))
+                value.update(schema_version=2, max_review_cycles=2)
+                path.write_text(json.dumps(value), encoding="utf-8")
+                before = path.read_bytes()
+
+                def state(unit):
+                    return "active" if unit.endswith(f".{active_kind}") else "inactive"
+
+                with self.assertRaisesRegex(SystemExit, f"{active_kind}.*must be inactive"):
+                    installer.migrate_profile(path, unit_state=state)
+                self.assertEqual(before, path.read_bytes())
 
     def test_required_ci_check_must_exist_and_succeed(self):
         self.assertEqual(
@@ -751,13 +806,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "dispatch_profile": approved["dispatch_profile"],
                 "phase": "author_committed",
                 "branch": "codex/a7-3-vpnrouter-deadbeef",
-                "review_cycle": 2,
+                "review_cycle": 3,
                 "crash_injected": True,
                 "candidate_sha": "candidate-sha",
                 "root_task_id": "task-1",
                 "run_id": "7",
+                "prior_review_rejections": 2,
+                "route_decisions": {},
             }
-            telemetry = {"model": approved["reviewer_model"], "session_id": "review-session"}
+            instance._ensure_route(state, paths)
+            telemetry = {"model": "gpt-5.6-sol", "session_id": "review-session"}
             with (
                 mock.patch.object(instance, "_assert_claim"),
                 mock.patch.object(instance, "_remove_worktree"),
@@ -880,6 +938,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 author_checks=[["fail-check"]],
                 codex_bin="codex",
                 codex_home=str(root / "codex"),
+                max_review_cycles=2,
             )
             client = RejectionClient()
             backend = RejectionBackend()

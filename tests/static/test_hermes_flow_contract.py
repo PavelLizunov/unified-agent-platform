@@ -10,6 +10,7 @@ from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+POLICY = json.loads((ROOT / "tools" / "swarm" / "flow-policy.json").read_text())
 MODULE_PATH = ROOT / "tools" / "swarm" / "flow_contract.py"
 SPEC = importlib.util.spec_from_file_location("flow_contract", MODULE_PATH)
 flow = importlib.util.module_from_spec(SPEC)
@@ -24,18 +25,25 @@ INSTALLER_SPEC.loader.exec_module(installer)
 
 
 def artifact(engine_family, model, sha, *, reviewer=False):
+    effort = (
+        "medium"
+        if model == "gpt-5.6-luna"
+        else "low"
+        if reviewer and model == "gpt-5.6-sol"
+        else "xhigh"
+    )
     base = {
         "schema_version": 1,
         "engine_family": engine_family,
         "model": model,
-        "reasoning_effort": "xhigh",
+        "reasoning_effort": effort,
         "session_id": "review-session" if reviewer else "author-session",
         "checks": [{"command": "python -m unittest", "exit_code": 0}],
     }
     if reviewer:
         base.update({
             "reviewed_sha": sha, "verdict": "accept", "review_cycle": 1, "findings": [],
-            "review_mode": "cross_family",
+            "review_mode": "same_provider_independent",
         })
     else:
         base.update({
@@ -52,6 +60,7 @@ def telemetry(value, component, sandbox):
         "component": component,
         "engine": "codex",
         "engine_family": value["engine_family"],
+        "model_provider": "openai",
         "model": value["model"],
         "model_attestation": "codex_rollout_turn_context",
         "reasoning_effort": value["reasoning_effort"],
@@ -70,97 +79,89 @@ def telemetry(value, component, sandbox):
     }
 
 
+def route_decision(summary):
+    if summary.get("task_class") == "complex_code":
+        signals = {
+            "schema_version": 1, "changed_files": 6,
+            "prior_review_rejections": 0, "flags": [],
+        }
+    elif summary.get("task_class") == "escalated_code":
+        signals = {
+            "schema_version": 1, "changed_files": 1,
+            "prior_review_rejections": 2, "flags": [],
+        }
+    else:
+        signals = {
+            "schema_version": 1, "changed_files": 1,
+            "prior_review_rejections": 0, "flags": [],
+        }
+    return flow.choose_delivery_route(POLICY, signals)
+
+
+def bind_route(summary, verification):
+    decision = route_decision(summary)
+    summary.setdefault("route_decision_id", decision["decision_id"])
+    verification.setdefault("route_decision_id", decision["decision_id"])
+    return decision
+
+
 def validate_review(summary, verification, **kwargs):
+    decision = bind_route(summary, verification)
     return flow.validate_review(
         summary,
         verification,
         telemetry(summary, "author", "workspace-write"),
         telemetry(verification, "reviewer", "read-only"),
+        decision,
+        POLICY,
         **kwargs,
+    )
+
+
+def validate_review_with_telemetry(summary, verification, author, reviewer, **kwargs):
+    decision = bind_route(summary, verification)
+    return flow.validate_review(
+        summary, verification, author, reviewer, decision, POLICY, **kwargs
     )
 
 
 class FlowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.policy = json.loads((ROOT / "tools" / "swarm" / "flow-policy.json").read_text())
-
-    def test_quota_blocked_claude_is_not_selected(self):
-        quota = {
-            "schema_version": 1,
-            "engines": {
-                "codex": {"state": "available"},
-                "claude": {"state": "quota_blocked"},
-                "ornith": {"state": "available"},
-                "qwen": {"state": "available"},
-            },
-        }
-        routed = flow.choose_route(self.policy, quota, "standard_code")
-        self.assertEqual("ready", routed["status"])
-        self.assertEqual("codex", routed["author"]["engine"])
-        self.assertEqual("gpt-5.6-sol", routed["reviewer"]["model"])
-        self.assertEqual("same_provider_degraded", routed["review_mode"])
-        self.assertEqual(
-            [
-                {"engine": "claude", "reason": "quota_blocked"},
-            ],
-            routed["skipped"]["reviewers"],
-        )
-
-        local = flow.choose_route(self.policy, quota, "low_risk_local")
-        self.assertEqual("author_blocked", local["status"])
-        local = flow.choose_route(self.policy, quota, "low_risk_local", allow_local=True)
-        self.assertEqual("ready", local["status"])
-        self.assertEqual("ornith", local["author"]["engine"])
-        self.assertEqual("qwen", local["reviewer"]["engine"])
+        cls.policy = POLICY
 
     def test_stale_or_same_family_review_is_rejected(self):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
-        verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
         with self.assertRaisesRegex(flow.ContractError, "stale review"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="bbb", ci_green=True
             )
         verification["reviewed_sha"] = "aaa"
-        verification["engine_family"] = "openai"
-        with self.assertRaisesRegex(flow.ContractError, "different engine families"):
+        verification["model"] = summary["model"]
+        with self.assertRaisesRegex(flow.ContractError, "exact OpenAI route actor"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
 
-    def test_same_provider_degraded_review_requires_distinct_model_and_session(self):
+    def test_same_provider_independent_review_requires_distinct_model_and_session(self):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
-        verification["review_mode"] = "same_provider_degraded"
-        with self.assertRaisesRegex(flow.ContractError, "different engine families"):
-            validate_review(
-                summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
-            )
+        verification["review_mode"] = "same_provider_independent"
         validate_review(
             summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-            allow_same_provider_review=True,
         )
         verification["model"] = summary["model"]
-        with self.assertRaisesRegex(flow.ContractError, "different exact models"):
+        with self.assertRaisesRegex(flow.ContractError, "exact OpenAI route actor"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
             )
         verification["model"] = "gpt-5.6-sol"
         verification["session_id"] = summary["session_id"]
         with self.assertRaisesRegex(flow.ContractError, "different sessions"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
             )
-
-    def test_high_risk_route_stays_blocked_without_cross_family_reviewer(self):
-        quota = {"schema_version": 1, "engines": {
-            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"}
-        }}
-        routed = flow.choose_route(self.policy, quota, "complex_rust")
-        self.assertEqual("review_blocked", routed["status"])
-        self.assertIsNone(routed["reviewer"])
 
     def test_delivery_policy_uses_the_approved_standard_route(self):
         decision = flow.choose_delivery_route(
@@ -171,9 +172,6 @@ class FlowContractTests(unittest.TestCase):
                 "prior_review_rejections": 0,
                 "flags": [],
             },
-            {"schema_version": 1, "engines": {
-                "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
-            }},
         )
         self.assertEqual("ready", decision["status"])
         self.assertEqual("standard", decision["route"])
@@ -181,112 +179,30 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("medium", decision["author"]["reasoning_effort"])
         self.assertEqual("gpt-5.6-sol", decision["reviewer"]["model"])
         self.assertEqual("low", decision["reviewer"]["reasoning_effort"])
-        self.assertEqual("same_provider_degraded", decision["review_mode"])
-        self.assertEqual(64, len(decision["quota_sha256"]))
+        self.assertEqual("same_provider_independent", decision["review_mode"])
         self.assertEqual(["default:standard"], decision["reasons"])
 
-    def test_delivery_policy_prefers_available_cross_family_review(self):
+    def test_delivery_policy_automatically_runs_complex_route(self):
         decision = flow.choose_delivery_route(
             self.policy,
-            {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-            {"schema_version": 1, "engines": {
-                "codex": {"state": "available"}, "claude": {"state": "available"},
-            }},
-            model_overrides={"claude": "claude-sonnet-4-6"},
+            {
+                "schema_version": 1,
+                "changed_files": 6,
+                "prior_review_rejections": 0,
+                "flags": ["cross_process", "multi_platform"],
+            },
         )
         self.assertEqual("ready", decision["status"])
-        self.assertEqual("gpt-5.6-luna", decision["author"]["model"])
-        self.assertEqual("claude-sonnet-4-6", decision["reviewer"]["model"])
-        self.assertEqual("cross_family", decision["review_mode"])
-        with self.assertRaisesRegex(flow.ContractError, "exact model ID required"):
-            flow.choose_delivery_route(
-                self.policy,
-                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-                {"schema_version": 1, "engines": {
-                    "codex": {"state": "available"}, "claude": {"state": "available"},
-                }},
-                model_overrides={"claude": "default"},
-            )
-
-    def test_delivery_policy_does_not_degrade_without_proved_quota_block(self):
-        decision = flow.choose_delivery_route(
-            self.policy,
-            {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-            {"schema_version": 1, "engines": {
-                "codex": {"state": "available"}, "claude": {"state": "available"},
-            }},
-        )
-        self.assertEqual("review_blocked", decision["status"])
-        self.assertIsNone(decision["author"])
-        self.assertIsNone(decision["reviewer"])
-        with self.assertRaisesRegex(flow.ContractError, "quota: schema_version 1"):
-            flow.choose_delivery_route(
-                self.policy,
-                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-                {"schema_version": True, "engines": {
-                    "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
-                }},
-            )
-        with self.assertRaisesRegex(flow.ContractError, "quota.engines.codex: expected an object"):
-            flow.choose_delivery_route(
-                self.policy,
-                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-                {"schema_version": 1, "engines": {
-                    "codex": [], "claude": {"state": "quota_blocked"},
-                }},
-            )
-        with self.assertRaisesRegex(flow.ContractError, "quota.engines.claude.blocked_until"):
-            flow.choose_delivery_route(
-                self.policy,
-                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-                {"schema_version": 1, "engines": {
-                    "codex": {"state": "available"},
-                    "claude": {"state": "quota_blocked", "blocked_until": 1},
-                }},
-            )
-        with self.assertRaisesRegex(flow.ContractError, "quota.engines.claude.state: invalid state"):
-            flow.choose_delivery_route(
-                self.policy,
-                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
-                {"schema_version": 1, "engines": {
-                    "codex": {"state": "available"}, "claude": {"state": []},
-                }},
-            )
-
-    def test_delivery_policy_standard_identity_binds_quota_state(self):
-        signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
-        blocked = {"schema_version": 1, "engines": {
-            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
-        }}
-        available = {"schema_version": 1, "engines": {
-            "codex": {"state": "available"}, "claude": {"state": "available"},
-        }}
-        first = flow.choose_delivery_route(self.policy, signals, blocked)
-        second = flow.choose_delivery_route(
-            self.policy, signals, available, model_overrides={"claude": "claude-sonnet-4-6"}
-        )
-        self.assertNotEqual(first["quota_sha256"], second["quota_sha256"])
-        self.assertNotEqual(first["decision_id"], second["decision_id"])
-
-    def test_delivery_policy_proposes_but_does_not_run_a_complex_route(self):
-        decision = flow.choose_delivery_route(self.policy, {
-            "schema_version": 1,
-            "changed_files": 6,
-            "prior_review_rejections": 0,
-            "flags": ["cross_process", "multi_platform"],
-        })
-        self.assertEqual("owner_approval_required", decision["status"])
         self.assertEqual("complex", decision["route"])
-        self.assertIsNone(decision["author"])
-        self.assertIsNone(decision["reviewer"])
-        self.assertEqual("gpt-5.6-sol", decision["proposed_route"]["author"]["model"])
-        self.assertEqual("gpt-5.6-terra", decision["proposed_route"]["reviewer"]["model"])
+        self.assertEqual("gpt-5.6-sol", decision["author"]["model"])
+        self.assertEqual("gpt-5.6-terra", decision["reviewer"]["model"])
+        self.assertEqual("same_provider_independent", decision["review_mode"])
         self.assertEqual(
             ["flag:cross_process", "flag:multi_platform", "changed_files>=6"],
             decision["reasons"],
         )
 
-    def test_delivery_policy_escalates_repeated_rejection_without_model_authority(self):
+    def test_delivery_policy_automatically_escalates_repeated_rejection(self):
         signals = {
             "schema_version": 1,
             "changed_files": 6,
@@ -296,11 +212,11 @@ class FlowContractTests(unittest.TestCase):
         first = flow.choose_delivery_route(self.policy, signals)
         second = flow.choose_delivery_route(self.policy, signals)
         self.assertEqual(first, second)
-        self.assertEqual("owner_approval_required", first["status"])
+        self.assertEqual("ready", first["status"])
         self.assertEqual("escalated", first["route"])
         self.assertEqual(["prior_review_rejections>=2"], first["reasons"])
-        self.assertEqual("gpt-5.6-terra", first["proposed_route"]["author"]["model"])
-        self.assertEqual("gpt-5.6-sol", first["proposed_route"]["reviewer"]["model"])
+        self.assertEqual("gpt-5.6-terra", first["author"]["model"])
+        self.assertEqual("gpt-5.6-sol", first["reviewer"]["model"])
         self.assertEqual(64, len(first["decision_id"]))
 
     def test_delivery_policy_identity_is_semantic_and_binds_the_exact_policy(self):
@@ -316,40 +232,24 @@ class FlowContractTests(unittest.TestCase):
         )
         self.assertEqual(first, reordered)
         changed = json.loads(json.dumps(self.policy))
-        changed["delivery_model_policy"]["routes"]["complex"]["author"]["model"] = (
-            "gpt-5.6-terra"
-        )
-        changed["delivery_model_policy"]["routes"]["complex"]["reviewer"]["model"] = (
-            "gpt-5.6-sol"
-        )
-        second = flow.choose_delivery_route(changed, signals)
-        self.assertNotEqual(first["policy_sha256"], second["policy_sha256"])
-        self.assertNotEqual(first["decision_id"], second["decision_id"])
+        changed["delivery_model_policy"]["routes"]["complex"]["author"]["model"] = "gpt-9-unapproved"
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
+            flow.choose_delivery_route(changed, signals)
         changed = json.loads(json.dumps(self.policy))
         changed["engines"]["codex"]["capacity_label"] = "changed-capacity"
         second = flow.choose_delivery_route(changed, signals)
         self.assertNotEqual(first["policy_sha256"], second["policy_sha256"])
         self.assertNotEqual(first["decision_id"], second["decision_id"])
 
-    def test_delivery_policy_v1_cannot_standing_approve_a_stronger_route(self):
+    def test_delivery_policy_requires_every_openai_route_to_be_standing_approved(self):
         changed = json.loads(json.dumps(self.policy))
-        changed["delivery_model_policy"]["routes"]["escalated"]["standing_approved"] = True
-        with self.assertRaisesRegex(flow.ContractError, "never standing-approves stronger routes"):
+        changed["delivery_model_policy"]["routes"]["escalated"]["standing_approved"] = False
+        with self.assertRaisesRegex(flow.ContractError, "all OpenAI delivery routes"):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 1,
                 "prior_review_rejections": 0,
                 "flags": [],
-            })
-
-        changed = json.loads(json.dumps(self.policy))
-        changed["delivery_model_policy"]["routes"]["standard"]["standing_approved"] = False
-        with self.assertRaisesRegex(flow.ContractError, "standard route to be standing-approved"):
-            flow.choose_delivery_route(changed, {
-                "schema_version": 1,
-                "changed_files": 6,
-                "prior_review_rejections": 0,
-                "flags": ["cross_process"],
             })
 
     def test_delivery_policy_validates_nonselected_routes(self):
@@ -365,7 +265,7 @@ class FlowContractTests(unittest.TestCase):
 
         changed = json.loads(json.dumps(self.policy))
         changed["delivery_model_policy"]["routes"]["standard"]["task_class"] = "complex_rust"
-        with self.assertRaisesRegex(flow.ContractError, "expected ADR-028 standard_code"):
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 6,
@@ -383,23 +283,16 @@ class FlowContractTests(unittest.TestCase):
                 "flags": ["cross_process"],
             })
 
-    def test_delivery_policy_pins_the_existing_standard_route(self):
+    def test_delivery_policy_rejects_non_openai_delivery_actor(self):
         signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
-        quota = {"schema_version": 1, "engines": {
-            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
-        }}
         changed = json.loads(json.dumps(self.policy))
-        changed["routes"]["standard_code"]["risk"] = "high"
-        with self.assertRaisesRegex(flow.ContractError, "invalid ADR-028 route"):
-            flow.choose_delivery_route(changed, signals, quota)
-        changed = json.loads(json.dumps(self.policy))
-        changed["routes"]["standard_code"]["authors"][0]["model"] = "gpt-5.3-codex-spark"
-        with self.assertRaisesRegex(flow.ContractError, "expected Codex Luna"):
-            flow.choose_delivery_route(changed, signals, quota)
+        changed["delivery_model_policy"]["routes"]["standard"]["reviewer"]["engine"] = "external"
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
+            flow.choose_delivery_route(changed, signals)
         changed = json.loads(json.dumps(self.policy))
         changed["engines"]["codex"]["family"] = "untrusted"
-        with self.assertRaisesRegex(flow.ContractError, "unexpected standard-route boundary"):
-            flow.choose_delivery_route(changed, signals, quota)
+        with self.assertRaisesRegex(flow.ContractError, "unexpected delivery-route boundary"):
+            flow.choose_delivery_route(changed, signals)
 
     def test_delivery_policy_rejects_boolean_schema_version(self):
         with self.assertRaisesRegex(flow.ContractError, "signals.schema_version: expected 1"):
@@ -419,6 +312,9 @@ class FlowContractTests(unittest.TestCase):
         }
         gated = flow.choose_delivery_route(self.policy, base)
         self.assertEqual("owner_approval_required", gated["status"])
+        self.assertIsNone(gated["route"])
+        self.assertIsNone(gated["author"])
+        self.assertIsNone(gated["reviewer"])
         self.assertEqual(["flag:local_or_gpu"], gated["reasons"])
         with self.assertRaisesRegex(flow.ContractError, "unknown flags"):
             flow.choose_delivery_route(self.policy, {**base, "flags": ["model_guessed_this"]})
@@ -426,39 +322,42 @@ class FlowContractTests(unittest.TestCase):
     def test_review_gate_rejects_mismatched_runtime_attestation(self):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
-        verification["review_mode"] = "same_provider_degraded"
+        verification["review_mode"] = "same_provider_independent"
         author = telemetry(summary, "author", "workspace-write")
         reviewer = telemetry(verification, "reviewer", "read-only")
         author["model"] = "gpt-5.6-sol"
         with self.assertRaisesRegex(flow.ContractError, "runtime attestation mismatch"):
-            flow.validate_review(
+            validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
+            )
+        author = telemetry(summary, "author", "workspace-write")
+        author["model_provider"] = "unapproved-provider"
+        with self.assertRaisesRegex(flow.ContractError, "approved OpenAI provider"):
+            validate_review_with_telemetry(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
             )
         author = telemetry(summary, "author", "workspace-write")
         reviewer["sandbox"] = "workspace-write"
         with self.assertRaisesRegex(flow.ContractError, "expected 'read-only'"):
-            flow.validate_review(
+            validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
             )
         reviewer = telemetry(verification, "reviewer", "read-only")
         reviewer["head_sha"] = "bbb"
         with self.assertRaisesRegex(flow.ContractError, "clean exact-SHA"):
-            flow.validate_review(
+            validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
             )
         reviewer = telemetry(verification, "reviewer", "read-only")
         reviewer.pop("reasoning_effort")
         with self.assertRaisesRegex(flow.ContractError, "reasoning_effort"):
-            flow.validate_review(
+            validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
             )
         summary.pop("reasoning_effort")
         verification.pop("reasoning_effort")
@@ -468,17 +367,34 @@ class FlowContractTests(unittest.TestCase):
         )
         author.pop("reasoning_effort")
         reviewer.pop("reasoning_effort")
-        with self.assertRaisesRegex(flow.ContractError, "reasoning_effort"):
-            flow.validate_review(
+        with self.assertRaisesRegex(flow.ContractError, "exact OpenAI route actor"):
+            validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
-                allow_same_provider_review=True,
+            )
+
+    def test_review_gate_is_bound_to_the_canonical_route_decision(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        decision = bind_route(summary, verification)
+        decision["reviewer"]["model"] = "gpt-5.6-terra"
+        with self.assertRaisesRegex(flow.ContractError, "current fail-closed policy"):
+            flow.validate_review(
+                summary,
+                verification,
+                telemetry(summary, "author", "workspace-write"),
+                telemetry(verification, "reviewer", "read-only"),
+                decision,
+                POLICY,
+                expected_repo=summary["repo"],
+                current_head="aaa",
+                ci_green=True,
             )
 
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
-        summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
-        verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
-        verification["review_cycle"] = 3
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        verification["review_cycle"] = 4
         with self.assertRaisesRegex(flow.ContractError, "review_cycle"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
@@ -495,8 +411,8 @@ class FlowContractTests(unittest.TestCase):
         )
 
     def test_merge_gate_requires_exact_models_accept_and_green_ci(self):
-        summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
-        verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
         with self.assertRaisesRegex(flow.ContractError, "required CI"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=False
@@ -598,6 +514,21 @@ class FlowContractTests(unittest.TestCase):
                         reasoning_effort="high", rollout=rollout, sandbox="workspace-write",
                         worktree=".", head="aaa",
                     )
+                bad_provider = json.loads(json.dumps(rollout_events))
+                bad_provider[0]["payload"]["model_provider"] = "unapproved-provider"
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                    for event in bad_provider:
+                        handle.write(json.dumps(event) + "\n")
+                    bad_provider_rollout = pathlib.Path(handle.name)
+                try:
+                    with self.assertRaisesRegex(flow.ContractError, "approved OpenAI provider"):
+                        flow.summarize_codex_events(
+                            path, component="author", model="gpt-5.3-codex-spark",
+                            reasoning_effort="xhigh", rollout=bad_provider_rollout,
+                            sandbox="workspace-write", worktree=".", head="aaa",
+                        )
+                finally:
+                    bad_provider_rollout.unlink()
             rerouted_events = events[:-1] + [
                 {"type": "item.completed", "item": {
                     "type": "error", "message": "model rerouted: a -> b (reason)",

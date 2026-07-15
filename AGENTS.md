@@ -13,8 +13,8 @@ push в master блокируется ruleset'ом; нужен зелёный `s
 | Слой | Состояние |
 |---|---|
 | **Infra** | k3s 2-node, **НЕ HA** (единственный control-plane/server `uap-home-1` + agent `uap-home-2` = один etcd-член; `uap-home-2` = 6 vCPU / 8 GB). VPS/HA отложены владельцем из-за бюджета; текущая стратегия — один control-plane + R2 backups + проверенный restore drill. Flux GitOps + SOPS/age; etcd→R2 DR. **LIVE.** |
-| **Model** | `subfleet` v0.3.1 (Claude-подписка как OpenAI-совместимый gateway) **LIVE + healthy**; DE-exit ротирован на живой ninitux. LiteLLM. Два egress-сервиса: `singbox-egress` (pinned VLESS, subfleet OAuth — **НИКОГДА не ротировать**) + `singbox-egress-ha` (urltest-failover, hermes + build-1). **LIVE.** |
-| **Agent** | Внешний hermes-agent в k3s (`uap-system`, `uap-home-2`) — основа агентного слоя. Текущий brain/runtime и его доказательства сверять только с `STATUS.md`; не переключать model/provider и не запускать local/GPU route без разрешённой policy. **LIVE.** |
+| **Model** | Flow delivery использует автоматическую OpenAI-only policy ADR-031: Luna/Sol/Terra без подтверждения каждого запуска. `subfleet`/Claude остаётся исторически установленной отдельной capacity, но не является автоматическим fallback. **LIVE policy rollout сверять со `STATUS.md`.** |
+| **Agent** | Внешний hermes-agent в k3s (`uap-system`, `uap-home-2`) — основа агентного слоя. Текущий brain/runtime и его доказательства сверять только с `STATUS.md`; Luna/Sol/Terra выбирает policy, а Claude/local/GPU без отдельного решения не запускать. **LIVE.** |
 | **Tools** | На `uap-build-1` (VMID 102, 8c/16GB, tailnet `100.85.56.31`; всё systemd, **НЕ k3s, НЕ GitOps**): knowledge-система, Kanban-рой, ai-search, hermes-workspace `:3000`. `local-models`-router — systemd на ops-1. Индекс: [tools/README.md](tools/README.md). **LIVE.** |
 
 ### Канонический порядок чтения
@@ -31,7 +31,7 @@ push в master блокируется ruleset'ом; нужен зелёный `s
 
 Ты получил спецификацию платформы. **Инфра/ADR-решения — закрыты:** реализуй, не перепроектируй. **НО
 модельный/агентный слой и харнесс — в активной переработке** (2026-06 пивот на вайб-кодинг + внешний
-NousResearch hermes-agent, ADR-022..028): здесь предлагай через ADR и действуй с согласия владельца, и **не
+NousResearch hermes-agent, ADR-022..031): здесь следуй принятым ADR и постоянным полномочиям владельца, и **не
 считай старые ADR-001/004/006 текущими** по этому слою. Ориентиры: `STATUS.md`, `docs/next-steps.md`, `docs/research/`.
 
 ## Порядок работы
@@ -47,8 +47,10 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
 
 - **Следуй [DECISIONS.md](DECISIONS.md).** Эти вопросы закрыты. Если считаешь решение ошибочным —
   не меняй молча: вынеси аргумент владельцу и жди ответа.
-- **Спрашивай владельца** по любому открытому пункту (домены, ключи API, destructive failover-тесты,
-  смена уже принятой топологии). Не выдумывай за него.
+- **Спрашивай владельца** только при настоящем продуктовом блокере или перед реально опасным действием: новые
+  credentials/external authority, destructive non-disposable data loss/failover, выход за цель, смена закрытой
+  архитектуры/security boundary, новый provider/Claude или local inference/GPU. Обычные Luna/Sol/Terra, стоимость,
+  reasoning effort, retries, tests/VM, PR/CI/merge и repo-defined deploy/post-verify подтверждения не требуют.
 - Новые фиксированные решения см. ADR-008..ADR-013: k3s вместо Docker/vanilla k8s, Tailscale как
   сетевой фундамент, бюджетный VPS-профиль только через веху, Flux+SOPS, Go-first/Rust-for-daemons,
   Windows/Mac только как внешние agent-воркеры.
@@ -57,10 +59,9 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
 - **Секреты не коммить.** API-ключи (Claude, OpenRouter), пароли Postgres — через SOPS/age и
   k8s Secrets, не plaintext в открытых манифестах.
 
-## Совместная работа Codex + Claude Code
+## Совместная работа ИИ-исполнителей
 
-- Codex и Claude Code — равноправные ИИ-исполнители. Источник правды: файлы репозитория, ADR и git,
-  а не память отдельного агента.
+- Источник правды для любого ИИ-исполнителя: файлы репозитория, ADR и git, а не память отдельного агента.
 - Перед началом задачи агент читает `AGENTS.md`, `DECISIONS.md`, актуальный этап в `BUILD-PLAN.md` и
   проверяет, нет ли незавершённых чужих изменений в тех же файлах.
 - Параллельные кодинг-воркеры — **каждый в своём `git worktree`** на одноразовой ветке (а не «не править
@@ -68,13 +69,12 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
   пересекаются — сначала зафиксировать границу: кто меняет infra, кто tests/runbooks, кто docs.
 - Multi-checkpoint и задачи дольше 30 минут запускаются по ADR-028 через Hermes Kanban flow из
   `runbooks/hermes-flow-v2.md`, а не цепочкой `chat --resume`.
-- Author и read-only reviewer по умолчанию используют разные engine family. Если Claude `quota_blocked`,
-  `standard_code` может использовать owner-approved degraded fallback: отдельная read-only Codex-сессия на
-  другой exact model (`gpt-5.6-sol`). Для infra/security/secrets cross-family reviewer остаётся обязательным.
-  Merge запрещён без `verification.json` с `accept`, совпадающим HEAD SHA и зелёным required CI; новый commit
-  требует нового review.
-- Не вызывай Claude Code при `quota_blocked`; используй quota state/circuit breaker. Тариф (`x20`, non-Max)
-  и точный model ID записываются раздельно. Локальные модели — только после отдельного разрешения владельца.
+- Author и read-only reviewer используют разные exact OpenAI models и разные sessions из детерминированного
+  `delivery-route`: Luna→Sol, Sol→Terra или Terra→Sol. Review привязан к exact SHA, read-only sandbox и runtime
+  attestation; один provider является принятой policy, не degraded fallback. Merge запрещён без `verification.json`
+  с `accept`, совпадающим HEAD SHA и зелёным required CI; новый commit требует нового review.
+- Claude, новый provider и локальные/GPU-модели запускаются только после отдельного решения владельца. Не делай
+  probe запрещённой capacity. Точный model ID, effort и session всегда сохраняются в Flow artifacts.
 - Коммиты — **Conventional Commits** (`type(scope): summary`). `Co-Authored-By` добавляется только для реально
   участвовавшего автора; точная модель и session фиксируются в Flow v2 artifacts. Git-identity на ops-1 =
   `UAP Agent <slovnmi@gmail.com>`.
@@ -100,13 +100,12 @@ NousResearch hermes-agent, ADR-022..028): здесь предлагай чере
 
 ## Текущий фокус
 
-**2026-07-14: единый Hermes mission plane** (ADR-030, `docs/product-operating-contract.md`). Внешний hermes-agent
+**2026-07-15: автономный Hermes mission delivery** (ADR-030/031, `docs/product-operating-contract.md`). Внешний hermes-agent
 остаётся основой. Workspace и Telegram должны показывать одну central Hermes mission/history; build-1, Flow/Kanban,
-coding workers и test VM — execution plane этой mission, не вторая точка управления. Текущий central-Workspace/local-
-Flow split ещё не мигрирован. A6.0/A6.1 зафиксировали карту и central mission contract; A6.2 добавил офлайн
-idempotent adapter к существующему Flow/Kanban (`tools/swarm/mission_adapter.py`) без live-установки или dispatch.
-Следующий этап A6.3 — синхронные projections одной mission в существующих Workspace/Telegram; без новой панели,
-model, swarm, GPU или live canary.
+coding workers и test VM — execution plane этой mission, не вторая точка управления. A6 и A7.1/A7.2 завершили
+central mission projection и safe blocked handoff. A7.3 имеет доказанный failure/recovery path, но ещё не доказал
+успешный PR/CI/merge/post-verify. Текущий шаг — встроить `openai-autonomy-v1` в установленный coordinator, затем
+выполнить успешный autonomous canary без нового сервиса, dashboard, Claude, local model или GPU.
 Инфра-слой (k3s/Flux/SOPS) построен и стабилен; **VPS и HA отложены владельцем на неопределённый срок из-за бюджета**.
 Третий k3s server не является active owner action. Фазированный план — `docs/next-steps.md` (Track A — пилот
 hermes-agent, Track B — blast-radius + DR при текущей single-control-plane стратегии). HA-заявления — только после

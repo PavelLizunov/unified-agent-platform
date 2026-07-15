@@ -430,6 +430,9 @@
 
 ## ADR-028 — Hermes Flow v2: Kanban, quota-aware routing и независимое review
 
+> **Маршрутизация заменена ADR-031 (2026-07-15):** Kanban, guarded worktrees, SHA-bound review и CI-гейты
+> сохраняются; Claude/quota gate и owner approval для выбора Luna/Sol/Terra больше не являются рабочим путём.
+
 - **Контекст:** восьмичасовая Spark Runner mission дала пять зелёных PR, но прошла через 22 отдельные
   `chat/--resume`-сессии, 713 последовательных tool calls и активные подсказки внешнего monitor. Отдельный
   reviewer-agent и Hermes Kanban swarm не использовались; Claude Code вызывался как редактор, а не verifier.
@@ -494,3 +497,27 @@
   `docs/next-steps.md`; сначала contract/state mapping и offline tests, затем один central mission, build-1 executor
   adapter, синхронные Workspace/Telegram views и только после этого controlled end-to-end canary. Spark Runner остаётся
   остановленным до отдельного решения владельца.
+
+## ADR-031 — Автоматическая OpenAI-only маршрутизация без оператора
+
+- **Контекст:** первая `codex-quality-v1` policy оставляла Claude в стандартном маршруте и возвращала
+  `owner_approval_required` для Sol/Terra. Это противоречило ADR-030: владелец снова выбирал модель и разрешал
+  обычные повторы вместо постановки одной продуктовой цели.
+- **Решение:** рабочий delivery route использует только уже доступную ChatGPT/Codex-подписку и три постоянно
+  разрешённых маршрута: `standard` = Luna author / Sol reviewer, `complex` = Sol / Terra, `escalated` = Terra / Sol.
+  Платформа детерминированно выбирает сложность, reasoning effort, retry и escalation. Все reviewer runs используют
+  отдельную read-only session, exact candidate SHA и runtime-derived model/sandbox attestation. Один OpenAI provider
+  является принятой продуктовой политикой, а не degraded mode.
+- **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
+  предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
+  опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой
+  architecture/security boundary, новые credentials/external authority, новый provider/Claude, local inference/GPU
+  и destructive/chaos/failover test с риском для недиспозабельного состояния.
+- **Обоснование:** это убирает владельца из execution loop, использует уже оплаченный надёжный маршрут и сохраняет
+  независимость review через session/SHA/read-only/runtime boundaries без нового сервиса или провайдера.
+- **Отвергнуто:** Claude как default reviewer; подтверждение каждой более сильной OpenAI-модели; локальная модель как
+  автоматический fallback; semantic-router или новый workflow engine.
+- **Последствия:** `delivery_model_policy` является OpenAI-only и fail-closed для неизвестных/опасных capability;
+  прежние quota-aware `route`/`quota-set` и Claude/local routes удалены из исполняемого Flow contract. A7 coordinator
+  обязан использовать `delivery-route`. ADR-028 superseded только в части model routing/review-mode; ADR-030 owner
+  gates уточнены этой ADR.

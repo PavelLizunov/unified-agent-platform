@@ -196,7 +196,7 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Owner-approved activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
+3. **A7.3 — Automatic activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
    PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts;
    PR #213 added strict runtime-attested author/reviewer reasoning effort.
    Attempts 3-5 proved bounded repair, crash recovery and autonomous rejection cleanup while independent review kept
@@ -204,9 +204,11 @@ not add an application service, workflow engine or mission database.
    runtime-attested reasoning effort and used Sol author plus exact-SHA read-only Terra review, both at `xhigh`. It
    recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
    Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
-   name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. Before
-   another canary, use the new fail-closed `codex-quality-v1` machine decision, obtain fresh owner approval for any
-   proposed stronger route and behaviorally cover a differently named custom executable; also project the actionable
+   name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. ADR-031
+   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. The repository
+   coordinator consumes and persists the fail-closed `openai-autonomy-v1` decision; before another canary, land and
+   install that exact revision, atomically migrate the stopped profile to schema v3/three cycles, and behaviorally
+   cover a differently named custom executable; also project the actionable
    finding/terminal stage and verify Telegram
    delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable

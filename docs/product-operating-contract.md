@@ -5,11 +5,11 @@ It does not claim that the current deployment already satisfies the contract.
 
 ## 1. Owner and platform roles
 
-- The owner provides a goal and may discuss material product, cost, performance or technology trade-offs.
+- The owner provides a goal and may discuss material product, performance or technology trade-offs.
 - The owner is **not** a developer, reviewer, operator or test runner in the delivery loop.
 - UAP turns the goal into a mission and carries it to the repository-specific Definition of Done.
-- UAP asks the owner only when a decision is irreversible, materially changes the product/cost/performance, requires
-  credentials or external authority, or no safe allowed route can make progress.
+- UAP asks the owner only when a decision is irreversible, materially changes the product, requires new credentials
+  or external authority, creates real destructive risk, or no safe allowed route can make progress.
 - Existing repository contracts and recorded preferences are used before asking a repeated question.
 
 ## 2. One product, one mission plane
@@ -37,8 +37,10 @@ Unless the repository contract says otherwise, an accepted mission includes:
 9. perform post-deploy/post-release verification;
 10. clean up temporary workers/worktrees and return an evidence-backed result.
 
-The platform retries, diagnoses and switches between **already approved** routes on its own. A failed attempt is not a
-reason to turn the owner into an operator.
+The platform retries, diagnoses and switches between **already approved** routes on its own. Luna, Sol and Terra are
+standing-approved OpenAI subscription capacity; their selection, reasoning effort, retry, escalation and ordinary
+subscription spend never require another confirmation. A failed attempt is not a reason to turn the owner into an
+operator.
 
 Submitting a mission authorizes its normal repository-defined workers and tests. It does not authorize a new model
 provider, a new privileged route, destructive testing or use of the owner's personal GPU.
@@ -56,8 +58,7 @@ provider, a new privileged route, destructive testing or use of the owner's pers
 
 Explicit owner approval is required for:
 
-- enabling or changing the default model/provider/runtime policy;
-- adding a paid route or materially changing expected cost;
+- enabling a new model provider/runtime outside the approved OpenAI Luna/Sol/Terra policy;
 - using the owner's Windows PC or GPU. UAP may not even probe it unless the owner has enabled the explicit
   **GPU for UAP** mode;
 - destructive/failover/restore tests against non-disposable state;
@@ -66,6 +67,7 @@ Explicit owner approval is required for:
 - irreversible product or data decisions.
 
 Within an approved policy, ordinary model selection, worker creation, retries and test execution are platform duties.
+Ordinary subscription or monetary spend is not a dangerous operation and is not an owner gate.
 
 ## 6. Observation and reporting
 
@@ -104,18 +106,19 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
    answer-and-resume loop for owner questions.
-2. Central `mission.accepted` does not automatically reach build-1. The A6.4 orchestrator explicitly created and
-   claimed the Kanban task, invoked the approved routes, published events and completed delivery.
+2. The source profile-bound A7 coordinator consumes deterministic route selection and requires a schema-v3 three-cycle
+   profile, but that revision/migration is not installed live yet; generic Central intake and a successful
+   PR/CI/merge/post-verify delivery remain unproven.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
    complete retention/cleanup lifecycle.
-5. The offline Flow contract can now derive model and sandbox policy from the exact Codex rollout `turn_context`, but
-   the live route has not yet adopted that gate and it does not prove an OS-independent read-only filesystem or
-   credential boundary.
+5. The Flow contract derives model and sandbox policy from the exact Codex rollout `turn_context`; the OpenAI-only
+   route decision is durable and validated in source but is not installed live yet. OS-independent read-only filesystem
+   and credential isolation remain unproven.
 6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Producer
    events use a closed schema and protect every allowed string before storage; mission DB and adapter state are
-   owner-only on POSIX. These offline hardening changes still await the owner-approved A7 rollout.
+   owner-only on POSIX. These offline hardening changes still await a verified A7 rollout.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 

@@ -4,13 +4,14 @@ ADR-028 contract for real multi-checkpoint repository work. This reuses Hermes K
 another workflow engine.
 
 Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
-`fe8b1aa0760b5f9cdc84306a03f2237bd40de835`. Installer/check, skill discovery, Claude-blocked routing, and a
+`fe8b1aa0760b5f9cdc84306a03f2237bd40de835`. Installer/check, skill discovery, the then-current route guard, and a
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
-Repository status (2026-07-14): the A6.2 central mission adapter is implemented, tested, installed on live build-1 and
-was exercised once by the owner-approved A6.4 canary. Automatic central intake-to-dispatch is not installed; the
-canary orchestrator invoked the adapter explicitly.
+Repository status (2026-07-15): the A6 adapter and profile-bound A7 coordinator are implemented and installed on
+build-1; six A7.3 attempts proved failure/recovery but not a successful delivery. ADR-031's policy-bound coordinator
+change is implemented offline and must be landed and installed before the next canary. Generic arbitrary-repository
+intake remains outside the current fixed-profile boundary.
 
 ## When to use
 
@@ -18,7 +19,7 @@ canary orchestrator invoked the adapter explicitly.
 - Any code/infra PR: author → independent read-only reviewer → required CI.
 - More than one checkpoint/PR or expected runtime over 30 minutes: Hermes Kanban swarm is mandatory.
 
-## 1. Quota and route preflight
+## 1. Route preflight
 
 On build-1, install or verify the runtime bridge from a trusted UAP checkout:
 
@@ -27,11 +28,32 @@ python3 tools/swarm/install_flow_v2.py
 python3 tools/swarm/install_flow_v2.py --check
 ```
 
+Before enabling an A7.3 timer, migrate its stopped legacy two-cycle profile atomically. This removes manual model/
+effort fields, sets schema v3 and makes all three bounded routes reachable:
+
+```bash
+PROFILE=<profile>
+systemctl --user stop \
+  "hermes-delivery-coordinator@${PROFILE}.timer" \
+  "hermes-delivery-coordinator@${PROFILE}.service"
+systemctl --user reset-failed \
+  "hermes-delivery-coordinator@${PROFILE}.timer" \
+  "hermes-delivery-coordinator@${PROFILE}.service" || true
+test "$(systemctl --user is-active "hermes-delivery-coordinator@${PROFILE}.timer" || true)" = inactive
+test "$(systemctl --user is-active "hermes-delivery-coordinator@${PROFILE}.service" || true)" = inactive
+python3 tools/swarm/install_flow_v2.py \
+  --migrate-profile "$HOME/.config/uap/delivery-${PROFILE}.json"
+```
+
+The helper rechecks that both matching units are exactly `inactive`, validates the complete v3 profile before
+`os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2 profile or any value other than three review cycles
+fails closed in the coordinator.
+
 This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` skill under
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while
 Codex CLI provides the separately sandboxed author/reviewer executions.
 
-Model-policy v1 is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
+`openai-autonomy-v1` is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
 record with the allowed-file count, prior independent-review rejections for the same task and explicit risk flags:
 
 ```json
@@ -49,59 +71,19 @@ Evaluate it without starting a model:
 python tools/swarm/flow_contract.py delivery-route \
   --policy tools/swarm/flow-policy.json \
   --signals /home/uap/swarm-out/<mission>/route-signals.json \
-  --quota /home/uap/swarm-out/<mission>/quota.json \
-  --model claude=<exact-model-id>
+  > /home/uap/swarm-out/<mission>/route-decision.json
 ```
 
-The Claude model override is required only when Claude is recorded as available; do not probe Claude merely to fill
-it. The standard outcome reuses the existing ADR-028 `standard_code` quota route instead of introducing a second
-authority:
+The installed policy has three standing-approved outcomes:
 
-- Claude available with an exact model: Luna author plus cross-family Claude review is `ready`;
-- Claude explicitly `quota_blocked`: Luna author plus Sol review is `ready` as `same_provider_degraded`;
-- Claude unknown, expired or available without an exact model: `review_blocked`, and no model is runnable.
-
-The installed `codex-quality-v1` policy has three outcomes:
-
-- `standard`: the existing quota-aware route above is used with `medium` author and `low` reviewer effort;
-- `complex`: Sol author / Terra reviewer at `xhigh` is returned only as a proposal with
-  `owner_approval_required`;
-- `escalated`: two prior review rejections or a privileged flag proposes Terra author / Sol reviewer at `xhigh`, also
-  with `owner_approval_required`.
+- `standard`: Luna author (`medium`) / Sol reviewer (`low`);
+- `complex`: Sol author / Terra reviewer at `xhigh`;
+- `escalated`: two prior review rejections select Terra author / Sol reviewer at `xhigh`.
 
 Unknown flags fail closed. Local/GPU, destructive, architecture, credential/external-authority and new-provider flags
-can never become a runnable route through this command. Model-policy v1 also rejects any attempt to mark `complex` or
-`escalated` as standing-approved. Canonical signals, the full policy SHA-256, the quota SHA-256 for a standard route
-and the exact resolved/proposed model/effort route are bound into the deterministic `decision_id`; it belongs in the
-mission evidence. Exit 0 means the quota-aware standard route is ready; exit 3 means no model may be invoked. A proposal is not an authorization and must not be copied into an enabled
-delivery profile without the matching owner decision and a future policy version that records that new authority.
-
-Claude Code exposes plan status interactively through `/usage`, but the installed CLI has no documented
-machine-readable `claude usage --json`. Never spend quota on an empty `claude -p` probe.
-
-Record known state in a mission-local file outside the repository:
-
-```bash
-python tools/swarm/flow_contract.py quota-set \
-  --file /home/uap/swarm-out/<mission>/quota.json \
-  --engine claude --state quota_blocked \
-  --reason owner_reported_100_percent
-```
-
-Route without local models by default:
-
-```bash
-python tools/swarm/flow_contract.py route \
-  --policy tools/swarm/flow-policy.json \
-  --quota /home/uap/swarm-out/<mission>/quota.json \
-  --task-class standard_code \
-  --model claude=<exact-model-id>
-```
-
-Exit 0 means author+reviewer are runnable. Exit 3 means `author_blocked` or `review_blocked`; do not call the
-blocked engine. `--allow-local` is forbidden unless the owner explicitly authorizes local models for this mission.
-After a known reset, state becomes `unknown`, not silently `available`; either update it from `/usage` or explicitly
-allow the first real task as the availability check.
+can never become runnable through this command. Canonical signals, the full policy SHA-256 and exact model/effort
+route are bound into `decision_id`. Exit 0 means the OpenAI route is ready; exit 3 means owner-gated capability was
+requested. Luna/Sol/Terra selection and ordinary spend require no confirmation; Claude/local/GPU are not fallback.
 
 ## 2. Repository guard
 
@@ -126,10 +108,11 @@ preflight → author → reviewer → CI/PR → merge → cleanup
                  ↖ revise ─────┘
 ```
 
-Cross-family review is preferred. When Claude is `quota_blocked`, `standard_code` may use the policy's explicit
-`same_provider_degraded` fallback: a separate read-only Codex session using a different exact model. This fallback
-is forbidden for infra, security and secrets. Reviewer may inspect the diff and run checks, but must not patch files.
-A finding creates a `revise` task for the author. Maximum two review cycles; the third becomes `blocked`.
+Every route uses a separate read-only OpenAI reviewer session with a different exact model. Runtime telemetry must
+prove both model identities, distinct sessions, the reviewed SHA and the reviewer read-only sandbox. This is
+`same_provider_independent`: provider diversity is not claimed, but the review is not a degraded fallback. Reviewer
+may inspect the diff and run checks, but must not patch files. A finding creates a `revise` task; the platform
+automatically escalates the route after repeated rejection.
 
 With `codex exec --sandbox workspace-write`, the linked worktree git-admin directory may be outside the writable
 root. The author therefore edits and tests only. The orchestrator re-runs the checks, stages an explicit file
@@ -150,9 +133,8 @@ python tools/swarm/mission_adapter.py \
   accept --event /path/to/mission-accepted.json
 ```
 
-This creates or reuses one blocked, unassigned root card. `--allow-dispatch` is forbidden until the owner has approved
-the exact runtime/profile and test target. Once approved, the platform must also supply both `--assignee` and a
-non-scratch `--workspace`; omission fails closed.
+This creates or reuses one blocked, unassigned root card. Activation is allowed only through a configured repository
+profile. The platform must supply both `--assignee` and a non-scratch `--workspace`; omission fails closed.
 
 Read the current deterministic producer-event batch without starting work:
 
@@ -175,16 +157,16 @@ python tools/swarm/mission_adapter.py \
   --state-root /home/uap/swarm-out \
   --board default \
   poll \
-  --dispatch-profile <owner-approved-profile-label> \
+  --dispatch-profile <configured-profile-label> \
   --workspace <fixed-non-scratch-workspace>
 ```
 
 `HERMES_API_TOKEN` and `HERMES_MISSION_PRODUCER_KEY` must come from a protected environment file; never pass either
 secret on argv. One invocation claims at most one exact-profile mission and stops after projecting its idempotent,
 blocked and unassigned root task. An absent/unknown profile, a non-accepted mission or an existing task is skipped.
-This default cannot launch a worker. `--activate --assignee <owner-approved-kanban-profile>` is a separate explicit
-gate: it creates a ready card and may make the existing Kanban dispatcher launch the configured worker, so the exact
-profile, workspace, model route and target require owner approval.
+This default cannot launch a worker. `--activate --assignee <configured-kanban-profile>` creates a ready card only
+for the repository/profile fixed in platform configuration. The coordinator chooses the OpenAI route and continues
+without per-run confirmation. Owner input remains required only for capabilities outside that contract.
 
 ## 4. Durable artifacts
 
@@ -197,8 +179,9 @@ Author writes `/home/uap/swarm-out/<mission>/summary.json`:
   "branch": "agent/mission",
   "head_sha": "full-sha",
   "engine_family": "openai",
-  "model": "gpt-5.3-codex-spark",
-  "reasoning_effort": "xhigh",
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "medium",
+  "route_decision_id": "sha256-of-the-canonical-policy-decision",
   "session_id": "exact-author-session-id",
   "task_class": "standard_code",
   "changed_files": ["src/lib.rs"],
@@ -213,11 +196,12 @@ Reviewer reads the actual worktree/diff and writes `verification.json`:
 {
   "schema_version": 1,
   "reviewed_sha": "full-sha",
-  "engine_family": "anthropic",
-  "model": "exact-claude-model-id",
-  "reasoning_effort": "xhigh",
+  "engine_family": "openai",
+  "model": "gpt-5.6-sol",
+  "reasoning_effort": "low",
+  "route_decision_id": "sha256-of-the-canonical-policy-decision",
   "session_id": "exact-reviewer-session-id",
-  "review_mode": "cross_family",
+  "review_mode": "same_provider_independent",
   "verdict": "accept",
   "review_cycle": 1,
   "findings": [],
@@ -233,16 +217,17 @@ python tools/swarm/flow_contract.py validate-review \
   --verification /home/uap/swarm-out/<mission>/verification.json \
   --author-telemetry /home/uap/swarm-out/<mission>/author-telemetry.json \
   --reviewer-telemetry /home/uap/swarm-out/<mission>/reviewer-telemetry.json \
+  --route-decision /home/uap/swarm-out/<mission>/route-decision.json \
+  --policy tools/swarm/flow-policy.json \
   --repo <owner/repo> --head "$(git rev-parse HEAD)" --ci-green
 ```
 
-The gate cross-checks each artifact's exact model/session against runtime-derived Codex telemetry and requires the
-author `workspace-write` and reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
-verification.
-
-For the owner-approved standard-code fallback, use a distinct reviewer model/session, set
-`"review_mode": "same_provider_degraded"`, and add `--allow-same-provider-review` to `validate-review`. The flag
-does not waive SHA, tests, CI, cycle, exact-model, or session checks and is rejected for other task classes.
+The gate recomputes the canonical decision from its persisted signals/policy, enforces the exact ADR-031 model/effort
+tuples and approved runtime provider, requires both artifacts to bind the same
+`decision_id`, cross-checks exact model/session/effort against runtime-derived Codex telemetry, and requires author
+`workspace-write` plus reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
+verification. Every route uses the distinct reviewer model/session and `same_provider_independent` mode returned by
+`delivery-route`; no manual review waiver exists.
 
 ## 5. Terminal state
 
@@ -282,12 +267,13 @@ python tools/swarm/flow_contract.py summarize-codex \
   --events /home/uap/swarm-out/<mission>/author-events.jsonl \
   --rollout /home/uap/.codex/sessions/<date>/rollout-<session-id>.jsonl \
   --worktree /home/uap/worktrees/<mission> --head <candidate-sha> \
-  --component author --model gpt-5.3-codex-spark --reasoning-effort xhigh \
+  --component author --model gpt-5.6-luna --reasoning-effort medium \
   --sandbox workspace-write \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```
 
-Use `--reasoning-effort xhigh --sandbox read-only --source-attestation <reviewer-source.json>` for the reviewer. The source digest is present in
+Use the reviewer model/effort from the resolved route plus `--sandbox read-only --source-attestation
+<reviewer-source.json>`. The source digest is present in
 the persisted user input, was created no more than five minutes before the session, and must still match the clean
 worktree HEAD/tree when summarized. This binds the review turn to the candidate under the single-owner coordinator
 threat model; it still does not prove an OS-independent filesystem or credential boundary.
@@ -296,11 +282,11 @@ threat model; it still does not prove an OS-independent filesystem or credential
 
 Use a separate disposable repository. Required behavioral evidence:
 
-- quota-blocked Claude is not invoked;
+- only the exact OpenAI route is invoked;
 - wrong remote is rejected before write;
 - author commit after `accept` makes review stale;
-- same-family reviewer is rejected by default; degraded standard-code review requires distinct models and sessions;
-- review cycle 3 is blocked;
+- same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
+- repeated review rejection automatically escalates the OpenAI route;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.
 

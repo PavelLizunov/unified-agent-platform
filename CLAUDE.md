@@ -51,8 +51,8 @@ pass" for the merged-PR list. The original reports are kept for historical recor
     subfleet is **retained for the owner's OTHER projects** (a Telegram bot + web sessions); redundant for in-repo coding.
   - **Agent** — bespoke `hermes/hermes.py` ("Hermes-legacy"; prompt-based ReAct/ReWOO; NodePort `:30890`). **PARKED.**
 - **Active direction (2026-06-22/23 pivot):** adopt the **external NousResearch hermes-agent** as the vibe-coding harness.
-  Brain = a **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling) OR a **local FC model** on the
-  RTX 5060 Ti; coding = quota-aware `codex exec` (primary) + `claude -p` (current non-Max plan) as skills.
+  Brain = the **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling). ADR-031 makes Luna/Sol/Terra
+  the automatic coding/review routes; Claude, local inference and GPU are not fallbacks without a separate owner decision.
   **Do NOT point hermes-agent's brain at the
   subfleet endpoint — it is FC-less and every tool silently goes dark.** Rationale + citations in `docs/research/`.
 - **GitOps coverage (verified):** the model+agent layer is now **fully Flux-reconciled** — `litellm.yaml`,
@@ -197,10 +197,11 @@ Good next tasks that do not require redesign:
    differently named custom executable remained invisible to the hard-coded process enumeration. PRs #205-#209 and
    #213 close the platform defects exposed so far. A successful PR/CI/merge/post-verify canary is still required. Evidence:
    `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
-5. The approved sixth A7.3 model attempt is exhausted. No additional model/runtime turn, Qwen/local inference/GPU,
-   Claude, swarm, Spark Runner, live cluster restart/deploy or destructive test is implied without a new owner gate.
-   The offline `codex-quality-v1` policy may propose Sol/Terra or Terra/Sol, but both stronger routes remain
-   `owner_approval_required` and are not runnable authority.
+5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
+   PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
+   dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the
+   mission remain gated. The source coordinator now consumes and persists `openai-autonomy-v1`; land, install and
+   verify that exact revision and atomically migrate the stopped profile to schema v3 before the next canary.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

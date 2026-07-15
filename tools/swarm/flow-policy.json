@@ -9,27 +9,13 @@
     "codex": {
       "family": "openai",
       "capacity_label": "x20"
-    },
-    "claude": {
-      "family": "anthropic",
-      "capacity_label": "non-max"
-    },
-    "ornith": {
-      "family": "local-ornith",
-      "capacity_label": "local",
-      "requires_local_permission": true
-    },
-    "qwen": {
-      "family": "local-qwen",
-      "capacity_label": "local",
-      "requires_local_permission": true
     }
   },
   "delivery_model_policy": {
-    "policy_id": "codex-quality-v1",
+    "policy_id": "openai-autonomy-v1",
     "complex_changed_files_at": 6,
     "complex_prior_review_rejections_at": 1,
-    "owner_gate_prior_review_rejections_at": 2,
+    "escalated_prior_review_rejections_at": 2,
     "complex_flags": [
       "concurrency",
       "cross_process",
@@ -50,13 +36,21 @@
         "task_class": "standard_code",
         "risk": "medium",
         "standing_approved": true,
-        "author_reasoning_effort": "medium",
-        "reviewer_reasoning_effort": "low"
+        "author": {
+          "engine": "codex",
+          "model": "gpt-5.6-luna",
+          "reasoning_effort": "medium"
+        },
+        "reviewer": {
+          "engine": "codex",
+          "model": "gpt-5.6-sol",
+          "reasoning_effort": "low"
+        }
       },
       "complex": {
         "task_class": "complex_code",
         "risk": "high",
-        "standing_approved": false,
+        "standing_approved": true,
         "author": {
           "engine": "codex",
           "model": "gpt-5.6-sol",
@@ -71,7 +65,7 @@
       "escalated": {
         "task_class": "escalated_code",
         "risk": "critical",
-        "standing_approved": false,
+        "standing_approved": true,
         "author": {
           "engine": "codex",
           "model": "gpt-5.6-terra",
@@ -83,38 +77,6 @@
           "reasoning_effort": "xhigh"
         }
       }
-    }
-  },
-  "routes": {
-    "complex_rust": {
-      "risk": "high",
-      "authors": [
-        {"engine": "codex", "model": "gpt-5.3-codex-spark"}
-      ],
-      "reviewers": [
-        {"engine": "claude", "model_env": "CLAUDE_REVIEW_MODEL"}
-      ]
-    },
-    "standard_code": {
-      "risk": "medium",
-      "same_provider_fallback": true,
-      "authors": [
-        {"engine": "codex", "model": "gpt-5.6-luna"},
-        {"engine": "claude", "model_env": "CLAUDE_AUTHOR_MODEL"}
-      ],
-      "reviewers": [
-        {"engine": "claude", "model_env": "CLAUDE_REVIEW_MODEL"},
-        {"engine": "codex", "model": "gpt-5.6-sol", "same_provider_fallback": true}
-      ]
-    },
-    "low_risk_local": {
-      "risk": "low",
-      "authors": [
-        {"engine": "ornith", "model": "ornith-9b"}
-      ],
-      "reviewers": [
-        {"engine": "qwen", "model": "qwen-35b"}
-      ]
     }
   }
 }
