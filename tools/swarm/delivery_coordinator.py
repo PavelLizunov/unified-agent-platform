@@ -778,7 +778,12 @@ class DeliveryCoordinator:
             self._save(paths, state)
             return True
         if cycle >= self.profile["max_review_cycles"]:
-            raise DeliveryError("review rejected the second and final candidate")
+            state.update(
+                phase="review_rejected",
+                review_findings=verification["findings"],
+            )
+            self._save(paths, state)
+            return False
         state.update(phase="needs_fix", review_cycle=cycle + 1, review_findings=verification["findings"])
         self._save(paths, state)
         return False
@@ -977,6 +982,8 @@ class DeliveryCoordinator:
         paths = self._paths(mission_id)
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
+            if state["phase"] == "review_rejected":
+                return {"action": "review_rejected", "mission_id": mission_id, "state": state}
             if mission.get("status") == "completed":
                 if state.get("phase") == "cleaned":
                     self._recover_task_completion(state, paths)

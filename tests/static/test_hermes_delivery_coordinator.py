@@ -596,6 +596,82 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
             self.assertTrue(result["state"]["crash_injected"])
 
+    def test_final_review_rejection_is_durable_and_does_not_rerun_a_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex"))
+            client = FakeClient()
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+
+            def runner(command, **_kwargs):
+                last = pathlib.Path(
+                    command[command.index("--output-last-message") + 1]
+                )
+                last.write_text(
+                    json.dumps({"verdict": "reject", "findings": ["still broken"]}),
+                    encoding="utf-8",
+                )
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='{"type":"thread.started","thread_id":"review-session"}\n',
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            paths["review"].mkdir(parents=True)
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "author_committed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 2,
+                "crash_injected": True,
+                "candidate_sha": "candidate-sha",
+                "root_task_id": "task-1",
+                "run_id": "7",
+            }
+            telemetry = {"model": approved["reviewer_model"], "session_id": "review-session"}
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git"),
+                mock.patch.object(instance, "_checks", return_value=[]),
+                mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source-sha"},
+                ),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "summarize_codex_events",
+                    return_value=telemetry,
+                ),
+            ):
+                self.assertFalse(instance._review(state, paths))
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("review_rejected", persisted["phase"])
+            self.assertEqual(["still broken"], persisted["review_findings"])
+            self.assertEqual("reject", persisted["review_verification"]["verdict"])
+
+            client.mission["status"] = "failed"
+            with (
+                mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")),
+                mock.patch.object(
+                    instance, "_ensure_worktree", side_effect=AssertionError("worktree mutation")
+                ),
+            ):
+                result = instance.tick()
+            self.assertEqual("review_rejected", result["action"])
+
     def test_lost_native_completion_response_recovers_without_manual_state_repair(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
