@@ -153,6 +153,7 @@ Author writes `/home/uap/swarm-out/<mission>/summary.json`:
   "head_sha": "full-sha",
   "engine_family": "openai",
   "model": "gpt-5.3-codex-spark",
+  "reasoning_effort": "xhigh",
   "session_id": "exact-author-session-id",
   "task_class": "standard_code",
   "changed_files": ["src/lib.rs"],
@@ -169,6 +170,7 @@ Reviewer reads the actual worktree/diff and writes `verification.json`:
   "reviewed_sha": "full-sha",
   "engine_family": "anthropic",
   "model": "exact-claude-model-id",
+  "reasoning_effort": "xhigh",
   "session_id": "exact-reviewer-session-id",
   "review_mode": "cross_family",
   "verdict": "accept",
@@ -235,11 +237,12 @@ python tools/swarm/flow_contract.py summarize-codex \
   --events /home/uap/swarm-out/<mission>/author-events.jsonl \
   --rollout /home/uap/.codex/sessions/<date>/rollout-<session-id>.jsonl \
   --worktree /home/uap/worktrees/<mission> --head <candidate-sha> \
-  --component author --model gpt-5.3-codex-spark --sandbox workspace-write \
+  --component author --model gpt-5.3-codex-spark --reasoning-effort xhigh \
+  --sandbox workspace-write \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```
 
-Use `--sandbox read-only --source-attestation <reviewer-source.json>` for the reviewer. The source digest is present in
+Use `--reasoning-effort xhigh --sandbox read-only --source-attestation <reviewer-source.json>` for the reviewer. The source digest is present in
 the persisted user input, was created no more than five minutes before the session, and must still match the clean
 worktree HEAD/tree when summarized. This binds the review turn to the candidate under the single-owner coordinator
 threat model; it still does not prove an OS-independent filesystem or credential boundary.

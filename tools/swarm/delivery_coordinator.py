@@ -33,14 +33,20 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
     "source_checkout", "default_branch", "worktree_root", "branch_prefix",
-    "assignee", "author_model", "reviewer_model", "required_files",
+    "assignee", "author_model", "reviewer_model", "author_reasoning_effort",
+    "reviewer_reasoning_effort", "required_files",
     "author_checks", "review_checks", "post_verify_checks", "required_ci_checks", "commit_message",
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
+    "author_reasoning_effort", "reviewer_reasoning_effort",
     "codex_bin", "gh_bin", "codex_home",
+}
+_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+_LEGACY_REASONING_EFFORTS = {
+    ("gpt-5.6-luna", "gpt-5.6-sol"): ("medium", "low"),
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -57,8 +63,8 @@ def _required_text(value: Any, name: str) -> str:
 
 def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     profile = mission_adapter._read_json(path)
-    if not isinstance(profile, dict) or profile.get("schema_version") != 1:
-        raise DeliveryError("profile schema_version must be 1")
+    if not isinstance(profile, dict) or profile.get("schema_version") not in {1, 2}:
+        raise DeliveryError("profile schema_version must be 1 or 2")
     if unknown := set(profile) - _PROFILE_FIELDS:
         raise DeliveryError(f"unknown profile fields: {', '.join(sorted(unknown))}")
     if missing := _REQUIRED_PROFILE_FIELDS - profile.keys():
@@ -72,6 +78,26 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         profile[name] = _required_text(profile.get(name), name)
     if profile["author_model"] == profile["reviewer_model"]:
         raise DeliveryError("author and reviewer exact models must differ")
+    effort_fields = ("author_reasoning_effort", "reviewer_reasoning_effort")
+    present_efforts = [name for name in effort_fields if name in profile]
+    missing_efforts = [name for name in effort_fields if name not in profile]
+    if profile["schema_version"] == 2 and missing_efforts:
+        raise DeliveryError(f"missing profile fields: {', '.join(missing_efforts)}")
+    if profile["schema_version"] == 1:
+        legacy = _LEGACY_REASONING_EFFORTS.get(
+            (profile["author_model"], profile["reviewer_model"])
+        )
+        if present_efforts or legacy is None:
+            raise DeliveryError("schema 1 is reserved for the exact legacy Luna/Sol profile")
+        profile["author_reasoning_effort"], profile["reviewer_reasoning_effort"] = legacy
+    for name in effort_fields:
+        if name not in profile:
+            continue
+        profile[name] = _required_text(profile[name], name)
+        if profile[name] not in _REASONING_EFFORTS:
+            raise DeliveryError(
+                f"profile.{name}: expected one of {', '.join(sorted(_REASONING_EFFORTS))}"
+            )
     if not re.fullmatch(r"coordinator-[A-Za-z0-9._-]{1,80}", profile["assignee"]):
         raise DeliveryError("profile.assignee must be a reserved non-routable coordinator identity")
     for name in ("required_files",):
@@ -285,6 +311,12 @@ class DeliveryCoordinator:
             GIT_TERMINAL_PROMPT="0",
         )
         return environment
+
+    def _reasoning_args(self, component: str) -> list[str]:
+        effort = self.profile.get(f"{component}_reasoning_effort")
+        if effort is None:
+            return []
+        return ["--strict-config", "-c", f'model_reasoning_effort="{effort}"']
 
     def _git(self, checkout: pathlib.Path, *arguments: str, check: bool = True) -> str:
         return self._run(["git", "-C", str(checkout), *arguments], check=check).stdout.strip()
@@ -726,6 +758,7 @@ class DeliveryCoordinator:
             events,
             component="author",
             model=self.profile["author_model"],
+            reasoning_effort=self.profile.get("author_reasoning_effort"),
             rollout=rollout,
             sandbox="workspace-write",
             worktree=paths["author"],
@@ -739,6 +772,7 @@ class DeliveryCoordinator:
             "task_class": "standard_code",
             "engine_family": "openai",
             "model": telemetry["model"],
+            "reasoning_effort": telemetry.get("reasoning_effort"),
             "session_id": telemetry["session_id"],
             "changed_files": sorted(cumulative),
             "checks": checks,
@@ -854,6 +888,7 @@ class DeliveryCoordinator:
         result = self._run(
             [
                 self.profile["codex_bin"], "exec", "--ignore-user-config",
+                *self._reasoning_args("author"),
                 "--model", self.profile["author_model"], "--sandbox", "workspace-write",
                 "--cd", str(paths["author"]), "--json", "--output-last-message", str(last), "-",
             ],
@@ -929,6 +964,7 @@ class DeliveryCoordinator:
         result = self._run(
             [
                 self.profile["codex_bin"], "exec", "--ignore-user-config",
+                *self._reasoning_args("reviewer"),
                 "--model", self.profile["reviewer_model"], "--sandbox", "read-only",
                 "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
                 "--output-last-message", str(last), "-",
@@ -952,6 +988,7 @@ class DeliveryCoordinator:
             events,
             component="reviewer",
             model=self.profile["reviewer_model"],
+            reasoning_effort=self.profile.get("reviewer_reasoning_effort"),
             rollout=self._rollout(events),
             sandbox="read-only",
             worktree=paths["review"],
@@ -964,6 +1001,7 @@ class DeliveryCoordinator:
             "verdict": response["verdict"],
             "engine_family": "openai",
             "model": telemetry["model"],
+            "reasoning_effort": telemetry.get("reasoning_effort"),
             "session_id": telemetry["session_id"],
             "review_mode": "same_provider_degraded",
             "findings": response["findings"],

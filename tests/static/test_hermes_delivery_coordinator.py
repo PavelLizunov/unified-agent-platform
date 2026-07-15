@@ -22,7 +22,7 @@ coordinator = importlib.import_module("delivery_coordinator")
 
 def profile(root: pathlib.Path) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "dispatch_profile": "build1-vpnrouter-a7-3",
         "goal": "Fix issue 39",
         "repo": "PavelLizunov/VPNRouter",
@@ -34,6 +34,8 @@ def profile(root: pathlib.Path) -> dict:
         "assignee": "coordinator-codex-luna-a7",
         "author_model": "gpt-5.6-luna",
         "reviewer_model": "gpt-5.6-sol",
+        "author_reasoning_effort": "xhigh",
+        "reviewer_reasoning_effort": "xhigh",
         "required_files": ["Cli.cs", "Core.cs", "Tests.cs"],
         "author_checks": [["dotnet", "test"]],
         "review_checks": [["dotnet", "test"]],
@@ -296,6 +298,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             loaded = coordinator.load_profile(path)
             self.assertEqual("gpt-5.6-luna", loaded["author_model"])
+            self.assertEqual("xhigh", loaded["author_reasoning_effort"])
             value["reviewer_model"] = value["author_model"]
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(coordinator.DeliveryError, "must differ"):
@@ -306,6 +309,51 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(coordinator.DeliveryError, "reserved non-routable"):
                 coordinator.load_profile(path)
+
+            value = profile(pathlib.Path(directory))
+            value["reviewer_reasoning_effort"] = "ultra"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "expected one of"):
+                coordinator.load_profile(path)
+
+            value = profile(pathlib.Path(directory))
+            value.pop("author_reasoning_effort")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "missing profile fields"):
+                coordinator.load_profile(path)
+
+            value = profile(pathlib.Path(directory))
+            value["schema_version"] = 1
+            value.pop("author_reasoning_effort")
+            value.pop("reviewer_reasoning_effort")
+            path.write_text(json.dumps(value), encoding="utf-8")
+            loaded = coordinator.load_profile(path)
+            self.assertEqual("medium", loaded["author_reasoning_effort"])
+            self.assertEqual("low", loaded["reviewer_reasoning_effort"])
+
+            value["reviewer_model"] = "gpt-5.6-terra"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "reserved for the exact legacy"):
+                coordinator.load_profile(path)
+
+            value = profile(pathlib.Path(directory))
+            value["schema_version"] = 1
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "reserved for the exact legacy"):
+                coordinator.load_profile(path)
+
+            loaded = profile(pathlib.Path(directory))
+            instance = coordinator.DeliveryCoordinator(
+                loaded, FakeClient(), FakeBackend(), pathlib.Path(directory) / "state"
+            )
+            self.assertEqual(
+                ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
+                instance._reasoning_args("author"),
+            )
+            self.assertEqual(
+                ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
+                instance._reasoning_args("reviewer"),
+            )
 
     def test_required_ci_check_must_exist_and_succeed(self):
         self.assertEqual(
@@ -676,6 +724,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
 
             def runner(command, **_kwargs):
+                self.assertIn("--strict-config", command)
+                self.assertIn('model_reasoning_effort="xhigh"', command)
                 last = pathlib.Path(
                     command[command.index("--output-last-message") + 1]
                 )
@@ -842,6 +892,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 nonlocal author_calls
                 if command[0] == "codex":
                     author_calls += 1
+                    self.assertIn("--strict-config", command)
+                    self.assertIn('model_reasoning_effort="xhigh"', command)
                     checkout = pathlib.Path(kwargs["cwd"])
                     for name in approved["required_files"]:
                         path = checkout / name

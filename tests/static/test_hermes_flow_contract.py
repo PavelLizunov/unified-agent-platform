@@ -28,6 +28,7 @@ def artifact(engine_family, model, sha, *, reviewer=False):
         "schema_version": 1,
         "engine_family": engine_family,
         "model": model,
+        "reasoning_effort": "xhigh",
         "session_id": "review-session" if reviewer else "author-session",
         "checks": [{"command": "python -m unittest", "exit_code": 0}],
     }
@@ -53,6 +54,8 @@ def telemetry(value, component, sandbox):
         "engine_family": value["engine_family"],
         "model": value["model"],
         "model_attestation": "codex_rollout_turn_context",
+        "reasoning_effort": value["reasoning_effort"],
+        "reasoning_effort_attestation": "codex_rollout_turn_context",
         "sandbox": sandbox,
         "sandbox_attestation": "codex_rollout_turn_context",
         "session_id": value["session_id"],
@@ -188,6 +191,28 @@ class FlowContractTests(unittest.TestCase):
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
                 allow_same_provider_review=True,
             )
+        reviewer = telemetry(verification, "reviewer", "read-only")
+        reviewer.pop("reasoning_effort")
+        with self.assertRaisesRegex(flow.ContractError, "reasoning_effort"):
+            flow.validate_review(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
+        summary.pop("reasoning_effort")
+        verification.pop("reasoning_effort")
+        author = telemetry({**summary, "reasoning_effort": "xhigh"}, "author", "workspace-write")
+        reviewer = telemetry(
+            {**verification, "reasoning_effort": "xhigh"}, "reviewer", "read-only"
+        )
+        author.pop("reasoning_effort")
+        reviewer.pop("reasoning_effort")
+        with self.assertRaisesRegex(flow.ContractError, "reasoning_effort"):
+            flow.validate_review(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
 
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
@@ -272,6 +297,7 @@ class FlowContractTests(unittest.TestCase):
             }},
             {"type": "turn_context", "payload": {
                 "model": "gpt-5.3-codex-spark",
+                "effort": "xhigh",
                 "sandbox_policy": {"type": "workspace-write", "network_access": False},
             }},
         ]
@@ -290,17 +316,26 @@ class FlowContractTests(unittest.TestCase):
             ):
                 result = flow.summarize_codex_events(
                     path, component="author", model="gpt-5.3-codex-spark",
+                    reasoning_effort="xhigh",
                     rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                 )
                 with self.assertRaisesRegex(flow.ContractError, "runtime model mismatch"):
                     flow.summarize_codex_events(
                         path, component="author", model="gpt-5.6-luna",
+                        reasoning_effort="xhigh",
                         rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                     )
                 with self.assertRaisesRegex(flow.ContractError, "runtime sandbox mismatch"):
                     flow.summarize_codex_events(
                         path, component="author", model="gpt-5.3-codex-spark",
+                        reasoning_effort="xhigh",
                         rollout=rollout, sandbox="read-only", worktree=".", head="aaa",
+                    )
+                with self.assertRaisesRegex(flow.ContractError, "runtime reasoning effort mismatch"):
+                    flow.summarize_codex_events(
+                        path, component="author", model="gpt-5.3-codex-spark",
+                        reasoning_effort="high", rollout=rollout, sandbox="workspace-write",
+                        worktree=".", head="aaa",
                     )
             rerouted_events = events[:-1] + [
                 {"type": "item.completed", "item": {
@@ -316,6 +351,7 @@ class FlowContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(flow.ContractError, "model reroute"):
                     flow.summarize_codex_events(
                         rerouted_path, component="author", model="gpt-5.3-codex-spark",
+                        reasoning_effort="xhigh",
                         rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                     )
             finally:
@@ -328,6 +364,8 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("openai", result["model_provider"])
         self.assertEqual("workspace-write", result["sandbox"])
         self.assertEqual("codex_rollout_turn_context", result["model_attestation"])
+        self.assertEqual("xhigh", result["reasoning_effort"])
+        self.assertEqual("codex_rollout_turn_context", result["reasoning_effort_attestation"])
         self.assertEqual("post_turn_clean_head", result["repo_attestation"])
         self.assertEqual({"file_change": 1, "command_execution": 1}, result["tool_calls"])
         self.assertEqual(1, result["failed_commands"])
@@ -379,7 +417,8 @@ class FlowContractTests(unittest.TestCase):
                             "content": [{"type": "input_text", "text": prompt}],
                         }},
                         {"type": "turn_context", "payload": {
-                            "model": "gpt-5.6-sol", "sandbox_policy": {"type": "read-only"},
+                            "model": "gpt-5.6-sol", "effort": "xhigh",
+                            "sandbox_policy": {"type": "read-only"},
                         }},
                     )) + "\n",
                     encoding="utf-8",
@@ -388,6 +427,7 @@ class FlowContractTests(unittest.TestCase):
             write_rollout(f"Review exact candidate. {marker}")
             result = flow.summarize_codex_events(
                 events_path, component="reviewer", model="gpt-5.6-sol",
+                reasoning_effort="xhigh",
                 rollout=rollout_path, sandbox="read-only", worktree=repo, head=head,
                 source_attestation_path=source_path,
             )
@@ -398,6 +438,7 @@ class FlowContractTests(unittest.TestCase):
             with self.assertRaisesRegex(flow.ContractError, "marker must appear exactly once"):
                 flow.summarize_codex_events(
                     events_path, component="reviewer", model="gpt-5.6-sol",
+                    reasoning_effort="xhigh",
                     rollout=rollout_path, sandbox="read-only", worktree=repo, head=head,
                     source_attestation_path=source_path,
                 )
