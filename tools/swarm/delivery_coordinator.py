@@ -33,17 +33,14 @@ Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
     "source_checkout", "default_branch", "worktree_root", "branch_prefix",
-    "assignee", "author_model", "reviewer_model", "author_reasoning_effort",
-    "reviewer_reasoning_effort", "route_flags", "required_files",
+    "assignee", "route_flags", "required_files",
     "author_checks", "review_checks", "post_verify_checks", "required_ci_checks", "commit_message",
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
-    "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",
-    "route_flags",
-    "codex_bin", "gh_bin", "codex_home",
+    "route_flags", "codex_bin", "gh_bin", "codex_home",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -60,8 +57,8 @@ def _required_text(value: Any, name: str) -> str:
 
 def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     profile = mission_adapter._read_json(path)
-    if not isinstance(profile, dict) or profile.get("schema_version") not in {1, 2}:
-        raise DeliveryError("profile schema_version must be 1 or 2")
+    if not isinstance(profile, dict) or profile.get("schema_version") != 3:
+        raise DeliveryError("profile schema_version must be 3; migrate before activation")
     if unknown := set(profile) - _PROFILE_FIELDS:
         raise DeliveryError(f"unknown profile fields: {', '.join(sorted(unknown))}")
     if missing := _REQUIRED_PROFILE_FIELDS - profile.keys():
@@ -72,12 +69,6 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         "pull_request_title", "pull_request_body",
     ):
         profile[name] = _required_text(profile.get(name), name)
-    # Legacy model fields remain parseable for live profile migration but are never execution authority.
-    for name in (
-        "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort"
-    ):
-        if name in profile:
-            profile[name] = _required_text(profile[name], name)
     route_flags = profile.get("route_flags", [])
     if (
         not isinstance(route_flags, list)
@@ -132,8 +123,8 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         value = profile.get(name)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise DeliveryError(f"profile.{name}: positive integer required")
-    if profile["max_review_cycles"] > 3:
-        raise DeliveryError("profile.max_review_cycles cannot exceed 3")
+    if profile["max_review_cycles"] != 3:
+        raise DeliveryError("profile.max_review_cycles must be 3 for bounded escalation")
     if profile["claim_ttl_seconds"] < (
         profile["command_timeout_seconds"] + profile["ci_timeout_seconds"] + 600
     ):

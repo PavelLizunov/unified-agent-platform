@@ -106,8 +106,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
    answer-and-resume loop for owner questions.
-2. The source profile-bound A7 coordinator consumes deterministic route selection, but that revision is not installed
-   live yet; generic Central intake and a successful PR/CI/merge/post-verify delivery remain unproven.
+2. The source profile-bound A7 coordinator consumes deterministic route selection and requires a schema-v3 three-cycle
+   profile, but that revision/migration is not installed live yet; generic Central intake and a successful
+   PR/CI/merge/post-verify delivery remain unproven.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no

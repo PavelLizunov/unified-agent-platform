@@ -54,6 +54,24 @@ _DELIVERY_SIGNAL_FIELDS = {"schema_version", "changed_files", "prior_review_reje
 _DELIVERY_ROUTE_FIELDS = {"task_class", "risk", "standing_approved", "author", "reviewer"}
 _DELIVERY_ACTOR_FIELDS = {"engine", "model", "reasoning_effort"}
 _REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+_OPENAI_PROVIDER = "openai"
+_OPENAI_AUTONOMY_ROUTES = {
+    "standard": {
+        "task_class": "standard_code", "risk": "medium",
+        "author": {"engine": "codex", "model": "gpt-5.6-luna", "reasoning_effort": "medium"},
+        "reviewer": {"engine": "codex", "model": "gpt-5.6-sol", "reasoning_effort": "low"},
+    },
+    "complex": {
+        "task_class": "complex_code", "risk": "high",
+        "author": {"engine": "codex", "model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
+        "reviewer": {"engine": "codex", "model": "gpt-5.6-terra", "reasoning_effort": "xhigh"},
+    },
+    "escalated": {
+        "task_class": "escalated_code", "risk": "critical",
+        "author": {"engine": "codex", "model": "gpt-5.6-terra", "reasoning_effort": "xhigh"},
+        "reviewer": {"engine": "codex", "model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
+    },
+}
 
 
 def _closed_fields(value: Any, allowed: set[str], where: str) -> dict[str, Any]:
@@ -106,6 +124,8 @@ def choose_delivery_route(
     config = _closed_fields(
         policy.get("delivery_model_policy"), _DELIVERY_POLICY_FIELDS, "delivery_model_policy"
     )
+    if config.get("policy_id") != "openai-autonomy-v1":
+        raise ContractError("delivery_model_policy.policy_id: expected openai-autonomy-v1")
     inputs = _closed_fields(signals, _DELIVERY_SIGNAL_FIELDS, "signals")
     if (
         isinstance(inputs["schema_version"], bool)
@@ -183,11 +203,6 @@ def choose_delivery_route(
     routes = config["routes"]
     if not isinstance(routes, dict) or set(routes) != {"standard", "complex", "escalated"}:
         raise ContractError("delivery_model_policy.routes: exact standard/complex/escalated routes required")
-    expected = {
-        "standard": ("standard_code", "medium"),
-        "complex": ("complex_code", "high"),
-        "escalated": ("escalated_code", "critical"),
-    }
     resolved_routes: dict[str, dict[str, Any]] = {}
     for name in ("standard", "complex", "escalated"):
         candidate = _closed_fields(routes[name], _DELIVERY_ROUTE_FIELDS, f"route.{name}")
@@ -201,8 +216,8 @@ def choose_delivery_route(
             "author": _delivery_actor(candidate["author"], f"route.{name}.author"),
             "reviewer": _delivery_actor(candidate["reviewer"], f"route.{name}.reviewer"),
         }
-        if (resolved_candidate["task_class"], resolved_candidate["risk"]) != expected[name]:
-            raise ContractError(f"route.{name}: unexpected task_class or risk")
+        if resolved_candidate != _OPENAI_AUTONOMY_ROUTES[name]:
+            raise ContractError(f"route.{name}: exact ADR-031 actor tuple required")
         for component in ("author", "reviewer"):
             engine = resolved_candidate[component]["engine"]
             engine_policy = policy.get("engines", {}).get(engine)
@@ -277,6 +292,8 @@ def _validate_runtime_attestation(
     where = f"{component}_telemetry"
     if telemetry.get("schema_version") != 1 or telemetry.get("status") != "completed":
         raise ContractError(f"{where}: completed schema_version 1 telemetry required")
+    if telemetry.get("model_provider") != _OPENAI_PROVIDER:
+        raise ContractError(f"{where}.model_provider: approved OpenAI provider required")
     artifact_effort = _required_text(artifact, "reasoning_effort", component)
     telemetry_effort = _required_text(telemetry, "reasoning_effort", where)
     allowed_efforts = {"low", "medium", "high", "xhigh", "max"}
@@ -456,9 +473,12 @@ def _codex_rollout_context(
         raise ContractError(
             f"runtime sandbox mismatch: expected {expected_sandbox!r}, observed {actual_sandbox!r}"
         )
+    model_provider = _required_text(meta, "model_provider", "rollout.session_meta")
+    if model_provider != _OPENAI_PROVIDER:
+        raise ContractError("rollout.session_meta.model_provider: approved OpenAI provider required")
     result = {
         "model": actual_model,
-        "model_provider": _required_text(meta, "model_provider", "rollout.session_meta"),
+        "model_provider": model_provider,
         "sandbox": actual_sandbox,
         "codex_cli_version": _required_text(meta, "cli_version", "rollout.session_meta"),
     }

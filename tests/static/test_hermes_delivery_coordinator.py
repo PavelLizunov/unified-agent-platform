@@ -18,11 +18,12 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "swarm"))
 coordinator = importlib.import_module("delivery_coordinator")
+installer = importlib.import_module("install_flow_v2")
 
 
 def profile(root: pathlib.Path) -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "dispatch_profile": "build1-vpnrouter-a7-3",
         "goal": "Fix issue 39",
         "repo": "PavelLizunov/VPNRouter",
@@ -32,10 +33,6 @@ def profile(root: pathlib.Path) -> dict:
         "worktree_root": str(root / "worktrees"),
         "branch_prefix": "codex/a7-3-vpnrouter",
         "assignee": "coordinator-codex-luna-a7",
-        "author_model": "gpt-5.6-sol",
-        "reviewer_model": "gpt-5.6-terra",
-        "author_reasoning_effort": "xhigh",
-        "reviewer_reasoning_effort": "xhigh",
         "required_files": [
             "Cli.cs", "Config.cs", "Core.cs", "Runtime.cs", "Tests.cs", "WindowsTests.cs"
         ],
@@ -320,15 +317,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             persisted = coordinator.mission_adapter._read_json(paths["state"])
             self.assertEqual(escalated, persisted["route_decisions"]["2"])
 
-    def test_profile_is_closed_and_manual_model_fields_are_not_authority(self):
+    def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "profile.json"
             value = profile(pathlib.Path(directory))
-            path.write_text(json.dumps(value), encoding="utf-8")
-            loaded = coordinator.load_profile(path)
-            self.assertEqual("gpt-5.6-sol", loaded["author_model"])
-            self.assertEqual("xhigh", loaded["author_reasoning_effort"])
-            value["reviewer_model"] = value["author_model"]
             path.write_text(json.dumps(value), encoding="utf-8")
             loaded = coordinator.load_profile(path)
             instance = coordinator.DeliveryCoordinator(
@@ -354,10 +346,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 coordinator.load_profile(path)
 
             value = profile(pathlib.Path(directory))
-            value.pop("author_reasoning_effort")
+            value["author_model"] = "gpt-9-unapproved"
             path.write_text(json.dumps(value), encoding="utf-8")
-            loaded = coordinator.load_profile(path)
-            self.assertNotIn("author_reasoning_effort", loaded)
+            with self.assertRaisesRegex(coordinator.DeliveryError, "unknown profile fields"):
+                coordinator.load_profile(path)
 
             loaded = profile(pathlib.Path(directory))
             instance = coordinator.DeliveryCoordinator(
@@ -375,6 +367,31 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
                 instance._reasoning_args(state, "reviewer"),
             )
+
+    def test_legacy_two_cycle_profile_requires_atomic_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "delivery-test.json"
+            value = profile(pathlib.Path(directory))
+            value.update(
+                schema_version=2,
+                max_review_cycles=2,
+                author_model="gpt-5.6-sol",
+                reviewer_model="gpt-5.6-terra",
+                author_reasoning_effort="xhigh",
+                reviewer_reasoning_effort="xhigh",
+            )
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "migrate before activation"):
+                coordinator.load_profile(path)
+
+            self.assertTrue(installer.migrate_profile(path))
+            migrated = coordinator.load_profile(path)
+            self.assertEqual(3, migrated["schema_version"])
+            self.assertEqual(3, migrated["max_review_cycles"])
+            self.assertFalse(set(migrated) & installer._LEGACY_MODEL_FIELDS)
+            self.assertFalse(installer.migrate_profile(path))
+            if os.name != "nt":
+                self.assertEqual(0o600, path.stat().st_mode & 0o777)
 
     def test_required_ci_check_must_exist_and_succeed(self):
         self.assertEqual(

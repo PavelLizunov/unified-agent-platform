@@ -207,7 +207,8 @@ not add an application service, workflow engine or mission database.
    name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. ADR-031
    now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. The repository
    coordinator consumes and persists the fail-closed `openai-autonomy-v1` decision; before another canary, land and
-   install that exact revision and behaviorally cover a differently named custom executable; also project the actionable
+   install that exact revision, atomically migrate the stopped profile to schema v3/three cycles, and behaviorally
+   cover a differently named custom executable; also project the actionable
    finding/terminal stage and verify Telegram
    delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable

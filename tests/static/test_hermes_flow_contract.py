@@ -60,6 +60,7 @@ def telemetry(value, component, sandbox):
         "component": component,
         "engine": "codex",
         "engine_family": value["engine_family"],
+        "model_provider": "openai",
         "model": value["model"],
         "model_attestation": "codex_rollout_turn_context",
         "reasoning_effort": value["reasoning_effort"],
@@ -231,15 +232,9 @@ class FlowContractTests(unittest.TestCase):
         )
         self.assertEqual(first, reordered)
         changed = json.loads(json.dumps(self.policy))
-        changed["delivery_model_policy"]["routes"]["complex"]["author"]["model"] = (
-            "gpt-5.6-terra"
-        )
-        changed["delivery_model_policy"]["routes"]["complex"]["reviewer"]["model"] = (
-            "gpt-5.6-sol"
-        )
-        second = flow.choose_delivery_route(changed, signals)
-        self.assertNotEqual(first["policy_sha256"], second["policy_sha256"])
-        self.assertNotEqual(first["decision_id"], second["decision_id"])
+        changed["delivery_model_policy"]["routes"]["complex"]["author"]["model"] = "gpt-9-unapproved"
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
+            flow.choose_delivery_route(changed, signals)
         changed = json.loads(json.dumps(self.policy))
         changed["engines"]["codex"]["capacity_label"] = "changed-capacity"
         second = flow.choose_delivery_route(changed, signals)
@@ -270,7 +265,7 @@ class FlowContractTests(unittest.TestCase):
 
         changed = json.loads(json.dumps(self.policy))
         changed["delivery_model_policy"]["routes"]["standard"]["task_class"] = "complex_rust"
-        with self.assertRaisesRegex(flow.ContractError, "unexpected task_class or risk"):
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
             flow.choose_delivery_route(changed, {
                 "schema_version": 1,
                 "changed_files": 6,
@@ -292,7 +287,7 @@ class FlowContractTests(unittest.TestCase):
         signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
         changed = json.loads(json.dumps(self.policy))
         changed["delivery_model_policy"]["routes"]["standard"]["reviewer"]["engine"] = "external"
-        with self.assertRaisesRegex(flow.ContractError, "OpenAI Codex engine required"):
+        with self.assertRaisesRegex(flow.ContractError, "exact ADR-031 actor tuple"):
             flow.choose_delivery_route(changed, signals)
         changed = json.loads(json.dumps(self.policy))
         changed["engines"]["codex"]["family"] = "untrusted"
@@ -332,6 +327,13 @@ class FlowContractTests(unittest.TestCase):
         reviewer = telemetry(verification, "reviewer", "read-only")
         author["model"] = "gpt-5.6-sol"
         with self.assertRaisesRegex(flow.ContractError, "runtime attestation mismatch"):
+            validate_review_with_telemetry(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+            )
+        author = telemetry(summary, "author", "workspace-write")
+        author["model_provider"] = "unapproved-provider"
+        with self.assertRaisesRegex(flow.ContractError, "approved OpenAI provider"):
             validate_review_with_telemetry(
                 summary, verification, author, reviewer,
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
@@ -512,6 +514,21 @@ class FlowContractTests(unittest.TestCase):
                         reasoning_effort="high", rollout=rollout, sandbox="workspace-write",
                         worktree=".", head="aaa",
                     )
+                bad_provider = json.loads(json.dumps(rollout_events))
+                bad_provider[0]["payload"]["model_provider"] = "unapproved-provider"
+                with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                    for event in bad_provider:
+                        handle.write(json.dumps(event) + "\n")
+                    bad_provider_rollout = pathlib.Path(handle.name)
+                try:
+                    with self.assertRaisesRegex(flow.ContractError, "approved OpenAI provider"):
+                        flow.summarize_codex_events(
+                            path, component="author", model="gpt-5.3-codex-spark",
+                            reasoning_effort="xhigh", rollout=bad_provider_rollout,
+                            sandbox="workspace-write", worktree=".", head="aaa",
+                        )
+                finally:
+                    bad_provider_rollout.unlink()
             rerouted_events = events[:-1] + [
                 {"type": "item.completed", "item": {
                     "type": "error", "message": "model rerouted: a -> b (reason)",

@@ -28,6 +28,18 @@ python3 tools/swarm/install_flow_v2.py
 python3 tools/swarm/install_flow_v2.py --check
 ```
 
+Before enabling an A7.3 timer, migrate its stopped legacy two-cycle profile atomically. This removes manual model/
+effort fields, sets schema v3 and makes all three bounded routes reachable:
+
+```bash
+systemctl --user is-active hermes-delivery-coordinator@<profile>.timer  # must be inactive
+python3 tools/swarm/install_flow_v2.py \
+  --migrate-profile ~/.config/uap/delivery-<profile>.json
+```
+
+The helper validates the complete v3 profile before `os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2
+profile or any value other than three review cycles fails closed in the coordinator.
+
 This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` skill under
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while
 Codex CLI provides the separately sandboxed author/reviewer executions.
@@ -201,7 +213,8 @@ python tools/swarm/flow_contract.py validate-review \
   --repo <owner/repo> --head "$(git rev-parse HEAD)" --ci-green
 ```
 
-The gate recomputes the canonical decision from its persisted signals/policy, requires both artifacts to bind the same
+The gate recomputes the canonical decision from its persisted signals/policy, enforces the exact ADR-031 model/effort
+tuples and approved runtime provider, requires both artifacts to bind the same
 `decision_id`, cross-checks exact model/session/effort against runtime-derived Codex telemetry, and requires author
 `workspace-write` plus reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
 verification. Every route uses the distinct reviewer model/session and `same_provider_independent` mode returned by
