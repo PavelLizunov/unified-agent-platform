@@ -12,6 +12,13 @@ import shutil
 FILES = {
     "flow_contract.py": pathlib.Path("swarm-bin/flow_contract.py"),
     "mission_adapter.py": pathlib.Path("swarm-bin/mission_adapter.py"),
+    "delivery_coordinator.py": pathlib.Path("swarm-bin/delivery_coordinator.py"),
+    "systemd/hermes-delivery-coordinator@.service": pathlib.Path(
+        ".config/systemd/user/hermes-delivery-coordinator@.service"
+    ),
+    "systemd/hermes-delivery-coordinator@.timer": pathlib.Path(
+        ".config/systemd/user/hermes-delivery-coordinator@.timer"
+    ),
     "flow-policy.json": pathlib.Path("swarm-bin/flow-policy.json"),
     "hermes-flow-v2/SKILL.md": pathlib.Path(".hermes/skills/hermes-flow-v2/SKILL.md"),
 }
@@ -23,7 +30,7 @@ def install(source: pathlib.Path, home: pathlib.Path) -> None:
         dst = home / relative_target
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
-    for executable in ("flow_contract.py", "mission_adapter.py"):
+    for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
         (home / FILES[executable]).chmod(0o755)
 
 
@@ -34,7 +41,7 @@ def check(source: pathlib.Path, home: pathlib.Path) -> None:
         if not dst.is_file() or dst.read_bytes() != src.read_bytes():
             raise SystemExit(f"flow-v2-install-error: stale or missing {dst}")
     if os.name != "nt":
-        for executable in ("flow_contract.py", "mission_adapter.py"):
+        for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
             if not (home / FILES[executable]).stat().st_mode & 0o111:
                 raise SystemExit(f"flow-v2-install-error: {executable} is not executable")
 
