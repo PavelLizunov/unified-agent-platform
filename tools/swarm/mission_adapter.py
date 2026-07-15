@@ -124,7 +124,7 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
-            "--initial-status", "ready" if allow_dispatch else "blocked",
+            "--initial-status", "running" if allow_dispatch else "blocked",
         ]
         if workspace:
             command.extend(["--workspace", workspace])

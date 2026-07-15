@@ -260,6 +260,12 @@ class MissionAdapterTests(unittest.TestCase):
                 mission_id="mission-2", goal="Goal", allow_dispatch=True,
                 assignee="approved-profile", workspace="scratch",
             )
+        backend.ensure_root(
+            mission_id="mission-2", goal="Goal", allow_dispatch=True,
+            assignee="approved-profile", workspace="worktree:/tmp/repo",
+        )
+        active_command = commands[-1]
+        self.assertEqual("running", active_command[active_command.index("--initial-status") + 1])
 
     def test_worker_cannot_publish_terminal_mission_event(self):
         with self.assertRaisesRegex(adapter.AdapterError, "not allowed"):
