@@ -185,9 +185,34 @@ def _exact_model(obj: dict[str, Any], where: str) -> str:
     return model
 
 
+def _validate_runtime_attestation(
+    artifact: dict[str, Any], telemetry: dict[str, Any], *, component: str, sandbox: str
+) -> None:
+    where = f"{component}_telemetry"
+    if telemetry.get("schema_version") != 1 or telemetry.get("status") != "completed":
+        raise ContractError(f"{where}: completed schema_version 1 telemetry required")
+    for key in ("engine_family", "model", "session_id"):
+        if telemetry.get(key) != artifact.get(key):
+            raise ContractError(f"{where}.{key}: runtime attestation mismatch")
+    if telemetry.get("component") != component:
+        raise ContractError(f"{where}.component: expected {component!r}")
+    if telemetry.get("sandbox") != sandbox:
+        raise ContractError(f"{where}.sandbox: expected {sandbox!r}")
+    sha_key = "head_sha" if component == "author" else "reviewed_sha"
+    if telemetry.get("head_sha") != artifact.get(sha_key) or telemetry.get("worktree_clean") is not True:
+        raise ContractError(f"{where}: clean exact-SHA worktree attestation required")
+    if (
+        telemetry.get("model_attestation") != "codex_rollout_turn_context"
+        or telemetry.get("sandbox_attestation") != "codex_rollout_turn_context"
+    ):
+        raise ContractError(f"{where}: Codex rollout attestation required")
+
+
 def validate_review(
     summary: dict[str, Any],
     verification: dict[str, Any],
+    author_telemetry: dict[str, Any],
+    reviewer_telemetry: dict[str, Any],
     *,
     expected_repo: str,
     current_head: str,
@@ -209,6 +234,12 @@ def validate_review(
     reviewer_model = _exact_model(verification, "verification")
     author_session = _required_text(summary, "session_id", "summary")
     reviewer_session = _required_text(verification, "session_id", "verification")
+    _validate_runtime_attestation(
+        summary, author_telemetry, component="author", sandbox="workspace-write"
+    )
+    _validate_runtime_attestation(
+        verification, reviewer_telemetry, component="reviewer", sandbox="read-only"
+    )
     same_family = summary.get("engine_family") == verification.get("engine_family")
     review_mode = _required_text(verification, "review_mode", "verification")
     if same_family:
@@ -292,6 +323,21 @@ def _codex_rollout_context(
     }
 
 
+def _repo_attestation(path: str | pathlib.Path, expected_head: str) -> dict[str, Any]:
+    requested = pathlib.Path(path).resolve()
+    root = pathlib.Path(_git(requested, "rev-parse", "--show-toplevel")).resolve()
+    if root != requested:
+        raise ContractError(f"worktree root mismatch: requested {requested}, actual {root}")
+    actual_head = _git(root, "rev-parse", "HEAD")
+    if actual_head != expected_head:
+        raise ContractError(
+            f"worktree HEAD mismatch: expected {expected_head!r}, observed {actual_head!r}"
+        )
+    if _git(root, "status", "--porcelain=v1"):
+        raise ContractError("worktree must be clean for runtime attestation")
+    return {"head_sha": actual_head, "worktree_clean": True}
+
+
 def summarize_codex_events(
     path: str | pathlib.Path,
     *,
@@ -299,6 +345,8 @@ def summarize_codex_events(
     model: str,
     rollout: str | pathlib.Path,
     sandbox: str,
+    worktree: str | pathlib.Path,
+    head: str,
 ) -> dict[str, Any]:
     _exact_model({"model": model}, "telemetry")
     session_id = None
@@ -341,6 +389,7 @@ def summarize_codex_events(
     runtime = _codex_rollout_context(
         rollout, session_id=session_id, expected_model=model, expected_sandbox=sandbox
     )
+    repo = _repo_attestation(worktree, head)
     return {
         "schema_version": 1,
         "component": component,
@@ -352,6 +401,7 @@ def summarize_codex_events(
         "sandbox": runtime["sandbox"],
         "sandbox_attestation": "codex_rollout_turn_context",
         "codex_cli_version": runtime["codex_cli_version"],
+        **repo,
         "session_id": session_id,
         "status": "completed",
         "tool_calls": tool_calls,
@@ -434,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     review = sub.add_parser("validate-review")
     review.add_argument("--summary", required=True)
     review.add_argument("--verification", required=True)
+    review.add_argument("--author-telemetry", required=True)
+    review.add_argument("--reviewer-telemetry", required=True)
     review.add_argument("--repo", required=True)
     review.add_argument("--head", required=True)
     review.add_argument("--ci-green", action="store_true")
@@ -455,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.add_argument("--component", required=True)
     telemetry.add_argument("--model", required=True)
     telemetry.add_argument("--rollout", required=True)
+    telemetry.add_argument("--worktree", required=True)
+    telemetry.add_argument("--head", required=True)
     telemetry.add_argument(
         "--sandbox", required=True,
         choices=("read-only", "workspace-write", "danger-full-access"),
@@ -478,7 +532,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "validate-review":
             validate_review(
-                load_json(args.summary), load_json(args.verification), expected_repo=args.repo,
+                load_json(args.summary), load_json(args.verification),
+                load_json(args.author_telemetry), load_json(args.reviewer_telemetry),
+                expected_repo=args.repo,
                 current_head=args.head, ci_green=args.ci_green,
                 allow_same_provider_review=args.allow_same_provider_review,
             )
@@ -499,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
             result = summarize_codex_events(
                 args.events, component=args.component, model=args.model,
                 rollout=args.rollout, sandbox=args.sandbox,
+                worktree=args.worktree, head=args.head,
             )
             write_json(args.output, result)
             print("hermes-flow-telemetry-ok")

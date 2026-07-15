@@ -184,10 +184,14 @@ Validate immediately before merge using the current PR HEAD:
 python tools/swarm/flow_contract.py validate-review \
   --summary /home/uap/swarm-out/<mission>/summary.json \
   --verification /home/uap/swarm-out/<mission>/verification.json \
+  --author-telemetry /home/uap/swarm-out/<mission>/author-telemetry.json \
+  --reviewer-telemetry /home/uap/swarm-out/<mission>/reviewer-telemetry.json \
   --repo <owner/repo> --head "$(git rev-parse HEAD)" --ci-green
 ```
 
-Any author commit invalidates the previous verification.
+The gate cross-checks each artifact's exact model/session against runtime-derived Codex telemetry and requires the
+author `workspace-write` and reviewer `read-only` sandbox attestations. Any author commit invalidates the previous
+verification.
 
 For the owner-approved standard-code fallback, use a distinct reviewer model/session, set
 `"review_mode": "same_provider_degraded"`, and add `--allow-same-provider-review` to `validate-review`. The flag
@@ -222,6 +226,7 @@ value and a mismatch or Codex `model rerouted` event fails closed:
 python tools/swarm/flow_contract.py summarize-codex \
   --events /home/uap/swarm-out/<mission>/author-events.jsonl \
   --rollout /home/uap/.codex/sessions/<date>/rollout-<session-id>.jsonl \
+  --worktree /home/uap/worktrees/<mission> --head <candidate-sha> \
   --component author --model gpt-5.3-codex-spark --sandbox workspace-write \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```
