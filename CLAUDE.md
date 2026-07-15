@@ -205,7 +205,8 @@ Good next tasks that do not require redesign:
    escalation and same-PR repair, before the next canary. The same PR number and pushed head are durable identity;
    final cleanup validates the durable PR number/head/base under a live claim, conditionally closes that exact PR,
    then lease-deletes the unchanged branch. CI persistence is bounded, repair pushes use an exact prior-head lease,
-   response loss converges, and compatible v1 in-progress routes/PR identities resume.
+   initial push/PR-create and repair-push response loss converge, and compatible v1 in-progress routes/PR identities
+   resume.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

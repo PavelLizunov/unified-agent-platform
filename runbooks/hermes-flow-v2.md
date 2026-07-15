@@ -92,9 +92,9 @@ independent exact-SHA review, verifies the previously bound PR number/branch/hea
 with an exact prior-head lease to that same PR and verifies the new head. It never sends raw CI logs to a model. If the
 third cycle still fails, every failure kind requires a live claim, conditionally closes only the exact bound PR,
 confirms its closed identity, then lease-deletes only the unchanged branch/SHA; it never sends an unconditional close
-mutation. Compatible exact v1 route and PR identity remain usable for their in-progress cycle, and a restart after a
-successful repair push
-converges without pushing again. New cycles use v2. The coordinator then removes local worktrees and publishes the
+mutation. Compatible exact v1 route and PR identity remain usable for their in-progress cycle. Restarts after a
+successful initial push, PR create or repair push reconcile only the exact branch/candidate/base identity and converge
+without repeating the successful mutation. New cycles use v2. The coordinator then removes local worktrees and publishes the
 terminal failure contract.
 
 ## 2. Repository guard
@@ -300,6 +300,7 @@ Use a separate disposable repository. Required behavioral evidence:
 - same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
 - repeated review or required-CI failure automatically escalates the OpenAI route and reuses the same PR;
 - successful/failed CI state contains only bounded name/outcome metadata;
+- lost responses after initial push, PR create or repair push reconcile the exact remote identity without duplication;
 - any final failure under a live claim closes only the exact durable PR number/head/base, verifies closure and then
   lease-deletes only its unchanged branch/SHA;
 - an exact compatible v1 in-progress decision resumes under v2 while a tampered decision fails closed;

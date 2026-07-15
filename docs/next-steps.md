@@ -212,7 +212,7 @@ not add an application service, workflow engine or mission database.
    each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. Any final failure under
    a live claim conditionally closes only that exact PR, confirms the closed identity, and then deletes only the
    unchanged branch with an exact-SHA lease, without an unconditional close call. Compatible v1 in-progress
-   route/PR identity evidence and a lost repair-push response recover automatically. Also
+   route/PR identity evidence and lost initial-push, PR-create or repair-push responses recover automatically. Also
    behaviorally cover a differently named custom
    executable and project the actionable
    finding/terminal stage and verify Telegram

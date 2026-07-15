@@ -1154,7 +1154,18 @@ class DeliveryCoordinator:
             if observed_head not in {previous_head, state["candidate_sha"]}:
                 raise DeliveryError("durable PR changed before repair push")
         else:
-            observed_head = None
+            remote = self._git(
+                paths["author"], "ls-remote", "--heads", "origin", state["branch"]
+            )
+            if remote:
+                remote_fields = remote.split()
+                if remote_fields != [
+                    state["candidate_sha"], f"refs/heads/{state['branch']}"
+                ]:
+                    raise DeliveryError("initial PR branch identity is already occupied")
+                observed_head = state["candidate_sha"]
+            else:
+                observed_head = None
         if observed_head != state["candidate_sha"]:
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]

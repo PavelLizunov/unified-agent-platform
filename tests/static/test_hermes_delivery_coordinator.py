@@ -723,6 +723,134 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("new-candidate", state["pr_head_sha"])
             self.assertFalse(any(command[0] == "git" for command in commands))
 
+    def test_initial_push_response_loss_recovers_the_exact_remote_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            remote_head = None
+            pr_exists = False
+            push_calls = 0
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, pr_exists, push_calls
+                if command[0] == "git" and "ls-remote" in command:
+                    output = (
+                        f"{remote_head}\trefs/heads/codex/fix\n" if remote_head else ""
+                    )
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                if command[0] == "git" and "push" in command:
+                    push_calls += 1
+                    remote_head = "candidate-sha"
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="lost initial push response"
+                    )
+                if command[0:3] == ["gh", "pr", "view"]:
+                    if not pr_exists:
+                        return subprocess.CompletedProcess(
+                            command, 1, stdout="", stderr="no pull request"
+                        )
+                    output = json.dumps({
+                        "number": 39,
+                        "url": "https://example.invalid/pr/39",
+                        "state": "OPEN",
+                        "headRefName": "codex/fix",
+                        "headRefOid": "candidate-sha",
+                        "baseRefName": approved["default_branch"],
+                    })
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                if command[0:3] == ["gh", "pr", "create"]:
+                    pr_exists = True
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="", stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+            }
+            paths = instance._paths("mission-a7-3")
+
+            with self.assertRaisesRegex(coordinator.DeliveryError, "lost initial push"):
+                instance._pr(state, paths)
+            instance._pr(state, paths)
+
+            self.assertEqual(1, push_calls)
+            self.assertEqual(39, state["pr_number"])
+            self.assertEqual("candidate-sha", state["pr_head_sha"])
+
+    def test_initial_pr_create_response_loss_recovers_the_exact_bound_pr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            pr_exists = False
+            create_calls = 0
+
+            def runner(command, **_kwargs):
+                nonlocal pr_exists, create_calls
+                if command[0] == "git" and "ls-remote" in command:
+                    output = "candidate-sha\trefs/heads/codex/fix\n"
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                if command[0:3] == ["gh", "pr", "view"]:
+                    if not pr_exists:
+                        return subprocess.CompletedProcess(
+                            command, 1, stdout="", stderr="no pull request"
+                        )
+                    output = json.dumps({
+                        "number": 39,
+                        "url": "https://example.invalid/pr/39",
+                        "state": "OPEN",
+                        "headRefName": "codex/fix",
+                        "headRefOid": "candidate-sha",
+                        "baseRefName": approved["default_branch"],
+                    })
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                if command[0:3] == ["gh", "pr", "create"]:
+                    create_calls += 1
+                    pr_exists = True
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="lost PR create response"
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+            }
+            paths = instance._paths("mission-a7-3")
+
+            with self.assertRaisesRegex(coordinator.DeliveryError, "lost PR create"):
+                instance._pr(state, paths)
+            instance._pr(state, paths)
+
+            self.assertEqual(1, create_calls)
+            self.assertEqual(39, state["pr_number"])
+            self.assertEqual("candidate-sha", state["pr_head_sha"])
+
     def test_merge_requeries_ci_and_stops_when_a_green_check_turns_failed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
