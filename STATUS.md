@@ -379,10 +379,12 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
 - **Remaining automation gap after the A7.3 failure-path canary:** the installed profile-bound timer can intake,
   activate, author, test, review, recover a failed author gate/crash and autonomously close a rejected run. The live
-  canaries did not reach PR/CI/merge/post-verify because review correctly rejected every candidate. The latest target
-  blocker is preserving a running custom executable path A while separately evaluating a valid config rewrite to B.
-  Central still exposes only a generic rejection error and retains stage `testing`; Telegram terminal delivery was not
-  independently verified. No general timer is enabled and no successful A7.3 delivery is claimed.
+  canaries did not reach PR/CI/merge/post-verify because review correctly rejected every candidate. Attempt 5
+  preserved the runtime-registered custom executable path A while separately evaluating config path B, recovered one
+  failed Windows author gate and the approved post-commit crash, then Sol rejected the candidate because the existing
+  TUN lock can intentionally fail open while the proposed detector treated the lock as mandatory. Central still
+  exposes only a generic rejection error and retains stage `testing`; Telegram terminal delivery was not independently
+  verified. No general timer is enabled and no successful A7.3 delivery is claimed.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

@@ -200,11 +200,14 @@ not add an application service, workflow engine or mission database.
    PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts.
    Attempt 3 recovered a failed pre-commit gate through exactly one Luna repair, recovered the approved author-commit
    crash, reached exact-SHA Sol review and then autonomously closed native/Central state and cleanup when Sol rejected
-   a real cross-process false positive. Attempt 4 pinned that behavior to the global TUN lock and again passed the
-   crash/Windows-gate path, but two exact-SHA Sol reviews found that config polling can forget a live custom runtime
-   after transient invalid YAML or a valid path A-to-B rewrite. No target PR was opened. Before another canary, obtain
-   fresh owner approval and preserve the running registered path while evaluating the configured candidate separately;
-   also project the actionable finding/terminal stage and verify Telegram delivery. One successful
+   a real cross-process false positive. Attempt 4 pinned that behavior to the global TUN lock but exposed config-path
+   liveness defects. Attempt 5 separated the runtime-registered path from the config-derived candidate, automatically
+   repaired one compile failure, recovered the approved author-commit crash and passed both Windows checkpoints. Sol
+   still rejected exact SHA `97cd9df...`: `TunOwnershipLock.TryAcquire()` intentionally fails open on semaphore
+   errors, while the candidate made `IsOwnedByAnyone()` mandatory and could hide a live tunnel in that supported
+   failure mode. No target PR was opened. Before another canary, obtain fresh owner approval and make lock observation
+   distinguish `owned`, `free` and `unavailable` (or otherwise preserve the existing fail-open behavior); also
+   project the actionable finding/terminal stage and verify Telegram delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable
    [A7.3 contract](a7-real-project-canary.md). See the exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
