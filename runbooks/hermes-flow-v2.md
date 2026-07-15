@@ -226,6 +226,7 @@ value and a mismatch or Codex `model rerouted` event fails closed:
 python tools/swarm/flow_contract.py summarize-codex \
   --events /home/uap/swarm-out/<mission>/author-events.jsonl \
   --rollout /home/uap/.codex/sessions/<date>/rollout-<session-id>.jsonl \
+  --worktree /home/uap/worktrees/<mission> --head <candidate-sha> \
   --component author --model gpt-5.3-codex-spark --sandbox workspace-write \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```

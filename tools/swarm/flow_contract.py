@@ -198,6 +198,9 @@ def _validate_runtime_attestation(
         raise ContractError(f"{where}.component: expected {component!r}")
     if telemetry.get("sandbox") != sandbox:
         raise ContractError(f"{where}.sandbox: expected {sandbox!r}")
+    sha_key = "head_sha" if component == "author" else "reviewed_sha"
+    if telemetry.get("head_sha") != artifact.get(sha_key) or telemetry.get("worktree_clean") is not True:
+        raise ContractError(f"{where}: clean exact-SHA worktree attestation required")
     if (
         telemetry.get("model_attestation") != "codex_rollout_turn_context"
         or telemetry.get("sandbox_attestation") != "codex_rollout_turn_context"
@@ -320,6 +323,21 @@ def _codex_rollout_context(
     }
 
 
+def _repo_attestation(path: str | pathlib.Path, expected_head: str) -> dict[str, Any]:
+    requested = pathlib.Path(path).resolve()
+    root = pathlib.Path(_git(requested, "rev-parse", "--show-toplevel")).resolve()
+    if root != requested:
+        raise ContractError(f"worktree root mismatch: requested {requested}, actual {root}")
+    actual_head = _git(root, "rev-parse", "HEAD")
+    if actual_head != expected_head:
+        raise ContractError(
+            f"worktree HEAD mismatch: expected {expected_head!r}, observed {actual_head!r}"
+        )
+    if _git(root, "status", "--porcelain=v1"):
+        raise ContractError("worktree must be clean for runtime attestation")
+    return {"head_sha": actual_head, "worktree_clean": True}
+
+
 def summarize_codex_events(
     path: str | pathlib.Path,
     *,
@@ -327,6 +345,8 @@ def summarize_codex_events(
     model: str,
     rollout: str | pathlib.Path,
     sandbox: str,
+    worktree: str | pathlib.Path,
+    head: str,
 ) -> dict[str, Any]:
     _exact_model({"model": model}, "telemetry")
     session_id = None
@@ -369,6 +389,7 @@ def summarize_codex_events(
     runtime = _codex_rollout_context(
         rollout, session_id=session_id, expected_model=model, expected_sandbox=sandbox
     )
+    repo = _repo_attestation(worktree, head)
     return {
         "schema_version": 1,
         "component": component,
@@ -380,6 +401,7 @@ def summarize_codex_events(
         "sandbox": runtime["sandbox"],
         "sandbox_attestation": "codex_rollout_turn_context",
         "codex_cli_version": runtime["codex_cli_version"],
+        **repo,
         "session_id": session_id,
         "status": "completed",
         "tool_calls": tool_calls,
@@ -485,6 +507,8 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.add_argument("--component", required=True)
     telemetry.add_argument("--model", required=True)
     telemetry.add_argument("--rollout", required=True)
+    telemetry.add_argument("--worktree", required=True)
+    telemetry.add_argument("--head", required=True)
     telemetry.add_argument(
         "--sandbox", required=True,
         choices=("read-only", "workspace-write", "danger-full-access"),
@@ -531,6 +555,7 @@ def main(argv: list[str] | None = None) -> int:
             result = summarize_codex_events(
                 args.events, component=args.component, model=args.model,
                 rollout=args.rollout, sandbox=args.sandbox,
+                worktree=args.worktree, head=args.head,
             )
             write_json(args.output, result)
             print("hermes-flow-telemetry-ok")

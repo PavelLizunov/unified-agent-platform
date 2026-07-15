@@ -5,6 +5,7 @@ import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -55,6 +56,8 @@ def telemetry(value, component, sandbox):
         "sandbox_attestation": "codex_rollout_turn_context",
         "session_id": value["session_id"],
         "status": "completed",
+        "head_sha": value["reviewed_sha" if component == "reviewer" else "head_sha"],
+        "worktree_clean": True,
     }
 
 
@@ -171,6 +174,14 @@ class FlowContractTests(unittest.TestCase):
                 expected_repo=summary["repo"], current_head="aaa", ci_green=True,
                 allow_same_provider_review=True,
             )
+        reviewer = telemetry(verification, "reviewer", "read-only")
+        reviewer["head_sha"] = "bbb"
+        with self.assertRaisesRegex(flow.ContractError, "clean exact-SHA"):
+            flow.validate_review(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
 
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
@@ -265,20 +276,24 @@ class FlowContractTests(unittest.TestCase):
                 handle.write(json.dumps(event) + "\n")
             rollout = pathlib.Path(handle.name)
         try:
-            result = flow.summarize_codex_events(
-                path, component="author", model="gpt-5.3-codex-spark",
-                rollout=rollout, sandbox="workspace-write",
-            )
-            with self.assertRaisesRegex(flow.ContractError, "runtime model mismatch"):
-                flow.summarize_codex_events(
-                    path, component="author", model="gpt-5.6-luna",
-                    rollout=rollout, sandbox="workspace-write",
+            with mock.patch.object(
+                flow, "_repo_attestation",
+                return_value={"head_sha": "aaa", "worktree_clean": True},
+            ):
+                result = flow.summarize_codex_events(
+                    path, component="author", model="gpt-5.3-codex-spark",
+                    rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                 )
-            with self.assertRaisesRegex(flow.ContractError, "runtime sandbox mismatch"):
-                flow.summarize_codex_events(
-                    path, component="reviewer", model="gpt-5.3-codex-spark",
-                    rollout=rollout, sandbox="read-only",
-                )
+                with self.assertRaisesRegex(flow.ContractError, "runtime model mismatch"):
+                    flow.summarize_codex_events(
+                        path, component="author", model="gpt-5.6-luna",
+                        rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
+                    )
+                with self.assertRaisesRegex(flow.ContractError, "runtime sandbox mismatch"):
+                    flow.summarize_codex_events(
+                        path, component="reviewer", model="gpt-5.3-codex-spark",
+                        rollout=rollout, sandbox="read-only", worktree=".", head="aaa",
+                    )
             rerouted_events = events[:-1] + [
                 {"type": "item.completed", "item": {
                     "type": "error", "message": "model rerouted: a -> b (reason)",
@@ -293,7 +308,7 @@ class FlowContractTests(unittest.TestCase):
                 with self.assertRaisesRegex(flow.ContractError, "model reroute"):
                     flow.summarize_codex_events(
                         rerouted_path, component="author", model="gpt-5.3-codex-spark",
-                        rollout=rollout, sandbox="workspace-write",
+                        rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                     )
             finally:
                 rerouted_path.unlink()
@@ -307,6 +322,29 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("codex_rollout_turn_context", result["model_attestation"])
         self.assertEqual({"file_change": 1, "command_execution": 1}, result["tool_calls"])
         self.assertEqual(1, result["failed_commands"])
+
+    def test_repo_attestation_requires_clean_exact_head(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = pathlib.Path(directory)
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "test"], check=True, capture_output=True)
+            head = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            self.assertEqual(
+                {"head_sha": head, "worktree_clean": True},
+                flow._repo_attestation(repo, head),
+            )
+            with self.assertRaisesRegex(flow.ContractError, "HEAD mismatch"):
+                flow._repo_attestation(repo, "0" * 40)
+            (repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+            with self.assertRaisesRegex(flow.ContractError, "must be clean"):
+                flow._repo_attestation(repo, head)
 
     def test_installer_is_idempotent_and_detects_drift(self):
         with tempfile.TemporaryDirectory() as directory:
