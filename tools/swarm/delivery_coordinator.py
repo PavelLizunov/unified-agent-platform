@@ -42,6 +42,8 @@ _PROFILE_FIELDS = {
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "codex_bin", "gh_bin", "codex_home",
 }
+_REJECTION_RESULT = "review_rejected"
+_REJECTION_SUMMARY = "Independent review rejected the candidate"
 
 
 def _required_text(value: Any, name: str) -> str:
@@ -506,6 +508,105 @@ class DeliveryCoordinator:
         self._save(paths, state)
         self._reconcile_completed(state)
         return True
+
+    def _rejection_events(self) -> list[dict[str, Any]]:
+        return [
+            {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+            {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "failed"}},
+            {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+        ]
+
+    def _validate_rejection_snapshot(
+        self, state: dict[str, Any], snapshot: dict[str, Any]
+    ) -> bool:
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if not isinstance(task, dict) or not isinstance(runs, list):
+            raise DeliveryError("Kanban rejection snapshot is invalid")
+        if task.get("status") == "running":
+            return False
+        matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
+        if (
+            task.get("status") != "done"
+            or task.get("result") != _REJECTION_RESULT
+            or len(matching) != 1
+            or matching[0].get("status") not in {"done", "completed"}
+            or matching[0].get("outcome") != "completed"
+            or matching[0].get("summary") != _REJECTION_SUMMARY
+            or matching[0].get("metadata") != {"mission_events": self._rejection_events()}
+        ):
+            raise DeliveryError("Kanban task ended outside the approved rejection contract")
+        return True
+
+    def _rejection_persisted(self, state: dict[str, Any]) -> bool:
+        return self._validate_rejection_snapshot(
+            state, self.backend.show(state["root_task_id"])
+        )
+
+    def _require_rejection_completion(self, state: dict[str, Any]) -> None:
+        if not self._rejection_persisted(state):
+            raise DeliveryError("durable Kanban rejection disappeared before publication")
+
+    def _rejected_events(
+        self,
+        mission_id: str,
+        adapter_state: dict[str, Any],
+        state: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        task_id = state["root_task_id"]
+        if adapter_state.get("root_task_id") != task_id:
+            raise DeliveryError("rejection reconciliation selected the wrong Kanban root")
+        snapshot = self.backend.show(task_id)
+        self._validate_rejection_snapshot(state, snapshot)
+        return mission_adapter.project_task_snapshot(
+            mission_id, task_id, snapshot, self.backend.read_log(task_id)
+        )
+
+    def _reconcile_rejected(self, state: dict[str, Any]) -> None:
+        if state.get("phase") != "rejection_task_completed":
+            raise DeliveryError("rejection reconciliation lacks durable Kanban authority")
+        self._reconcile(
+            before_publish=lambda _mission_id, _event: self._require_rejection_completion(state),
+            event_source=lambda mission_id, adapter_state: self._rejected_events(
+                mission_id, adapter_state, state
+            ),
+        )
+
+    def _recover_rejection_completion(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> bool:
+        if not self._rejection_persisted(state):
+            return False
+        state["phase"] = "rejection_task_completed"
+        self._save(paths, state)
+        self._reconcile_rejected(state)
+        return True
+
+    def _finish_rejection(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any]:
+        if state["phase"] == "review_rejected":
+            self._cleanup(state, paths)
+            state["phase"] = "rejection_cleaned"
+            self._save(paths, state)
+        if state["phase"] == "rejection_cleaned":
+            if not self._recover_rejection_completion(state, paths):
+                self._assert_claim(state)
+                self.backend.complete(
+                    state["root_task_id"],
+                    result=_REJECTION_RESULT,
+                    summary=_REJECTION_SUMMARY,
+                    metadata={"mission_events": self._rejection_events()},
+                )
+                if not self._recover_rejection_completion(state, paths):
+                    raise DeliveryError("Kanban rejection did not reach terminal state")
+        if state["phase"] == "rejection_task_completed":
+            self._reconcile_rejected(state)
+            if self.client.get_mission(state["mission_id"]).get("status") != "failed":
+                raise DeliveryError("Central did not fail the rejected mission")
+            state.update(phase="complete", outcome=_REJECTION_RESULT)
+            self._save(paths, state)
+        return {"action": state["phase"], "mission_id": state["mission_id"], "state": state}
 
     def _expand(self, command: list[str], state: dict[str, Any], paths: dict[str, pathlib.Path]) -> list[str]:
         values = {
@@ -982,8 +1083,10 @@ class DeliveryCoordinator:
         paths = self._paths(mission_id)
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
-            if state["phase"] == "review_rejected":
-                return {"action": "review_rejected", "mission_id": mission_id, "state": state}
+            if state["phase"] in {
+                "review_rejected", "rejection_cleaned", "rejection_task_completed"
+            }:
+                return self._finish_rejection(state, paths)
             if mission.get("status") == "completed":
                 if state.get("phase") == "cleaned":
                     self._recover_task_completion(state, paths)
@@ -1042,7 +1145,9 @@ class DeliveryCoordinator:
                 self._publish_stage(state, "testing", 50)
                 self._reconcile_active(state)
                 if not self._review(state, paths):
-                    return {"action": "review_rejected", "mission_id": mission_id}
+                    if state["phase"] == "review_rejected":
+                        return self._finish_rejection(state, paths)
+                    return {"action": state["phase"], "mission_id": mission_id, "state": state}
 
             if state["phase"] == "reviewed":
                 self._assert_claim(state)
