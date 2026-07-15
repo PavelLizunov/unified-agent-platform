@@ -464,7 +464,12 @@ def reconcile_pending(
         if not isinstance(mission_id, str) or not mission_id:
             raise AdapterError("central reconcile projection has no mission id")
         state = recover_mission_state(mission_id, state_root, backend)
-        projected_ids = {task.get("task_id") for task in tasks if isinstance(task, dict)}
+        if not all(
+            isinstance(task, dict) and isinstance(task.get("task_id"), str) and task["task_id"]
+            for task in tasks
+        ):
+            raise AdapterError("central reconcile projection has an invalid task")
+        projected_ids = {task["task_id"] for task in tasks}
         if state["root_task_id"] not in projected_ids:
             raise AdapterError("central projection does not contain the exact Kanban root")
         events = sync_mission(mission_id, state_root, backend)

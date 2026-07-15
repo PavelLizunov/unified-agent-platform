@@ -467,6 +467,23 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(1, len(backend.tasks))
             self.assertEqual(1, backend.create_calls)
 
+    def test_reconcile_rejects_ambiguous_native_root(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            adapter.dispatch_pending(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            duplicate = copy.deepcopy(backend.tasks["task-1"])
+            duplicate["task"]["id"] = "task-2"
+            backend.tasks["task-2"] = duplicate
+            with self.assertRaisesRegex(adapter.AdapterError, "one exact Kanban root"):
+                adapter.reconcile_pending(
+                    central, state_root, backend, dispatch_profile="build1-uap"
+                )
+
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()
         listing.__enter__.return_value.read.return_value = b'{"missions": []}'
