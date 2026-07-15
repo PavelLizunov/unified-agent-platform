@@ -21,7 +21,7 @@ PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "776ec98c0b311284572386c4038d589a507a8f3587f8acf40ba0c0daf3807591",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "9ca1c2611cf3bed843ca5cd0a515ce0d94340821aab380555112a42a909a946a",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -325,6 +325,9 @@ def connect(
             event, created = store.append_producer(mission_id, body)
             if created:
                 await self._notify_mission(store, event)
+            completed = store.complete_if_ready(mission_id)
+            if completed is not None and completed[1]:
+                await self._notify_mission(store, completed[0])
             return web.json_response({
                 "created": created,
                 "event": event,

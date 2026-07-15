@@ -6,8 +6,10 @@ import asyncio
 import importlib.util
 import json
 import os
+import sqlite3
 import stat
 import tempfile
+import threading
 from pathlib import Path
 
 
@@ -345,6 +347,227 @@ def test_terminal_authority_is_loopback_only() -> None:
     assert not missions.terminal_request_allowed("not-an-address")
 
 
+def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        mission_id = "mission-auto-complete"
+        store.accept("Deliver safely", mission_id=mission_id, dispatch_profile="build1-target")
+
+        def publish(event_type: str, payload: dict, number: int) -> None:
+            store.append_producer(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:auto:{number}"},
+                    "payload": payload,
+                },
+            )
+
+        publish(
+            "task.upsert",
+            {"task_id": "task-1", "title": "Root", "status": "done", "assignee": "codex-luna"},
+            1,
+        )
+        publish(
+            "worker.upsert",
+            {"worker_id": "task-1:run:1", "run_id": "1", "profile": "codex-luna", "status": "success"},
+            2,
+        )
+        number = 3
+        for gate_id in ("tests", "review", "ci", "post-verify"):
+            publish("gate.upsert", {"gate_id": gate_id, "status": "passed"}, number)
+            number += 1
+        publish(
+            "delivery.upsert",
+            {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"},
+            number,
+        )
+        number += 1
+        publish(
+            "delivery.upsert",
+            {"kind": "default_branch", "status": "verified", "url": "https://example.invalid/commit/1"},
+            number,
+        )
+        assert store.complete_if_ready(mission_id) is None
+
+        publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, number + 1)
+        completed = store.complete_if_ready(mission_id)
+        assert completed is not None and completed[1]
+        assert completed[0]["source"] == "central-hermes"
+        assert completed[0]["type"] == "mission.completed"
+        assert store.projection(mission_id)["status"] == "completed"
+        assert store.complete_if_ready(mission_id) is None
+
+
+def test_auto_completion_rejects_multiple_workers() -> None:
+    view = missions.empty_projection()
+    view.update(
+        status="active",
+        tasks=[{"task_id": "task-1", "status": "done"}],
+        workers=[
+            {"worker_id": "worker-1", "status": "success"},
+            {"worker_id": "worker-2", "status": "success"},
+        ],
+        gates=[{"gate_id": gate_id, "status": "passed"} for gate_id in missions._COMPLETION_GATES],
+        deliveries=[
+            {"kind": kind, "status": status}
+            for kind, status in missions._COMPLETION_DELIVERIES.items()
+        ],
+    )
+    assert not missions.completion_ready(view)
+    view.update(
+        status="waiting_owner",
+        workers=[{"worker_id": "worker-1", "status": "success"}],
+    )
+    assert not missions.completion_ready(view)
+
+
+def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        mission_id = "mission-atomic-complete"
+        store.accept("Deliver atomically", mission_id=mission_id)
+        events = [
+            ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+            ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+            *(("gate.upsert", {"gate_id": gate_id, "status": "passed"}) for gate_id in missions._COMPLETION_GATES),
+            ("delivery.upsert", {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"}),
+            ("delivery.upsert", {"kind": "default_branch", "status": "verified", "url": "https://example.invalid/commit/1"}),
+        ]
+        for number, (event_type, payload) in enumerate(events, 1):
+            store.append_producer(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:atomic:{number}"},
+                    "payload": payload,
+                },
+            )
+
+        readiness_entered = threading.Event()
+        release_completion = threading.Event()
+        regression_started = threading.Event()
+        outcome: dict[str, object] = {}
+        original = missions.completion_ready
+
+        def observed(view: dict) -> bool:
+            readiness_entered.set()
+            assert release_completion.wait(5)
+            return original(view)
+
+        def complete() -> None:
+            try:
+                outcome["completion"] = store.complete_if_ready(mission_id)
+            except BaseException as error:
+                outcome["completion_error"] = error
+
+        def regress() -> None:
+            regression_started.set()
+            try:
+                store.append_producer(
+                    mission_id,
+                    {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": "gate.upsert",
+                        "source": "build1-flow",
+                        "correlation": {"producer_event_id": "flow:atomic:regression"},
+                        "payload": {"gate_id": "review", "status": "failed"},
+                    },
+                )
+                outcome["regression"] = "committed"
+            except BaseException as error:
+                outcome["regression_error"] = error
+
+        missions.completion_ready = observed
+        try:
+            completer = threading.Thread(target=complete)
+            completer.start()
+            assert readiness_entered.wait(5)
+            competing = sqlite3.connect(database, timeout=0)
+            competing.execute("PRAGMA busy_timeout=0")
+            try:
+                competing.execute("BEGIN IMMEDIATE")
+                raise AssertionError("completion did not hold the SQLite write transaction")
+            except sqlite3.OperationalError as error:
+                assert "locked" in str(error).lower()
+            finally:
+                competing.close()
+            regressor = threading.Thread(target=regress)
+            regressor.start()
+            assert regression_started.wait(5)
+            release_completion.set()
+            completer.join(5)
+            regressor.join(5)
+        finally:
+            missions.completion_ready = original
+            release_completion.set()
+        assert not completer.is_alive() and not regressor.is_alive()
+        assert "completion_error" not in outcome
+        assert outcome["completion"][1]
+        assert isinstance(outcome.get("regression_error"), missions.MissionError)
+        assert "terminal" in str(outcome["regression_error"])
+        assert store.projection(mission_id)["status"] == "completed"
+
+
+def test_unresolved_question_survives_stage_and_blocks_auto_completion() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        mission_id = "mission-question-block"
+        store.accept("Wait for owner", mission_id=mission_id)
+        store.append_central(
+            mission_id,
+            {
+                "schema_version": 1,
+                "mission_id": mission_id,
+                "type": "mission.question",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {"question_id": "q-1", "text": "Choose the product behavior"},
+            },
+        )
+        store.append_central(
+            mission_id,
+            {
+                "schema_version": 1,
+                "mission_id": mission_id,
+                "type": "mission.stage",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {"stage": "verifying", "progress_percent": 90},
+            },
+        )
+        events = [
+            ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+            ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+            *(("gate.upsert", {"gate_id": gate_id, "status": "passed"}) for gate_id in missions._COMPLETION_GATES),
+            ("delivery.upsert", {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"}),
+            ("delivery.upsert", {"kind": "default_branch", "status": "verified", "url": "https://example.invalid/commit/1"}),
+        ]
+        for number, (event_type, payload) in enumerate(events, 1):
+            store.append_producer(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:question:{number}"},
+                    "payload": payload,
+                },
+            )
+        view = store.projection(mission_id)
+        assert view["status"] == "active" and view["question"]["question_id"] == "q-1"
+        assert store.complete_if_ready(mission_id) is None
+
+
 def test_mission_database_is_owner_only_on_posix() -> None:
     if os.name != "posix":
         return
@@ -353,6 +576,7 @@ def test_mission_database_is_owner_only_on_posix() -> None:
         database.touch(mode=0o666)
         os.chmod(database, 0o666)
         missions.MissionStore(database)
+        assert stat.S_IMODE(database.parent.stat().st_mode) == 0o700
         assert stat.S_IMODE(database.stat().st_mode) == 0o600
 
 
@@ -365,6 +589,10 @@ def main() -> None:
     test_dispatch_candidates_do_not_starve_behind_newer_missions()
     test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
+    test_central_auto_completion_requires_the_full_delivery_contract()
+    test_auto_completion_rejects_multiple_workers()
+    test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
+    test_unresolved_question_survives_stage_and_blocks_auto_completion()
     test_mission_database_is_owner_only_on_posix()
     print("hermes mission runtime checks passed")
 

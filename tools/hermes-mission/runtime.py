@@ -69,6 +69,11 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
 _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
+_COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
+_COMPLETION_DELIVERIES = {
+    "pull_request": "merged",
+    "default_branch": "verified",
+}
 
 
 class MissionError(ValueError):
@@ -305,14 +310,61 @@ def telegram_text(view: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def completion_ready(view: dict[str, Any]) -> bool:
+    """Apply the narrow A7.3 one-task delivery completion policy."""
+    if view.get("status") != "active" or view.get("question") is not None:
+        return False
+    tasks = view.get("tasks")
+    workers = view.get("workers")
+    if (
+        not isinstance(tasks, list)
+        or len(tasks) != 1
+        or tasks[0].get("status") not in {"done", "archived"}
+        or not isinstance(workers, list)
+        or len(workers) != 1
+        or workers[0].get("status") not in {"success", "completed"}
+    ):
+        return False
+    gates = {
+        item.get("gate_id"): item.get("status")
+        for item in view.get("gates", [])
+        if isinstance(item, dict)
+    }
+    if any(gates.get(gate_id) != "passed" for gate_id in _COMPLETION_GATES):
+        return False
+    deliveries = {
+        item.get("kind"): item.get("status")
+        for item in view.get("deliveries", [])
+        if isinstance(item, dict)
+    }
+    return all(
+        deliveries.get(kind) == status
+        for kind, status in _COMPLETION_DELIVERIES.items()
+    )
+
+
 class MissionStore:
     def __init__(self, path: str | Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if os.name == "posix":
+            os.chmod(self.path.parent, 0o700)
             self.path.touch(mode=0o600, exist_ok=True)
             os.chmod(self.path, 0o600)
         self._init_schema()
+
+    def _harden_permissions(self) -> None:
+        if os.name != "posix":
+            return
+        os.chmod(self.path.parent, 0o700)
+        for candidate in (
+            self.path,
+            Path(f"{self.path}-wal"),
+            Path(f"{self.path}-shm"),
+            Path(f"{self.path}-journal"),
+        ):
+            if candidate.exists():
+                os.chmod(candidate, 0o600)
 
     @classmethod
     def default(cls) -> "MissionStore":
@@ -321,6 +373,7 @@ class MissionStore:
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
+        self._harden_permissions()
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout=10000")
         return connection
@@ -336,6 +389,7 @@ class MissionStore:
             raise
         finally:
             connection.close()
+            self._harden_permissions()
 
     def _init_schema(self) -> None:
         with self._db() as connection:
@@ -509,6 +563,56 @@ class MissionStore:
 
     def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         return self._append(mission_id, _producer_submission(mission_id, submission))
+
+    def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
+        """Let Central, never the producer, append the terminal delivery event."""
+        mission_id = _require_id(mission_id, "mission_id")
+        event = _validate_submission(
+            mission_id,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "mission_id": mission_id,
+                "type": "mission.completed",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:auto-complete:v1"},
+                "payload": {"result": "Delivery completed, merged, and verified"},
+            },
+        )
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence",
+                (mission_id,),
+            ).fetchall()
+            previous = [self._row(row) for row in rows]
+            if not previous:
+                raise MissionError("mission not found")
+            if not completion_ready(project(previous)):
+                return None
+            sequence = len(previous) + 1
+            event.update(
+                sequence=sequence,
+                event_id=f"{mission_id}:{sequence}",
+                occurred_at=_utc_now(),
+            )
+            connection.execute(
+                """INSERT INTO mission_events
+                   (mission_id, sequence, event_id, occurred_at, type, source,
+                    correlation_json, payload_json, producer_event_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mission_id,
+                    sequence,
+                    event["event_id"],
+                    event["occurred_at"],
+                    event["type"],
+                    event["source"],
+                    _json(event["correlation"]),
+                    _json(event["payload"]),
+                    event["correlation"]["producer_event_id"],
+                ),
+            )
+        return event, True
 
     def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         mission_id = _require_id(mission_id, "mission_id")

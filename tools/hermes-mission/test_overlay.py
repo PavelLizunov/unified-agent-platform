@@ -72,6 +72,7 @@ def main() -> None:
         assert "X-Hermes-Mission-Producer-Key" in api
         assert "producer_key_valid" in api
         assert "notify_subscribers" in api
+        assert "complete_if_ready" in api
         assert "_handle_finish_mission" in api
         assert "atomic sticky initial block" not in kanban
         assert '"blocked",\n                        {"reason": None, "kind": "needs_input"}' in kanban
