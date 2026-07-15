@@ -124,7 +124,7 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
-            "--initial-status", "ready" if allow_dispatch else "blocked",
+            "--initial-status", "running" if allow_dispatch else "blocked",
         ]
         if workspace:
             command.extend(["--workspace", workspace])
@@ -455,7 +455,7 @@ def reconcile_pending(
         tasks = mission.get("tasks")
         if (
             mission.get("dispatch_profile") != dispatch_profile
-            or mission.get("status") != "active"
+            or mission.get("status") not in {"active", "waiting_owner"}
             or not isinstance(tasks, list)
             or not tasks
         ):
@@ -532,6 +532,33 @@ def dispatch_pending(
     return None
 
 
+def coordinator_tick(
+    client: Any,
+    state_root: pathlib.Path,
+    backend: Any,
+    *,
+    dispatch_profile: str,
+    workspace: str,
+    assignee: str | None = None,
+    activate: bool = False,
+) -> dict[str, Any] | None:
+    reconciled = reconcile_pending(
+        client, state_root, backend, dispatch_profile=dispatch_profile
+    )
+    if reconciled is not None:
+        return {**reconciled, "action": "reconciled"}
+    dispatched = dispatch_pending(
+        client,
+        state_root,
+        backend,
+        dispatch_profile=dispatch_profile,
+        workspace=workspace,
+        assignee=assignee,
+        activate=activate,
+    )
+    return None if dispatched is None else {**dispatched, "action": "dispatched"}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-bin", default="/home/uap/hermes-agent/.venv/bin/hermes")
@@ -560,6 +587,13 @@ def main(argv: list[str] | None = None) -> int:
     reconcile.add_argument("--central-url", default=os.environ.get("HERMES_API_URL"))
     reconcile.add_argument("--dispatch-profile", required=True)
 
+    tick = sub.add_parser("tick")
+    tick.add_argument("--central-url", default=os.environ.get("HERMES_API_URL"))
+    tick.add_argument("--dispatch-profile", required=True)
+    tick.add_argument("--workspace", required=True)
+    tick.add_argument("--assignee")
+    tick.add_argument("--activate", action="store_true")
+
     args = parser.parse_args(argv)
     backend = HermesKanbanBackend(args.hermes_bin, args.board)
     try:
@@ -570,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "sync":
             result = sync_mission(args.mission_id, args.state_root, backend)
-        elif args.command in {"poll", "reconcile"}:
+        elif args.command in {"poll", "reconcile", "tick"}:
             client = CentralMissionClient(
                 args.central_url,
                 os.environ.get("HERMES_API_TOKEN", ""),
@@ -586,12 +620,22 @@ def main(argv: list[str] | None = None) -> int:
                     assignee=args.assignee,
                     activate=args.activate,
                 )
-            else:
+            elif args.command == "reconcile":
                 result = reconcile_pending(
                     client,
                     args.state_root,
                     backend,
                     dispatch_profile=args.dispatch_profile,
+                )
+            else:
+                result = coordinator_tick(
+                    client,
+                    args.state_root,
+                    backend,
+                    dispatch_profile=args.dispatch_profile,
+                    workspace=args.workspace,
+                    assignee=args.assignee,
+                    activate=args.activate,
                 )
         if args.command == "sync" and args.output:
             _write_json(args.output, result)

@@ -260,6 +260,12 @@ class MissionAdapterTests(unittest.TestCase):
                 mission_id="mission-2", goal="Goal", allow_dispatch=True,
                 assignee="approved-profile", workspace="scratch",
             )
+        backend.ensure_root(
+            mission_id="mission-2", goal="Goal", allow_dispatch=True,
+            assignee="approved-profile", workspace="worktree:/tmp/repo",
+        )
+        active_command = commands[-1]
+        self.assertEqual("running", active_command[active_command.index("--initial-status") + 1])
 
     def test_worker_cannot_publish_terminal_mission_event(self):
         with self.assertRaisesRegex(adapter.AdapterError, "not allowed"):
@@ -483,6 +489,27 @@ class MissionAdapterTests(unittest.TestCase):
                 adapter.reconcile_pending(
                     central, state_root, backend, dispatch_profile="build1-uap"
                 )
+
+    def test_coordinator_tick_reconciles_before_dispatch(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            first = adapter.coordinator_tick(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            self.assertEqual("dispatched", first["action"])
+            self.assertEqual(1, backend.create_calls)
+
+            central.mission["status"] = "waiting_owner"
+            second = adapter.coordinator_tick(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            self.assertEqual("reconciled", second["action"])
+            self.assertEqual(1, backend.create_calls)
+            self.assertEqual(1, len(central.events))
 
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()
