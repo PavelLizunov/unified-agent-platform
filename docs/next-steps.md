@@ -205,8 +205,9 @@ not add an application service, workflow engine or mission database.
    recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
    Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
    name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. Before
-   another canary, obtain fresh owner approval, make route selection an explicit machine policy and behaviorally cover
-   a differently named custom executable; also project the actionable finding/terminal stage and verify Telegram
+   another canary, use the new fail-closed `codex-quality-v1` machine decision, obtain fresh owner approval for any
+   proposed stronger route and behaviorally cover a differently named custom executable; also project the actionable
+   finding/terminal stage and verify Telegram
    delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable
    [A7.3 contract](a7-real-project-canary.md). See the exact

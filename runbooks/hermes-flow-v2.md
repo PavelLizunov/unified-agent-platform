@@ -31,6 +31,51 @@ This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` s
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while
 Codex CLI provides the separately sandboxed author/reviewer executions.
 
+Model-policy v1 is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
+record with the allowed-file count, prior independent-review rejections for the same task and explicit risk flags:
+
+```json
+{
+  "schema_version": 1,
+  "changed_files": 6,
+  "prior_review_rejections": 2,
+  "flags": ["cross_process", "durable_state", "multi_platform"]
+}
+```
+
+Evaluate it without starting a model:
+
+```bash
+python tools/swarm/flow_contract.py delivery-route \
+  --policy tools/swarm/flow-policy.json \
+  --signals /home/uap/swarm-out/<mission>/route-signals.json \
+  --quota /home/uap/swarm-out/<mission>/quota.json \
+  --model claude=<exact-model-id>
+```
+
+The Claude model override is required only when Claude is recorded as available; do not probe Claude merely to fill
+it. The standard outcome reuses the existing ADR-028 `standard_code` quota route instead of introducing a second
+authority:
+
+- Claude available with an exact model: Luna author plus cross-family Claude review is `ready`;
+- Claude explicitly `quota_blocked`: Luna author plus Sol review is `ready` as `same_provider_degraded`;
+- Claude unknown, expired or available without an exact model: `review_blocked`, and no model is runnable.
+
+The installed `codex-quality-v1` policy has three outcomes:
+
+- `standard`: the existing quota-aware route above is used with `medium` author and `low` reviewer effort;
+- `complex`: Sol author / Terra reviewer at `xhigh` is returned only as a proposal with
+  `owner_approval_required`;
+- `escalated`: two prior review rejections or a privileged flag proposes Terra author / Sol reviewer at `xhigh`, also
+  with `owner_approval_required`.
+
+Unknown flags fail closed. Local/GPU, destructive, architecture, credential/external-authority and new-provider flags
+can never become a runnable route through this command. Model-policy v1 also rejects any attempt to mark `complex` or
+`escalated` as standing-approved. Canonical signals, the full policy SHA-256, the quota SHA-256 for a standard route
+and the exact resolved/proposed model/effort route are bound into the deterministic `decision_id`; it belongs in the
+mission evidence. Exit 0 means the quota-aware standard route is ready; exit 3 means no model may be invoked. A proposal is not an authorization and must not be copied into an enabled
+delivery profile without the matching owner decision and a future policy version that records that new authority.
+
 Claude Code exposes plan status interactively through `/usage`, but the installed CLI has no documented
 machine-readable `claude usage --json`. Never spend quota on an empty `claude -p` probe.
 

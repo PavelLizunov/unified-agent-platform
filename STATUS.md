@@ -59,6 +59,14 @@ Last updated: 2026-07-15
   branch/worktrees and stopped model use. The timer is disabled and no target PR exists. One successful
   PR/CI/merge/post-verify canary remains required. Exact evidence:
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+- **Model-policy v1 is explicit and fail-closed (2026-07-15).** `flow_contract.py delivery-route` now classifies a
+  closed repo-contract signal record with deterministic rules from `flow-policy.json`. The standing-approved
+  `standard` result reuses ADR-028's quota-aware `standard_code` route: available Claude gives cross-family review,
+  while a proved `quota_blocked` state permits the Luna/Sol `same_provider_degraded` fallback; other states block.
+  Cross-process, durable-state, multi-platform and similar complexity signals propose
+  Sol/Terra; repeated review rejection or privileged flags propose Terra/Sol. Both stronger outcomes remain
+  `owner_approval_required`, return no runnable author/reviewer and start no model. This policy foundation is not a
+  seventh canary authorization and is not yet wired into generic Central mission intake.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

@@ -8,7 +8,8 @@ proved the same bounded crash recovery, one autonomous review repair, runtime-at
 independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
-owner record, route selection must be an explicit machine policy, and a fresh owner approval bundle is required.
+owner record. Route selection now has the deterministic `codex-quality-v1` policy, but its complex and escalated
+outcomes deliberately return `owner_approval_required`; a fresh owner approval bundle is still required.
 
 Non-model observation hardening may continue without that bundle. No profile timer is enabled, and no further
 activation or model turn is authorized by the completed attempts.

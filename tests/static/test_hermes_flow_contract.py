@@ -162,6 +162,267 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("review_blocked", routed["status"])
         self.assertIsNone(routed["reviewer"])
 
+    def test_delivery_policy_uses_the_approved_standard_route(self):
+        decision = flow.choose_delivery_route(
+            self.policy,
+            {
+                "schema_version": 1,
+                "changed_files": 3,
+                "prior_review_rejections": 0,
+                "flags": [],
+            },
+            {"schema_version": 1, "engines": {
+                "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
+            }},
+        )
+        self.assertEqual("ready", decision["status"])
+        self.assertEqual("standard", decision["route"])
+        self.assertEqual("gpt-5.6-luna", decision["author"]["model"])
+        self.assertEqual("medium", decision["author"]["reasoning_effort"])
+        self.assertEqual("gpt-5.6-sol", decision["reviewer"]["model"])
+        self.assertEqual("low", decision["reviewer"]["reasoning_effort"])
+        self.assertEqual("same_provider_degraded", decision["review_mode"])
+        self.assertEqual(64, len(decision["quota_sha256"]))
+        self.assertEqual(["default:standard"], decision["reasons"])
+
+    def test_delivery_policy_prefers_available_cross_family_review(self):
+        decision = flow.choose_delivery_route(
+            self.policy,
+            {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+            {"schema_version": 1, "engines": {
+                "codex": {"state": "available"}, "claude": {"state": "available"},
+            }},
+            model_overrides={"claude": "claude-sonnet-4-6"},
+        )
+        self.assertEqual("ready", decision["status"])
+        self.assertEqual("gpt-5.6-luna", decision["author"]["model"])
+        self.assertEqual("claude-sonnet-4-6", decision["reviewer"]["model"])
+        self.assertEqual("cross_family", decision["review_mode"])
+        with self.assertRaisesRegex(flow.ContractError, "exact model ID required"):
+            flow.choose_delivery_route(
+                self.policy,
+                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+                {"schema_version": 1, "engines": {
+                    "codex": {"state": "available"}, "claude": {"state": "available"},
+                }},
+                model_overrides={"claude": "default"},
+            )
+
+    def test_delivery_policy_does_not_degrade_without_proved_quota_block(self):
+        decision = flow.choose_delivery_route(
+            self.policy,
+            {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+            {"schema_version": 1, "engines": {
+                "codex": {"state": "available"}, "claude": {"state": "available"},
+            }},
+        )
+        self.assertEqual("review_blocked", decision["status"])
+        self.assertIsNone(decision["author"])
+        self.assertIsNone(decision["reviewer"])
+        with self.assertRaisesRegex(flow.ContractError, "quota: schema_version 1"):
+            flow.choose_delivery_route(
+                self.policy,
+                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+                {"schema_version": True, "engines": {
+                    "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
+                }},
+            )
+        with self.assertRaisesRegex(flow.ContractError, "quota.engines.codex: expected an object"):
+            flow.choose_delivery_route(
+                self.policy,
+                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+                {"schema_version": 1, "engines": {
+                    "codex": [], "claude": {"state": "quota_blocked"},
+                }},
+            )
+        with self.assertRaisesRegex(flow.ContractError, "quota.engines.claude.blocked_until"):
+            flow.choose_delivery_route(
+                self.policy,
+                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+                {"schema_version": 1, "engines": {
+                    "codex": {"state": "available"},
+                    "claude": {"state": "quota_blocked", "blocked_until": 1},
+                }},
+            )
+        with self.assertRaisesRegex(flow.ContractError, "quota.engines.claude.state: invalid state"):
+            flow.choose_delivery_route(
+                self.policy,
+                {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []},
+                {"schema_version": 1, "engines": {
+                    "codex": {"state": "available"}, "claude": {"state": []},
+                }},
+            )
+
+    def test_delivery_policy_standard_identity_binds_quota_state(self):
+        signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
+        blocked = {"schema_version": 1, "engines": {
+            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
+        }}
+        available = {"schema_version": 1, "engines": {
+            "codex": {"state": "available"}, "claude": {"state": "available"},
+        }}
+        first = flow.choose_delivery_route(self.policy, signals, blocked)
+        second = flow.choose_delivery_route(
+            self.policy, signals, available, model_overrides={"claude": "claude-sonnet-4-6"}
+        )
+        self.assertNotEqual(first["quota_sha256"], second["quota_sha256"])
+        self.assertNotEqual(first["decision_id"], second["decision_id"])
+
+    def test_delivery_policy_proposes_but_does_not_run_a_complex_route(self):
+        decision = flow.choose_delivery_route(self.policy, {
+            "schema_version": 1,
+            "changed_files": 6,
+            "prior_review_rejections": 0,
+            "flags": ["cross_process", "multi_platform"],
+        })
+        self.assertEqual("owner_approval_required", decision["status"])
+        self.assertEqual("complex", decision["route"])
+        self.assertIsNone(decision["author"])
+        self.assertIsNone(decision["reviewer"])
+        self.assertEqual("gpt-5.6-sol", decision["proposed_route"]["author"]["model"])
+        self.assertEqual("gpt-5.6-terra", decision["proposed_route"]["reviewer"]["model"])
+        self.assertEqual(
+            ["flag:cross_process", "flag:multi_platform", "changed_files>=6"],
+            decision["reasons"],
+        )
+
+    def test_delivery_policy_escalates_repeated_rejection_without_model_authority(self):
+        signals = {
+            "schema_version": 1,
+            "changed_files": 6,
+            "prior_review_rejections": 5,
+            "flags": ["cross_process", "durable_state", "multi_platform"],
+        }
+        first = flow.choose_delivery_route(self.policy, signals)
+        second = flow.choose_delivery_route(self.policy, signals)
+        self.assertEqual(first, second)
+        self.assertEqual("owner_approval_required", first["status"])
+        self.assertEqual("escalated", first["route"])
+        self.assertEqual(["prior_review_rejections>=2"], first["reasons"])
+        self.assertEqual("gpt-5.6-terra", first["proposed_route"]["author"]["model"])
+        self.assertEqual("gpt-5.6-sol", first["proposed_route"]["reviewer"]["model"])
+        self.assertEqual(64, len(first["decision_id"]))
+
+    def test_delivery_policy_identity_is_semantic_and_binds_the_exact_policy(self):
+        signals = {
+            "schema_version": 1,
+            "changed_files": 1,
+            "prior_review_rejections": 0,
+            "flags": ["concurrency", "cross_process"],
+        }
+        first = flow.choose_delivery_route(self.policy, signals)
+        reordered = flow.choose_delivery_route(
+            self.policy, {**signals, "flags": list(reversed(signals["flags"]))}
+        )
+        self.assertEqual(first, reordered)
+        changed = json.loads(json.dumps(self.policy))
+        changed["delivery_model_policy"]["routes"]["complex"]["author"]["model"] = (
+            "gpt-5.6-terra"
+        )
+        changed["delivery_model_policy"]["routes"]["complex"]["reviewer"]["model"] = (
+            "gpt-5.6-sol"
+        )
+        second = flow.choose_delivery_route(changed, signals)
+        self.assertNotEqual(first["policy_sha256"], second["policy_sha256"])
+        self.assertNotEqual(first["decision_id"], second["decision_id"])
+        changed = json.loads(json.dumps(self.policy))
+        changed["engines"]["codex"]["capacity_label"] = "changed-capacity"
+        second = flow.choose_delivery_route(changed, signals)
+        self.assertNotEqual(first["policy_sha256"], second["policy_sha256"])
+        self.assertNotEqual(first["decision_id"], second["decision_id"])
+
+    def test_delivery_policy_v1_cannot_standing_approve_a_stronger_route(self):
+        changed = json.loads(json.dumps(self.policy))
+        changed["delivery_model_policy"]["routes"]["escalated"]["standing_approved"] = True
+        with self.assertRaisesRegex(flow.ContractError, "never standing-approves stronger routes"):
+            flow.choose_delivery_route(changed, {
+                "schema_version": 1,
+                "changed_files": 1,
+                "prior_review_rejections": 0,
+                "flags": [],
+            })
+
+        changed = json.loads(json.dumps(self.policy))
+        changed["delivery_model_policy"]["routes"]["standard"]["standing_approved"] = False
+        with self.assertRaisesRegex(flow.ContractError, "standard route to be standing-approved"):
+            flow.choose_delivery_route(changed, {
+                "schema_version": 1,
+                "changed_files": 6,
+                "prior_review_rejections": 0,
+                "flags": ["cross_process"],
+            })
+
+    def test_delivery_policy_validates_nonselected_routes(self):
+        changed = json.loads(json.dumps(self.policy))
+        changed["delivery_model_policy"]["routes"]["complex"]["author"]["extra"] = "ignored"
+        with self.assertRaisesRegex(flow.ContractError, "route.complex.author: unknown fields"):
+            flow.choose_delivery_route(changed, {
+                "schema_version": 1,
+                "changed_files": 1,
+                "prior_review_rejections": 0,
+                "flags": [],
+            })
+
+        changed = json.loads(json.dumps(self.policy))
+        changed["delivery_model_policy"]["routes"]["standard"]["task_class"] = "complex_rust"
+        with self.assertRaisesRegex(flow.ContractError, "expected ADR-028 standard_code"):
+            flow.choose_delivery_route(changed, {
+                "schema_version": 1,
+                "changed_files": 6,
+                "prior_review_rejections": 0,
+                "flags": ["cross_process"],
+            })
+
+        changed = json.loads(json.dumps(self.policy))
+        changed["schema_version"] = True
+        with self.assertRaisesRegex(flow.ContractError, "policy: schema_version 1"):
+            flow.choose_delivery_route(changed, {
+                "schema_version": 1,
+                "changed_files": 6,
+                "prior_review_rejections": 0,
+                "flags": ["cross_process"],
+            })
+
+    def test_delivery_policy_pins_the_existing_standard_route(self):
+        signals = {"schema_version": 1, "changed_files": 1, "prior_review_rejections": 0, "flags": []}
+        quota = {"schema_version": 1, "engines": {
+            "codex": {"state": "available"}, "claude": {"state": "quota_blocked"},
+        }}
+        changed = json.loads(json.dumps(self.policy))
+        changed["routes"]["standard_code"]["risk"] = "high"
+        with self.assertRaisesRegex(flow.ContractError, "invalid ADR-028 route"):
+            flow.choose_delivery_route(changed, signals, quota)
+        changed = json.loads(json.dumps(self.policy))
+        changed["routes"]["standard_code"]["authors"][0]["model"] = "gpt-5.3-codex-spark"
+        with self.assertRaisesRegex(flow.ContractError, "expected Codex Luna"):
+            flow.choose_delivery_route(changed, signals, quota)
+        changed = json.loads(json.dumps(self.policy))
+        changed["engines"]["codex"]["family"] = "untrusted"
+        with self.assertRaisesRegex(flow.ContractError, "unexpected standard-route boundary"):
+            flow.choose_delivery_route(changed, signals, quota)
+
+    def test_delivery_policy_rejects_boolean_schema_version(self):
+        with self.assertRaisesRegex(flow.ContractError, "signals.schema_version: expected 1"):
+            flow.choose_delivery_route(self.policy, {
+                "schema_version": True,
+                "changed_files": 1,
+                "prior_review_rejections": 0,
+                "flags": [],
+            })
+
+    def test_delivery_policy_fails_closed_on_unknown_or_privileged_signals(self):
+        base = {
+            "schema_version": 1,
+            "changed_files": 1,
+            "prior_review_rejections": 0,
+            "flags": ["local_or_gpu"],
+        }
+        gated = flow.choose_delivery_route(self.policy, base)
+        self.assertEqual("owner_approval_required", gated["status"])
+        self.assertEqual(["flag:local_or_gpu"], gated["reasons"])
+        with self.assertRaisesRegex(flow.ContractError, "unknown flags"):
+            flow.choose_delivery_route(self.policy, {**base, "flags": ["model_guessed_this"]})
+
     def test_review_gate_rejects_mismatched_runtime_attestation(self):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)

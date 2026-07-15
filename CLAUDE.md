@@ -199,6 +199,8 @@ Good next tasks that do not require redesign:
    `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 5. The approved sixth A7.3 model attempt is exhausted. No additional model/runtime turn, Qwen/local inference/GPU,
    Claude, swarm, Spark Runner, live cluster restart/deploy or destructive test is implied without a new owner gate.
+   The offline `codex-quality-v1` policy may propose Sol/Terra or Terra/Sol, but both stronger routes remain
+   `owner_approval_required` and are not runnable authority.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
