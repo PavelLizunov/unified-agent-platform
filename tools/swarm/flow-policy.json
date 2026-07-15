@@ -25,6 +25,66 @@
       "requires_local_permission": true
     }
   },
+  "delivery_model_policy": {
+    "policy_id": "codex-quality-v1",
+    "complex_changed_files_at": 6,
+    "complex_prior_review_rejections_at": 1,
+    "owner_gate_prior_review_rejections_at": 2,
+    "complex_flags": [
+      "concurrency",
+      "cross_process",
+      "durable_state",
+      "multi_platform",
+      "protocol_or_schema",
+      "security_boundary"
+    ],
+    "owner_gate_flags": [
+      "architecture_change",
+      "credentials_or_external_authority",
+      "destructive",
+      "local_or_gpu",
+      "new_provider"
+    ],
+    "routes": {
+      "standard": {
+        "task_class": "standard_code",
+        "risk": "medium",
+        "standing_approved": true,
+        "author_reasoning_effort": "medium",
+        "reviewer_reasoning_effort": "low"
+      },
+      "complex": {
+        "task_class": "complex_code",
+        "risk": "high",
+        "standing_approved": false,
+        "author": {
+          "engine": "codex",
+          "model": "gpt-5.6-sol",
+          "reasoning_effort": "xhigh"
+        },
+        "reviewer": {
+          "engine": "codex",
+          "model": "gpt-5.6-terra",
+          "reasoning_effort": "xhigh"
+        }
+      },
+      "escalated": {
+        "task_class": "escalated_code",
+        "risk": "critical",
+        "standing_approved": false,
+        "author": {
+          "engine": "codex",
+          "model": "gpt-5.6-terra",
+          "reasoning_effort": "xhigh"
+        },
+        "reviewer": {
+          "engine": "codex",
+          "model": "gpt-5.6-sol",
+          "reasoning_effort": "xhigh"
+        }
+      }
+    }
+  },
   "routes": {
     "complex_rust": {
       "risk": "high",
