@@ -286,6 +286,9 @@ class CentralMissionClient:
         self.base_url = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", ""))
         self.api_token = api_token.strip()
         self.producer_key = producer_key.strip()
+        # Central Hermes is a private control-plane endpoint. Never send its
+        # bearer or producer credentials through an ambient egress proxy.
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
     def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -297,7 +300,7 @@ class CentralMissionClient:
             })
         request = urllib.request.Request(f"{self.base_url}{path}", data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with self.opener.open(request, timeout=10) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
             raise AdapterError(f"central mission API returned HTTP {error.code}") from error
