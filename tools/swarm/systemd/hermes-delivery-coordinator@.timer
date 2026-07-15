@@ -2,7 +2,7 @@
 Description=Poll one approved UAP delivery profile (%i)
 
 [Timer]
-OnBootSec=1min
+OnActiveSec=1min
 OnUnitActiveSec=1min
 RandomizedDelaySec=5s
 Persistent=true
