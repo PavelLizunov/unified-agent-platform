@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermes Flow v2 contract: routing, quota state, repo guards and review gates."""
+"""Hermes Flow v2 contract: OpenAI routing, repo guards and review gates."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import datetime as dt
 import hashlib
 import json
-import os
 import pathlib
 import subprocess
 import sys
@@ -47,140 +46,12 @@ def _parse_time(value: str | None) -> dt.datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=dt.timezone.utc)
 
 
-def quota_state(quota: dict[str, Any], engine: str, now: dt.datetime | None = None) -> str:
-    entry = quota.get("engines", {}).get(engine, {"state": "unknown"})
-    state = entry.get("state", "unknown")
-    if state not in {"available", "quota_blocked", "unknown"}:
-        raise ContractError(f"quota.engines.{engine}.state: invalid state {state!r}")
-    until = _parse_time(entry.get("blocked_until"))
-    now = now or dt.datetime.now(dt.timezone.utc)
-    if state == "quota_blocked" and until and now >= until:
-        return "unknown"
-    return state
-
-
-def set_quota(
-    quota: dict[str, Any], engine: str, state: str, blocked_until: str | None, reason: str | None
-) -> dict[str, Any]:
-    if state not in {"available", "quota_blocked", "unknown"}:
-        raise ContractError(f"invalid quota state {state!r}")
-    if blocked_until:
-        _parse_time(blocked_until)
-    quota.setdefault("schema_version", 1)
-    quota.setdefault("engines", {})[engine] = {
-        "state": state,
-        "blocked_until": blocked_until,
-        "reason": reason,
-        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-    }
-    return quota
-
-
-def _resolve_candidate(
-    candidate: dict[str, Any], policy: dict[str, Any], model_overrides: dict[str, str]
-) -> dict[str, str] | None:
-    engine = _required_text(candidate, "engine", "candidate")
-    engine_policy = policy.get("engines", {}).get(engine)
-    if not isinstance(engine_policy, dict):
-        raise ContractError(f"candidate engine {engine!r} is absent from policy.engines")
-    model = candidate.get("model")
-    if not model and candidate.get("model_env"):
-        model = model_overrides.get(engine) or os.environ.get(candidate["model_env"])
-    if not isinstance(model, str) or not model.strip():
-        return None
-    return {"engine": engine, "family": _required_text(engine_policy, "family", engine), "model": model}
-
-
-def choose_route(
-    policy: dict[str, Any],
-    quota: dict[str, Any],
-    task_class: str,
-    *,
-    allow_local: bool = False,
-    allow_unknown: bool = False,
-    model_overrides: dict[str, str] | None = None,
-    now: dt.datetime | None = None,
-) -> dict[str, Any]:
-    route = policy.get("routes", {}).get(task_class)
-    if not isinstance(route, dict):
-        raise ContractError(f"unknown task class {task_class!r}")
-    model_overrides = model_overrides or {}
-
-    def eligible(
-        items: list[dict[str, Any]], forbidden_family: str | None = None,
-        allow_same_family: bool = False,
-    ) -> tuple[dict[str, str] | None, list[dict[str, str]]]:
-        skipped: list[dict[str, str]] = []
-        for item in items:
-            engine = _required_text(item, "engine", "candidate")
-            engine_policy = policy.get("engines", {}).get(engine)
-            if not isinstance(engine_policy, dict):
-                raise ContractError(f"candidate engine {engine!r} is absent from policy.engines")
-            family = _required_text(engine_policy, "family", engine)
-            if family == forbidden_family and not (
-                allow_same_family and item.get("same_provider_fallback") is True
-            ):
-                skipped.append({"engine": engine, "reason": "same_family"})
-                continue
-            if engine_policy.get("requires_local_permission") and not allow_local:
-                skipped.append({"engine": engine, "reason": "local_permission_required"})
-                continue
-            state = quota_state(quota, engine, now)
-            if state != "available" and not (state == "unknown" and allow_unknown):
-                skipped.append({"engine": engine, "reason": state})
-                continue
-            resolved = _resolve_candidate(item, policy, model_overrides)
-            if not resolved:
-                skipped.append({"engine": engine, "reason": "exact_model_unresolved"})
-                continue
-            resolved["quota_state"] = state
-            return resolved, skipped
-        return None, skipped
-
-    author, author_skipped = eligible(route.get("authors", []))
-    if not author:
-        return {
-            "status": "author_blocked",
-            "task_class": task_class,
-            "author": None,
-            "reviewer": None,
-            "skipped": {"authors": author_skipped},
-        }
-    reviewer, reviewer_skipped = eligible(
-        route.get("reviewers", []),
-        author["family"],
-        allow_same_family=route.get("same_provider_fallback") is True,
-    )
-    review_mode = None
-    if reviewer:
-        review_mode = (
-            "same_provider_degraded"
-            if reviewer["family"] == author["family"]
-            else "cross_family"
-        )
-    return {
-        "status": "ready" if reviewer else "review_blocked",
-        "task_class": task_class,
-        "risk": route.get("risk"),
-        "author": author,
-        "reviewer": reviewer,
-        "review_mode": review_mode,
-        "skipped": {"authors": author_skipped, "reviewers": reviewer_skipped},
-    }
-
-
 _DELIVERY_POLICY_FIELDS = {
     "policy_id", "complex_changed_files_at", "complex_prior_review_rejections_at",
-    "owner_gate_prior_review_rejections_at", "complex_flags", "owner_gate_flags", "routes",
+    "escalated_prior_review_rejections_at", "complex_flags", "owner_gate_flags", "routes",
 }
 _DELIVERY_SIGNAL_FIELDS = {"schema_version", "changed_files", "prior_review_rejections", "flags"}
-_DELIVERY_ROUTE_BASE_FIELDS = {"task_class", "risk", "standing_approved"}
-_DELIVERY_STANDARD_ROUTE_FIELDS = {
-    *_DELIVERY_ROUTE_BASE_FIELDS, "author_reasoning_effort", "reviewer_reasoning_effort",
-}
-_DELIVERY_STRONG_ROUTE_FIELDS = {
-    *_DELIVERY_ROUTE_BASE_FIELDS, "author", "reviewer",
-}
+_DELIVERY_ROUTE_FIELDS = {"task_class", "risk", "standing_approved", "author", "reviewer"}
 _DELIVERY_ACTOR_FIELDS = {"engine", "model", "reasoning_effort"}
 _REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
@@ -216,9 +87,6 @@ def _delivery_actor(value: Any, where: str) -> dict[str, str]:
 def choose_delivery_route(
     policy: dict[str, Any],
     signals: dict[str, Any],
-    quota: dict[str, Any] | None = None,
-    *,
-    model_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Choose a deterministic repo-contract route without invoking a model."""
     if (
@@ -226,19 +94,15 @@ def choose_delivery_route(
         or isinstance(policy.get("schema_version"), bool)
         or policy.get("schema_version") != 1
         or not isinstance(policy.get("engines"), dict)
-        or not isinstance(policy.get("routes"), dict)
     ):
-        raise ContractError("policy: schema_version 1 plus engines/routes objects required")
-    if model_overrides is not None and not isinstance(model_overrides, dict):
-        raise ContractError("model_overrides: expected an object")
-    for engine, family in (("codex", "openai"), ("claude", "anthropic")):
-        entry = policy["engines"].get(engine)
-        if (
-            not isinstance(entry, dict)
-            or entry.get("family") != family
-            or entry.get("requires_local_permission") is True
-        ):
-            raise ContractError(f"policy.engines.{engine}: unexpected standard-route boundary")
+        raise ContractError("policy: schema_version 1 plus an engines object required")
+    codex = policy["engines"].get("codex")
+    if (
+        not isinstance(codex, dict)
+        or codex.get("family") != "openai"
+        or codex.get("requires_local_permission") is True
+    ):
+        raise ContractError("policy.engines.codex: unexpected delivery-route boundary")
     config = _closed_fields(
         policy.get("delivery_model_policy"), _DELIVERY_POLICY_FIELDS, "delivery_model_policy"
     )
@@ -290,24 +154,22 @@ def choose_delivery_route(
         config["complex_prior_review_rejections_at"],
         "delivery_model_policy.complex_prior_review_rejections_at",
     )
-    owner_rejections_at = _nonnegative_int(
-        config["owner_gate_prior_review_rejections_at"],
-        "delivery_model_policy.owner_gate_prior_review_rejections_at",
+    escalated_rejections_at = _nonnegative_int(
+        config["escalated_prior_review_rejections_at"],
+        "delivery_model_policy.escalated_prior_review_rejections_at",
     )
-    if not 0 < complex_rejections_at < owner_rejections_at:
+    if not 0 < complex_rejections_at < escalated_rejections_at:
         raise ContractError("delivery_model_policy: rejection thresholds must increase from 1 or more")
     if complex_files_at < 1:
         raise ContractError("delivery_model_policy.complex_changed_files_at: expected 1 or more")
 
-    reasons: list[str] = []
     owner_matches = sorted(flags & owner_flags)
-    if owner_matches:
-        reasons.extend(f"flag:{flag}" for flag in owner_matches)
-    if prior_rejections >= owner_rejections_at:
-        reasons.append(f"prior_review_rejections>={owner_rejections_at}")
-    if reasons:
+    reasons: list[str]
+    if prior_rejections >= escalated_rejections_at:
+        reasons = [f"prior_review_rejections>={escalated_rejections_at}"]
         route_name = "escalated"
     else:
+        reasons = []
         complex_matches = sorted(flags & complex_flags)
         reasons.extend(f"flag:{flag}" for flag in complex_matches)
         if changed_files >= complex_files_at:
@@ -321,152 +183,39 @@ def choose_delivery_route(
     routes = config["routes"]
     if not isinstance(routes, dict) or set(routes) != {"standard", "complex", "escalated"}:
         raise ContractError("delivery_model_policy.routes: exact standard/complex/escalated routes required")
-    standard = _closed_fields(
-        routes["standard"], _DELIVERY_STANDARD_ROUTE_FIELDS, "route.standard"
-    )
-    if not isinstance(standard["standing_approved"], bool):
-        raise ContractError("route.standard.standing_approved: boolean required")
-    if not standard["standing_approved"]:
-        raise ContractError("delivery model policy v1 requires its standard route to be standing-approved")
-    if _required_text(standard, "task_class", "route.standard") != "standard_code":
-        raise ContractError("route.standard.task_class: expected ADR-028 standard_code")
-    if _required_text(standard, "risk", "route.standard") != "medium":
-        raise ContractError("route.standard.risk: expected medium")
-    for field in ("author_reasoning_effort", "reviewer_reasoning_effort"):
-        if _required_text(standard, field, "route.standard") not in _REASONING_EFFORTS:
-            raise ContractError(f"route.standard.{field}: invalid value")
-
+    expected = {
+        "standard": ("standard_code", "medium"),
+        "complex": ("complex_code", "high"),
+        "escalated": ("escalated_code", "critical"),
+    }
     resolved_routes: dict[str, dict[str, Any]] = {}
-    for name in ("complex", "escalated"):
-        candidate = _closed_fields(routes[name], _DELIVERY_STRONG_ROUTE_FIELDS, f"route.{name}")
+    for name in ("standard", "complex", "escalated"):
+        candidate = _closed_fields(routes[name], _DELIVERY_ROUTE_FIELDS, f"route.{name}")
         if not isinstance(candidate["standing_approved"], bool):
             raise ContractError(f"route.{name}.standing_approved: boolean required")
-        if name != "standard" and candidate["standing_approved"]:
-            raise ContractError("delivery model policy v1 never standing-approves stronger routes")
+        if not candidate["standing_approved"]:
+            raise ContractError("all OpenAI delivery routes must be standing-approved")
         resolved_candidate = {
             "task_class": _required_text(candidate, "task_class", f"route.{name}"),
             "risk": _required_text(candidate, "risk", f"route.{name}"),
             "author": _delivery_actor(candidate["author"], f"route.{name}.author"),
             "reviewer": _delivery_actor(candidate["reviewer"], f"route.{name}.reviewer"),
         }
+        if (resolved_candidate["task_class"], resolved_candidate["risk"]) != expected[name]:
+            raise ContractError(f"route.{name}: unexpected task_class or risk")
         for component in ("author", "reviewer"):
             engine = resolved_candidate[component]["engine"]
             engine_policy = policy.get("engines", {}).get(engine)
-            if not isinstance(engine_policy, dict):
-                raise ContractError(f"route.{name}.{component}: unknown engine {engine!r}")
-            if engine_policy.get("requires_local_permission"):
-                raise ContractError(
-                    f"route.{name}.{component}: local engines require a separate owner gate"
-                )
+            if (
+                engine != "codex"
+                or not isinstance(engine_policy, dict)
+                or engine_policy.get("family") != "openai"
+                or engine_policy.get("requires_local_permission") is True
+            ):
+                raise ContractError(f"route.{name}.{component}: OpenAI Codex engine required")
         if resolved_candidate["author"]["model"] == resolved_candidate["reviewer"]["model"]:
             raise ContractError(f"route.{name}: author and reviewer exact models must differ")
-        resolved_routes[name] = {"standing_approved": candidate["standing_approved"], **resolved_candidate}
-    quota_sha256 = None
-    if route_name == "standard":
-        legacy_standard = policy["routes"].get("standard_code")
-        if (
-            not isinstance(legacy_standard, dict)
-            or legacy_standard.get("risk") != "medium"
-            or legacy_standard.get("same_provider_fallback") is not True
-            or not isinstance(legacy_standard.get("authors"), list)
-            or not all(isinstance(item, dict) for item in legacy_standard["authors"])
-            or not isinstance(legacy_standard.get("reviewers"), list)
-            or not all(isinstance(item, dict) for item in legacy_standard["reviewers"])
-        ):
-            raise ContractError("policy.routes.standard_code: invalid ADR-028 route")
-        if quota is None:
-            routed = {
-                "status": "review_blocked", "task_class": standard["task_class"],
-                "risk": standard["risk"], "author": None, "reviewer": None,
-                "review_mode": None, "skipped": {"reviewers": [{"reason": "quota_required"}]},
-            }
-        else:
-            if (
-                not isinstance(quota, dict)
-                or isinstance(quota.get("schema_version"), bool)
-                or quota.get("schema_version") != 1
-                or not isinstance(quota.get("engines"), dict)
-            ):
-                raise ContractError("quota: schema_version 1 and an engines object required")
-            for engine in ("codex", "claude"):
-                entry = quota["engines"].get(engine)
-                if entry is not None and not isinstance(entry, dict):
-                    raise ContractError(f"quota.engines.{engine}: expected an object")
-                if entry is None:
-                    continue
-                allowed = {"state", "blocked_until", "reason", "updated_at"}
-                if unknown := set(entry) - allowed:
-                    raise ContractError(
-                        f"quota.engines.{engine}: unknown fields: {', '.join(sorted(unknown))}"
-                    )
-                state = entry.get("state", "unknown")
-                if not isinstance(state, str) or state not in {"available", "quota_blocked", "unknown"}:
-                    raise ContractError(f"quota.engines.{engine}.state: invalid state")
-                for field in ("reason", "updated_at"):
-                    if entry.get(field) is not None and not isinstance(entry[field], str):
-                        raise ContractError(f"quota.engines.{engine}.{field}: string or null required")
-                blocked_until = entry.get("blocked_until")
-                if blocked_until is not None:
-                    if not isinstance(blocked_until, str) or not blocked_until:
-                        raise ContractError(
-                            f"quota.engines.{engine}.blocked_until: timestamp or null required"
-                        )
-                    try:
-                        _parse_time(blocked_until)
-                    except ValueError as error:
-                        raise ContractError(
-                            f"quota.engines.{engine}.blocked_until: invalid timestamp"
-                        ) from error
-            routed = choose_route(
-                policy, quota, standard["task_class"], model_overrides=model_overrides
-            )
-            quota_sha256 = hashlib.sha256(
-                json.dumps(quota, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-        if routed["status"] == "ready":
-            _exact_model(routed["author"], "route.standard.author")
-            _exact_model(routed["reviewer"], "route.standard.reviewer")
-            if routed["author"].get("engine") != "codex" or routed["author"].get("model") != "gpt-5.6-luna":
-                raise ContractError("route.standard.author: expected Codex Luna")
-            expected_reviewer = (
-                ("claude", None) if routed["review_mode"] == "cross_family"
-                else ("codex", "gpt-5.6-sol")
-            )
-            if (
-                routed["reviewer"].get("engine") != expected_reviewer[0]
-                or (
-                    expected_reviewer[1] is not None
-                    and routed["reviewer"].get("model") != expected_reviewer[1]
-                )
-            ):
-                raise ContractError("route.standard.reviewer: unexpected ADR-028 reviewer")
-        if routed["status"] == "ready" and routed["review_mode"] == "same_provider_degraded":
-            claude_blocked = any(
-                skipped.get("engine") == "claude" and skipped.get("reason") == "quota_blocked"
-                for skipped in routed["skipped"].get("reviewers", [])
-            )
-            if not claude_blocked:
-                routed = {
-                    **routed, "status": "review_blocked", "author": None, "reviewer": None,
-                    "review_mode": None,
-                }
-        resolved = {
-            "standing_approved": standard["standing_approved"],
-            "task_class": standard["task_class"],
-            "risk": standard["risk"],
-            "author": (
-                {**routed["author"], "reasoning_effort": standard["author_reasoning_effort"]}
-                if routed.get("author") else None
-            ),
-            "reviewer": (
-                {**routed["reviewer"], "reasoning_effort": standard["reviewer_reasoning_effort"]}
-                if routed.get("reviewer") else None
-            ),
-            "review_mode": routed.get("review_mode"),
-        }
-    else:
-        routed = None
-        resolved = resolved_routes[route_name]
+        resolved_routes[name] = {"standing_approved": True, **resolved_candidate}
     canonical_signals = {
         "schema_version": 1,
         "changed_files": changed_files,
@@ -476,17 +225,16 @@ def choose_delivery_route(
     policy_sha256 = hashlib.sha256(
         json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    decision = {
+    resolved = None if owner_matches else resolved_routes[route_name]
+    decision: dict[str, Any] = {
         "policy_id": _required_text(config, "policy_id", "delivery_model_policy"),
         "policy_sha256": policy_sha256,
-        "route": route_name,
-        "task_class": resolved["task_class"],
-        "risk": resolved["risk"],
-        "reasons": reasons,
+        "route": None if owner_matches else route_name,
+        "task_class": None if owner_matches else resolved["task_class"],
+        "risk": None if owner_matches else resolved["risk"],
+        "reasons": [*(f"flag:{flag}" for flag in owner_matches)] if owner_matches else reasons,
         "signals": canonical_signals,
     }
-    if quota_sha256 is not None:
-        decision["quota_sha256"] = quota_sha256
     decision["decision_id"] = hashlib.sha256(
         json.dumps(
             {**decision, "resolved_route": resolved},
@@ -494,22 +242,14 @@ def choose_delivery_route(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    if route_name == "standard":
-        if resolved["standing_approved"] and routed and routed["status"] == "ready":
-            return {
-                "status": "ready", **decision, "author": resolved["author"],
-                "reviewer": resolved["reviewer"], "review_mode": resolved["review_mode"],
-            }
+    if owner_matches:
         return {
-            "status": routed["status"] if routed else "review_blocked", **decision,
+            "status": "owner_approval_required", **decision,
             "author": None, "reviewer": None, "review_mode": None,
         }
     return {
-        "status": "owner_approval_required",
-        **decision,
-        "author": None,
-        "reviewer": None,
-        "proposed_route": {"author": resolved["author"], "reviewer": resolved["reviewer"]},
+        "status": "ready", **decision, "author": resolved["author"],
+        "reviewer": resolved["reviewer"], "review_mode": "same_provider_independent",
     }
 
 
@@ -605,10 +345,8 @@ def validate_review(
     if same_family:
         if not allow_same_provider_review:
             raise ContractError("author and reviewer must use different engine families")
-        if summary.get("task_class") != "standard_code":
-            raise ContractError("same-provider review is allowed only for standard_code")
-        if review_mode != "same_provider_degraded":
-            raise ContractError("same-provider review must declare same_provider_degraded")
+        if review_mode != "same_provider_independent":
+            raise ContractError("same-provider review must declare same_provider_independent")
         if author_model == reviewer_model:
             raise ContractError("same-provider author and reviewer must use different exact models")
         if author_session == reviewer_session:
@@ -907,40 +645,13 @@ def guard_repo(path: str | pathlib.Path, expected_remote: str, expected_branch: 
     return {"root": str(root), "remote": remote, "branch": branch}
 
 
-def _model_overrides(values: list[str]) -> dict[str, str]:
-    result: dict[str, str] = {}
-    for value in values:
-        engine, separator, model = value.partition("=")
-        if not separator or not engine or not model:
-            raise ContractError("--model must be ENGINE=MODEL")
-        result[engine] = model
-    return result
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
 
-    route = sub.add_parser("route")
-    route.add_argument("--policy", required=True)
-    route.add_argument("--quota", required=True)
-    route.add_argument("--task-class", required=True)
-    route.add_argument("--allow-local", action="store_true")
-    route.add_argument("--allow-unknown", action="store_true")
-    route.add_argument("--model", action="append", default=[])
-
     delivery_route = sub.add_parser("delivery-route")
     delivery_route.add_argument("--policy", required=True)
     delivery_route.add_argument("--signals", required=True)
-    delivery_route.add_argument("--quota", required=True)
-    delivery_route.add_argument("--model", action="append", default=[])
-
-    quota = sub.add_parser("quota-set")
-    quota.add_argument("--file", required=True)
-    quota.add_argument("--engine", required=True)
-    quota.add_argument("--state", required=True)
-    quota.add_argument("--blocked-until")
-    quota.add_argument("--reason")
 
     review = sub.add_parser("validate-review")
     review.add_argument("--summary", required=True)
@@ -988,26 +699,12 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "route":
-            result = choose_route(
-                load_json(args.policy), load_json(args.quota), args.task_class,
-                allow_local=args.allow_local, allow_unknown=args.allow_unknown,
-                model_overrides=_model_overrides(args.model),
-            )
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 0 if result["status"] == "ready" else 3
         if args.command == "delivery-route":
             result = choose_delivery_route(
-                load_json(args.policy), load_json(args.signals), load_json(args.quota),
-                model_overrides=_model_overrides(args.model),
+                load_json(args.policy), load_json(args.signals),
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["status"] == "ready" else 3
-        if args.command == "quota-set":
-            path = pathlib.Path(args.file)
-            state = load_json(path) if path.exists() else {"schema_version": 1, "engines": {}}
-            write_json(path, set_quota(state, args.engine, args.state, args.blocked_until, args.reason))
-            return 0
         if args.command == "validate-review":
             validate_review(
                 load_json(args.summary), load_json(args.verification),

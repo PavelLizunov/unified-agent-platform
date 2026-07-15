@@ -3,20 +3,22 @@
 Status: **executed six times on 2026-07-15; the autonomous failure path passed, but A7.3 is not accepted because a
 successful delivery has not been demonstrated**.
 
-All six owner approvals are exhausted and are not standing authorization for another model turn. The sixth attempt
+The six historical per-attempt approvals are exhausted. ADR-031 now provides standing authorization for OpenAI
+Luna/Sol/Terra model turns, ordinary subscription spend and automatic retry/escalation. The sixth attempt
 proved the same bounded crash recovery, one autonomous review repair, runtime-attested Sol/Terra `xhigh` routing,
 independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
-owner record. Route selection now has the deterministic `codex-quality-v1` policy, but its complex and escalated
-outcomes deliberately return `owner_approval_required`; a fresh owner approval bundle is still required.
+owner record. Route selection now has deterministic `openai-autonomy-v1`; the coordinator must consume it before the
+next canary.
 
-Non-model observation hardening may continue without that bundle. No profile timer is enabled, and no further
-activation or model turn is authorized by the completed attempts.
+No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
+outside the standing authority.
 
 ## Scope
 
-The canary must use one owner-approved existing repository and one owner-approved, build-1-configured routing profile.
+The canary must use one existing repository and one build-1-configured routing profile already covered by its
+repo-contract.
 Mission input never supplies a shell command, local path, credential or model ID.
 
 The approved change must:
@@ -30,14 +32,14 @@ The approved change must:
 ## Execution DAG
 
 1. **Preflight:** record mission ID, target repository, default-branch SHA, dispatch profile, permitted file scope and
-   clean disposable worktree. Resolve the owner-approved author/reviewer routes; fail closed on any mismatch or reroute.
+   clean disposable worktree. Resolve the deterministic author/reviewer route; fail closed on any mismatch or reroute.
 2. **Dispatch:** activate exactly one Kanban root and one author worker. Every task/run/event retains the mission ID.
 3. **Author:** implement and test only the approved change, then create one candidate commit. Reject unexpected paths,
    secrets, missing tests or a dirty base.
 4. **Recoverable checkpoint:** after the author commit is durable but before its central acknowledgement, stop the
    coordinator at the pre-approved fault point. On restart, reconcile the existing task/worktree/commit; do not launch
    a second author or create a second candidate commit.
-5. **Review:** use a separate owner-approved read-only session against the exact candidate SHA. Runtime-derived model,
+5. **Review:** use a separate read-only session against the exact candidate SHA. Runtime-derived model,
    provider, sandbox and session identity must pass `flow_contract.py`; otherwise stop.
 6. **Delivery:** run repository gates, open the PR, wait for required CI, apply bounded fixes if permitted, and merge
    only the reviewed SHA after all gates are green.
@@ -64,9 +66,9 @@ One evidence bundle must link:
 
 Any missing item is a failed canary, not a partial success.
 
-## Single owner approval bundle
+## Standing execution authority
 
-Before execution the platform asks once for the exact target/goal, integration boundary, allowed file scope,
-author/reviewer routes, activation, recoverable fault point, merge/deploy authority, cleanup authority and time/cost
-ceiling. After approval the platform performs every command, test, retry, PR, merge, verification and cleanup; the owner
-does not become an operator.
+The repository contract and build-1 profile fix the target, integration boundary, allowed file scope, merge/deploy and
+cleanup rules. The platform chooses Luna/Sol/Terra, reasoning effort, activation, retry and escalation automatically,
+then performs every command, test, PR, merge, verification and cleanup. It asks the owner only for a genuine product
+blocker or a dangerous action outside ADR-031; spending money is not such an action.
