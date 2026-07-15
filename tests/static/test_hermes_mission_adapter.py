@@ -585,9 +585,11 @@ class MissionAdapterTests(unittest.TestCase):
         reconciling.__enter__.return_value.read.return_value = b'{"missions": []}'
         published = mock.MagicMock()
         published.__enter__.return_value.read.return_value = b'{"created": true}'
+        opener = mock.MagicMock()
+        opener.open.side_effect = [listing, reconciling, published]
         with mock.patch.object(
-            adapter.urllib.request, "urlopen", side_effect=[listing, reconciling, published]
-        ) as opener:
+            adapter.urllib.request, "build_opener", return_value=opener
+        ) as build_opener:
             client = adapter.CentralMissionClient(
                 "http://central.example:30642",
                 "api-token",
@@ -597,9 +599,11 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual([], client.list_missions("build1-uap", reconcile=True))
             client.publish("mission-1", {"type": "task.upsert"})
 
-        first_request = opener.call_args_list[0].args[0]
-        reconcile_request = opener.call_args_list[1].args[0]
-        second_request = opener.call_args_list[2].args[0]
+        proxy_handler = build_opener.call_args.args[0]
+        self.assertEqual({}, proxy_handler.proxies)
+        first_request = opener.open.call_args_list[0].args[0]
+        reconcile_request = opener.open.call_args_list[1].args[0]
+        second_request = opener.open.call_args_list[2].args[0]
         first_headers = {key.lower(): value for key, value in first_request.header_items()}
         second_headers = {key.lower(): value for key, value in second_request.header_items()}
         self.assertEqual("Bearer api-token", first_headers["authorization"])
