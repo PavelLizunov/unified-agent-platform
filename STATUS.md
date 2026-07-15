@@ -49,13 +49,15 @@ Last updated: 2026-07-15
   loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
 - **A7.3 autonomous failure path passed; successful delivery is not yet proven (2026-07-15).** PRs #199-#209 provide
   the profile-bound timer coordinator, direct Central transport, durable claim/crash recovery, bounded author-check
-  repair, exact candidate fingerprinting, autonomous rejected-run closure and timer self-arming. A fourth approved
-  VPNRouter mission pinned the cross-process probe rule to the existing global TUN lock, changed exactly four approved
-  files and passed both Windows author/reviewer gates in two cycles. Separate Sol reviews found two further custom-path
-  liveness defects: transient bad YAML and a valid A-to-B rewrite could each forget the running path A. The bounded
-  coordinator opened no target PR, then completed native/Central failure state, published
-  `tests=passed/review=failed/cleanup=passed`, removed branch/worktrees and stopped model use. The timer is disabled and
-  no target PR exists. One successful PR/CI/merge/post-verify canary remains required. Exact evidence:
+  repair, exact candidate fingerprinting, autonomous rejected-run closure and timer self-arming. PR #213 additionally
+  binds author/reviewer reasoning effort to strict Codex config and runtime `turn_context`. The sixth approved
+  VPNRouter mission used Sol author and separate exact-SHA read-only Terra review, both at `xhigh`. It recovered the
+  approved author-commit crash, autonomously repaired three first-review findings and passed every Windows checkpoint.
+  Terra still rejected the final candidate because observation hard-coded the `sing-box` process name and would miss a
+  differently named custom executable from a fresh CLI process. The bounded coordinator opened no target PR, then
+  completed native/Central failure state, published `tests=passed/review=failed/cleanup=passed`, removed
+  branch/worktrees and stopped model use. The timer is disabled and no target PR exists. One successful
+  PR/CI/merge/post-verify canary remains required. Exact evidence:
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
@@ -379,10 +381,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
 - **Remaining automation gap after the A7.3 failure-path canary:** the installed profile-bound timer can intake,
   activate, author, test, review, recover a failed author gate/crash and autonomously close a rejected run. The live
-  canaries did not reach PR/CI/merge/post-verify because review correctly rejected every candidate. Attempt 5
-  preserved the runtime-registered custom executable path A while separately evaluating config path B, recovered one
-  failed Windows author gate and the approved post-commit crash, then Sol rejected the candidate because the existing
-  TUN lock can intentionally fail open while the proposed detector treated the lock as mandatory. Central still
+  canaries did not reach PR/CI/merge/post-verify because review correctly rejected every candidate. Attempt 6 used
+  Sol/Terra at runtime-attested `xhigh`, recovered the approved post-commit crash and one full review repair, then
+  Terra rejected the final candidate because hard-coded `sing-box` enumeration missed a differently named custom
+  executable recorded by the runtime owner. Central still
   exposes only a generic rejection error and retains stage `testing`; Telegram terminal delivery was not independently
   verified. No general timer is enabled and no successful A7.3 delivery is claimed.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1

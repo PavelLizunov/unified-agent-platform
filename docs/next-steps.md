@@ -197,17 +197,17 @@ not add an application service, workflow engine or mission database.
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
 3. **A7.3 — Owner-approved activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
-   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts.
-   Attempt 3 recovered a failed pre-commit gate through exactly one Luna repair, recovered the approved author-commit
-   crash, reached exact-SHA Sol review and then autonomously closed native/Central state and cleanup when Sol rejected
-   a real cross-process false positive. Attempt 4 pinned that behavior to the global TUN lock but exposed config-path
-   liveness defects. Attempt 5 separated the runtime-registered path from the config-derived candidate, automatically
-   repaired one compile failure, recovered the approved author-commit crash and passed both Windows checkpoints. Sol
-   still rejected exact SHA `97cd9df...`: `TunOwnershipLock.TryAcquire()` intentionally fails open on semaphore
-   errors, while the candidate made `IsOwnedByAnyone()` mandatory and could hide a live tunnel in that supported
-   failure mode. No target PR was opened. Before another canary, obtain fresh owner approval and make lock observation
-   distinguish `owned`, `free` and `unavailable` (or otherwise preserve the existing fail-open behavior); also
-   project the actionable finding/terminal stage and verify Telegram delivery. One successful
+   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts;
+   PR #213 added strict runtime-attested author/reviewer reasoning effort.
+   Attempts 3-5 proved bounded repair, crash recovery and autonomous rejection cleanup while independent review kept
+   finding real cross-process, configuration-liveness and unavailable-lock defects. Attempt 6 added PR #213's
+   runtime-attested reasoning effort and used Sol author plus exact-SHA read-only Terra review, both at `xhigh`. It
+   recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
+   Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
+   name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. Before
+   another canary, obtain fresh owner approval, make route selection an explicit machine policy and behaviorally cover
+   a differently named custom executable; also project the actionable finding/terminal stage and verify Telegram
+   delivery. One successful
    PR/CI/merge/post-verify route is still required by the executable
    [A7.3 contract](a7-real-project-canary.md). See the exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).

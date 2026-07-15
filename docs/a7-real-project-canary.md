@@ -1,14 +1,14 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **executed three times on 2026-07-15; the autonomous failure path passed, but A7.3 is not accepted because a
+Status: **executed six times on 2026-07-15; the autonomous failure path passed, but A7.3 is not accepted because a
 successful delivery has not been demonstrated**.
 
-All three owner approvals are exhausted and are not standing authorization for another model turn. The third attempt
-proved bounded author-check repair, the approved post-commit crash recovery, independent rejection and autonomous
-native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
+All six owner approvals are exhausted and are not standing authorization for another model turn. The sixth attempt
+proved the same bounded crash recovery, one autonomous review repair, runtime-attested Sol/Terra `xhigh` routing,
+independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
-Before another canary, the target contract must resolve the observed cross-process deep-verification false positive
-and a fresh owner approval bundle is required.
+Before another canary, the target contract must cover a differently named custom executable from the durable runtime
+owner record, route selection must be an explicit machine policy, and a fresh owner approval bundle is required.
 
 Non-model observation hardening may continue without that bundle. No profile timer is enabled, and no further
 activation or model turn is authorized by the completed attempts.
@@ -20,7 +20,7 @@ Mission input never supplies a shell command, local path, credential or model ID
 
 The approved change must:
 
-- modify 3–5 tracked files;
+- modify only the exact allowlist of 3–6 tracked files approved for that mission;
 - cross one existing integration boundary (for example CLI→library, API→persistence or config→runtime);
 - include deterministic unit/integration coverage for the changed behaviour;
 - exclude secrets, infrastructure topology, destructive migration and unrelated refactoring;
