@@ -196,14 +196,15 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Owner-approved activation and delivery — ⚠️ FOUNDATION LIVE; CANARY FAILED (2026-07-15).** PRs #199-#203
-   installed the bounded coordinator and fixed the defects found by two live attempts. Both attempts recovered the
-   approved author-commit crash and passed Windows gates, but separate Sol review rejected both final VPNRouter
-   candidates before PR creation. Final review exhaustion is now durable/model-inert. Next, add autonomous rejected-run
-   task/Central closure, notification and cleanup, then obtain a fresh owner approval for another real-project canary.
-   One successful PR/CI/merge/post-verify route is still required by the executable
+3. **A7.3 — Owner-approved activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
+   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by three live attempts.
+   Attempt 3 recovered a failed pre-commit gate through exactly one Luna repair, recovered the approved author-commit
+   crash, reached exact-SHA Sol review and then autonomously closed native/Central state and cleanup when Sol rejected
+   a real cross-process false positive. No target PR was opened. Before another canary, obtain fresh owner approval and
+   pin that product behavior; also project the actionable finding/terminal stage and verify Telegram delivery. One
+   successful PR/CI/merge/post-verify route is still required by the executable
    [A7.3 contract](a7-real-project-canary.md). See the exact
-   [failed-canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
+   [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.

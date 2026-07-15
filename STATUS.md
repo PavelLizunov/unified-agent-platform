@@ -47,14 +47,15 @@ Last updated: 2026-07-15
   `a7-blocked-20260715-7214ad7-03` produced one blocked/unassigned root, one `task.upsert`, zero runs and a null second
   poll, with no worker/model process. The poll is still manually invoked: no timer, activation or autonomous delivery
   loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
-- **A7.3 coordinator foundation is live, but the real-project canary FAILED at review 2026-07-15.** PRs #199-#202
-  added the profile-bound timer coordinator, direct Central transport, pinned active-task semantics and durable public
-  claim proof. Two owner-approved VPNRouter missions each recovered the approved post-commit crash, passed Windows VM
-  gates and reached separate Luna/Sol cycles, but both final candidates were rejected before target PR creation. The
-  second attempt exposed repeated final-review invocation; PR #203 now durably checkpoints `review_rejected` and makes
-  later ticks model-inert. Timers are disabled, missions are failed, tasks/worktrees are cleaned and no target PR was
-  opened. Autonomous rejected-run closure and one successful PR/CI/merge/post-verify canary remain required. Exact
-  evidence: `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+- **A7.3 autonomous failure path passed; successful delivery is not yet proven (2026-07-15).** PRs #199-#209 provide
+  the profile-bound timer coordinator, direct Central transport, durable claim/crash recovery, bounded author-check
+  repair, exact candidate fingerprinting, autonomous rejected-run closure and timer self-arming. A third approved
+  VPNRouter mission recovered an initial compiler failure without manual target/state edits, used exactly one Luna
+  repair, recovered the approved post-commit crash and reached a separate read-only Sol review. Sol correctly rejected
+  one cross-process deep-probe false positive before target PR creation. The coordinator then completed native and
+  Central failure state, published `tests=passed/review=failed/cleanup=passed`, removed branch/worktrees and stopped
+  model use. Timers are disabled and no target PR exists. One successful PR/CI/merge/post-verify canary remains
+  required. Exact evidence: `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -375,11 +376,11 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
-- **Remaining automation gap after the failed A7.3 canary:** an installed profile-bound timer can intake, activate,
-  author, test, review and prepare delivery, and its accepted path contains PR/CI/merge/post-verify transitions. The
-  live canary did not reach those delivery transitions because independent review correctly rejected both candidates.
-  Final rejection still needs autonomous native/Central task closure, owner notification and cleanup; current failed
-  projections retain stale `running` task rows. No general timer is enabled and no successful A7.3 delivery is claimed.
+- **Remaining automation gap after the A7.3 failure-path canary:** the installed profile-bound timer can intake,
+  activate, author, test, review, recover a failed author gate/crash and autonomously close a rejected run. The live
+  canary did not reach PR/CI/merge/post-verify because review correctly rejected the candidate. Central still exposes
+  only a generic rejection error and retains stage `testing`/50%; Telegram terminal delivery was not independently
+  verified. No general timer is enabled and no successful A7.3 delivery is claimed.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

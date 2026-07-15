@@ -1,16 +1,17 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **executed twice on 2026-07-15; both attempts failed at independent review, so A7.3 is not accepted**.
+Status: **executed three times on 2026-07-15; the autonomous failure path passed, but A7.3 is not accepted because a
+successful delivery has not been demonstrated**.
 
-The two owner approvals are exhausted and are not standing authorization for another model turn. The coordinator
-foundation and exact failure evidence are recorded in
+All three owner approvals are exhausted and are not standing authorization for another model turn. The third attempt
+proved bounded author-check repair, the approved post-commit crash recovery, independent rejection and autonomous
+native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
-Before another canary, the rejected-run terminal/notification/cleanup path must become autonomous and a fresh owner
-approval bundle is required.
+Before another canary, the target contract must resolve the observed cross-process deep-verification false positive
+and a fresh owner approval bundle is required.
 
-The pre-activation foundation may be prepared without that bundle. It is limited to offline, non-spawning recovery
-primitives such as deterministic event reconciliation and reconstruction of disposable adapter cache from native
-Kanban authority; it must not install a periodic poller or pass `--activate`.
+Non-model observation hardening may continue without that bundle. No profile timer is enabled, and no further
+activation or model turn is authorized by the completed attempts.
 
 ## Scope
 
@@ -41,9 +42,12 @@ The approved change must:
    only the reviewed SHA after all gates are green.
 7. **Post-verify:** fetch a fresh default branch, prove the reviewed commit is an ancestor of the merge, and rerun the
    repository's required post-merge check.
-8. **Cleanup:** remove the disposable worktree/branch and close the Kanban task only after merge and post-verify.
-   Preserve bounded evidence, not raw secrets or model output. Only after that evidence is durable may Central Hermes,
-   never the build-1 producer, write the terminal mission state through its authenticated local authority path.
+8. **Terminal and cleanup:** on the accepted path, remove the disposable worktree/branch and close the Kanban task
+   only after merge and post-verify. After final author-check or review rejection, remove the same disposable state,
+   durably close the native task with bounded failure gates, and let Central Hermes append `mission.failed`; that
+   failure closure does not satisfy the successful-delivery gate. Preserve bounded evidence, not raw secrets or model
+   output. Only after the matching success or failure evidence is durable may Central Hermes, never the build-1
+   producer, write the terminal mission state through its authenticated local authority path.
 
 ## Acceptance evidence
 

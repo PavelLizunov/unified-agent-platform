@@ -2,12 +2,12 @@
 
 Date: 2026-07-15
 
-Status: **FAILED AT INDEPENDENT REVIEW; A7.3 IS NOT COMPLETE**
+Status: **AUTONOMOUS FAILURE PATH PASS; SUCCESSFUL DELIVERY NOT YET PROVEN**
 
 ## Accepted boundary
 
-The owner approved one real-project A7.3 route, then explicitly approved one second clean attempt after the first
-candidate failed review. Both used:
+The owner approved one real-project A7.3 route, explicitly approved a second clean attempt, and later approved a third
+attempt after the first two candidates exposed platform and target defects. All three used:
 
 - target `PavelLizunov/VPNRouter`, issue #39, base
   `c51f619fa98792c1726c1eadc2796f4e067048ba`;
@@ -20,8 +20,8 @@ candidate failed review. Both used:
 - PR/CI/merge/post-verify authority only after an accepted review;
 - no Claude, Qwen, Ollama, vLLM, local inference, GPU, Spark Runner, tag, release or destructive test.
 
-The owner did not run commands or repair either attempt. The quality gate stopped both candidates before a target PR
-was opened.
+The owner did not run commands or repair any attempt. The quality gate stopped all three candidates before a target
+PR was opened.
 
 ## Landed UAP foundation and corrections
 
@@ -32,12 +32,18 @@ was opened.
 | [#201](https://github.com/PavelLizunov/unified-agent-platform/pull/201) pinned active status | `2205f96e1c37f2fecd80f99b67c3a1ad7068ba63` | `c9348465da96b89b02fd16bd96ce9b7f3f94e3f9` | Adapter uses pinned Hermes `running` create status |
 | [#202](https://github.com/PavelLizunov/unified-agent-platform/pull/202) public lease proof | `96d390091d005cae001191f298fcbb1216424d60` | `73bb2f3782690e7007d7adfe5f8bdf3998e69973` | Claim proof is bound to exact task/run, lock and unexpired public event payload |
 | [#203](https://github.com/PavelLizunov/unified-agent-platform/pull/203) exhausted-review checkpoint | `68138dadb6be7118feb95d779042854bd423681d` | `4b1f39ccea857c0a5f8d8912c2c9094e3778a411` | Final rejection is durable and later ticks cannot invoke another model |
+| [#205](https://github.com/PavelLizunov/unified-agent-platform/pull/205) autonomous rejection closure | `d17d0a47ec4efb2fc1681b80d90c1999ee7ac110` | `461795c70e426f546489d38059e67d9c4472a81a` | Rejected runs clean up, durably complete the native task and let Central append `mission.failed` |
+| [#206](https://github.com/PavelLizunov/unified-agent-platform/pull/206) rejection rollout | `54c1698845d1de394c24ce7e45fddefa3cc047a6` | `a012bfe27052d5462d0cc9bd021ed58836a92ff7` | Config revision `v26-a7-3-rejection` mounted the failure policy in the live pod |
+| [#207](https://github.com/PavelLizunov/unified-agent-platform/pull/207) author-check retry | `46af67e0887746ebaa9cddb70ce490d0f24b8309` | `7964b9a76078655a01bbba0317454134ad674d2a` | A failed pre-commit gate becomes one bounded repair cycle; exact candidate content is fingerprinted and exhaustion terminates safely |
+| [#208](https://github.com/PavelLizunov/unified-agent-platform/pull/208) author-check rollout | `bad5ef9c59bf97e741305c82cb020e3d8fa335c6` | `7ef3eff619617c71e8b3a3e332e653b8fc2c6b19` | Config revision `v27-a7-3-author-checks` rolled the live Central failure policy |
+| [#209](https://github.com/PavelLizunov/unified-agent-platform/pull/209) first-tick timer arming | `6c7ccbc402c30aaebd716fb854454fc82850e7cb` | `da3ec15526c60b9c76a33b0234178f17f2b80e28` | `OnActiveSec` arms a newly enabled timer independently of the old user-manager boot time |
 
-Every PR passed required `static-checks`. The final #203 head also passed the full local gate with
-`secret-scan-ok`, `iac-static-ok` and `verify-local-ok`. Its separate runtime-attested Sol review used session
-`019f65a6-2305-7310-936d-0c8083388dbd`, exact model `gpt-5.6-sol`, read-only sandbox and returned `accept` with no
-findings. The installed build-1 coordinator matched the accepted source SHA-256
-`d8abf8488689eadf576772a2ccaae0316e9d05817b5aa70b69cad79b91faab8f`.
+Every PR passed required `static-checks`. The #207 correction passed the full local gate with `secret-scan-ok`,
+`iac-static-ok` and `verify-local-ok`, 20 Windows/Linux coordinator tests and the mission-runtime checks. After two
+review rounds found and closed candidate-mutation gaps, exact head `46af67e...` received a runtime-attested read-only
+Sol `accept` with no findings in session `019f65ec-f81d-7242-a81b-33d12128a1f4`. The installed build-1 coordinator
+matched its merged-master source SHA-256 `0fe747daac5acbb3f69b9202e77a98fefe0324b450b0d07cbe1705debb31efb1`.
+The two-line #209 timer correction also passed the full gate and an exact-SHA read-only Sol review.
 
 ## Attempt 1 — rejected
 
@@ -86,6 +92,40 @@ not push, open a PR, wait for CI, merge or post-verify the target.
 The rejected candidate is retained as a 5,814-byte prerequisite bundle at build-1 under the mission evidence
 directory. Its SHA-256 is `b3d0a3be08a617e760635d8ac8c27763430ddaed7c995ab5a23e75a1d6819721`; it requires base `c51f619...`.
 
+## Attempt 3 — autonomous recovery and rejection closure
+
+| Identity | Value |
+|---|---|
+| Mission | `a7-vpnrouter-issue39-20260715-03` |
+| Root / run | `t_e9157d97` / `23` |
+| Final candidate | `28ed7ad5663c8b774c03b5927f8c047d8234e45e` |
+| Luna sessions | `019f65d3-48a3-72f2-a5cb-7b75d6da10ab`, `019f65f8-af93-7213-a0da-e6f095d344b5` |
+| Sol session | `019f65fb-5a8e-7df3-86b6-4a3003b4e485` |
+| Final state SHA-256 | `9d0173dc19d86327bb7bde80b74c5f4bb6a442f53c733ab28674756b0b97478c` |
+
+The first Luna turn changed exactly the three approved files but the authoritative Windows gate found two C# compiler
+errors before commit. The old coordinator left `phase=claimed` with a dirty worktree and refused a second model. The
+timer was disabled; no target file was manually repaired. PRs #207/#208 added and rolled out a content-fingerprinted,
+bounded author-check checkpoint. On resumption, one recovery tick reran the gate and persisted `needs_fix`, cycle 2,
+without a model. The next timer tick invoked exactly one Luna repair turn, passed all Windows author checks and created
+candidate `28ed7ad...`. The approved post-commit crash then fired; the following tick recovered the same SHA and did
+not repeat Luna.
+
+The separate read-only Sol review reran the Windows gate successfully but rejected the candidate with one P1: CLI
+status runs in another process, while the deep-verification suppression signal is process-local, so a temporary probe
+can be mistaken for a TUN-owning external runtime. No target PR was opened.
+
+Unlike attempts 1 and 2, rejection closure was fully autonomous. The coordinator removed author/review worktrees and
+the local branch, completed native task `t_e9157d97`, published the terminal task/worker/gates and Central appended
+`mission.failed`. The final Central projection is sequence `12`, status `failed`, one `done` task, one `completed`
+worker and exact gates `tests=passed`, `review=failed`, `cleanup=passed`. Target branch/PR lookup is empty and no model
+process remains. The final timer was disabled/inactive.
+
+One bootstrap defect was observed: the installed timer still used `OnBootSec`, so enabling it long after the user
+manager boot produced `active (elapsed)` with no next trigger; Codex started the first recovery service tick once.
+PR #209 replaced that condition with `OnActiveSec=1min`. Live post-install verification then showed a future first
+trigger immediately after `enable --now`; the timer was disabled before that verification trigger fired.
+
 ## Failure recovery and cleanup
 
 The original coordinator saved the final review files but raised before updating `delivery-state.json`. Because the
@@ -103,10 +143,10 @@ archived and their active runs reclaimed. Both timers are disabled/inactive, dis
 are absent, and target PR lookup is empty. The current Central projections are sequence `7`, status `failed`, stage
 `testing`, progress `50%`; projection IDs are `825d56543d2fb5d0` and `9232b99540b6e45f`.
 
-One failure-path gap remains visible: Central's embedded task projections still say `running` although the native
-tasks are archived. The rejection path does not yet publish a final rejected gate/task snapshot, close the Central
-mission locally, or perform evidence-driven cleanup by itself. Manual cleanup was performed by Codex, not the owner,
-but this is not the Product Operating Contract's autonomous terminal path.
+Those historical gaps are closed for attempt 3. Two observation limitations remain: Central exposes only the generic
+error `Independent review rejected the candidate`, not the actionable Sol finding, and the failed projection retains
+stage `testing` at `50%` with an empty terminal list. Telegram delivery of this terminal update was not independently
+verified.
 
 ## Proven and not proven
 
@@ -118,15 +158,17 @@ Proven:
 - the approved post-commit crash recovers the same author checkpoint without a duplicate turn;
 - the review gate prevents PR creation for a green-tested but incorrect candidate;
 - final review exhaustion no longer causes unbounded model retries after PR #203;
+- a pre-commit test failure resumes through exactly one bounded author repair without manual state or target edits;
+- review rejection autonomously closes native and Central state and removes branch/worktrees without another model;
+- a newly enabled timer is now scheduled from activation rather than a historical boot;
 - the owner did not become a command, test or cleanup operator.
 
 Not proven:
 
 - one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
-- autonomous rejected-run closure, Central failure, projection reconciliation and cleanup;
-- Workspace/Telegram terminal consistency for a rejected delivery;
+- detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- authority for another live author/reviewer mission. The two approved attempts are exhausted.
+- authority for another live author/reviewer mission. The approved third attempt is exhausted.
 
 ## Gate
 
@@ -136,10 +178,12 @@ Not proven:
 | Crash/restart checkpoint | **PASS** |
 | Runtime model/sandbox attestation | **PASS** |
 | Independent quality rejection | **PASS (fail-closed)** |
+| Autonomous failure closure and cleanup | **PASS** |
+| Newly enabled timer self-arms | **PASS after #209** |
 | Successful target delivery | **FAIL / NOT DEMONSTRATED** |
 | A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
 
-Before another live canary, add a bounded failure terminal path that durably records review rejection, reconciles the
-native and Central task states, notifies the owner and cleans up without another model call. A new canary then needs a
-fresh owner approval for its model turns. The target contract must also pin content-sensitive cache invalidation,
-including an equal-length rewrite with preserved metadata.
+Before another live canary, obtain fresh owner approval for its model turns and revise the target contract around the
+cross-process deep-verification false positive. A successful PR/CI/merge/fresh-main post-verify route remains the A7.3
+completion gate. Separately, project the actionable review finding and a terminal stage/progress into Central and
+verify Telegram delivery; neither requires claiming that the success path is complete.
