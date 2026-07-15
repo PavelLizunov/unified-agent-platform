@@ -356,6 +356,32 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance.policy, tampered
                 )
 
+    def test_legacy_pr_head_is_migrated_before_ci_repair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("legacy-pr")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "legacy-pr",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pr_open",
+                "branch": "codex/legacy-pr",
+                "candidate_sha": "reviewed-v1-sha",
+                "pr_number": 39,
+            })
+
+            recovered = instance._load_state("legacy-pr", paths)
+
+            self.assertEqual("reviewed-v1-sha", recovered["pr_head_sha"])
+            self.assertEqual(
+                "reviewed-v1-sha",
+                coordinator.mission_adapter._read_json(paths["state"])["pr_head_sha"],
+            )
+
     def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "profile.json"
@@ -601,6 +627,47 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(39, state["pr_number"])
             self.assertFalse(any(command[0:3] == ["gh", "pr", "create"] for command in commands))
 
+    def test_repair_push_response_loss_converges_without_a_second_push(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps({
+                        "number": 39,
+                        "url": "https://example.invalid/pr/39",
+                        "state": "OPEN",
+                        "headRefName": "codex/fix",
+                        "headRefOid": "new-candidate",
+                    })
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "new-candidate",
+                "pr_number": 39,
+                "pr_head_sha": "old-candidate",
+            }
+
+            instance._pr(state, paths)
+
+            self.assertEqual("new-candidate", state["pr_head_sha"])
+            self.assertFalse(any(command[0] == "git" for command in commands))
+
     def test_merge_requeries_ci_and_stops_when_a_green_check_turns_failed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -614,8 +681,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 commands.append(command)
                 if command[1] == "api":
                     output = "candidate-sha\n"
-                elif "state,mergedAt,mergeCommit,url" in command:
-                    output = json.dumps({"state": "OPEN", "mergedAt": None, "mergeCommit": None})
+                elif "state,mergedAt,mergeCommit,url,headRefOid" in command:
+                    output = json.dumps({
+                        "state": "OPEN", "mergedAt": None, "mergeCommit": None,
+                        "headRefOid": "candidate-sha",
+                    })
                 elif "statusCheckRollup" in command:
                     output = json.dumps({
                         "statusCheckRollup": [{"name": "test", "conclusion": "FAILURE"}]
@@ -651,6 +721,39 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ["test"],
             ),
         )
+
+    def test_merge_rejects_a_merged_pr_with_a_different_head(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+
+            def runner(command, **_kwargs):
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps({
+                        "state": "MERGED",
+                        "mergedAt": "2026-07-15T00:00:00Z",
+                        "mergeCommit": {"oid": "merge-sha"},
+                        "url": "https://example.invalid/pr/39",
+                        "headRefOid": "unreviewed-sha",
+                    })
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=output, stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {"candidate_sha": "reviewed-sha", "pr_number": 39}
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_pr_head"),
+                mock.patch.object(instance, "_wait_ci"),
+                mock.patch.object(instance, "_validate_review"),
+            ):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "merged state"):
+                    instance._merge(state)
 
     def test_ci_failure_is_checkpointed_and_escalates_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -813,8 +916,6 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 commands.append(command)
                 if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps(views.pop(0))
-                elif command[0:3] == ["gh", "pr", "close"]:
-                    output = ""
                 elif "ls-remote" in command:
                     output = remote_heads.pop(0)
                 elif "push" in command and "--delete" in command:
@@ -832,13 +933,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "candidate_sha": "candidate-sha",
                 "pr_head_sha": "candidate-sha",
             })
-            self.assertTrue(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
             deletion = next(command for command in commands if command[0] == "git" and "--delete" in command)
             self.assertIn(
                 "--force-with-lease=refs/heads/codex/fix:candidate-sha", deletion
             )
-            close = next(command for command in commands if command[0:3] == ["gh", "pr", "close"])
-            self.assertNotIn("--delete-branch", close)
+            self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
 
             commands.clear()
             views.append({
@@ -869,8 +968,6 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 commands.append(command)
                 if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps(views.pop(0))
-                elif command[0:3] == ["gh", "pr", "close"]:
-                    output = ""
                 elif "ls-remote" in command:
                     output = "moved-sha\trefs/heads/codex/fix\n"
                 else:

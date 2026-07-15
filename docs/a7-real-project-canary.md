@@ -48,9 +48,9 @@ The approved change must:
 7. **Post-verify:** fetch a fresh default branch, prove the reviewed commit is an ancestor of the merge, and rerun the
    repository's required post-merge check.
 8. **Terminal and cleanup:** on the accepted path, remove the disposable worktree/branch and close the Kanban task
-   only after merge and post-verify. After final author-check, review rejection or required-CI failure, close any open
-   PR only when its number/head branch/exact pushed SHA match durable state, delete the remote branch with an exact
-   SHA lease, remove the same disposable state, durably close
+   only after merge and post-verify. After final author-check, review rejection or required-CI failure, verify the
+   bound PR number/head branch/exact pushed SHA, lease-delete only that unchanged branch, require GitHub-confirmed PR
+   closure without an unconditional close call, remove the same disposable state, durably close
    the native task with bounded failure gates, and let Central Hermes append `mission.failed`; that
    failure closure does not satisfy the successful-delivery gate. Preserve bounded evidence, not raw secrets or model
    output. Only after the matching success or failure evidence is durable may Central Hermes, never the build-1

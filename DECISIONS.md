@@ -511,7 +511,8 @@
   `openai-autonomy-v2` считает независимый review rejection и required-CI failure одним quality-failure signal:
   после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
   счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. После трёх циклов он
-  закрывает только PR с совпадающими durable branch/SHA, удаляет disposable state и завершает mission честным failure.
+  lease-защищённо удаляет только совпадающую durable branch/SHA, требует подтверждённого GitHub закрытия связанного
+  PR, удаляет disposable state и завершает mission честным failure; безусловный PR-close запрещён.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой

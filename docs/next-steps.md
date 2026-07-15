@@ -209,8 +209,9 @@ not add an application service, workflow engine or mission database.
    fail-closed `openai-autonomy-v1` decision and atomically migrated the stopped profile to schema v3/three cycles.
    Before another canary, land and install `openai-autonomy-v2`: independent-review or required-CI failure must
    durably select the next OpenAI route and repair the same PR. The durable PR number/head may not be rebound;
-   CI persistence is bounded to name/outcome; any final failure closes the exact prior PR and deletes its branch only
-   with an exact SHA lease. Compatible v1 in-progress route evidence remains valid under v2 recovery. Also
+   CI persistence is bounded to name/outcome; any final failure deletes only the exact prior branch with an exact SHA
+   lease and then requires GitHub-confirmed closure of the bound PR, without an unconditional close call. Compatible
+   v1 in-progress route/PR-head evidence and a lost repair-push response recover automatically. Also
    behaviorally cover a differently named custom
    executable and project the actionable
    finding/terminal stage and verify Telegram
