@@ -51,6 +51,13 @@ _DELIVERY_POLICY_FIELDS = {
     "escalated_prior_quality_failures_at", "complex_flags", "owner_gate_flags", "routes",
 }
 _DELIVERY_SIGNAL_FIELDS = {"schema_version", "changed_files", "prior_quality_failures", "flags"}
+_DELIVERY_POLICY_FIELDS_V1 = {
+    "policy_id", "complex_changed_files_at", "complex_prior_review_rejections_at",
+    "escalated_prior_review_rejections_at", "complex_flags", "owner_gate_flags", "routes",
+}
+_DELIVERY_SIGNAL_FIELDS_V1 = {
+    "schema_version", "changed_files", "prior_review_rejections", "flags",
+}
 _DELIVERY_ROUTE_FIELDS = {"task_class", "risk", "standing_approved", "author", "reviewer"}
 _DELIVERY_ACTOR_FIELDS = {"engine", "model", "reasoning_effort"}
 _REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
@@ -102,9 +109,11 @@ def _delivery_actor(value: Any, where: str) -> dict[str, str]:
     return result
 
 
-def choose_delivery_route(
+def _choose_delivery_route(
     policy: dict[str, Any],
     signals: dict[str, Any],
+    *,
+    policy_id: str,
 ) -> dict[str, Any]:
     """Choose a deterministic repo-contract route without invoking a model."""
     if (
@@ -121,12 +130,19 @@ def choose_delivery_route(
         or codex.get("requires_local_permission") is True
     ):
         raise ContractError("policy.engines.codex: unexpected delivery-route boundary")
+    legacy = policy_id == "openai-autonomy-v1"
+    if policy_id not in {"openai-autonomy-v1", "openai-autonomy-v2"}:
+        raise ContractError("delivery_model_policy.policy_id: unsupported policy")
     config = _closed_fields(
-        policy.get("delivery_model_policy"), _DELIVERY_POLICY_FIELDS, "delivery_model_policy"
+        policy.get("delivery_model_policy"),
+        _DELIVERY_POLICY_FIELDS_V1 if legacy else _DELIVERY_POLICY_FIELDS,
+        "delivery_model_policy",
     )
-    if config.get("policy_id") != "openai-autonomy-v2":
-        raise ContractError("delivery_model_policy.policy_id: expected openai-autonomy-v2")
-    inputs = _closed_fields(signals, _DELIVERY_SIGNAL_FIELDS, "signals")
+    if config.get("policy_id") != policy_id:
+        raise ContractError(f"delivery_model_policy.policy_id: expected {policy_id}")
+    inputs = _closed_fields(
+        signals, _DELIVERY_SIGNAL_FIELDS_V1 if legacy else _DELIVERY_SIGNAL_FIELDS, "signals"
+    )
     if (
         isinstance(inputs["schema_version"], bool)
         or not isinstance(inputs["schema_version"], int)
@@ -134,9 +150,8 @@ def choose_delivery_route(
     ):
         raise ContractError("signals.schema_version: expected 1")
     changed_files = _nonnegative_int(inputs["changed_files"], "signals.changed_files")
-    prior_failures = _nonnegative_int(
-        inputs["prior_quality_failures"], "signals.prior_quality_failures"
-    )
+    failure_field = "prior_review_rejections" if legacy else "prior_quality_failures"
+    prior_failures = _nonnegative_int(inputs[failure_field], f"signals.{failure_field}")
     if (
         not isinstance(inputs["flags"], list)
         or not all(isinstance(flag, str) and flag for flag in inputs["flags"])
@@ -170,13 +185,18 @@ def choose_delivery_route(
         config["complex_changed_files_at"],
         "delivery_model_policy.complex_changed_files_at",
     )
+    complex_failure_field = (
+        "complex_prior_review_rejections_at" if legacy else "complex_prior_quality_failures_at"
+    )
+    escalated_failure_field = (
+        "escalated_prior_review_rejections_at"
+        if legacy else "escalated_prior_quality_failures_at"
+    )
     complex_failures_at = _nonnegative_int(
-        config["complex_prior_quality_failures_at"],
-        "delivery_model_policy.complex_prior_quality_failures_at",
+        config[complex_failure_field], f"delivery_model_policy.{complex_failure_field}"
     )
     escalated_failures_at = _nonnegative_int(
-        config["escalated_prior_quality_failures_at"],
-        "delivery_model_policy.escalated_prior_quality_failures_at",
+        config[escalated_failure_field], f"delivery_model_policy.{escalated_failure_field}"
     )
     if not 0 < complex_failures_at < escalated_failures_at:
         raise ContractError("delivery_model_policy: quality-failure thresholds must increase")
@@ -186,7 +206,7 @@ def choose_delivery_route(
     owner_matches = sorted(flags & owner_flags)
     reasons: list[str]
     if prior_failures >= escalated_failures_at:
-        reasons = [f"prior_quality_failures>={escalated_failures_at}"]
+        reasons = [f"{failure_field}>={escalated_failures_at}"]
         route_name = "escalated"
     else:
         reasons = []
@@ -195,7 +215,7 @@ def choose_delivery_route(
         if changed_files >= complex_files_at:
             reasons.append(f"changed_files>={complex_files_at}")
         if prior_failures >= complex_failures_at:
-            reasons.append(f"prior_quality_failures>={complex_failures_at}")
+            reasons.append(f"{failure_field}>={complex_failures_at}")
         route_name = "complex" if reasons else "standard"
         if not reasons:
             reasons.append("default:standard")
@@ -234,7 +254,7 @@ def choose_delivery_route(
     canonical_signals = {
         "schema_version": 1,
         "changed_files": changed_files,
-        "prior_quality_failures": prior_failures,
+        failure_field: prior_failures,
         "flags": sorted(flags),
     }
     policy_sha256 = hashlib.sha256(
@@ -266,6 +286,63 @@ def choose_delivery_route(
         "status": "ready", **decision, "author": resolved["author"],
         "reviewer": resolved["reviewer"], "review_mode": "same_provider_independent",
     }
+
+
+def choose_delivery_route(
+    policy: dict[str, Any], signals: dict[str, Any]
+) -> dict[str, Any]:
+    """Choose the current deterministic repo-contract route."""
+    return _choose_delivery_route(policy, signals, policy_id="openai-autonomy-v2")
+
+
+def _legacy_delivery_policy(policy: dict[str, Any]) -> dict[str, Any]:
+    legacy = json.loads(json.dumps(policy))
+    config = _closed_fields(
+        legacy.get("delivery_model_policy"), _DELIVERY_POLICY_FIELDS, "delivery_model_policy"
+    )
+    if config.get("policy_id") != "openai-autonomy-v2":
+        raise ContractError("legacy route recovery requires the current v2 policy")
+    config["policy_id"] = "openai-autonomy-v1"
+    config["complex_prior_review_rejections_at"] = config.pop(
+        "complex_prior_quality_failures_at"
+    )
+    config["escalated_prior_review_rejections_at"] = config.pop(
+        "escalated_prior_quality_failures_at"
+    )
+    return legacy
+
+
+def validate_stored_delivery_route(
+    policy: dict[str, Any], decision: dict[str, Any]
+) -> dict[str, Any]:
+    """Validate a durable current or exact compatible v1 route; return its v2 equivalent."""
+    if not isinstance(decision, dict) or not isinstance(decision.get("signals"), dict):
+        raise ContractError("route decision with canonical signals required")
+    if decision.get("policy_id") == "openai-autonomy-v2":
+        current = choose_delivery_route(policy, decision["signals"])
+        if decision != current:
+            raise ContractError("route decision does not match the current fail-closed policy")
+        return current
+    if decision.get("policy_id") != "openai-autonomy-v1":
+        raise ContractError("durable route decision uses an unsupported policy")
+    legacy = _choose_delivery_route(
+        _legacy_delivery_policy(policy),
+        decision["signals"],
+        policy_id="openai-autonomy-v1",
+    )
+    if decision != legacy:
+        raise ContractError("legacy route decision does not match the exact v1 policy")
+    signals = decision["signals"]
+    current = choose_delivery_route(policy, {
+        "schema_version": signals["schema_version"],
+        "changed_files": signals["changed_files"],
+        "prior_quality_failures": signals["prior_review_rejections"],
+        "flags": signals["flags"],
+    })
+    compatible = ("status", "route", "task_class", "risk", "author", "reviewer", "review_mode")
+    if any(decision.get(field) != current.get(field) for field in compatible):
+        raise ContractError("legacy route is not execution-compatible with the current policy")
+    return current
 
 
 def _validate_checks(value: Any, where: str) -> None:
@@ -337,11 +414,10 @@ def validate_review(
     current_head: str,
     ci_green: bool,
 ) -> None:
-    if not isinstance(route_decision, dict) or not isinstance(route_decision.get("signals"), dict):
-        raise ContractError("route decision with canonical signals required")
-    expected_decision = choose_delivery_route(policy, route_decision["signals"])
-    if route_decision != expected_decision or expected_decision.get("status") != "ready":
-        raise ContractError("route decision does not match the current fail-closed policy")
+    current_decision = validate_stored_delivery_route(policy, route_decision)
+    if current_decision.get("status") != "ready":
+        raise ContractError("route decision is not ready")
+    expected_decision = route_decision
     if summary.get("schema_version") != 1 or verification.get("schema_version") != 1:
         raise ContractError("summary and verification schema_version must be 1")
     if _required_text(summary, "repo", "summary") != expected_repo:

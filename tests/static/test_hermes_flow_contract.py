@@ -163,6 +163,34 @@ class FlowContractTests(unittest.TestCase):
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
             )
 
+    def test_exact_v1_review_artifacts_remain_valid_during_v2_recovery(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        legacy = flow._choose_delivery_route(
+            flow._legacy_delivery_policy(self.policy),
+            {
+                "schema_version": 1,
+                "changed_files": 1,
+                "prior_review_rejections": 0,
+                "flags": [],
+            },
+            policy_id="openai-autonomy-v1",
+        )
+        summary["route_decision_id"] = legacy["decision_id"]
+        verification["route_decision_id"] = legacy["decision_id"]
+
+        flow.validate_review(
+            summary,
+            verification,
+            telemetry(summary, "author", "workspace-write"),
+            telemetry(verification, "reviewer", "read-only"),
+            legacy,
+            self.policy,
+            expected_repo=summary["repo"],
+            current_head="aaa",
+            ci_green=True,
+        )
+
     def test_delivery_policy_uses_the_approved_standard_route(self):
         decision = flow.choose_delivery_route(
             self.policy,

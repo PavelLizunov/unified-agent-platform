@@ -66,8 +66,10 @@ Last updated: 2026-07-15
   Claude, local inference and GPU are outside this route. PR #216 installed `openai-autonomy-v1` and atomically
   migrated the stopped build-1 profile to schema v3/three cycles. Current source `openai-autonomy-v2` additionally
   treats independent-review and required-CI failures as durable quality failures: the next tick automatically raises
-  the OpenAI route and repairs the same PR; after the final cycle it closes only the exact durable PR/branch/SHA,
-  cleans disposable state and records terminal failure. This v2 revision still requires merge/install verification;
+  the OpenAI route and repairs the same durably bound PR. Both successful and failed CI retain only bounded
+  name/outcome metadata. Final failure closes every previously opened PR only after exact number/branch/head checks
+  and deletes its branch with an exact Git lease; compatible in-progress v1 route attestations remain recoverable.
+  It then cleans disposable state and records terminal failure. This v2 revision still requires merge/install verification;
   no seventh canary or successful autonomous delivery is claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,

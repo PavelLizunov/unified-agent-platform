@@ -88,9 +88,11 @@ requested. Luna/Sol/Terra selection and ordinary spend require no confirmation; 
 
 A failed required CI check is a normal autonomous repair signal. The coordinator persists only bounded check
 name/outcome metadata, increments the durable quality-failure count, selects the next route, reruns the author and
-independent exact-SHA review, pushes the new candidate to the same PR and waits again. It never sends raw CI logs to a
-model. If the third cycle still fails, it verifies the PR number, head branch and exact candidate SHA, closes that
-disposable PR, removes its remote/local branch and worktrees, and publishes the terminal failure contract.
+independent exact-SHA review, verifies the previously bound PR number/branch/head before the repair push, pushes the
+new candidate to that same PR and verifies the new head. It never sends raw CI logs to a model. If the third cycle
+still fails, every failure kind closes the exact previously opened PR; remote deletion uses an exact-SHA Git lease
+and refuses a moved branch. Compatible exact v1 route decisions remain usable for their in-progress cycle; new cycles
+use v2. The coordinator then removes local worktrees and publishes the terminal failure contract.
 
 ## 2. Repository guard
 
@@ -294,7 +296,9 @@ Use a separate disposable repository. Required behavioral evidence:
 - author commit after `accept` makes review stale;
 - same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
 - repeated review or required-CI failure automatically escalates the OpenAI route and reuses the same PR;
-- final CI failure closes only the exact durable PR/branch/SHA and converges to cleanup plus terminal failure;
+- successful/failed CI state contains only bounded name/outcome metadata;
+- any final failure closes only the exact durable PR/branch/SHA and lease-deletes the unchanged remote branch;
+- an exact compatible v1 in-progress decision resumes under v2 while a tampered decision fails closed;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.
 

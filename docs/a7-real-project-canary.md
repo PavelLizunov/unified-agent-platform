@@ -11,7 +11,8 @@ independent rejection and native/Central cleanup without a target PR. The coordi
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
 owner record. PR #216 installed deterministic `openai-autonomy-v1` plus the atomic schema-v3/three-cycle profile.
 The next exact revision must install `openai-autonomy-v2`, which durably escalates after independent-review or
-required-CI failure and repairs the same PR without owner intervention.
+required-CI failure and repairs the same durably bound PR without owner intervention. It preserves only bounded CI
+name/outcome metadata, accepts exact compatible v1 attestations for an in-progress cycle, and refuses PR rebinding.
 
 No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
 outside the standing authority.
@@ -48,7 +49,8 @@ The approved change must:
    repository's required post-merge check.
 8. **Terminal and cleanup:** on the accepted path, remove the disposable worktree/branch and close the Kanban task
    only after merge and post-verify. After final author-check, review rejection or required-CI failure, close any open
-   PR only when its number/head branch/exact SHA match durable state, remove the same disposable state, durably close
+   PR only when its number/head branch/exact pushed SHA match durable state, delete the remote branch with an exact
+   SHA lease, remove the same disposable state, durably close
    the native task with bounded failure gates, and let Central Hermes append `mission.failed`; that
    failure closure does not satisfy the successful-delivery gate. Preserve bounded evidence, not raw secrets or model
    output. Only after the matching success or failure evidence is durable may Central Hermes, never the build-1
