@@ -228,7 +228,7 @@ class MissionAdapterTests(unittest.TestCase):
             nonlocal active_created
             commands.append(command)
             action = command[command.index("central") + 1]
-            active = "--initial-status" in command and command[command.index("--initial-status") + 1] == "ready"
+            active = "--initial-status" in command and command[command.index("--initial-status") + 1] == "running"
             active_created = active_created or active
             return subprocess.CompletedProcess(
                 command, 0,
@@ -273,7 +273,7 @@ class MissionAdapterTests(unittest.TestCase):
             assignee="approved-profile", workspace="worktree:/tmp/repo",
         )
         active_command = next(command for command in reversed(commands) if "--initial-status" in command)
-        self.assertEqual("ready", active_command[active_command.index("--initial-status") + 1])
+        self.assertEqual("running", active_command[active_command.index("--initial-status") + 1])
 
     def test_worker_cannot_publish_terminal_mission_event(self):
         with self.assertRaisesRegex(adapter.AdapterError, "not allowed"):

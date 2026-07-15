@@ -125,7 +125,9 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
-            "--initial-status", "ready" if allow_dispatch else "blocked",
+            # Pinned Hermes v0.18.0 exposes ``running`` as the create-time
+            # spelling for an atomically persisted, unclaimed ``ready`` card.
+            "--initial-status", "running" if allow_dispatch else "blocked",
         ]
         if workspace:
             command.extend(["--workspace", workspace])
