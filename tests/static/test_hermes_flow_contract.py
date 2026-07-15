@@ -43,6 +43,31 @@ def artifact(engine_family, model, sha, *, reviewer=False):
     return base
 
 
+def telemetry(value, component, sandbox):
+    return {
+        "schema_version": 1,
+        "component": component,
+        "engine": "codex",
+        "engine_family": value["engine_family"],
+        "model": value["model"],
+        "model_attestation": "codex_rollout_turn_context",
+        "sandbox": sandbox,
+        "sandbox_attestation": "codex_rollout_turn_context",
+        "session_id": value["session_id"],
+        "status": "completed",
+    }
+
+
+def validate_review(summary, verification, **kwargs):
+    return flow.validate_review(
+        summary,
+        verification,
+        telemetry(summary, "author", "workspace-write"),
+        telemetry(verification, "reviewer", "read-only"),
+        **kwargs,
+    )
+
+
 class FlowContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -81,13 +106,13 @@ class FlowContractTests(unittest.TestCase):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
         verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
         with self.assertRaisesRegex(flow.ContractError, "stale review"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="bbb", ci_green=True
             )
         verification["reviewed_sha"] = "aaa"
         verification["engine_family"] = "openai"
         with self.assertRaisesRegex(flow.ContractError, "different engine families"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
 
@@ -96,23 +121,23 @@ class FlowContractTests(unittest.TestCase):
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
         verification["review_mode"] = "same_provider_degraded"
         with self.assertRaisesRegex(flow.ContractError, "different engine families"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
-        flow.validate_review(
+        validate_review(
             summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
             allow_same_provider_review=True,
         )
         verification["model"] = summary["model"]
         with self.assertRaisesRegex(flow.ContractError, "different exact models"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
                 allow_same_provider_review=True,
             )
         verification["model"] = "gpt-5.6-sol"
         verification["session_id"] = summary["session_id"]
         with self.assertRaisesRegex(flow.ContractError, "different sessions"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
                 allow_same_provider_review=True,
             )
@@ -125,12 +150,34 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("review_blocked", routed["status"])
         self.assertIsNone(routed["reviewer"])
 
+    def test_review_gate_rejects_mismatched_runtime_attestation(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        verification["review_mode"] = "same_provider_degraded"
+        author = telemetry(summary, "author", "workspace-write")
+        reviewer = telemetry(verification, "reviewer", "read-only")
+        author["model"] = "gpt-5.6-sol"
+        with self.assertRaisesRegex(flow.ContractError, "runtime attestation mismatch"):
+            flow.validate_review(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
+        author = telemetry(summary, "author", "workspace-write")
+        reviewer["sandbox"] = "workspace-write"
+        with self.assertRaisesRegex(flow.ContractError, "expected 'read-only'"):
+            flow.validate_review(
+                summary, verification, author, reviewer,
+                expected_repo=summary["repo"], current_head="aaa", ci_green=True,
+                allow_same_provider_review=True,
+            )
+
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
         verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
         verification["review_cycle"] = 3
         with self.assertRaisesRegex(flow.ContractError, "review_cycle"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
         self.assertFalse(
@@ -148,18 +195,18 @@ class FlowContractTests(unittest.TestCase):
         summary = artifact("openai", "gpt-5.3-codex-spark", "aaa")
         verification = artifact("anthropic", "claude-sonnet-4-6", "aaa", reviewer=True)
         with self.assertRaisesRegex(flow.ContractError, "required CI"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=False
             )
         verification["verdict"] = "reject"
         with self.assertRaisesRegex(flow.ContractError, "verdict"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
         verification["verdict"] = "accept"
         verification["model"] = "default"
         with self.assertRaisesRegex(flow.ContractError, "exact model ID"):
-            flow.validate_review(
+            validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
             )
 

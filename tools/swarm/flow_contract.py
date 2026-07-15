@@ -185,9 +185,31 @@ def _exact_model(obj: dict[str, Any], where: str) -> str:
     return model
 
 
+def _validate_runtime_attestation(
+    artifact: dict[str, Any], telemetry: dict[str, Any], *, component: str, sandbox: str
+) -> None:
+    where = f"{component}_telemetry"
+    if telemetry.get("schema_version") != 1 or telemetry.get("status") != "completed":
+        raise ContractError(f"{where}: completed schema_version 1 telemetry required")
+    for key in ("engine_family", "model", "session_id"):
+        if telemetry.get(key) != artifact.get(key):
+            raise ContractError(f"{where}.{key}: runtime attestation mismatch")
+    if telemetry.get("component") != component:
+        raise ContractError(f"{where}.component: expected {component!r}")
+    if telemetry.get("sandbox") != sandbox:
+        raise ContractError(f"{where}.sandbox: expected {sandbox!r}")
+    if (
+        telemetry.get("model_attestation") != "codex_rollout_turn_context"
+        or telemetry.get("sandbox_attestation") != "codex_rollout_turn_context"
+    ):
+        raise ContractError(f"{where}: Codex rollout attestation required")
+
+
 def validate_review(
     summary: dict[str, Any],
     verification: dict[str, Any],
+    author_telemetry: dict[str, Any],
+    reviewer_telemetry: dict[str, Any],
     *,
     expected_repo: str,
     current_head: str,
@@ -209,6 +231,12 @@ def validate_review(
     reviewer_model = _exact_model(verification, "verification")
     author_session = _required_text(summary, "session_id", "summary")
     reviewer_session = _required_text(verification, "session_id", "verification")
+    _validate_runtime_attestation(
+        summary, author_telemetry, component="author", sandbox="workspace-write"
+    )
+    _validate_runtime_attestation(
+        verification, reviewer_telemetry, component="reviewer", sandbox="read-only"
+    )
     same_family = summary.get("engine_family") == verification.get("engine_family")
     review_mode = _required_text(verification, "review_mode", "verification")
     if same_family:
@@ -434,6 +462,8 @@ def main(argv: list[str] | None = None) -> int:
     review = sub.add_parser("validate-review")
     review.add_argument("--summary", required=True)
     review.add_argument("--verification", required=True)
+    review.add_argument("--author-telemetry", required=True)
+    review.add_argument("--reviewer-telemetry", required=True)
     review.add_argument("--repo", required=True)
     review.add_argument("--head", required=True)
     review.add_argument("--ci-green", action="store_true")
@@ -478,7 +508,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "validate-review":
             validate_review(
-                load_json(args.summary), load_json(args.verification), expected_repo=args.repo,
+                load_json(args.summary), load_json(args.verification),
+                load_json(args.author_telemetry), load_json(args.reviewer_telemetry),
+                expected_repo=args.repo,
                 current_head=args.head, ci_green=args.ci_green,
                 allow_same_provider_review=args.allow_same_provider_review,
             )
