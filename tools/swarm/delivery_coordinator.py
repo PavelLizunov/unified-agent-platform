@@ -29,6 +29,12 @@ class InjectedCrash(RuntimeError):
     pass
 
 
+class CIFailed(DeliveryError):
+    def __init__(self, message: str, checks: Any):
+        super().__init__(message)
+        self.checks = checks
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
@@ -46,6 +52,8 @@ _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
 _AUTHOR_CHECKS_RESULT = "author_checks_failed"
 _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
+_CI_RESULT = "ci_failed"
+_CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _MAX_CHECK_FAILURE_CHARS = 4000
 
 
@@ -299,9 +307,19 @@ class DeliveryCoordinator:
         return {
             "schema_version": 1,
             "changed_files": len(self.profile["required_files"]),
-            "prior_review_rejections": state.get("prior_review_rejections", 0),
+            "prior_quality_failures": self._quality_failures(state),
             "flags": self.profile["route_flags"],
         }
+
+    @staticmethod
+    def _quality_failures(state: dict[str, Any]) -> int:
+        values = [
+            state.get("prior_review_rejections", 0),
+            state.get("prior_ci_failures", 0),
+        ]
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in values):
+            raise DeliveryError("durable quality-failure counters are invalid")
+        return sum(values)
 
     def _ensure_route(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
@@ -311,7 +329,7 @@ class DeliveryCoordinator:
         )
         if decision.get("status") != "ready":
             raise DeliveryError("mission requires a capability outside the configured OpenAI policy")
-        key = str(state.get("prior_review_rejections", 0))
+        key = str(self._quality_failures(state))
         decisions = state.setdefault("route_decisions", {})
         if key in decisions and decisions[key] != decision:
             raise DeliveryError("routing policy changed during a durable mission cycle")
@@ -320,7 +338,7 @@ class DeliveryCoordinator:
         return decision
 
     def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
-        key = str(state.get("prior_review_rejections", 0))
+        key = str(self._quality_failures(state))
         decision = state.get("route_decisions", {}).get(key)
         if not isinstance(decision, dict) or decision.get("status") != "ready":
             raise DeliveryError("durable OpenAI route decision is missing")
@@ -388,6 +406,7 @@ class DeliveryCoordinator:
             ):
                 raise DeliveryError("delivery state identity mismatch")
             state.setdefault("prior_review_rejections", 0)
+            state.setdefault("prior_ci_failures", 0)
             state.setdefault("route_decisions", {})
             return state
         digest = hashlib.sha256(mission_id.encode()).hexdigest()[:12]
@@ -399,6 +418,7 @@ class DeliveryCoordinator:
             "branch": f"{self.profile['branch_prefix']}-{digest}",
             "review_cycle": 1,
             "prior_review_rejections": 0,
+            "prior_ci_failures": 0,
             "route_decisions": {},
             "crash_injected": False,
         }
@@ -569,6 +589,17 @@ class DeliveryCoordinator:
     def _failure_contract(
         self, state: dict[str, Any]
     ) -> tuple[str, str, list[dict[str, Any]]]:
+        if state.get("failure_kind") == "ci":
+            return (
+                _CI_RESULT,
+                _CI_SUMMARY,
+                [
+                    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "failed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+                ],
+            )
         if state.get("failure_kind") == "author_checks":
             return (
                 _AUTHOR_CHECKS_RESULT,
@@ -662,7 +693,9 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
-        if state["phase"] in {"review_rejected", "author_checks_failed"}:
+        if state["phase"] in {"review_rejected", "author_checks_failed", "ci_failed"}:
+            if state.get("failure_kind") == "ci":
+                self._close_failed_pr(state)
             self._cleanup(state, paths)
             state["phase"] = "rejection_cleaned"
             self._save(paths, state)
@@ -1097,7 +1130,7 @@ class DeliveryCoordinator:
                 state["ci_checks"] = checks
                 return
             if decision == "failed":
-                raise DeliveryError("PR CI failed or did not satisfy the exact required checks")
+                raise CIFailed("PR CI failed or did not satisfy the exact required checks", checks)
             time.sleep(10)
         raise DeliveryError("PR CI timed out")
 
@@ -1112,9 +1145,75 @@ class DeliveryCoordinator:
 
     def _require_ci_green_now(self, state: dict[str, Any]) -> None:
         checks = self._ci_rollup(state)
-        if _ci_decision(checks, self.profile["required_ci_checks"]) != "passed":
+        decision = _ci_decision(checks, self.profile["required_ci_checks"])
+        if decision == "failed":
+            raise CIFailed("required PR CI failed at the merge boundary", checks)
+        if decision != "passed":
             raise DeliveryError("required PR CI is not green at the merge boundary")
         state["ci_checks"] = checks
+
+    def _record_ci_failure(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], error: CIFailed
+    ) -> None:
+        checks = error.checks if isinstance(error.checks, list) else []
+        summaries = []
+        for item in checks[:50]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("context") or "unknown")[:200]
+            outcome = str(
+                item.get("conclusion") or item.get("state") or item.get("status") or "unknown"
+            )[:100]
+            summaries.append({"name": name, "outcome": outcome})
+        details = ", ".join(f"{item['name']}={item['outcome']}" for item in summaries)
+        finding = f"{error}: {details or 'invalid check rollup'}"
+        self._quality_failures(state)
+        state["ci_checks"] = summaries
+        state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
+        if state["review_cycle"] < self.profile["max_review_cycles"]:
+            state.update(
+                phase="needs_fix",
+                review_cycle=state["review_cycle"] + 1,
+                review_findings=[finding[:_MAX_CHECK_FAILURE_CHARS]],
+            )
+        else:
+            state.update(
+                phase="ci_failed",
+                failure_kind="ci",
+                failure_error=finding[:_MAX_CHECK_FAILURE_CHARS],
+            )
+        self._save(paths, state)
+
+    def _close_failed_pr(self, state: dict[str, Any]) -> None:
+        fields = "state,headRefName,headRefOid"
+
+        def inspect() -> dict[str, Any]:
+            return json.loads(self._run(
+                [
+                    self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
+                    "--repo", self.profile["repo"], "--json", fields,
+                ]
+            ).stdout)
+
+        info = inspect()
+        if (
+            info.get("headRefName") != state["branch"]
+            or info.get("headRefOid") != state["candidate_sha"]
+        ):
+            raise DeliveryError("failed PR identity no longer matches the durable candidate")
+        if info.get("state") == "OPEN":
+            self._run(
+                [
+                    self.profile["gh_bin"], "pr", "close", str(state["pr_number"]),
+                    "--repo", self.profile["repo"], "--delete-branch",
+                ]
+            )
+            info = inspect()
+        if info.get("state") != "CLOSED":
+            raise DeliveryError("failed PR did not reach closed state")
+        source = pathlib.Path(self.profile["source_checkout"])
+        if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+            self._git(source, "push", "origin", "--delete", state["branch"])
 
     def _assert_pr_head(self, state: dict[str, Any]) -> None:
         head = self._run(
@@ -1252,7 +1351,7 @@ class DeliveryCoordinator:
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
             if state["phase"] in {
-                "review_rejected", "author_checks_failed", "rejection_cleaned",
+                "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
                 "rejection_task_completed",
             }:
                 return self._finish_rejection(state, paths)
@@ -1325,19 +1424,25 @@ class DeliveryCoordinator:
                 self._pr(state, paths)
                 self._publish_stage(state, "delivering", 80)
 
-            if state["phase"] == "pr_open":
-                self._assert_claim(state)
-                self._wait_ci(state)
-                self._validate_review(state)
-                state["phase"] = "ci_green"
-                self._save(paths, state)
+            try:
+                if state["phase"] == "pr_open":
+                    self._assert_claim(state)
+                    self._wait_ci(state)
+                    self._validate_review(state)
+                    state["phase"] = "ci_green"
+                    self._save(paths, state)
 
-            if state["phase"] == "ci_green":
-                self._assert_claim(state)
-                self._merge(state)
-                state["phase"] = "merged"
-                self._save(paths, state)
-                self._publish_stage(state, "verifying", 90)
+                if state["phase"] == "ci_green":
+                    self._assert_claim(state)
+                    self._merge(state)
+                    state["phase"] = "merged"
+                    self._save(paths, state)
+                    self._publish_stage(state, "verifying", 90)
+            except CIFailed as error:
+                self._record_ci_failure(state, paths, error)
+                if state["phase"] == "ci_failed":
+                    return self._finish_rejection(state, paths)
+                return {"action": state["phase"], "mission_id": mission_id, "state": state}
 
             if state["phase"] == "merged":
                 self._assert_claim(state)

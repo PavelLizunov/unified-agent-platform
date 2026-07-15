@@ -53,14 +53,15 @@ This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` s
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while
 Codex CLI provides the separately sandboxed author/reviewer executions.
 
-`openai-autonomy-v1` is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
-record with the allowed-file count, prior independent-review rejections for the same task and explicit risk flags:
+`openai-autonomy-v2` is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
+record with the allowed-file count, prior independent-review/required-CI quality failures for the same task and
+explicit risk flags:
 
 ```json
 {
   "schema_version": 1,
   "changed_files": 6,
-  "prior_review_rejections": 2,
+  "prior_quality_failures": 2,
   "flags": ["cross_process", "durable_state", "multi_platform"]
 }
 ```
@@ -78,12 +79,18 @@ The installed policy has three standing-approved outcomes:
 
 - `standard`: Luna author (`medium`) / Sol reviewer (`low`);
 - `complex`: Sol author / Terra reviewer at `xhigh`;
-- `escalated`: two prior review rejections select Terra author / Sol reviewer at `xhigh`.
+- `escalated`: two prior review or required-CI failures select Terra author / Sol reviewer at `xhigh`.
 
 Unknown flags fail closed. Local/GPU, destructive, architecture, credential/external-authority and new-provider flags
 can never become runnable through this command. Canonical signals, the full policy SHA-256 and exact model/effort
 route are bound into `decision_id`. Exit 0 means the OpenAI route is ready; exit 3 means owner-gated capability was
 requested. Luna/Sol/Terra selection and ordinary spend require no confirmation; Claude/local/GPU are not fallback.
+
+A failed required CI check is a normal autonomous repair signal. The coordinator persists only bounded check
+name/outcome metadata, increments the durable quality-failure count, selects the next route, reruns the author and
+independent exact-SHA review, pushes the new candidate to the same PR and waits again. It never sends raw CI logs to a
+model. If the third cycle still fails, it verifies the PR number, head branch and exact candidate SHA, closes that
+disposable PR, removes its remote/local branch and worktrees, and publishes the terminal failure contract.
 
 ## 2. Repository guard
 
@@ -286,7 +293,8 @@ Use a separate disposable repository. Required behavioral evidence:
 - wrong remote is rejected before write;
 - author commit after `accept` makes review stale;
 - same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
-- repeated review rejection automatically escalates the OpenAI route;
+- repeated review or required-CI failure automatically escalates the OpenAI route and reuses the same PR;
+- final CI failure closes only the exact durable PR/branch/SHA and converges to cleanup plus terminal failure;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.
 

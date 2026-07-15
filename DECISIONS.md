@@ -508,6 +508,10 @@
   Платформа детерминированно выбирает сложность, reasoning effort, retry и escalation. Все reviewer runs используют
   отдельную read-only session, exact candidate SHA и runtime-derived model/sandbox attestation. Один OpenAI provider
   является принятой продуктовой политикой, а не degraded mode.
+  `openai-autonomy-v2` считает независимый review rejection и required-CI failure одним quality-failure signal:
+  после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
+  счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. После трёх циклов он
+  закрывает только PR с совпадающими durable branch/SHA, удаляет disposable state и завершает mission честным failure.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой
@@ -519,5 +523,6 @@
   автоматический fallback; semantic-router или новый workflow engine.
 - **Последствия:** `delivery_model_policy` является OpenAI-only и fail-closed для неизвестных/опасных capability;
   прежние quota-aware `route`/`quota-set` и Claude/local routes удалены из исполняемого Flow contract. A7 coordinator
-  обязан использовать `delivery-route`. ADR-028 superseded только в части model routing/review-mode; ADR-030 owner
-  gates уточнены этой ADR.
+  обязан использовать `delivery-route`. Raw CI logs не становятся durable prompt/state: сохраняются только bounded
+  check-name/outcome metadata, а author повторно запускает repo-contract gates. ADR-028 superseded только в части
+  model routing/review-mode; ADR-030 owner gates уточнены этой ADR.

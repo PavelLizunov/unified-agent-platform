@@ -33,8 +33,11 @@ not continue such work through a chain of `chat --resume` sessions.
    diff, runs checks, and produces `verification.json`; it never edits, commits, pushes, or merges.
 6. Validate `summary.json` and `verification.json` against the persisted canonical route decision, current HEAD and
    green required CI. No manual model/review waiver exists.
-7. At most three review/fix cycles so two independent rejections can reach the escalated route. Complete the root card only after merge, default-branch proof, remote/local branch
-   deletion, disposable worktree removal, and a green `terminal-check`.
+7. At most three quality/fix cycles. Independent review rejection or required-CI failure increments the same routing
+   signal, automatically escalates the next OpenAI route, and reuses the same PR. Persist only bounded CI
+   check-name/outcome metadata, never raw logs. After the final CI failure, close only the exact durable PR/branch/SHA,
+   clean disposable state and publish terminal failure. Complete a successful root card only after merge,
+   default-branch proof, remote/local branch deletion, disposable worktree removal, and a green `terminal-check`.
 8. When the task belongs to a central Hermes mission, use the installed `mission_adapter.py` ingress/sync boundary and
    preserve its `mission_id`/tenant. Never bypass its idempotency key. `--allow-dispatch` additionally requires the
    configured profile, an explicit assignee and a non-scratch workspace.

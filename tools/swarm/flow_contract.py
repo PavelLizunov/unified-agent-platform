@@ -47,10 +47,10 @@ def _parse_time(value: str | None) -> dt.datetime | None:
 
 
 _DELIVERY_POLICY_FIELDS = {
-    "policy_id", "complex_changed_files_at", "complex_prior_review_rejections_at",
-    "escalated_prior_review_rejections_at", "complex_flags", "owner_gate_flags", "routes",
+    "policy_id", "complex_changed_files_at", "complex_prior_quality_failures_at",
+    "escalated_prior_quality_failures_at", "complex_flags", "owner_gate_flags", "routes",
 }
-_DELIVERY_SIGNAL_FIELDS = {"schema_version", "changed_files", "prior_review_rejections", "flags"}
+_DELIVERY_SIGNAL_FIELDS = {"schema_version", "changed_files", "prior_quality_failures", "flags"}
 _DELIVERY_ROUTE_FIELDS = {"task_class", "risk", "standing_approved", "author", "reviewer"}
 _DELIVERY_ACTOR_FIELDS = {"engine", "model", "reasoning_effort"}
 _REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
@@ -124,8 +124,8 @@ def choose_delivery_route(
     config = _closed_fields(
         policy.get("delivery_model_policy"), _DELIVERY_POLICY_FIELDS, "delivery_model_policy"
     )
-    if config.get("policy_id") != "openai-autonomy-v1":
-        raise ContractError("delivery_model_policy.policy_id: expected openai-autonomy-v1")
+    if config.get("policy_id") != "openai-autonomy-v2":
+        raise ContractError("delivery_model_policy.policy_id: expected openai-autonomy-v2")
     inputs = _closed_fields(signals, _DELIVERY_SIGNAL_FIELDS, "signals")
     if (
         isinstance(inputs["schema_version"], bool)
@@ -134,8 +134,8 @@ def choose_delivery_route(
     ):
         raise ContractError("signals.schema_version: expected 1")
     changed_files = _nonnegative_int(inputs["changed_files"], "signals.changed_files")
-    prior_rejections = _nonnegative_int(
-        inputs["prior_review_rejections"], "signals.prior_review_rejections"
+    prior_failures = _nonnegative_int(
+        inputs["prior_quality_failures"], "signals.prior_quality_failures"
     )
     if (
         not isinstance(inputs["flags"], list)
@@ -170,23 +170,23 @@ def choose_delivery_route(
         config["complex_changed_files_at"],
         "delivery_model_policy.complex_changed_files_at",
     )
-    complex_rejections_at = _nonnegative_int(
-        config["complex_prior_review_rejections_at"],
-        "delivery_model_policy.complex_prior_review_rejections_at",
+    complex_failures_at = _nonnegative_int(
+        config["complex_prior_quality_failures_at"],
+        "delivery_model_policy.complex_prior_quality_failures_at",
     )
-    escalated_rejections_at = _nonnegative_int(
-        config["escalated_prior_review_rejections_at"],
-        "delivery_model_policy.escalated_prior_review_rejections_at",
+    escalated_failures_at = _nonnegative_int(
+        config["escalated_prior_quality_failures_at"],
+        "delivery_model_policy.escalated_prior_quality_failures_at",
     )
-    if not 0 < complex_rejections_at < escalated_rejections_at:
-        raise ContractError("delivery_model_policy: rejection thresholds must increase from 1 or more")
+    if not 0 < complex_failures_at < escalated_failures_at:
+        raise ContractError("delivery_model_policy: quality-failure thresholds must increase")
     if complex_files_at < 1:
         raise ContractError("delivery_model_policy.complex_changed_files_at: expected 1 or more")
 
     owner_matches = sorted(flags & owner_flags)
     reasons: list[str]
-    if prior_rejections >= escalated_rejections_at:
-        reasons = [f"prior_review_rejections>={escalated_rejections_at}"]
+    if prior_failures >= escalated_failures_at:
+        reasons = [f"prior_quality_failures>={escalated_failures_at}"]
         route_name = "escalated"
     else:
         reasons = []
@@ -194,8 +194,8 @@ def choose_delivery_route(
         reasons.extend(f"flag:{flag}" for flag in complex_matches)
         if changed_files >= complex_files_at:
             reasons.append(f"changed_files>={complex_files_at}")
-        if prior_rejections >= complex_rejections_at:
-            reasons.append(f"prior_review_rejections>={complex_rejections_at}")
+        if prior_failures >= complex_failures_at:
+            reasons.append(f"prior_quality_failures>={complex_failures_at}")
         route_name = "complex" if reasons else "standard"
         if not reasons:
             reasons.append("default:standard")
@@ -234,7 +234,7 @@ def choose_delivery_route(
     canonical_signals = {
         "schema_version": 1,
         "changed_files": changed_files,
-        "prior_review_rejections": prior_rejections,
+        "prior_quality_failures": prior_failures,
         "flags": sorted(flags),
     }
     policy_sha256 = hashlib.sha256(

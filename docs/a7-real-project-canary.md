@@ -9,9 +9,9 @@ proved the same bounded crash recovery, one autonomous review repair, runtime-at
 independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 Before another canary, the target contract must cover a differently named custom executable from the durable runtime
-owner record. Route selection now has deterministic `openai-autonomy-v1`; the source coordinator consumes and
-persists it, and that exact revision plus the atomic schema-v3/three-cycle profile migration must be installed before
-the next canary.
+owner record. PR #216 installed deterministic `openai-autonomy-v1` plus the atomic schema-v3/three-cycle profile.
+The next exact revision must install `openai-autonomy-v2`, which durably escalates after independent-review or
+required-CI failure and repairs the same PR without owner intervention.
 
 No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
 outside the standing authority.
@@ -47,8 +47,9 @@ The approved change must:
 7. **Post-verify:** fetch a fresh default branch, prove the reviewed commit is an ancestor of the merge, and rerun the
    repository's required post-merge check.
 8. **Terminal and cleanup:** on the accepted path, remove the disposable worktree/branch and close the Kanban task
-   only after merge and post-verify. After final author-check or review rejection, remove the same disposable state,
-   durably close the native task with bounded failure gates, and let Central Hermes append `mission.failed`; that
+   only after merge and post-verify. After final author-check, review rejection or required-CI failure, close any open
+   PR only when its number/head branch/exact SHA match durable state, remove the same disposable state, durably close
+   the native task with bounded failure gates, and let Central Hermes append `mission.failed`; that
    failure closure does not satisfy the successful-delivery gate. Preserve bounded evidence, not raw secrets or model
    output. Only after the matching success or failure evidence is durable may Central Hermes, never the build-1
    producer, write the terminal mission state through its authenticated local authority path.

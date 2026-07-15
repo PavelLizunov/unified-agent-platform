@@ -218,6 +218,7 @@ class RejectionClient(FakeClient):
         if gates in (
             {"tests": "passed", "review": "failed", "cleanup": "passed"},
             {"tests": "failed", "cleanup": "passed"},
+            {"tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed"},
         ):
             self.mission["status"] = "failed"
 
@@ -467,7 +468,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 mock.patch.object(instance, "_wait_ci"),
                 mock.patch.object(instance, "_validate_review"),
             ):
-                with self.assertRaisesRegex(coordinator.DeliveryError, "not green"):
+                with self.assertRaisesRegex(coordinator.CIFailed, "merge boundary"):
                     instance._merge(state)
             self.assertFalse(any(command[1:3] == ["pr", "merge"] for command in commands))
         self.assertEqual(
@@ -480,6 +481,159 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ["test"],
             ),
         )
+
+    def test_ci_failure_is_checkpointed_and_escalates_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            client = FakeClient()
+            client.mission["tasks"] = [{"task_id": "task-1"}]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            state_root = root / "state"
+            instance = HermeticCoordinator(
+                approved, client, backend, state_root, counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pr_open",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "route_decisions": {},
+                "crash_injected": True,
+                "candidate_sha": "candidate-sha",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+                "pr_url": "https://example.invalid/pr/39",
+            })
+            checks = [{
+                "name": "test",
+                "conclusion": "FAILURE",
+                "detailsUrl": "https://example.invalid/raw-details",
+            }]
+            with mock.patch.object(
+                instance, "_wait_ci",
+                side_effect=coordinator.CIFailed("required CI failed", checks),
+            ):
+                result = instance.tick()
+
+            self.assertEqual("needs_fix", result["action"])
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(2, persisted["review_cycle"])
+            self.assertEqual(1, persisted["prior_ci_failures"])
+            self.assertEqual([{"name": "test", "outcome": "FAILURE"}], persisted["ci_checks"])
+            self.assertNotIn("detailsUrl", json.dumps(persisted))
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root
+            )
+            recovered = restarted._load_state("mission-a7-3", paths)
+            decision = restarted._ensure_route(recovered, paths)
+            self.assertEqual("complex", decision["route"])
+            self.assertEqual("gpt-5.6-sol", decision["author"]["model"])
+            self.assertEqual("gpt-5.6-terra", decision["reviewer"]["model"])
+            self.assertEqual(decision, recovered["route_decisions"]["1"])
+
+    def test_final_ci_failure_closes_pr_and_converges_to_terminal_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "ci_failed",
+                "failure_kind": "ci",
+                "failure_error": "test=FAILURE",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 3,
+                "crash_injected": True,
+                "candidate_sha": "candidate-sha",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+            })
+
+            with (
+                mock.patch.object(instance, "_close_failed_pr") as close,
+                mock.patch.object(instance, "_cleanup") as cleanup,
+            ):
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("ci_failed", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            close.assert_called_once()
+            cleanup.assert_called_once()
+            self.assertEqual(
+                instance._failure_contract(result["state"])[2],
+                backend.runs[0]["metadata"]["mission_events"],
+            )
+
+    def test_failed_pr_cleanup_is_bound_to_exact_branch_and_sha(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            commands = []
+            views = [
+                {"state": "OPEN", "headRefName": "codex/fix", "headRefOid": "candidate-sha"},
+                {"state": "CLOSED", "headRefName": "codex/fix", "headRefOid": "candidate-sha"},
+            ]
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(views.pop(0))
+                elif command[0:3] == ["gh", "pr", "close"]:
+                    output = ""
+                elif "ls-remote" in command:
+                    output = "candidate-sha\trefs/heads/codex/fix\n"
+                elif "push" in command and "--delete" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            instance._close_failed_pr({
+                "pr_number": 39,
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+            })
+            self.assertTrue(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
+            self.assertTrue(any("--delete" in command for command in commands if command[0] == "git"))
+
+            commands.clear()
+            views.append({
+                "state": "OPEN", "headRefName": "codex/fix", "headRefOid": "different-sha"
+            })
+            with self.assertRaisesRegex(coordinator.DeliveryError, "identity"):
+                instance._close_failed_pr({
+                    "pr_number": 39,
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                })
+            self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
+            self.assertFalse(any(command[0] == "git" for command in commands))
 
     def test_reserved_assignee_must_not_resolve_to_a_worker_profile(self):
         with tempfile.TemporaryDirectory() as directory:
