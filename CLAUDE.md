@@ -191,11 +191,13 @@ Good next tasks that do not require redesign:
    and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
 3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
    resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
-4. A7.1/A7.2 are complete through one live non-activating blocked handoff. The poll is still manually invoked; the
-   next milestone is A7.3 periodic intake plus owner-approved activation/delivery. Reuse MissionStore,
-   `mission_adapter.py` and native Kanban; do not add a new control plane or dashboard.
-5. The A6.4/A7.2 approvals do not carry forward. No model/runtime change, Qwen/local inference/GPU, Claude, swarm,
-   Spark Runner, live restart/deploy or destructive test is implied.
+4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator is installed, but both owner-approved VPNRouter
+   canaries failed closed at independent review before target PR creation. PR #203 prevents repeated model calls after
+   final review exhaustion. Next close the rejected native run, Central projection/mission, owner notification and
+   cleanup autonomously; do not add a new control plane or dashboard. Evidence:
+   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+5. The two A7.3 live model attempts are exhausted. No additional model/runtime turn, Qwen/local inference/GPU,
+   Claude, swarm, Spark Runner, live cluster restart/deploy or destructive test is implied without a new owner gate.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret
