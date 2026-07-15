@@ -41,7 +41,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v23-atomic-mission-block"
+        "v24-a7-3-foundation"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]

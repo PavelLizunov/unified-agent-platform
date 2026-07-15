@@ -24,8 +24,10 @@ not continue such work through a chain of `chat --resume` sessions.
    local model unless the owner explicitly approved that exact mission.
 4. Run the author with the exact model returned by the route. The author edits/tests only; the orchestrator stages
    an explicit allowlist and creates the commit after re-running checks.
-5. Run the reviewer in a separate session with `codex exec --sandbox read-only`. Summarize each Codex JSONL together
-   with its matching local rollout; runtime model and sandbox must match the approved route and role. For
+5. Run the reviewer in a separate session with `codex exec --sandbox read-only`. Immediately before it starts, create
+   an `attest-source` artifact and include its printed marker once in the review prompt. Summarize each Codex JSONL
+   together with its matching local rollout and source artifact; runtime model, sandbox, cwd and source SHA must match
+   the approved route and role. For
    `same_provider_degraded`, the exact reviewer model must differ from the author model. The reviewer reads the real
    diff, runs checks, and produces `verification.json`; it never edits, commits, pushes, or merges.
 6. Validate `summary.json` and `verification.json` against the current HEAD and green required CI. Use

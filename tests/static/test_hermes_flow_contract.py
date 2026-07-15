@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import hashlib
 import json
 import pathlib
 import subprocess
@@ -57,6 +58,11 @@ def telemetry(value, component, sandbox):
         "session_id": value["session_id"],
         "status": "completed",
         "head_sha": value["reviewed_sha" if component == "reviewer" else "head_sha"],
+        "tree_sha": "tree-sha",
+        "repo_attestation": (
+            "codex_rollout_prompt_sha256" if component == "reviewer" else "post_turn_clean_head"
+        ),
+        "source_attestation_sha256": "source-sha" if component == "reviewer" else None,
         "worktree_clean": True,
     }
 
@@ -249,6 +255,7 @@ class FlowContractTests(unittest.TestCase):
                 flow.guard_repo(repo, remote, "flow-test")
 
     def test_codex_telemetry_is_attributed_to_exact_session_and_model(self):
+        worktree = pathlib.Path(".").resolve()
         events = [
             {"type": "thread.started", "thread_id": "session-1"},
             {"type": "item.completed", "item": {"type": "file_change", "status": "completed"}},
@@ -261,6 +268,7 @@ class FlowContractTests(unittest.TestCase):
             {"type": "session_meta", "payload": {
                 "id": "session-1", "session_id": "session-1",
                 "model_provider": "openai", "cli_version": "0.144.3",
+                "cwd": str(worktree), "timestamp": "2026-07-15T08:00:00Z",
             }},
             {"type": "turn_context", "payload": {
                 "model": "gpt-5.3-codex-spark",
@@ -291,7 +299,7 @@ class FlowContractTests(unittest.TestCase):
                     )
                 with self.assertRaisesRegex(flow.ContractError, "runtime sandbox mismatch"):
                     flow.summarize_codex_events(
-                        path, component="reviewer", model="gpt-5.3-codex-spark",
+                        path, component="author", model="gpt-5.3-codex-spark",
                         rollout=rollout, sandbox="read-only", worktree=".", head="aaa",
                     )
             rerouted_events = events[:-1] + [
@@ -320,8 +328,79 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("openai", result["model_provider"])
         self.assertEqual("workspace-write", result["sandbox"])
         self.assertEqual("codex_rollout_turn_context", result["model_attestation"])
+        self.assertEqual("post_turn_clean_head", result["repo_attestation"])
         self.assertEqual({"file_change": 1, "command_execution": 1}, result["tool_calls"])
         self.assertEqual(1, result["failed_commands"])
+
+    def test_reviewer_telemetry_is_bound_to_prompted_source_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            repo = root / "review"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test"], check=True)
+            subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+            (repo / "tracked.txt").write_text("review\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(repo), "add", "tracked.txt"], check=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "candidate"], check=True, capture_output=True)
+            head = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            source = flow.source_attestation(repo, head)
+            source["created_at"] = "2026-07-15T08:00:00+00:00"
+            unsigned = {key: value for key, value in source.items() if key != "sha256"}
+            source["sha256"] = hashlib.sha256(
+                json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            source_path = root / "source.json"
+            flow.write_json(source_path, source)
+            marker = f"UAP_SOURCE_ATTESTATION_SHA256={source['sha256']}"
+            events_path = root / "events.jsonl"
+            events_path.write_text(
+                "\n".join(json.dumps(event) for event in (
+                    {"type": "thread.started", "thread_id": "review-session"},
+                    {"type": "turn.completed", "usage": {}},
+                )) + "\n",
+                encoding="utf-8",
+            )
+            rollout_path = root / "rollout.jsonl"
+
+            def write_rollout(prompt):
+                rollout_path.write_text(
+                    "\n".join(json.dumps(event) for event in (
+                        {"type": "session_meta", "payload": {
+                            "id": "review-session", "session_id": "review-session",
+                            "model_provider": "openai", "cli_version": "0.144.3",
+                            "cwd": str(repo.resolve()), "timestamp": "2026-07-15T08:00:01Z",
+                        }},
+                        {"type": "response_item", "payload": {
+                            "type": "message", "role": "user",
+                            "content": [{"type": "input_text", "text": prompt}],
+                        }},
+                        {"type": "turn_context", "payload": {
+                            "model": "gpt-5.6-sol", "sandbox_policy": {"type": "read-only"},
+                        }},
+                    )) + "\n",
+                    encoding="utf-8",
+                )
+
+            write_rollout(f"Review exact candidate. {marker}")
+            result = flow.summarize_codex_events(
+                events_path, component="reviewer", model="gpt-5.6-sol",
+                rollout=rollout_path, sandbox="read-only", worktree=repo, head=head,
+                source_attestation_path=source_path,
+            )
+            self.assertEqual("codex_rollout_prompt_sha256", result["repo_attestation"])
+            self.assertEqual(source["tree_sha"], result["tree_sha"])
+
+            write_rollout("Review exact candidate without the binding marker.")
+            with self.assertRaisesRegex(flow.ContractError, "marker must appear exactly once"):
+                flow.summarize_codex_events(
+                    events_path, component="reviewer", model="gpt-5.6-sol",
+                    rollout=rollout_path, sandbox="read-only", worktree=repo, head=head,
+                    source_attestation_path=source_path,
+                )
 
     def test_repo_attestation_requires_clean_exact_head(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -337,7 +416,15 @@ class FlowContractTests(unittest.TestCase):
                 check=True, capture_output=True, text=True,
             ).stdout.strip()
             self.assertEqual(
-                {"head_sha": head, "worktree_clean": True},
+                {
+                    "worktree": str(repo.resolve()),
+                    "head_sha": head,
+                    "tree_sha": subprocess.run(
+                        ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"],
+                        check=True, capture_output=True, text=True,
+                    ).stdout.strip(),
+                    "worktree_clean": True,
+                },
                 flow._repo_attestation(repo, head),
             )
             with self.assertRaisesRegex(flow.ContractError, "HEAD mismatch"):

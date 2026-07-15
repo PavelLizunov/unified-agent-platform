@@ -218,9 +218,17 @@ Telemetry must attribute exact sessions/models/tools/retries/timeouts separately
 reviewer, CI and external monitor. Unknown token usage remains `null`.
 
 Capture Codex JSONL with `codex exec --json`, retain the matching local rollout, and summarize both without sending
-either log to another model. The summarizer requires the rollout `session_meta.id` to equal the JSONL `thread_id` and
-derives model/provider/sandbox from its single runtime `turn_context`; the CLI model argument is only the expected
-value and a mismatch or Codex `model rerouted` event fails closed:
+either log to another model. The summarizer requires the rollout `session_meta.id` to equal the JSONL `thread_id`,
+requires its `cwd` to equal the attested worktree, and derives model/provider/sandbox from its single runtime
+`turn_context`; the CLI model argument is only the expected value and a mismatch or Codex `model rerouted` event fails
+closed. Before a read-only reviewer starts, bind its exact source tree to that persisted rollout prompt:
+
+```bash
+MARKER="$(python tools/swarm/flow_contract.py attest-source \
+  --worktree /home/uap/worktrees/<mission>-review --head <candidate-sha> \
+  --output /home/uap/swarm-out/<mission>/reviewer-source.json)"
+codex exec --json --sandbox read-only "Review <candidate-sha>. ${MARKER}"
+```
 
 ```bash
 python tools/swarm/flow_contract.py summarize-codex \
@@ -231,8 +239,10 @@ python tools/swarm/flow_contract.py summarize-codex \
   --output /home/uap/swarm-out/<mission>/author-telemetry.json
 ```
 
-Use `--sandbox read-only` for the reviewer. This proves the policy recorded by the exact Codex turn, not an
-OS-independent filesystem or credential boundary; preserve before/after worktree evidence for that stronger claim.
+Use `--sandbox read-only --source-attestation <reviewer-source.json>` for the reviewer. The source digest is present in
+the persisted user input, was created no more than five minutes before the session, and must still match the clean
+worktree HEAD/tree when summarized. This binds the review turn to the candidate under the single-owner coordinator
+threat model; it still does not prove an OS-independent filesystem or credential boundary.
 
 ## Pilot gate before production integration
 

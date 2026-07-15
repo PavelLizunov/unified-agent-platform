@@ -19,7 +19,7 @@ FILES = {
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
-    "hermes_cli/kanban_db.py": "35375a46c0b2d4a07d7d17fb770c4ac41ad8d72b61b094eb3bc0ad8d0daf9c9b",
+    "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
     "gateway/platforms/api_server.py": "776ec98c0b311284572386c4038d589a507a8f3587f8acf40ba0c0daf3807591",  # gitleaks:allow -- pinned patched SHA-256
 }
@@ -48,7 +48,7 @@ def transform(relative: str, text: str) -> str:
             "mission command",
         )
     if relative == "hermes_cli/kanban_db.py":
-        return replace(
+        text = replace(
             text,
             '''                _append_event(
                     conn,
@@ -90,6 +90,88 @@ def transform(relative: str, text: str) -> str:
                         {"reason": None, "kind": "needs_input"},
                     )''',
             "atomic sticky initial block",
+        )
+        text = replace(
+            text,
+            '''    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_idempotency ON tasks(idempotency_key)"
+    )''',
+            '''    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tasks_idempotency ON tasks(idempotency_key)"
+    )
+    duplicate = conn.execute(
+        "SELECT idempotency_key, COUNT(*) AS task_count FROM tasks "
+        "WHERE idempotency_key IS NOT NULL AND status != 'archived' "
+        "GROUP BY idempotency_key HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if duplicate:
+        raise RuntimeError(
+            "active Kanban idempotency duplicates must be resolved before migration: "
+            f"{duplicate['idempotency_key']} ({duplicate['task_count']} rows)"
+        )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_tasks_active_idempotency "
+        "ON tasks(idempotency_key) "
+        "WHERE idempotency_key IS NOT NULL AND status != 'archived'"
+    )''',
+            "active idempotency uniqueness",
+        )
+        text = replace(
+            text,
+            '''        except sqlite3.IntegrityError:
+            if attempt == 1:
+                raise
+            # Retry with a fresh id.
+            continue''',
+            '''        except sqlite3.IntegrityError:
+            if idempotency_key:
+                row = conn.execute(
+                    "SELECT id FROM tasks WHERE idempotency_key = ? "
+                    "AND status != 'archived' ORDER BY created_at DESC LIMIT 1",
+                    (idempotency_key,),
+                ).fetchone()
+                if row:
+                    return row["id"]
+            if attempt == 1:
+                raise
+            # Retry with a fresh id.
+            continue''',
+            "concurrent idempotency recovery",
+        )
+        text = replace(
+            text,
+            '''def connect(
+    db_path: Optional[Path] = None,''',
+            '''def _harden_db_permissions(path: Path) -> None:
+    if os.name != "posix":
+        return
+    os.chmod(path.parent, 0o700)
+    for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm"), Path(f"{path}-journal")):
+        if candidate.exists():
+            os.chmod(candidate, 0o600)
+
+
+def connect(
+    db_path: Optional[Path] = None,''',
+            "owner-only Kanban database",
+        )
+        text = replace(
+            text,
+            '''        conn = _sqlite_connect(path)
+        try:''',
+            '''        conn = _sqlite_connect(path)
+        _harden_db_permissions(path)
+        try:''',
+            "fast-path Kanban permissions",
+        )
+        return replace(
+            text,
+            '''        conn = _sqlite_connect(path)
+        try:''',
+            '''        conn = _sqlite_connect(path)
+        _harden_db_permissions(path)
+        try:''',
+            "init-path Kanban permissions",
         )
     if relative == "gateway/run.py":
         return replace(
