@@ -193,7 +193,12 @@ def _validate_runtime_attestation(
     where = f"{component}_telemetry"
     if telemetry.get("schema_version") != 1 or telemetry.get("status") != "completed":
         raise ContractError(f"{where}: completed schema_version 1 telemetry required")
-    for key in ("engine_family", "model", "session_id"):
+    artifact_effort = _required_text(artifact, "reasoning_effort", component)
+    telemetry_effort = _required_text(telemetry, "reasoning_effort", where)
+    allowed_efforts = {"low", "medium", "high", "xhigh", "max"}
+    if artifact_effort not in allowed_efforts or telemetry_effort not in allowed_efforts:
+        raise ContractError(f"{where}.reasoning_effort: valid exact effort required")
+    for key in ("engine_family", "model", "reasoning_effort", "session_id"):
         if telemetry.get(key) != artifact.get(key):
             raise ContractError(f"{where}.{key}: runtime attestation mismatch")
     if telemetry.get("component") != component:
@@ -213,6 +218,7 @@ def _validate_runtime_attestation(
         _required_text(telemetry, "source_attestation_sha256", where)
     if (
         telemetry.get("model_attestation") != "codex_rollout_turn_context"
+        or telemetry.get("reasoning_effort_attestation") != "codex_rollout_turn_context"
         or telemetry.get("sandbox_attestation") != "codex_rollout_turn_context"
     ):
         raise ContractError(f"{where}: Codex rollout attestation required")
@@ -292,6 +298,7 @@ def _codex_rollout_context(
     *,
     session_id: str,
     expected_model: str,
+    expected_reasoning_effort: str | None,
     expected_sandbox: str,
     expected_worktree: str | pathlib.Path,
     source_attestation: dict[str, Any] | None,
@@ -333,6 +340,14 @@ def _codex_rollout_context(
         raise ContractError(
             f"runtime model mismatch: expected {expected_model!r}, observed {actual_model!r}"
         )
+    actual_reasoning_effort = context.get("effort")
+    if expected_reasoning_effort is not None:
+        actual_reasoning_effort = _required_text(context, "effort", "rollout.turn_context")
+        if actual_reasoning_effort != expected_reasoning_effort:
+            raise ContractError(
+                "runtime reasoning effort mismatch: "
+                f"expected {expected_reasoning_effort!r}, observed {actual_reasoning_effort!r}"
+            )
     sandbox_policy = context.get("sandbox_policy")
     if not isinstance(sandbox_policy, dict):
         raise ContractError("rollout.turn_context.sandbox_policy: object required")
@@ -347,6 +362,8 @@ def _codex_rollout_context(
         "sandbox": actual_sandbox,
         "codex_cli_version": _required_text(meta, "cli_version", "rollout.session_meta"),
     }
+    if expected_reasoning_effort is not None:
+        result["reasoning_effort"] = actual_reasoning_effort
     if source_attestation is not None:
         digest = _required_text(source_attestation, "sha256", "source_attestation")
         marker = f"UAP_SOURCE_ATTESTATION_SHA256={digest}"
@@ -412,6 +429,7 @@ def summarize_codex_events(
     *,
     component: str,
     model: str,
+    reasoning_effort: str,
     rollout: str | pathlib.Path,
     sandbox: str,
     worktree: str | pathlib.Path,
@@ -468,11 +486,12 @@ def summarize_codex_events(
         rollout,
         session_id=session_id,
         expected_model=model,
+        expected_reasoning_effort=reasoning_effort,
         expected_sandbox=sandbox,
         expected_worktree=worktree,
         source_attestation=source,
     )
-    return {
+    result = {
         "schema_version": 1,
         "component": component,
         "engine": "codex",
@@ -497,6 +516,12 @@ def summarize_codex_events(
         "non_json_lines": non_json_lines,
         "usage": usage,
     }
+    if reasoning_effort is not None:
+        result.update(
+            reasoning_effort=runtime["reasoning_effort"],
+            reasoning_effort_attestation="codex_rollout_turn_context",
+        )
+    return result
 
 
 def canonical_remote(value: str) -> str:
@@ -597,6 +622,10 @@ def main(argv: list[str] | None = None) -> int:
     telemetry.add_argument("--events", required=True)
     telemetry.add_argument("--component", required=True)
     telemetry.add_argument("--model", required=True)
+    telemetry.add_argument(
+        "--reasoning-effort", required=True,
+        choices=("low", "medium", "high", "xhigh", "max"),
+    )
     telemetry.add_argument("--rollout", required=True)
     telemetry.add_argument("--worktree", required=True)
     telemetry.add_argument("--head", required=True)
@@ -651,6 +680,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "summarize-codex":
             result = summarize_codex_events(
                 args.events, component=args.component, model=args.model,
+                reasoning_effort=args.reasoning_effort,
                 rollout=args.rollout, sandbox=args.sandbox,
                 worktree=args.worktree, head=args.head,
                 source_attestation_path=args.source_attestation,
