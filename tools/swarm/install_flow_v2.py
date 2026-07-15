@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
 import tempfile
 
 
@@ -51,9 +52,40 @@ def check(source: pathlib.Path, home: pathlib.Path) -> None:
                 raise SystemExit(f"flow-v2-install-error: {executable} is not executable")
 
 
-def migrate_profile(path: pathlib.Path) -> bool:
+def _systemd_unit_state(unit: str) -> str:
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", unit],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise SystemExit(f"flow-v2-install-error: cannot verify {unit} is inactive") from error
+    return result.stdout.strip() or "unknown"
+
+
+def _require_profile_units_inactive(path: pathlib.Path, unit_state=None) -> None:
+    prefix, suffix = "delivery-", ".json"
+    if not path.name.startswith(prefix) or not path.name.endswith(suffix):
+        raise SystemExit("flow-v2-install-error: profile must be named delivery-<instance>.json")
+    instance = path.name[len(prefix):-len(suffix)]
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+    if not instance or any(character not in allowed for character in instance):
+        raise SystemExit("flow-v2-install-error: invalid delivery profile instance")
+    inspect = unit_state or _systemd_unit_state
+    for kind in ("timer", "service"):
+        unit = f"hermes-delivery-coordinator@{instance}.{kind}"
+        state = inspect(unit)
+        if state != "inactive":
+            raise SystemExit(f"flow-v2-install-error: {unit} must be inactive (got {state})")
+
+
+def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
     """Atomically migrate one stopped legacy profile to policy-authoritative schema v3."""
     path = path.expanduser().resolve()
+    _require_profile_units_inactive(path, unit_state)
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise SystemExit("flow-v2-install-error: delivery profile must be an object")

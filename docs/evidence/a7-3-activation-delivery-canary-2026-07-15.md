@@ -295,7 +295,8 @@ Not proven:
 - one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
 - detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- authority for another live author/reviewer mission. The approved sixth attempt is exhausted.
+- installation of the standing-authorized `openai-autonomy-v1` policy and atomic schema-v3 profile migration required
+  before another live author/reviewer mission.
 
 ## Gate
 
@@ -311,10 +312,12 @@ Not proven:
 | Successful target delivery | **FAIL / NOT DEMONSTRATED** |
 | A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
 
-Before another live canary, obtain fresh owner approval for its model turns and make route selection an explicit
-machine policy rather than an ad-hoc model choice. The next target contract must also enumerate verified executable
-basenames/paths from the durable owner record instead of hard-coding `sing-box`, with a cross-process behavioral test
-using a differently named custom executable. Do not silently promote Terra to author or increase review cycles.
+Before another live canary, land and install the owner-approved ADR-031 `openai-autonomy-v1` machine policy, stop both
+coordinator units and atomically migrate the fixed profile to schema v3. Luna/Sol/Terra turns, reasoning escalation and
+subscription spend inside that policy require no fresh owner approval. Claude, a new provider, local inference/GPU,
+destructive operations or work outside the approved scope remain owner-gated. The next target contract must also
+enumerate verified executable basenames/paths from the durable owner record instead of hard-coding `sing-box`, with a
+cross-process behavioral test using a differently named custom executable.
 A successful PR/CI/merge/fresh-main post-verify route remains the A7.3 completion gate. Separately, project the
 actionable review finding and a terminal stage/progress into Central and verify Telegram delivery; neither requires
 claiming that the success path is complete.

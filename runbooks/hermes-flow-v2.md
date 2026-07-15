@@ -32,13 +32,22 @@ Before enabling an A7.3 timer, migrate its stopped legacy two-cycle profile atom
 effort fields, sets schema v3 and makes all three bounded routes reachable:
 
 ```bash
-systemctl --user is-active hermes-delivery-coordinator@<profile>.timer  # must be inactive
+PROFILE=<profile>
+systemctl --user stop \
+  "hermes-delivery-coordinator@${PROFILE}.timer" \
+  "hermes-delivery-coordinator@${PROFILE}.service"
+systemctl --user reset-failed \
+  "hermes-delivery-coordinator@${PROFILE}.timer" \
+  "hermes-delivery-coordinator@${PROFILE}.service" || true
+test "$(systemctl --user is-active "hermes-delivery-coordinator@${PROFILE}.timer" || true)" = inactive
+test "$(systemctl --user is-active "hermes-delivery-coordinator@${PROFILE}.service" || true)" = inactive
 python3 tools/swarm/install_flow_v2.py \
-  --migrate-profile ~/.config/uap/delivery-<profile>.json
+  --migrate-profile "$HOME/.config/uap/delivery-${PROFILE}.json"
 ```
 
-The helper validates the complete v3 profile before `os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2
-profile or any value other than three review cycles fails closed in the coordinator.
+The helper rechecks that both matching units are exactly `inactive`, validates the complete v3 profile before
+`os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2 profile or any value other than three review cycles
+fails closed in the coordinator.
 
 This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` skill under
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while

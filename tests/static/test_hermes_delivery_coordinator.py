@@ -384,14 +384,31 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with self.assertRaisesRegex(coordinator.DeliveryError, "migrate before activation"):
                 coordinator.load_profile(path)
 
-            self.assertTrue(installer.migrate_profile(path))
+            inactive = lambda _unit: "inactive"
+            self.assertTrue(installer.migrate_profile(path, unit_state=inactive))
             migrated = coordinator.load_profile(path)
             self.assertEqual(3, migrated["schema_version"])
             self.assertEqual(3, migrated["max_review_cycles"])
             self.assertFalse(set(migrated) & installer._LEGACY_MODEL_FIELDS)
-            self.assertFalse(installer.migrate_profile(path))
+            self.assertFalse(installer.migrate_profile(path, unit_state=inactive))
             if os.name != "nt":
                 self.assertEqual(0o600, path.stat().st_mode & 0o777)
+
+    def test_profile_migration_refuses_active_timer_or_service(self):
+        for active_kind in ("timer", "service"):
+            with self.subTest(active_kind=active_kind), tempfile.TemporaryDirectory() as directory:
+                path = pathlib.Path(directory) / "delivery-test.json"
+                value = profile(pathlib.Path(directory))
+                value.update(schema_version=2, max_review_cycles=2)
+                path.write_text(json.dumps(value), encoding="utf-8")
+                before = path.read_bytes()
+
+                def state(unit):
+                    return "active" if unit.endswith(f".{active_kind}") else "inactive"
+
+                with self.assertRaisesRegex(SystemExit, f"{active_kind}.*must be inactive"):
+                    installer.migrate_profile(path, unit_state=state)
+                self.assertEqual(before, path.read_bytes())
 
     def test_required_ci_check_must_exist_and_succeed(self):
         self.assertEqual(
