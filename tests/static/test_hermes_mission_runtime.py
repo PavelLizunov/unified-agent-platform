@@ -234,6 +234,24 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
         candidates = store.dispatch_candidates("build1-uap", 1)
         assert [item["mission_id"] for item in candidates] == ["mission-old"]
 
+        store.append_producer(
+            "mission-old",
+            {
+                "schema_version": 1,
+                "mission_id": "mission-old",
+                "type": "task.upsert",
+                "source": "build1-flow",
+                "correlation": {"task_id": "task-1", "producer_event_id": "flow:old:task"},
+                "payload": {"task_id": "task-1", "title": "Root", "status": "running"},
+            },
+        )
+        assert [item["mission_id"] for item in store.dispatch_candidates(
+            "build1-uap", 1, reconcile=True
+        )] == ["mission-old"]
+        assert [item["mission_id"] for item in store.dispatch_candidates("build1-uap", 1)] == [
+            "mission-second"
+        ]
+
 
 def test_producer_schema_is_closed_and_all_strings_are_redacted() -> None:
     event = {

@@ -162,15 +162,17 @@ class HermesKanbanBackend:
         return task
 
     def list_task_ids(self, mission_id: str) -> list[str]:
+        return sorted(task["id"] for task in self.list_tasks(mission_id))
+
+    def list_tasks(self, mission_id: str) -> list[dict[str, Any]]:
         tasks = self._json("list", "--tenant", mission_id, "--json")
         if not isinstance(tasks, list):
             raise AdapterError("Hermes Kanban list response must be an array")
         if not all(isinstance(task, dict) for task in tasks):
             raise AdapterError("Hermes Kanban list response has an invalid task")
-        ids = [task.get("id") for task in tasks]
-        if not all(isinstance(task_id, str) and task_id for task_id in ids):
+        if not all(isinstance(task.get("id"), str) and task["id"] for task in tasks):
             raise AdapterError("Hermes Kanban list response has an invalid task id")
-        return sorted(ids)
+        return tasks
 
     def show(self, task_id: str) -> dict[str, Any]:
         result = self._json("show", task_id, "--json")
@@ -225,8 +227,13 @@ class CentralMissionClient:
             raise AdapterError("central mission API returned invalid JSON")
         return result
 
-    def list_missions(self, dispatch_profile: str) -> list[dict[str, Any]]:
-        query = urllib.parse.urlencode({"dispatch_profile": dispatch_profile, "limit": 1})
+    def list_missions(
+        self, dispatch_profile: str, *, reconcile: bool = False
+    ) -> list[dict[str, Any]]:
+        parameters: dict[str, Any] = {"dispatch_profile": dispatch_profile, "limit": 1}
+        if reconcile:
+            parameters["reconcile"] = 1
+        query = urllib.parse.urlencode(parameters)
         result = self._request("GET", f"/api/missions?{query}")
         missions = result.get("missions")
         if not isinstance(missions, list) or not all(isinstance(item, dict) for item in missions):
@@ -263,6 +270,44 @@ def accept_mission(
         "idempotency_key": f"central-mission:{mission_id}",
     }
     _write_json(_state_path(state_root, mission_id), state, private_parent=True)
+    return state
+
+
+def recover_mission_state(
+    mission_id: str, state_root: pathlib.Path, backend: Any
+) -> dict[str, Any]:
+    path = _state_path(state_root, mission_id)
+    roots = [
+        task for task in backend.list_tasks(mission_id)
+        if task.get("title") == f"Mission {mission_id}"
+        and task.get("created_by") == "central-hermes"
+        and task.get("tenant") == mission_id
+    ]
+    if len(roots) != 1:
+        raise AdapterError("mission adapter state cannot be recovered from one exact Kanban root")
+    root_task_id = roots[0]["id"]
+    if path.is_file():
+        state = _read_json(path)
+        expected = {
+            "schema_version": 1,
+            "mission_id": mission_id,
+            "tenant": mission_id,
+            "idempotency_key": f"central-mission:{mission_id}",
+        }
+        if not isinstance(state, dict) or any(state.get(key) != value for key, value in expected.items()):
+            raise AdapterError("mission adapter state mismatch")
+        if state.get("root_task_id") != root_task_id:
+            raise AdapterError("mission adapter state has the wrong root task id")
+        return state
+
+    state = {
+        "schema_version": 1,
+        "mission_id": mission_id,
+        "root_task_id": root_task_id,
+        "tenant": mission_id,
+        "idempotency_key": f"central-mission:{mission_id}",
+    }
+    _write_json(path, state, private_parent=True)
     return state
 
 
@@ -393,13 +438,45 @@ def project_mission(mission_id: str, backend: Any) -> list[dict[str, Any]]:
 
 
 def sync_mission(mission_id: str, state_root: pathlib.Path, backend: Any) -> list[dict[str, Any]]:
-    path = _state_path(state_root, mission_id)
-    if not path.is_file():
-        raise AdapterError("mission adapter state not found")
-    state = _read_json(path)
-    if not isinstance(state, dict) or state.get("mission_id") != mission_id:
-        raise AdapterError("mission adapter state mismatch")
+    recover_mission_state(mission_id, state_root, backend)
     return project_mission(mission_id, backend)
+
+
+def reconcile_pending(
+    client: Any,
+    state_root: pathlib.Path,
+    backend: Any,
+    *,
+    dispatch_profile: str,
+) -> dict[str, Any] | None:
+    if not dispatch_profile:
+        raise AdapterError("reconcile requires a profile")
+    for mission in client.list_missions(dispatch_profile, reconcile=True):
+        tasks = mission.get("tasks")
+        if (
+            mission.get("dispatch_profile") != dispatch_profile
+            or mission.get("status") != "active"
+            or not isinstance(tasks, list)
+            or not tasks
+        ):
+            raise AdapterError("central reconcile projection is invalid")
+        mission_id = mission.get("mission_id")
+        if not isinstance(mission_id, str) or not mission_id:
+            raise AdapterError("central reconcile projection has no mission id")
+        state = recover_mission_state(mission_id, state_root, backend)
+        if not all(
+            isinstance(task, dict) and isinstance(task.get("task_id"), str) and task["task_id"]
+            for task in tasks
+        ):
+            raise AdapterError("central reconcile projection has an invalid task")
+        projected_ids = {task["task_id"] for task in tasks}
+        if state["root_task_id"] not in projected_ids:
+            raise AdapterError("central projection does not contain the exact Kanban root")
+        events = sync_mission(mission_id, state_root, backend)
+        for event in events:
+            client.publish(mission_id, event)
+        return {**state, "published_events": len(events)}
+    return None
 
 
 def dispatch_pending(
@@ -479,6 +556,10 @@ def main(argv: list[str] | None = None) -> int:
     poll.add_argument("--assignee")
     poll.add_argument("--activate", action="store_true")
 
+    reconcile = sub.add_parser("reconcile")
+    reconcile.add_argument("--central-url", default=os.environ.get("HERMES_API_URL"))
+    reconcile.add_argument("--dispatch-profile", required=True)
+
     args = parser.parse_args(argv)
     backend = HermesKanbanBackend(args.hermes_bin, args.board)
     try:
@@ -489,21 +570,29 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "sync":
             result = sync_mission(args.mission_id, args.state_root, backend)
-        else:
+        elif args.command in {"poll", "reconcile"}:
             client = CentralMissionClient(
                 args.central_url,
                 os.environ.get("HERMES_API_TOKEN", ""),
                 os.environ.get("HERMES_MISSION_PRODUCER_KEY", ""),
             )
-            result = dispatch_pending(
-                client,
-                args.state_root,
-                backend,
-                dispatch_profile=args.dispatch_profile,
-                workspace=args.workspace,
-                assignee=args.assignee,
-                activate=args.activate,
-            )
+            if args.command == "poll":
+                result = dispatch_pending(
+                    client,
+                    args.state_root,
+                    backend,
+                    dispatch_profile=args.dispatch_profile,
+                    workspace=args.workspace,
+                    assignee=args.assignee,
+                    activate=args.activate,
+                )
+            else:
+                result = reconcile_pending(
+                    client,
+                    args.state_root,
+                    backend,
+                    dispatch_profile=args.dispatch_profile,
+                )
         if args.command == "sync" and args.output:
             _write_json(args.output, result)
         else:

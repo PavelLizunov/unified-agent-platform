@@ -86,6 +86,27 @@ async def smoke(checkout: pathlib.Path) -> None:
             "/api/missions/mission-smoke/events", json=unknown, headers=headers
         )
         assert rejected.status == 400, await rejected.text()
+        task = {
+            "schema_version": 1,
+            "mission_id": "mission-smoke",
+            "type": "task.upsert",
+            "source": "build1-flow",
+            "correlation": {"task_id": "task-1", "producer_event_id": "flow:smoke:task"},
+            "payload": {"task_id": "task-1", "title": "Root", "status": "running"},
+        }
+        task_response = await client.post(
+            "/api/missions/mission-smoke/events", json=task, headers=headers
+        )
+        assert task_response.status == 201, await task_response.text()
+        handed_off = await client.get(
+            "/api/missions?dispatch_profile=build1-smoke&reconcile=1&limit=1"
+        )
+        handed_off_body = await handed_off.json()
+        assert [item["mission_id"] for item in handed_off_body["missions"]] == ["mission-smoke"]
+        invalid_reconcile = await client.get(
+            "/api/missions?dispatch_profile=build1-smoke&reconcile=yes&limit=1"
+        )
+        assert invalid_reconcile.status == 400
         forged = await client.post(
             "/api/missions/mission-forged/events",
             json={

@@ -21,7 +21,7 @@ PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "hermes_cli/kanban_db.py": "35375a46c0b2d4a07d7d17fb770c4ac41ad8d72b61b094eb3bc0ad8d0daf9c9b",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "0504003cea0d3f5663b17e16a602738ad25ab8dbdd4f7e4b72836286866b4775",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "776ec98c0b311284572386c4038d589a507a8f3587f8acf40ba0c0daf3807591",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -151,8 +151,15 @@ def transform(relative: str, text: str) -> str:
         try:
             limit = int(request.query.get("limit", "20"))
             store = self._missions()
+            reconcile = request.query.get("reconcile", "0")
+            if reconcile not in {"0", "1"}:
+                raise MissionError("invalid reconcile selector")
             missions = (
-                store.dispatch_candidates(request.query.get("dispatch_profile"), limit)
+                store.dispatch_candidates(
+                    request.query.get("dispatch_profile"),
+                    limit,
+                    reconcile=reconcile == "1",
+                )
                 if "dispatch_profile" in request.query
                 else store.list(limit)
             )

@@ -45,9 +45,11 @@ class FakeKanban:
             self.tasks[task_id] = {
                 "task": {
                     "id": task_id,
-                    "title": goal,
+                    "title": f"Mission {mission_id}",
                     "status": "ready" if allow_dispatch else "blocked",
                     "assignee": assignee if allow_dispatch else None,
+                    "created_by": "central-hermes",
+                    "tenant": mission_id,
                 },
                 "runs": [],
             }
@@ -55,6 +57,9 @@ class FakeKanban:
 
     def list_task_ids(self, mission_id):
         return sorted(self.tasks)
+
+    def list_tasks(self, mission_id):
+        return [copy.deepcopy(self.tasks[task_id]["task"]) for task_id in sorted(self.tasks)]
 
     def show(self, task_id):
         return copy.deepcopy(self.tasks[task_id])
@@ -88,9 +93,11 @@ class FakeCentral:
         self.fail_after_commit_once = False
         self.requested_profiles = []
 
-    def list_missions(self, dispatch_profile):
+    def list_missions(self, dispatch_profile, *, reconcile=False):
         self.requested_profiles.append(dispatch_profile)
         if self.mission["dispatch_profile"] != dispatch_profile:
+            return []
+        if bool(self.mission["tasks"]) != reconcile:
             return []
         return [copy.deepcopy(self.mission)]
 
@@ -147,8 +154,9 @@ class MissionAdapterTests(unittest.TestCase):
             task_id = state["root_task_id"]
             backend.tasks[task_id] = {
                 "task": {
-                    "id": task_id, "title": "Implement", "status": "done",
+                    "id": task_id, "title": f"Mission {self.document['mission_id']}", "status": "done",
                     "assignee": "approved-profile",
+                    "created_by": "central-hermes", "tenant": self.document["mission_id"],
                 },
                 "runs": [{
                     "id": 7,
@@ -406,28 +414,106 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(1, len(central.events))
             self.assertEqual(1, len(central.mission["tasks"]))
 
+    def test_reconcile_recovers_deleted_state_and_partial_multi_event_publish(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            dispatched = adapter.dispatch_pending(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            task_id = dispatched["root_task_id"]
+            backend.tasks[task_id]["task"].update(status="done", assignee="approved-profile")
+            backend.tasks[task_id]["runs"] = [{
+                "id": 1,
+                "profile": "approved-profile",
+                "status": "completed",
+                "outcome": "success",
+                "metadata": {"mission_events": [{
+                    "type": "gate.upsert",
+                    "payload": {"gate_id": "tests", "status": "passed"},
+                }]},
+            }]
+            backend.logs[task_id] = "work complete\n"
+            adapter._state_path(state_root, "mission-auto").unlink()
+
+            original_publish = central.publish
+            calls = 0
+
+            def fail_after_first_event(mission_id, event):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    raise adapter.AdapterError("simulated partial publish")
+                original_publish(mission_id, event)
+
+            central.publish = fail_after_first_event
+            with self.assertRaisesRegex(adapter.AdapterError, "partial publish"):
+                adapter.reconcile_pending(
+                    central, state_root, backend, dispatch_profile="build1-uap"
+                )
+
+            self.assertTrue(adapter._state_path(state_root, "mission-auto").is_file())
+            central.publish = original_publish
+            result = adapter.reconcile_pending(
+                central, state_root, backend, dispatch_profile="build1-uap"
+            )
+            self.assertEqual(task_id, result["root_task_id"])
+            self.assertEqual(
+                {"task.upsert", "worker.upsert", "terminal.append", "gate.upsert"},
+                {event["type"] for event in central.events.values()},
+            )
+            self.assertEqual(1, len(backend.tasks))
+            self.assertEqual(1, backend.create_calls)
+
+    def test_reconcile_rejects_ambiguous_native_root(self):
+        backend = FakeKanban()
+        central = FakeCentral()
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory)
+            adapter.dispatch_pending(
+                central, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/repo",
+            )
+            duplicate = copy.deepcopy(backend.tasks["task-1"])
+            duplicate["task"]["id"] = "task-2"
+            backend.tasks["task-2"] = duplicate
+            with self.assertRaisesRegex(adapter.AdapterError, "one exact Kanban root"):
+                adapter.reconcile_pending(
+                    central, state_root, backend, dispatch_profile="build1-uap"
+                )
+
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()
         listing.__enter__.return_value.read.return_value = b'{"missions": []}'
+        reconciling = mock.MagicMock()
+        reconciling.__enter__.return_value.read.return_value = b'{"missions": []}'
         published = mock.MagicMock()
         published.__enter__.return_value.read.return_value = b'{"created": true}'
-        with mock.patch.object(adapter.urllib.request, "urlopen", side_effect=[listing, published]) as opener:
+        with mock.patch.object(
+            adapter.urllib.request, "urlopen", side_effect=[listing, reconciling, published]
+        ) as opener:
             client = adapter.CentralMissionClient(
                 "http://central.example:30642",
                 "api-token",
                 "producer-key",
             )
             self.assertEqual([], client.list_missions("build1-uap"))
+            self.assertEqual([], client.list_missions("build1-uap", reconcile=True))
             client.publish("mission-1", {"type": "task.upsert"})
 
         first_request = opener.call_args_list[0].args[0]
-        second_request = opener.call_args_list[1].args[0]
+        reconcile_request = opener.call_args_list[1].args[0]
+        second_request = opener.call_args_list[2].args[0]
         first_headers = {key.lower(): value for key, value in first_request.header_items()}
         second_headers = {key.lower(): value for key, value in second_request.header_items()}
         self.assertEqual("Bearer api-token", first_headers["authorization"])
         self.assertEqual("producer-key", second_headers["x-hermes-mission-producer-key"])
         self.assertIn("dispatch_profile=build1-uap", first_request.full_url)
         self.assertIn("limit=1", first_request.full_url)
+        self.assertNotIn("reconcile=1", first_request.full_url)
+        self.assertIn("reconcile=1", reconcile_request.full_url)
         self.assertNotIn("api-token", first_request.full_url)
         self.assertNotIn("producer-key", second_request.full_url)
 
