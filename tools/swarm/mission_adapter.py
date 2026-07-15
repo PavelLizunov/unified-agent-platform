@@ -124,6 +124,7 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
+            "--initial-status", "ready" if allow_dispatch else "blocked",
         ]
         if workspace:
             command.extend(["--workspace", workspace])
@@ -150,24 +151,14 @@ class HermesKanbanBackend:
                  if isinstance(event, dict) and event.get("kind") in {"blocked", "unblocked"}),
                 None,
             )
-            if current.get("status") == "blocked" and sticky != "blocked":
-                self._run("promote", task["id"])
-                current["status"] = "ready"
-            if current.get("status") == "ready":
-                self._run("block", "--kind", "needs_input", task["id"])
-            elif current.get("status") != "blocked":
-                raise AdapterError("safe handoff task is not blockable")
-            snapshot = self.show(task["id"])
-            task = snapshot["task"]
             if (
-                task.get("id") != current["id"]
-                or task.get("status") != "blocked"
-                or "assignee" not in task
-                or task["assignee"] is not None
+                current.get("status") != "blocked"
+                or sticky != "blocked"
             ):
-                raise AdapterError("safe handoff native task identity/status/assignee mismatch")
+                raise AdapterError("safe handoff is not atomically sticky-blocked")
             if not isinstance(snapshot.get("runs"), list) or snapshot["runs"]:
                 raise AdapterError("safe handoff unexpectedly created a Kanban run")
+            task = current
         return task
 
     def list_task_ids(self, mission_id: str) -> list[str]:

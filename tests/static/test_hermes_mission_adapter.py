@@ -213,23 +213,18 @@ class MissionAdapterTests(unittest.TestCase):
 
     def test_real_backend_is_shell_free_idempotent_and_dispatch_gated(self):
         commands = []
-        state = {"status": "ready", "events": []}
 
         def runner(command):
             commands.append(command)
             action = command[command.index("central") + 1]
-            if action == "block":
-                state["status"] = "blocked"
-                state["events"].append({"kind": "blocked"})
-                return subprocess.CompletedProcess(command, 0, stdout="Blocked task-1\n", stderr="")
             return subprocess.CompletedProcess(
                 command, 0,
                 stdout=json.dumps(
-                    {"id": "task-1", "status": state["status"]}
+                    {"id": "task-1", "status": "blocked"}
                     if action == "create"
                     else {
-                        "task": {"id": "task-1", "status": state["status"], "assignee": None},
-                        "events": state["events"],
+                        "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                        "events": [{"kind": "created"}, {"kind": "blocked"}],
                         "runs": [],
                     }
                 ),
@@ -244,17 +239,14 @@ class MissionAdapterTests(unittest.TestCase):
         command = commands[0]
         self.assertEqual("/opt/hermes", command[0])
         self.assertIn("central-mission:mission-1", command)
-        self.assertNotIn("--initial-status", command)
+        self.assertEqual("blocked", command[command.index("--initial-status") + 1])
         self.assertNotIn("--assignee", command)
         self.assertEqual("blocked", task["status"])
-        block_commands = [item for item in commands if "block" in item]
-        self.assertEqual(1, len(block_commands))
-        self.assertIn("needs_input", block_commands[0])
         backend.ensure_root(
             mission_id="mission-1", goal="Goal", allow_dispatch=False,
             assignee=None, workspace=None,
         )
-        self.assertEqual(1, len([item for item in commands if "block" in item]))
+        self.assertEqual([], [item for item in commands if "block" in item])
         with self.assertRaisesRegex(adapter.AdapterError, "non-scratch workspace"):
             backend.ensure_root(
                 mission_id="mission-2", goal="Goal", allow_dispatch=True,
@@ -273,39 +265,38 @@ class MissionAdapterTests(unittest.TestCase):
     def test_safe_backend_rejects_malformed_final_native_state(self):
         cases = {
             "missing-assignee": {
-                "task": {"id": "task-1", "status": "blocked"}, "runs": [],
+                "task": {"id": "task-1", "status": "blocked"},
+                "events": [{"kind": "blocked"}], "runs": [],
             },
             "missing-id": {
-                "task": {"status": "blocked", "assignee": None}, "runs": [],
+                "task": {"status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
             },
             "mismatched-id": {
-                "task": {"id": "task-other", "status": "blocked", "assignee": None}, "runs": [],
+                "task": {"id": "task-other", "status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
             },
             "malformed-runs": {
-                "task": {"id": "task-1", "status": "blocked", "assignee": None}, "runs": None,
+                "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": None,
+            },
+            "missing-sticky-block": {
+                "task": {"id": "task-1", "status": "blocked", "assignee": None},
+                "events": [{"kind": "created"}], "runs": [],
+            },
+            "ready": {
+                "task": {"id": "task-1", "status": "ready", "assignee": None},
+                "events": [{"kind": "blocked"}], "runs": [],
             },
         }
         for name, malformed in cases.items():
             with self.subTest(name=name):
-                shows = 0
-
                 def runner(command):
-                    nonlocal shows
                     action = command[command.index("central") + 1]
                     if action == "create":
-                        output = {"id": "task-1", "status": "ready"}
-                    elif action == "block":
-                        return subprocess.CompletedProcess(command, 0, stdout="Blocked task-1\n", stderr="")
+                        output = {"id": "task-1", "status": "blocked"}
                     else:
-                        shows += 1
-                        output = (
-                            {
-                                "task": {"id": "task-1", "status": "ready", "assignee": None},
-                                "events": [],
-                                "runs": [],
-                            }
-                            if shows == 1 else malformed
-                        )
+                        output = malformed
                     return subprocess.CompletedProcess(
                         command, 0, stdout=json.dumps(output), stderr=""
                     )

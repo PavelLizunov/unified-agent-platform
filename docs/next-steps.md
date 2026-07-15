@@ -188,7 +188,7 @@ not add an application service, workflow engine or mission database.
 
 1. **A7.1 — Pull handoff and bounded retry — offline gate.** Central `mission.accepted` carries an immutable optional
    `dispatch_profile`. The build-1 adapter performs one bounded poll, exact-matches the locally configured profile,
-   creates/reuses one blocked native Kanban root and publishes its deterministic task event. A fault after Kanban create
+   creates/reuses one atomically sticky-blocked native Kanban root and publishes its deterministic task event. A fault after Kanban create
    but before central publish must converge after restart to one task/root ID and one producer event. No model runner
    is invoked by the hermetic test, and blocked is the default live-safe behavior.
 2. **A7.2 — Owner-approved live blocked-task canary.** Deploy/reload the central field, install the updated adapter and

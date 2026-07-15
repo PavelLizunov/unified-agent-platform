@@ -13,11 +13,13 @@ import subprocess
 UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
 FILES = {
     "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
+    "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
     "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
+    "hermes_cli/kanban_db.py": "35375a46c0b2d4a07d7d17fb770c4ac41ad8d72b61b094eb3bc0ad8d0daf9c9b",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
     "gateway/platforms/api_server.py": "0504003cea0d3f5663b17e16a602738ad25ab8dbdd4f7e4b72836286866b4775",  # gitleaks:allow -- pinned patched SHA-256
 }
@@ -44,6 +46,50 @@ def transform(relative: str, text: str) -> str:
             '    CommandDef("mission", "Show or follow one central UAP mission", "Session",\n'
             '               args_hint="[mission-id]", gateway_only=True),',
             "mission command",
+        )
+    if relative == "hermes_cli/kanban_db.py":
+        return replace(
+            text,
+            '''                _append_event(
+                    conn,
+                    task_id,
+                    "created",
+                    {
+                        "assignee": assignee,
+                        "status": task_status,
+                        "parents": list(parents),
+                        "tenant": tenant,
+                        "branch_name": branch_name,
+                        "skills": list(skills_list) if skills_list else None,
+                        "goal_mode": bool(goal_mode) or None,
+                    },
+                )''',
+            '''                _append_event(
+                    conn,
+                    task_id,
+                    "created",
+                    {
+                        "assignee": assignee,
+                        "status": task_status,
+                        "parents": list(parents),
+                        "tenant": tenant,
+                        "branch_name": branch_name,
+                        "skills": list(skills_list) if skills_list else None,
+                        "goal_mode": bool(goal_mode) or None,
+                    },
+                )
+                if task_status == "blocked":
+                    conn.execute(
+                        "UPDATE tasks SET block_kind = 'needs_input' WHERE id = ?",
+                        (task_id,),
+                    )
+                    _append_event(
+                        conn,
+                        task_id,
+                        "blocked",
+                        {"reason": None, "kind": "needs_input"},
+                    )''',
+            "atomic sticky initial block",
         )
     if relative == "gateway/run.py":
         return replace(
