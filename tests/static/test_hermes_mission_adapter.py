@@ -320,12 +320,19 @@ class MissionAdapterTests(unittest.TestCase):
                     "task": {
                         "id": "task-1",
                         "status": "running",
-                        "claim_expires": expires,
                     },
                     "runs": [{
                         "id": 9,
                         "status": "running",
-                        "claim_expires": expires,
+                    }],
+                    "events": [{
+                        "kind": "claimed",
+                        "payload": {
+                            "lock": "build-1:123",
+                            "expires": expires,
+                            "run_id": 9,
+                        },
+                        "run_id": 9,
                     }],
                 }),
                 stderr="",

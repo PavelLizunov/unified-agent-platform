@@ -226,9 +226,19 @@ class HermesKanbanBackend:
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
+        events = snapshot.get("events")
         matching = [
             run for run in runs or []
             if isinstance(run, dict) and str(run.get("id")) == str(run_id)
+        ]
+        claims = [
+            event for event in events or []
+            if (
+                isinstance(event, dict)
+                and event.get("kind") == "claimed"
+                and isinstance(event.get("payload"), dict)
+                and str(event["payload"].get("run_id")) == str(run_id)
+            )
         ]
         minimum = int(time.time()) + min_remaining_seconds
         if (
@@ -237,10 +247,13 @@ class HermesKanbanBackend:
             or task.get("status") != "running"
             or len(matching) != 1
             or matching[0].get("status") != "running"
-            or not isinstance(task.get("claim_expires"), int)
-            or task["claim_expires"] <= minimum
-            or not isinstance(matching[0].get("claim_expires"), int)
-            or matching[0]["claim_expires"] <= minimum
+            # Pinned Hermes omits private claim columns from ``kanban show``;
+            # the durable public lease proof is the matching claimed event.
+            or len(claims) != 1
+            or not isinstance(claims[0]["payload"].get("lock"), str)
+            or not claims[0]["payload"]["lock"]
+            or not isinstance(claims[0]["payload"].get("expires"), int)
+            or claims[0]["payload"]["expires"] <= minimum
         ):
             raise AdapterError("Hermes Kanban claim is absent, stale, or expired")
         return snapshot
