@@ -208,10 +208,11 @@ not add an application service, workflow engine or mission database.
    now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. PR #216 installed the
    fail-closed `openai-autonomy-v1` decision and atomically migrated the stopped profile to schema v3/three cycles.
    Before another canary, land and install `openai-autonomy-v2`: independent-review or required-CI failure must
-   durably select the next OpenAI route and repair the same PR. The durable PR number/head may not be rebound;
-   CI persistence is bounded to name/outcome; any final failure deletes only the exact prior branch with an exact SHA
-   lease and then requires GitHub-confirmed closure of the bound PR, without an unconditional close call. Compatible
-   v1 in-progress route/PR-head evidence and a lost repair-push response recover automatically. Also
+   durably select the next OpenAI route and repair the same PR. The durable PR number/head/base may not be rebound;
+   each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. Any final failure under
+   a live claim conditionally closes only that exact PR, confirms the closed identity, and then deletes only the
+   unchanged branch with an exact-SHA lease, without an unconditional close call. Compatible v1 in-progress
+   route/PR identity evidence and a lost repair-push response recover automatically. Also
    behaviorally cover a differently named custom
    executable and project the actionable
    finding/terminal stage and verify Telegram

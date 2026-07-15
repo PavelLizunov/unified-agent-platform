@@ -510,9 +510,11 @@
   является принятой продуктовой политикой, а не degraded mode.
   `openai-autonomy-v2` считает независимый review rejection и required-CI failure одним quality-failure signal:
   после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
-  счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. После трёх циклов он
-  lease-защищённо удаляет только совпадающую durable branch/SHA, требует подтверждённого GitHub закрытия связанного
-  PR, удаляет disposable state и завершает mission честным failure; безусловный PR-close запрещён.
+  счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. Номер PR, head SHA и
+  base branch являются durable identity; repair push использует exact-head lease. После трёх циклов coordinator с
+  действующим Kanban claim повторно проверяет эту identity, условно закрывает только совпадающий PR, подтверждает
+  закрытие и затем lease-защищённо удаляет только неизменившуюся branch/SHA. После этого он удаляет disposable state
+  и завершает mission честным failure; безусловный PR-close запрещён.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой

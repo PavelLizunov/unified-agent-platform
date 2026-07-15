@@ -67,9 +67,10 @@ Last updated: 2026-07-15
   migrated the stopped build-1 profile to schema v3/three cycles. Current source `openai-autonomy-v2` additionally
   treats independent-review and required-CI failures as durable quality failures: the next tick automatically raises
   the OpenAI route and repairs the same durably bound PR. Both successful and failed CI retain only bounded
-  name/outcome metadata. Final failure lease-deletes only the exact durable branch/head, then requires GitHub to
-  report the bound PR closed; it never issues an unconditional close. Compatible in-progress v1 route and PR-head
-  state remain recoverable, including a lost response after a successful repair push.
+  name/outcome metadata. PR number/head/base are durable identity and repair pushes use an exact prior-head lease.
+  Final failure requires a live Kanban claim, conditionally closes only that matching PR, verifies it closed, and then
+  lease-deletes the unchanged branch/head; it never issues an unconditional close. Compatible in-progress v1 route
+  and PR identity remain recoverable, including a lost response after a successful repair push.
   It then cleans disposable state and records terminal failure. This v2 revision still requires merge/install verification;
   no seventh canary or successful autonomous delivery is claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs

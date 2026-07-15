@@ -203,8 +203,9 @@ Good next tasks that do not require redesign:
    mission remain gated. `openai-autonomy-v1` and the schema-v3 profile are installed. Land, install and verify
    `openai-autonomy-v2`, which turns independent-review or required-CI failure into durable automatic route
    escalation and same-PR repair, before the next canary. The same PR number and pushed head are durable identity;
-   final cleanup uses an exact-SHA lease before GitHub-confirmed PR closure, CI persistence is bounded, repair-push
-   response loss converges, and compatible v1 in-progress routes/PR heads resume.
+   final cleanup validates the durable PR number/head/base under a live claim, conditionally closes that exact PR,
+   then lease-deletes the unchanged branch. CI persistence is bounded, repair pushes use an exact prior-head lease,
+   response loss converges, and compatible v1 in-progress routes/PR identities resume.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

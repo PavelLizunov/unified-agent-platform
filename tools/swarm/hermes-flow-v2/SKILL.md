@@ -35,8 +35,9 @@ not continue such work through a chain of `chat --resume` sessions.
    green required CI. No manual model/review waiver exists.
 7. At most three quality/fix cycles. Independent review rejection or required-CI failure increments the same routing
    signal, automatically escalates the next OpenAI route, and reuses the same PR. Persist only bounded CI
-   check-name/outcome metadata, never raw logs. After any final failure, lease-delete only the exact durable branch/SHA,
-   require GitHub-confirmed closure of the bound PR, clean disposable state and publish terminal failure. Complete a
+   check-name/outcome metadata, never raw logs. After any final failure, require a live claim, conditionally close only
+   the exact durable PR number/head/base, confirm closure, then lease-delete only its unchanged branch/SHA. Clean
+   disposable state and publish terminal failure. Complete a
    successful root card only after merge,
    default-branch proof, remote/local branch deletion, disposable worktree removal, and a green `terminal-check`.
 8. When the task belongs to a central Hermes mission, use the installed `mission_adapter.py` ingress/sync boundary and
