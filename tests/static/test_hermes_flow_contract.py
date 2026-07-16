@@ -424,6 +424,10 @@ class FlowContractTests(unittest.TestCase):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
         verification["review_cycle"] = 4
+        validate_review(
+            summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
+        )
+        verification["review_cycle"] = 5
         with self.assertRaisesRegex(flow.ContractError, "review_cycle"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
