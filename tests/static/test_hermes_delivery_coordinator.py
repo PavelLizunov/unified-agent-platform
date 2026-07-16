@@ -728,6 +728,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 self.assertEqual(before, path.read_bytes())
 
     def test_required_ci_check_must_exist_and_succeed(self):
+        for status in ("REQUESTED", "WAITING"):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    "pending",
+                    coordinator._ci_decision([{"name": "test", "status": status}], ["test"]),
+                )
         self.assertEqual(
             "pending",
             coordinator._ci_decision([{"name": "other", "conclusion": "SUCCESS"}], ["test"]),
@@ -747,27 +753,80 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             ),
         )
 
-    def test_successful_ci_persists_only_bounded_name_and_outcome(self):
+    def test_ci_uses_actions_jobs_and_persists_only_bounded_results(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
             approved.update(gh_bin="gh", codex_home=str(root / "codex"))
-            raw = [{
-                "name": "test",
-                "conclusion": "SUCCESS",
-                "detailsUrl": "https://example.invalid/private-details",
+            push_only = False
+            association = [{
+                "number": 39,
+                "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                "base": {"ref": approved["default_branch"]},
             }]
-
             def runner(command, **_kwargs):
-                self.assertIn("statusCheckRollup", command)
-                return subprocess.CompletedProcess(
-                    command, 0, stdout=json.dumps({"statusCheckRollup": raw}), stderr=""
-                )
+                nonlocal push_only
+                self.assertNotIn("statusCheckRollup", command)
+                endpoint = command[4]
+                if endpoint.endswith("/actions/runs"):
+                    runs = [{
+                        "id": 70, "workflow_id": 9, "name": "CI", "status": "completed",
+                        "conclusion": "success", "head_sha": "candidate-sha", "event": "push",
+                        "head_branch": "codex/fix", "pull_requests": [],
+                    }, {
+                        "id": 72, "workflow_id": 10, "name": "Foreign", "status": "completed",
+                        "conclusion": "success", "head_sha": "candidate-sha",
+                        "event": "pull_request", "head_branch": "codex/fix",
+                        "pull_requests": [{
+                            "number": 40,
+                            "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                            "base": {"ref": "release"},
+                        }],
+                    }, {
+                        "id": 73, "workflow_id": 11, "name": "Manual", "status": "completed",
+                        "conclusion": "success", "head_sha": "candidate-sha",
+                        "event": "workflow_dispatch", "head_branch": "codex/fix",
+                        "pull_requests": association,
+                    }, {
+                        "id": 74, "workflow_id": 12, "name": "Foreign push",
+                        "status": "completed", "conclusion": "success",
+                        "head_sha": "candidate-sha", "event": "push",
+                        "head_branch": "codex/fix", "pull_requests": [{
+                            "number": 40,
+                            "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                            "base": {"ref": "release"},
+                        }],
+                    }]
+                    if not push_only:
+                        runs.append({
+                            "id": 71, "workflow_id": 9, "name": "CI", "status": "completed",
+                            "conclusion": "success", "head_sha": "candidate-sha",
+                            "event": "pull_request", "head_branch": "codex/fix",
+                            "pull_requests": association,
+                        })
+                    output = {
+                        "total_count": len(runs),
+                        "workflow_runs": runs,
+                    }
+                elif endpoint.endswith(("/actions/runs/70/jobs", "/actions/runs/71/jobs")):
+                    output = {
+                        "total_count": 1,
+                        "jobs": [{
+                            "name": "test", "status": "completed", "conclusion": "success",
+                            "head_sha": "candidate-sha",
+                            "details_url": "https://example.invalid/private-details",
+                        }],
+                    }
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=json.dumps(output), stderr="")
 
             instance = coordinator.DeliveryCoordinator(
                 approved, FakeClient(), FakeBackend(), root / "state", runner=runner
             )
-            state = {"pr_number": 39}
+            state = {
+                "pr_number": 39, "pr_head_sha": "candidate-sha", "branch": "codex/fix",
+            }
             with (
                 mock.patch.object(instance, "_assert_claim"),
                 mock.patch.object(instance, "_assert_pr_head"),
@@ -776,9 +835,18 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 instance._require_ci_green_now(state)
 
             self.assertEqual(
-                [{"name": "test", "outcome": "SUCCESS"}], state["ci_checks"]
+                [
+                    {"name": "workflow:CI", "outcome": "SUCCESS"},
+                    {"name": "test", "outcome": "SUCCESS"},
+                ],
+                state["ci_checks"],
             )
             self.assertNotIn("detailsUrl", json.dumps(state))
+            push_only = True
+            self.assertEqual(
+                "passed",
+                coordinator._ci_decision(instance._ci_rollup(state), ["test"]),
+            )
 
     def test_pending_ci_timeout_enters_the_bounded_quality_failure_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1151,10 +1219,32 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
-                elif "statusCheckRollup" in command:
-                    output = json.dumps({
-                        "statusCheckRollup": [{"name": "test", "conclusion": "FAILURE"}]
-                    })
+                elif command[1:4] == ["api", "--method", "GET"]:
+                    endpoint = command[4]
+                    if endpoint.endswith("/actions/runs"):
+                        output = json.dumps({
+                            "total_count": 1,
+                            "workflow_runs": [{
+                                "id": 71, "workflow_id": 9, "name": "CI", "status": "completed",
+                                "conclusion": "failure", "head_sha": "candidate-sha",
+                                "event": "pull_request", "head_branch": "codex/fix",
+                                "pull_requests": [{
+                                    "number": 39,
+                                    "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                                    "base": {"ref": approved["default_branch"]},
+                                }],
+                            }],
+                        })
+                    elif endpoint.endswith("/actions/runs/71/jobs"):
+                        output = json.dumps({
+                            "total_count": 1,
+                            "jobs": [{
+                                "name": "test", "status": "completed",
+                                "conclusion": "failure", "head_sha": "candidate-sha",
+                            }],
+                        })
+                    else:
+                        raise AssertionError(command)
                 else:
                     raise AssertionError(command)
                 return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
@@ -1168,6 +1258,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "branch": "codex/fix",
                 "candidate_sha": "candidate-sha",
                 "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
                 "pr_base_branch": approved["default_branch"],
                 "ci_checks": [{"name": "test", "conclusion": "SUCCESS"}],
             }
