@@ -83,6 +83,21 @@ def main() -> None:
     assert "hermes-mission-runtime.yaml" in resources
     assert "hermes-agent-mission.sops.yaml" in resources
     assert "hermes-agent-owner.sops.yaml" in resources
+
+    owner_secret = yaml.safe_load(
+        (ROOT / "clusters/prod/infra/hermes-agent-owner.sops.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert owner_secret["apiVersion"] == "v1"
+    assert owner_secret["kind"] == "Secret"
+    assert owner_secret["metadata"] == {
+        "name": "hermes-agent-owner",
+        "namespace": "uap-system",
+    }
+    assert set(owner_secret["data"]) == {"owner-key"}
+    assert owner_secret["data"]["owner-key"].startswith("ENC[AES256_GCM")
+    assert isinstance(owner_secret.get("sops"), dict)
     print("hermes-mission-deployment-ok")
 
 

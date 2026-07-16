@@ -29,6 +29,29 @@ python3 tools/swarm/install_flow_v2.py
 python3 tools/swarm/install_flow_v2.py --check
 ```
 
+The coordinator must not inherit Workspace's owner-answer capability. Before enabling any coordinator timer,
+provision `~/.config/uap/delivery-coordinator.env` with mode `0600` and only the two Central client variables
+`HERMES_API_URL` and `HERMES_API_TOKEN`. The producer capability remains in the existing owner-only
+`~/.config/mission-producer-key`. Never copy `HERMES_MISSION_OWNER_KEY` into the coordinator environment. A safe
+migration from the existing protected Workspace environment is:
+
+```bash
+install -d -m 0700 "$HOME/.config/uap"
+temporary="$(mktemp "$HOME/.config/uap/.delivery-coordinator.env.XXXXXX")"
+trap 'rm -f "$temporary"' EXIT
+sed -n '/^HERMES_API_URL=/p; /^HERMES_API_TOKEN=/p' \
+  "$HOME/hermes-workspace/.env" > "$temporary"
+test "$(grep -Ec '^(HERMES_API_URL|HERMES_API_TOKEN)=' "$temporary")" = 2
+! grep -q '^HERMES_MISSION_OWNER_KEY=' "$temporary"
+chmod 0600 "$temporary"
+mv -f "$temporary" "$HOME/.config/uap/delivery-coordinator.env"
+trap - EXIT
+```
+
+The installed systemd unit reads only that file and explicitly unsets `HERMES_MISSION_OWNER_KEY`. This prevents
+normal coordinator execution from receiving the Workspace owner capability; it does not claim isolation from a
+separately compromised process running as the same trusted build-1 Unix account.
+
 Before enabling an A7.3 timer, migrate its stopped legacy two-cycle profile atomically. This removes manual model/
 effort fields, sets schema v3 and makes all three bounded routes reachable:
 

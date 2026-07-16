@@ -1960,6 +1960,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("Type=oneshot", service)
         self.assertIn("SuccessExitStatus=75", service)
         self.assertIn("UMask=0077", service)
+        self.assertIn(
+            "EnvironmentFile=%h/.config/uap/delivery-coordinator.env", service
+        )
+        self.assertIn("UnsetEnvironment=HERMES_MISSION_OWNER_KEY", service)
+        self.assertNotIn("%h/hermes-workspace/.env", service)
         self.assertIn("OnUnitActiveSec=1min", timer)
         self.assertIn("OnActiveSec=1min", timer)
         self.assertNotIn("OnBootSec=", timer)

@@ -22,6 +22,7 @@ an unavailable error rather than read or write build-1/browser fallback state. T
    deliberate owner-only secret store and is never committed.
 3. Put runtime variables in that file without exposing values:
    `HERMES_API_URL=http://100.94.228.67:30642`, `HERMES_API_TOKEN` from Secret `hermes-agent-api/api-key`,
+   `HERMES_MISSION_OWNER_KEY` from Secret `hermes-agent-owner/owner-key`,
    `HERMES_CENTRAL_ONLY=1` to exclude build-1 config and local discovery from the model picker,
    `HERMES_DASHBOARD_URL=http://100.94.228.67:30911`, `HERMES_DASHBOARD_USERNAME` to the configured
    dashboard user, and `HERMES_DASHBOARD_PASSWORD` from Secret `hermes-agent-dashboard/password`.
@@ -33,6 +34,14 @@ an unavailable error rather than read or write build-1/browser fallback state. T
 5. Build and restart only the Workspace unit on build-1 after the overlay and environment are installed:
    `pnpm install --frozen-lockfile && pnpm build`, then `sudo systemctl restart hermes-workspace`.
    Do not restart the local gateway/dashboard for this change.
+6. Before adding the owner key to Workspace, install the separate coordinator environment described in
+   `runbooks/hermes-flow-v2.md`, reinstall its systemd unit and run `systemctl --user daemon-reload`. Verify without
+   printing values that `~/.config/uap/delivery-coordinator.env` contains exactly `HERMES_API_URL` and
+   `HERMES_API_TOKEN`, and no `HERMES_MISSION_OWNER_KEY`. The coordinator unit must include
+   `UnsetEnvironment=HERMES_MISSION_OWNER_KEY`.
+7. After the Workspace restart, verify the protected `.env` remains mode `0600` and the running Workspace process
+   has `HERMES_MISSION_OWNER_KEY` without printing its environment. A missing key must leave mission answers
+   fail-closed with HTTP 503; the coordinator continues to operate using its separate environment.
 
 Secret values must be streamed between trusted hosts or supplied on stdin; never put values in commands,
 shell history, process listings, logs, markdown, or manifests. The encrypted Secret remains GitOps-managed.

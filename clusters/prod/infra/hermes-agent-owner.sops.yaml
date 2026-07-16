@@ -1,16 +1,22 @@
-apiVersion: null
+apiVersion: v1
+data:
+    owner-key: ENC[AES256_GCM,data:FPOpe+ez2rrshkJ2F2nl7Jv0ZEiGRLRgZae5VL09CzW2R47kOjO5TKCHoLg924ovyJucQyz4avN1IOzs/W59Lrnk/m0m54rQ5oEjHa35rWn+pbgCwnNT/Q==,iv:90LryotskKiFOdzWoF0hhf7EVcwYATFXZ42/bl047B8=,tag:Av8z07wmtNCnvIxdC3MK3A==,type:str]
+kind: Secret
+metadata:
+    name: hermes-agent-owner
+    namespace: uap-system
 sops:
     age:
         - enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB2clpjaHhHd3R6QVR0Yysv
-            RmJGU3dOOU1kcUFJbE1CVDcyZUdHMHh2UUM0CmQ1UGVqQ1J4YVJFSzZ1WG5acVQw
-            Tjh4R3h2NDVxMUV0aThGak9qYk5QcEkKLS0tIFRwNEVpV3FjMFdQcGo0YWZEL3ZS
-            ZjRCVkhCQTJ1WFpia0pFcVNFWHFhREEKKp5ev6N8ExpZ+ZT059mzz3Q8CgKLHFHu
-            kCQTr9Xznr5dUl5QXnPdOuANPeGxRSN4N1AIlxIvXLtAQzRRLJ+WAw==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBnOEZSYUQwWmVRUDNyQ2Fn
+            aERhcFJlVkFyZTVOV3lOaXFjMHh0eTd1aFVZCmZIU1RWenp4U0h4aThONi96OUpX
+            MDFGZGMxU2RWV3RJbTZudlNsU05JdFEKLS0tIDQxQ256YUlkMUppZXpYSzVJLzRw
+            SjkvMkxrcnlPSU1neFhEL3htck9OeXMKSEnjx7p5i5iVKsyewYJRDtHR/HNqh9xc
+            uO/i/RZYt9s7OfERaO8NOiLH7sXCuqYP24mWfYBHVxgEhUj8TnTyLg==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-07-16T21:21:22Z"
-    mac: ENC[AES256_GCM,data:MImEHGkv/NKtD6MrWVMgQLN690CZhgyO/UbPW3GvGHvr1xAqM3QOr20DBSiD91oI8mkkT2NVFpM/ss0cNYnfMWYIKSfUwO/T2as2sxObWaPmO5170ZWSyGk0AIruZeWTV0aXT0T4kOX3Ic1dLzw+cshPFrANGbUMBvHuUWUdNpk=,iv:WBIjCr9dsu9IU8fUZWyy6HRTIZG+OHHCZR1Q8fklMO0=,tag:hPXjQAtd2vMT52bpSV5ZXw==,type:str]
+    lastmodified: "2026-07-16T21:32:58Z"
+    mac: ENC[AES256_GCM,data:I7nX7nvq5aCYh1diMUovgdYRipcl1/s/jmXrWrWuJvVYnZFfGni4AF33rhrlnNeBdrpxrWBIOs7J3zn4N9RmWC1KRXEovIFybFaIDDsLCv3n9jJtrBgKIUqZ36IyyjDUkESGIlNsxBMGoqIXh9uxLd7oiSC9ja43OH1X9vhsH8g=,iv:m/SgBaexP1f5MUMem+pk3wcrcfdbDNf5GpukW2+CjhY=,tag:HBp9TSWZ1RTAau1V9DT38A==,type:str]
     version: 3.13.1
