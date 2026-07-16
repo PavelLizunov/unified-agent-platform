@@ -386,7 +386,7 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         {"tests": "passed", "review": "failed", "cleanup": "passed"},
         {"tests": "failed", "cleanup": "passed"},
     ):
-        return not deliveries
+        return not deliveries or deliveries == {"pull_request": "failed"}
     if gates == {
         "tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed",
     }:
@@ -395,6 +395,31 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         "tests": "passed", "review": "passed", "ci": "passed",
         "post-verify": "failed", "cleanup": "passed",
     } and deliveries == {"pull_request": "merged"}
+
+
+def _rejection_terminal(view: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
+    if not rejection_ready(view):
+        return None
+    gates = {
+        item.get("gate_id"): item.get("status")
+        for item in view.get("gates", [])
+        if isinstance(item, dict)
+    }
+    if gates.get("tests") == "failed":
+        return "central:auto-author-checks-failed:v1", {
+            "error": "Author checks failed after the approved cycle limit",
+        }
+    if gates.get("post-verify") == "failed":
+        return "central:auto-post-verify-failed:v1", {
+            "error": "Post-verify failed after the approved repair mission",
+        }
+    if gates.get("ci") == "failed":
+        return "central:auto-ci-failed:v1", {
+            "error": "Required CI failed after the approved cycle limit",
+        }
+    return "central:auto-review-rejected:v1", {
+        "error": "Independent review rejected the candidate",
+    }
 
 
 class MissionStore:
@@ -835,7 +860,16 @@ class MissionStore:
                 (mission_id,),
             ).fetchone()
         view = project(previous)
-        if not telegram or not completion_ready(view, telegram_terminal_ready=True):
+        if not telegram:
+            return None
+        if completion_ready(view, telegram_terminal_ready=True):
+            event_type = "mission.completed"
+            producer_event_id = "central:auto-complete:v1"
+            payload = {"result": "Delivery completed, merged, and verified"}
+        elif rejection := _rejection_terminal(view):
+            event_type = "mission.failed"
+            producer_event_id, payload = rejection
+        else:
             return None
         sequence = len(previous) + 1
         return {
@@ -844,10 +878,10 @@ class MissionStore:
             "sequence": sequence,
             "event_id": f"{mission_id}:{sequence}",
             "occurred_at": _utc_now(),
-            "type": "mission.completed",
+            "type": event_type,
             "source": "central-hermes",
-            "correlation": {"producer_event_id": "central:auto-complete:v1"},
-            "payload": {"result": "Delivery completed, merged, and verified"},
+            "correlation": {"producer_event_id": producer_event_id},
+            "payload": payload,
         }
 
     def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
@@ -872,29 +906,14 @@ class MissionStore:
             telegram_terminal_ready = bool(telegram) and all(
                 row["last_notified_sequence"] >= sequence for row in telegram
             )
+            rejection = _rejection_terminal(view)
             if completion_ready(view, telegram_terminal_ready=telegram_terminal_ready):
                 event_type = "mission.completed"
                 producer_event_id = "central:auto-complete:v1"
                 payload = {"result": "Delivery completed, merged, and verified"}
-            elif rejection_ready(view):
+            elif rejection is not None and (not telegram or telegram_terminal_ready):
                 event_type = "mission.failed"
-                gates = {
-                    item.get("gate_id"): item.get("status")
-                    for item in view.get("gates", [])
-                    if isinstance(item, dict)
-                }
-                if gates.get("tests") == "failed":
-                    producer_event_id = "central:auto-author-checks-failed:v1"
-                    payload = {"error": "Author checks failed after the approved cycle limit"}
-                elif gates.get("post-verify") == "failed":
-                    producer_event_id = "central:auto-post-verify-failed:v1"
-                    payload = {"error": "Post-verify failed after the approved repair mission"}
-                elif gates.get("ci") == "failed":
-                    producer_event_id = "central:auto-ci-failed:v1"
-                    payload = {"error": "Required CI failed after the approved cycle limit"}
-                else:
-                    producer_event_id = "central:auto-review-rejected:v1"
-                    payload = {"error": "Independent review rejected the candidate"}
+                producer_event_id, payload = rejection
             else:
                 return None
             event = _validate_submission(

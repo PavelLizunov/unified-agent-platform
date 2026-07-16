@@ -962,7 +962,7 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
         assert store.bound_mission("telegram", "42", "7") == parent
 
 
-def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
+def test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
 
@@ -990,6 +990,20 @@ def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
             assert terminal is not None
             return terminal[0]
 
+        review = fail(
+            "mission-review-failed-after-pr",
+            [("tests", "passed"), ("review", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert review["payload"]["error"] == "Independent review rejected the candidate"
+        author_checks = fail(
+            "mission-author-checks-failed-after-pr",
+            [("tests", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert author_checks["payload"]["error"] == (
+            "Author checks failed after the approved cycle limit"
+        )
         ci = fail(
             "mission-ci-failed",
             [("tests", "passed"), ("review", "passed"), ("ci", "failed"), ("cleanup", "passed")],
@@ -1007,6 +1021,66 @@ def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
         assert post_verify["payload"]["error"] == (
             "Post-verify failed after the approved repair mission"
         )
+
+
+def test_failure_terminal_waits_for_telegram_checkpoint_and_retries() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            mission_id = "mission-review-failed-with-telegram"
+            store.accept("Deliver", mission_id=mission_id)
+            store.bind(mission_id, "telegram", "42")
+            events = [
+                ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+                ("worker.upsert", {"worker_id": "worker-1", "status": "completed"}),
+                ("gate.upsert", {"gate_id": "tests", "status": "passed"}),
+                ("gate.upsert", {"gate_id": "review", "status": "failed"}),
+                ("delivery.upsert", {
+                    "kind": "pull_request", "status": "failed",
+                    "url": "https://example.invalid/pr/1",
+                }),
+                ("gate.upsert", {"gate_id": "cleanup", "status": "passed"}),
+            ]
+            for number, (event_type, payload) in enumerate(events, 1):
+                store.append_producer(
+                    mission_id,
+                    {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": event_type,
+                        "source": "build1-flow",
+                        "correlation": {"producer_event_id": f"flow:telegram-failure:{number}"},
+                        "payload": payload,
+                    },
+                )
+
+            assert store.complete_if_ready(mission_id) is None
+            notification = store.completion_notification(mission_id)
+            assert notification is not None and notification["type"] == "mission.failed"
+
+            async def fail_once(_subscription: dict, _text: str) -> None:
+                raise RuntimeError("telegram unavailable")
+
+            try:
+                await missions.notify_subscribers(store, notification, fail_once)
+                raise AssertionError("failed Telegram delivery was accepted")
+            except RuntimeError as error:
+                assert str(error) == "telegram unavailable"
+            assert store.complete_if_ready(mission_id) is None
+            assert store.projection(mission_id)["status"] == "active"
+
+            delivered: list[str] = []
+
+            async def send(_subscription: dict, text: str) -> None:
+                delivered.append(text)
+
+            assert await missions.notify_subscribers(store, notification, send) == 1
+            assert delivered and "failed" in delivered[0].lower()
+            terminal = store.complete_if_ready(mission_id)
+            assert terminal is not None and terminal[0]["type"] == "mission.failed"
+            assert store.pending_subscriptions(mission_id, terminal[0]["sequence"]) == []
+
+    asyncio.run(scenario())
 
 
 def main() -> None:
@@ -1027,7 +1101,8 @@ def main() -> None:
     test_mission_database_is_owner_only_on_posix()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()
-    test_terminal_failure_contracts_include_ci_and_post_verify()
+    test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
+    test_failure_terminal_waits_for_telegram_checkpoint_and_retries()
     print("hermes mission runtime checks passed")
 
 
