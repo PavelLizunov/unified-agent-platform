@@ -543,6 +543,34 @@ class DeliveryCoordinator:
             "repair_context": directory / "post-verify-repair.json",
         }
 
+    @staticmethod
+    def _owner_answers(state: dict[str, Any]) -> list[dict[str, str]]:
+        answers = state.get("owner_answers", [])
+        if not isinstance(answers, list) or len(answers) > 8:
+            raise DeliveryError("durable owner-answer history is invalid")
+        validated = []
+        for answer in answers:
+            if not isinstance(answer, dict) or set(answer) != {
+                "question_id", "text", "sha256"
+            }:
+                raise DeliveryError("durable owner-answer checkpoint is invalid")
+            question_id, text, digest = (
+                answer.get("question_id"), answer.get("text"), answer.get("sha256")
+            )
+            if (
+                not isinstance(question_id, str)
+                or not question_id
+                or len(question_id) > 128
+                or not isinstance(text, str)
+                or not text
+                or len(text) > 4096
+                or not isinstance(digest, str)
+                or hashlib.sha256(text.encode("utf-8")).hexdigest() != digest
+            ):
+                raise DeliveryError("durable owner-answer checkpoint is invalid")
+            validated.append(dict(answer))
+        return validated
+
     def _load_state(self, mission_id: str, paths: dict[str, pathlib.Path]) -> dict[str, Any]:
         if paths["state"].is_file():
             state = mission_adapter._read_json(paths["state"])
@@ -556,6 +584,8 @@ class DeliveryCoordinator:
             state.setdefault("prior_ci_failures", 0)
             state.setdefault("prior_author_failures", 0)
             state.setdefault("route_decisions", {})
+            state.setdefault("owner_answers", [])
+            self._owner_answers(state)
             migrated = False
             if "review_findings" in state:
                 findings = _sanitize_findings(state["review_findings"])
@@ -595,6 +625,7 @@ class DeliveryCoordinator:
             "prior_ci_failures": 0,
             "prior_author_failures": 0,
             "route_decisions": {},
+            "owner_answers": [],
             "crash_injected": False,
         }
         if paths["repair_context"].is_file():
@@ -625,6 +656,127 @@ class DeliveryCoordinator:
 
     def _save(self, paths: dict[str, pathlib.Path], state: dict[str, Any]) -> None:
         mission_adapter._write_json(paths["state"], state, private_parent=True)
+
+    def _wait_for_owner(
+        self,
+        state: dict[str, Any],
+        mission: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+    ) -> dict[str, Any]:
+        question = mission.get("question")
+        if (
+            state.get("phase") not in {"new", "waiting_owner"}
+            or not isinstance(question, dict)
+            or set(question) != {"question_id", "text"}
+            or not isinstance(question.get("question_id"), str)
+            or not question["question_id"]
+            or not isinstance(question.get("text"), str)
+            or not question["text"]
+        ):
+            raise DeliveryError("owner question is outside the pre-execution checkpoint")
+        tasks = mission.get("tasks")
+        if not isinstance(tasks, list):
+            raise DeliveryError("owner question has an invalid task projection")
+        if not tasks:
+            raise DeliveryError("owner question requires the inert pre-execution Kanban root")
+        adapter_state = mission_adapter.recover_mission_state(
+            mission["mission_id"], self.state_root, self.backend
+        )
+        projected = {
+            task.get("task_id") for task in tasks if isinstance(task, dict)
+        }
+        if adapter_state["root_task_id"] not in projected:
+            raise DeliveryError("owner question does not reference the exact Kanban root")
+        snapshot = self.backend.show(adapter_state["root_task_id"])
+        task = snapshot.get("task")
+        sticky = mission_adapter._latest_sticky_event(snapshot.get("events"))
+        if (
+            not isinstance(task, dict)
+            or task.get("status") != "blocked"
+            or task.get("assignee") is not None
+            or snapshot.get("runs") != []
+            or sticky is None
+            or sticky.get("kind") != "blocked"
+        ):
+            raise DeliveryError("owner question root is not inert and sticky-blocked")
+        state.update(
+            phase="waiting_owner",
+            root_task_id=adapter_state["root_task_id"],
+            owner_question={
+                "question_id": question["question_id"],
+                "text": _bounded_diagnostic(question["text"]),
+            },
+        )
+        self._save(paths, state)
+        return {
+            "action": "waiting_owner",
+            "mission_id": mission["mission_id"],
+            "state": state,
+        }
+
+    def _resume_owner_answer(
+        self,
+        state: dict[str, Any],
+        mission: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+    ) -> None:
+        if state.get("phase") not in {"new", "waiting_owner", "owner_answer_pending"}:
+            raise DeliveryError("owner answer arrived after execution started")
+        answer = mission.get("answer")
+        if (
+            not isinstance(answer, dict)
+            or set(answer) != {"question_id", "text"}
+            or not isinstance(answer.get("question_id"), str)
+            or not answer["question_id"]
+            or not isinstance(answer.get("text"), str)
+            or not answer["text"]
+        ):
+            raise DeliveryError("owner answer projection is invalid")
+        previous = state.get("owner_question")
+        if isinstance(previous, dict) and previous.get("question_id") != answer["question_id"]:
+            raise DeliveryError("owner answer does not match the durable question")
+        text = _bounded_diagnostic(answer["text"])
+        entry = {
+            "question_id": answer["question_id"],
+            "text": text,
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+        answers = self._owner_answers(state)
+        matches = [item for item in answers if item["question_id"] == entry["question_id"]]
+        if matches and matches != [entry]:
+            raise DeliveryError("owner answer changed after its durable checkpoint")
+        if not matches:
+            if len(answers) == 8:
+                raise DeliveryError("owner-answer history limit reached")
+            answers.append(entry)
+        adapter_state = mission_adapter.recover_mission_state(
+            mission["mission_id"], self.state_root, self.backend
+        )
+        tasks = mission.get("tasks")
+        if (
+            not isinstance(tasks, list)
+            or adapter_state["root_task_id"] not in {
+                task.get("task_id") for task in tasks if isinstance(task, dict)
+            }
+        ):
+            raise DeliveryError("owner answer does not reference the exact Kanban root")
+        state.update(
+            phase="owner_answer_pending",
+            root_task_id=adapter_state["root_task_id"],
+            owner_answers=answers,
+        )
+        self._save(paths, state)
+        self._assert_nonroutable_assignee()
+        self.backend.resume_root_from_answer(
+            state["root_task_id"],
+            assignee=self.profile["assignee"],
+            workspace=f"worktree:{paths['author']}",
+            question_id=entry["question_id"],
+            answer_digest=entry["sha256"],
+        )
+        state["phase"] = "new"
+        state.pop("owner_question", None)
+        self._save(paths, state)
 
     def _ensure_worktree(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
         source = pathlib.Path(self.profile["source_checkout"])
@@ -1166,12 +1318,14 @@ class DeliveryCoordinator:
         events = paths["directory"] / f"author-{cycle}.jsonl"
         last = paths["directory"] / f"author-{cycle}-last.txt"
         findings = _sanitize_findings(state.get("review_findings", []))
+        owner_answers = self._owner_answers(state)
         prompt = (
             "Implement the owner-approved mission in this exact repository. "
             "Read and obey all repository instructions. Do not commit, push, open a PR, merge, tag, release, "
             "deploy, use another agent, or change files outside the allowlist. Preserve the C#/.NET stack and "
             "use the smallest native implementation.\n\n"
             f"Goal: {self.profile['goal']}\n"
+            f"Owner answers bound to this mission: {json.dumps(owner_answers)}\n"
             f"Exact allowed files: {json.dumps(self.profile['required_files'])}\n"
             f"Review findings to fix: {json.dumps(findings)}\n"
             "Run relevant focused tests if useful; the coordinator reruns the authoritative gates."
@@ -1934,6 +2088,20 @@ class DeliveryCoordinator:
                 return {"action": "complete", "mission_id": mission_id, "state": state}
             if mission.get("status") in {"failed", "cancelled"}:
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
+            if mission.get("status") == "waiting_owner":
+                return self._wait_for_owner(state, mission, paths)
+            if state.get("phase") == "waiting_owner" and mission.get("answer") is None:
+                raise DeliveryError("owner question cleared without a durable answer")
+            answer = mission.get("answer")
+            if isinstance(answer, dict):
+                consumed = any(
+                    item["question_id"] == answer.get("question_id")
+                    for item in self._owner_answers(state)
+                )
+                if state.get("phase") in {"new", "waiting_owner", "owner_answer_pending"}:
+                    self._resume_owner_answer(state, mission, paths)
+                elif not consumed:
+                    raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)

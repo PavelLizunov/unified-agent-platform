@@ -21,15 +21,17 @@ data:
     UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
     FILES = {
         "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
+        "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
         "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
         "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
         "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
     }
     PATCHED_FILES = {
-        "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
-        "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
-        "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-        "gateway/platforms/api_server.py": "f8a2fa9d3f248eec845ccf201d4afb75b95c713b5c4e1a5cbe90a1ba6308a431",  # gitleaks:allow -- pinned patched SHA-256
+        "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
+        "hermes_cli/kanban.py": "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
+        "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+        "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
+        "gateway/platforms/api_server.py": "fa4b9f275ae1377330d678c2b3e78987aa0aae0d470e7916d9315cb73b0ca1b7",  # gitleaks:allow -- pinned patched SHA-256
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -51,9 +53,25 @@ data:
                 text,
                 '    CommandDef("status", "Show session, model, token, and context info", "Session"),',
                 '    CommandDef("status", "Show session, model, token, and context info", "Session"),\n'
-                '    CommandDef("mission", "Show or follow one central UAP mission", "Session",\n'
-                '               args_hint="[mission-id]", gateway_only=True),',
+                '    CommandDef("mission", "Show, bind, or answer one central UAP mission", "Session",\n'
+                '               args_hint="[mission-id | answer <text>]", gateway_only=True),',
                 "mission command",
+            )
+        if relative == "hermes_cli/kanban.py":
+            text = replace(
+                text,
+                '''    author = _profile_author() if reason else None
+        failed: list[str] = []''',
+                '''    failed: list[str] = []''',
+                "atomic unblock audit author removal",
+            )
+            return replace(
+                text,
+                '''            if reason:
+                    kb.add_comment(conn, tid, author, f"UNBLOCK: {reason}")
+                if not kb.unblock_task(conn, tid):''',
+                '''            if not kb.unblock_task(conn, tid, reason=reason):''',
+                "atomic unblock audit reference",
             )
         if relative == "hermes_cli/kanban_db.py":
             text = replace(
@@ -172,7 +190,7 @@ data:
             try:''',
                 "fast-path Kanban permissions",
             )
-            return replace(
+            text = replace(
                 text,
                 '''        conn = _sqlite_connect(path)
             try:''',
@@ -180,6 +198,44 @@ data:
             _harden_db_permissions(path)
             try:''',
                 "init-path Kanban permissions",
+            )
+            text = replace(
+                text,
+                '''def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
+        """Transition ``blocked``/``scheduled`` -> ready or todo.''',
+                '''def unblock_task(
+        conn: sqlite3.Connection, task_id: str, *, reason: Optional[str] = None
+    ) -> bool:
+        """Transition ``blocked``/``scheduled`` -> ready or todo.''',
+                "atomic unblock audit signature",
+            )
+            text = replace(
+                text,
+                '''    state) holds for the rest of this function's lifetime.
+        """
+        now = int(time.time())
+        with write_txn(conn):''',
+                '''    state) holds for the rest of this function's lifetime.
+        """
+        if reason is not None:
+            reason = reason.strip()
+            if not reason or len(reason) > 256:
+                raise ValueError("unblock reason must contain 1..256 characters")
+        now = int(time.time())
+        with write_txn(conn):''',
+                "atomic unblock audit validation",
+            )
+            return replace(
+                text,
+                '''        _append_event(
+                conn, task_id, "unblocked",
+                {"status": new_status} if new_status != "ready" else None,
+            )''',
+                '''        payload = {} if new_status == "ready" else {"status": new_status}
+            if reason:
+                payload["reason"] = reason
+            _append_event(conn, task_id, "unblocked", payload or None)''',
+                "atomic unblock audit event",
             )
         if relative == "gateway/run.py":
             return replace(
@@ -199,6 +255,28 @@ data:
                 chat_id = str(source.chat_id)
                 thread_id = str(source.thread_id or "")
                 requested = event.get_command_args().strip()
+                if requested == "answer" or requested.startswith("answer "):
+                    mission_id = store.bound_mission(platform, chat_id, thread_id)
+                    answer = requested[len("answer"):].strip()
+                    if not mission_id:
+                        return "No mission is bound to this chat. Use /mission <mission-id> first."
+                    if not answer:
+                        return "Usage: /mission answer <your answer>"
+                    try:
+                        from agent.redact import redact_sensitive_text
+
+                        view = store.projection(mission_id)
+                        question = view.get("question")
+                        if not isinstance(question, dict):
+                            return "The bound mission has no open owner question."
+                        store.answer(
+                            mission_id,
+                            question["question_id"],
+                            redact_sensitive_text(answer, force=True),
+                        )
+                        return telegram_text(store.projection(mission_id))
+                    except MissionError as error:
+                        return f"Mission unavailable: {error}"
                 mission_id = requested or store.bound_mission(platform, chat_id, thread_id) or store.latest()
                 if not mission_id:
                     return "No central missions yet."
@@ -219,7 +297,7 @@ data:
                 "from agent.redact import redact_sensitive_text\n"
                 "from hermes_cli.uap_missions import (\n"
                 "    MissionError, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-                "    notify_subscribers, producer_key_valid,\n"
+                "    notify_subscribers, owner_key_valid, producer_key_valid,\n"
                 "    sanitize_producer_submission, terminal_request_allowed,\n"
                 ")",
                 "mission imports",
@@ -368,6 +446,30 @@ data:
             except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
                 return web.json_response({"error": str(error)}, status=400)
 
+        async def _handle_answer_mission(self, request: "web.Request") -> "web.Response":
+            if auth_error := self._check_auth(request):
+                return auth_error
+            if not owner_key_valid(request.headers.get("X-Hermes-Mission-Owner-Key")):
+                return web.json_response({"error": "Invalid mission owner key"}, status=401)
+            try:
+                body = await request.json()
+                if not isinstance(body, dict) or set(body) != {"question_id", "text"}:
+                    raise MissionError("mission answer must contain question_id and text")
+                store = self._missions()
+                event, created = store.answer(
+                    request.match_info["mission_id"],
+                    body.get("question_id"),
+                    redact_sensitive_text(body.get("text"), force=True),
+                )
+                await self._notify_mission(store, event)
+                return web.json_response({
+                    "created": created,
+                    "event": event,
+                    "mission": store.projection(event["mission_id"]),
+                }, status=201 if created else 200)
+            except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+                return web.json_response({"error": str(error)}, status=400)
+
         async def _handle_finish_mission(self, request: "web.Request") -> "web.Response":
             if auth_error := self._check_auth(request):
                 return auth_error
@@ -431,6 +533,7 @@ data:
                 self._app.router.add_post("/api/missions", self._handle_create_mission)
                 self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
                 self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
+                self._app.router.add_post("/api/missions/{mission_id}/answer", self._handle_answer_mission)
                 self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
                 self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
                 "mission routes",
@@ -536,11 +639,12 @@ data:
         "complete",
     )
     TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
-    NOTIFY_TYPES = {"mission.stage", "mission.question", *TERMINAL_TYPES}
+    NOTIFY_TYPES = {"mission.stage", "mission.question", "mission.answer", *TERMINAL_TYPES}
     REQUIRED_PAYLOAD = {
         "mission.accepted": {"goal"},
         "mission.stage": {"stage", "progress_percent"},
         "mission.question": {"question_id", "text"},
+        "mission.answer": {"question_id", "text"},
         "task.upsert": {"task_id", "title", "status"},
         "worker.upsert": {"worker_id", "status"},
         "terminal.append": {"stream", "text"},
@@ -559,7 +663,9 @@ data:
         "terminal.append": {"stream", "text", "offset"},
     }
     CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
-    PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {"mission.accepted", *TERMINAL_TYPES}
+    PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
+        "mission.accepted", "mission.answer", *TERMINAL_TYPES,
+    }
     _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
     _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
     _ID_PAYLOAD_FIELDS = {
@@ -570,6 +676,7 @@ data:
     _MAX_EVENT_JSON = 65_536
     _MAX_TERMINAL_ENTRIES = 200
     _MAX_TERMINAL_CHARS = 65_536
+    _MAX_OWNER_ANSWER_CHARS = 4_000
     _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
     _COMPLETION_DELIVERIES = {
         "pull_request": "merged",
@@ -704,6 +811,7 @@ data:
             "dispatch_profile": None,
             "parent_mission_id": None,
             "question": None,
+            "answer": None,
             "result": None,
             "error": None,
             "tasks": [],
@@ -748,12 +856,24 @@ data:
                 progress = payload["progress_percent"]
                 if progress < view["progress_percent"]:
                     raise MissionError("mission progress decreased")
-                view.update(status="active", stage=payload["stage"], progress_percent=progress)
+                view.update(stage=payload["stage"], progress_percent=progress)
+                if view.get("question") is None:
+                    view["status"] = "active"
             elif kind == "mission.question":
                 view.update(
                     status="waiting_owner",
                     question={"question_id": payload["question_id"], "text": payload["text"]},
+                    answer=None,
                 )
+            elif kind == "mission.answer":
+                question = view.get("question")
+                if (
+                    view.get("status") != "waiting_owner"
+                    or not isinstance(question, dict)
+                    or question.get("question_id") != payload["question_id"]
+                ):
+                    raise MissionError("mission answer does not match the open question")
+                view.update(status="active", question=None, answer=dict(payload))
             elif kind == "task.upsert":
                 tasks[str(payload["task_id"])] = dict(payload)
             elif kind == "worker.upsert":
@@ -801,6 +921,8 @@ data:
         ]
         if view.get("question"):
             lines.append(f"Question: {view['question']['text']}")
+        if view.get("answer"):
+            lines.append(f"Answer received: {view['answer']['text']}")
         if view.get("result"):
             lines.append(f"Result: {view['result']}")
         if view.get("error"):
@@ -1333,6 +1455,29 @@ data:
                     "repair-restore", child_mission_id,
                 )
 
+        def answer(
+            self, mission_id: str, question_id: str, text: str
+        ) -> tuple[dict[str, Any], bool]:
+            """Record one idempotent owner answer to the currently open question."""
+            question_id = _require_id(question_id, "question_id")
+            text = str(text or "").strip()
+            if not text or len(text) > _MAX_OWNER_ANSWER_CHARS:
+                raise MissionError("owner answer must contain 1..4000 characters")
+            fingerprint = hashlib.sha256(question_id.encode("utf-8")).hexdigest()[:32]
+            return self.append_central(
+                mission_id,
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "mission_id": mission_id,
+                    "type": "mission.answer",
+                    "source": "central-hermes",
+                    "correlation": {
+                        "producer_event_id": f"central:answer:{fingerprint}"
+                    },
+                    "payload": {"question_id": question_id, "text": text},
+                },
+            )
+
         def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             normalized = dict(submission)
             normalized["source"] = "central-hermes"
@@ -1487,6 +1632,14 @@ data:
                         raise MissionError("mission is terminal")
                     if event["type"] == "mission.stage" and event["payload"]["progress_percent"] < current["progress_percent"]:
                         raise MissionError("mission progress decreased")
+                    if event["type"] == "mission.answer":
+                        question = current.get("question")
+                        if (
+                            current.get("status") != "waiting_owner"
+                            or not isinstance(question, dict)
+                            or question.get("question_id") != event["payload"]["question_id"]
+                        ):
+                            raise MissionError("mission answer does not match the open question")
                 sequence = len(previous) + 1
                 event.update(
                     sequence=sequence,
@@ -1713,6 +1866,11 @@ data:
 
     def producer_key_valid(provided: str | None) -> bool:
         expected = os.environ.get("HERMES_MISSION_PRODUCER_KEY", "").strip()
+        return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
+
+
+    def owner_key_valid(provided: str | None) -> bool:
+        expected = os.environ.get("HERMES_MISSION_OWNER_KEY", "").strip()
         return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
 
 

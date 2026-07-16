@@ -13,15 +13,17 @@ import subprocess
 UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
 FILES = {
     "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
+    "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
     "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
     "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
 }
 PATCHED_FILES = {
-    "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
-    "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
-    "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "f8a2fa9d3f248eec845ccf201d4afb75b95c713b5c4e1a5cbe90a1ba6308a431",  # gitleaks:allow -- pinned patched SHA-256
+    "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
+    "hermes_cli/kanban.py": "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
+    "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+    "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
+    "gateway/platforms/api_server.py": "fa4b9f275ae1377330d678c2b3e78987aa0aae0d470e7916d9315cb73b0ca1b7",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -43,9 +45,25 @@ def transform(relative: str, text: str) -> str:
             text,
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),',
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),\n'
-            '    CommandDef("mission", "Show or follow one central UAP mission", "Session",\n'
-            '               args_hint="[mission-id]", gateway_only=True),',
+            '    CommandDef("mission", "Show, bind, or answer one central UAP mission", "Session",\n'
+            '               args_hint="[mission-id | answer <text>]", gateway_only=True),',
             "mission command",
+        )
+    if relative == "hermes_cli/kanban.py":
+        text = replace(
+            text,
+            '''    author = _profile_author() if reason else None
+    failed: list[str] = []''',
+            '''    failed: list[str] = []''',
+            "atomic unblock audit author removal",
+        )
+        return replace(
+            text,
+            '''            if reason:
+                kb.add_comment(conn, tid, author, f"UNBLOCK: {reason}")
+            if not kb.unblock_task(conn, tid):''',
+            '''            if not kb.unblock_task(conn, tid, reason=reason):''',
+            "atomic unblock audit reference",
         )
     if relative == "hermes_cli/kanban_db.py":
         text = replace(
@@ -164,7 +182,7 @@ def connect(
         try:''',
             "fast-path Kanban permissions",
         )
-        return replace(
+        text = replace(
             text,
             '''        conn = _sqlite_connect(path)
         try:''',
@@ -172,6 +190,44 @@ def connect(
         _harden_db_permissions(path)
         try:''',
             "init-path Kanban permissions",
+        )
+        text = replace(
+            text,
+            '''def unblock_task(conn: sqlite3.Connection, task_id: str) -> bool:
+    """Transition ``blocked``/``scheduled`` -> ready or todo.''',
+            '''def unblock_task(
+    conn: sqlite3.Connection, task_id: str, *, reason: Optional[str] = None
+) -> bool:
+    """Transition ``blocked``/``scheduled`` -> ready or todo.''',
+            "atomic unblock audit signature",
+        )
+        text = replace(
+            text,
+            '''    state) holds for the rest of this function's lifetime.
+    """
+    now = int(time.time())
+    with write_txn(conn):''',
+            '''    state) holds for the rest of this function's lifetime.
+    """
+    if reason is not None:
+        reason = reason.strip()
+        if not reason or len(reason) > 256:
+            raise ValueError("unblock reason must contain 1..256 characters")
+    now = int(time.time())
+    with write_txn(conn):''',
+            "atomic unblock audit validation",
+        )
+        return replace(
+            text,
+            '''        _append_event(
+            conn, task_id, "unblocked",
+            {"status": new_status} if new_status != "ready" else None,
+        )''',
+            '''        payload = {} if new_status == "ready" else {"status": new_status}
+        if reason:
+            payload["reason"] = reason
+        _append_event(conn, task_id, "unblocked", payload or None)''',
+            "atomic unblock audit event",
         )
     if relative == "gateway/run.py":
         return replace(
@@ -191,6 +247,28 @@ def connect(
             chat_id = str(source.chat_id)
             thread_id = str(source.thread_id or "")
             requested = event.get_command_args().strip()
+            if requested == "answer" or requested.startswith("answer "):
+                mission_id = store.bound_mission(platform, chat_id, thread_id)
+                answer = requested[len("answer"):].strip()
+                if not mission_id:
+                    return "No mission is bound to this chat. Use /mission <mission-id> first."
+                if not answer:
+                    return "Usage: /mission answer <your answer>"
+                try:
+                    from agent.redact import redact_sensitive_text
+
+                    view = store.projection(mission_id)
+                    question = view.get("question")
+                    if not isinstance(question, dict):
+                        return "The bound mission has no open owner question."
+                    store.answer(
+                        mission_id,
+                        question["question_id"],
+                        redact_sensitive_text(answer, force=True),
+                    )
+                    return telegram_text(store.projection(mission_id))
+                except MissionError as error:
+                    return f"Mission unavailable: {error}"
             mission_id = requested or store.bound_mission(platform, chat_id, thread_id) or store.latest()
             if not mission_id:
                 return "No central missions yet."
@@ -211,7 +289,7 @@ def connect(
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
             "    MissionError, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-            "    notify_subscribers, producer_key_valid,\n"
+            "    notify_subscribers, owner_key_valid, producer_key_valid,\n"
             "    sanitize_producer_submission, terminal_request_allowed,\n"
             ")",
             "mission imports",
@@ -360,6 +438,30 @@ def connect(
         except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
             return web.json_response({"error": str(error)}, status=400)
 
+    async def _handle_answer_mission(self, request: "web.Request") -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        if not owner_key_valid(request.headers.get("X-Hermes-Mission-Owner-Key")):
+            return web.json_response({"error": "Invalid mission owner key"}, status=401)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {"question_id", "text"}:
+                raise MissionError("mission answer must contain question_id and text")
+            store = self._missions()
+            event, created = store.answer(
+                request.match_info["mission_id"],
+                body.get("question_id"),
+                redact_sensitive_text(body.get("text"), force=True),
+            )
+            await self._notify_mission(store, event)
+            return web.json_response({
+                "created": created,
+                "event": event,
+                "mission": store.projection(event["mission_id"]),
+            }, status=201 if created else 200)
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            return web.json_response({"error": str(error)}, status=400)
+
     async def _handle_finish_mission(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
             return auth_error
@@ -423,6 +525,7 @@ def connect(
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
             self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
+            self._app.router.add_post("/api/missions/{mission_id}/answer", self._handle_answer_mission)
             self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
             self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
             "mission routes",

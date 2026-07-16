@@ -53,11 +53,12 @@ def main() -> None:
         second = run(clone)
         assert second.returncode == 0 and "overlay already applied" in second.stdout, second.stderr
         checked = run(clone, "--check")
-        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 5, checked.stderr
+        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 6, checked.stderr
 
         commands = (clone / "hermes_cli/commands.py").read_text(encoding="utf-8")
         gateway = (clone / "gateway/run.py").read_text(encoding="utf-8")
         api = (clone / "gateway/platforms/api_server.py").read_text(encoding="utf-8")
+        kanban_cli = (clone / "hermes_cli/kanban.py").read_text(encoding="utf-8")
         kanban = (clone / "hermes_cli/kanban_db.py").read_text(encoding="utf-8")
         assert 'CommandDef("mission"' in commands
         assert 'if canonical == "mission"' in gateway
@@ -66,21 +67,29 @@ def main() -> None:
             '"/api/missions"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
+            '"/api/missions/{mission_id}/answer"',
             '"/api/missions/{mission_id}/terminal"',
         ):
             assert route in api
         assert "X-Hermes-Mission-Producer-Key" in api
         assert "producer_key_valid" in api
+        assert "X-Hermes-Mission-Owner-Key" in api
+        assert "owner_key_valid" in api
         assert 'if not isinstance(body, dict)' in api
         assert 'body.get("parent_mission_id") is not None' in api
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
+        assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
+        assert 'requested.startswith("answer ")' in gateway
+        assert "store.answer(" in gateway
         assert "atomic sticky initial block" not in kanban
         assert '"blocked",\n                        {"reason": None, "kind": "needs_input"}' in kanban
         assert "uq_tasks_active_idempotency" in kanban
         assert "def _harden_db_permissions" in kanban
+        assert "kb.unblock_task(conn, tid, reason=reason)" in kanban_cli
+        assert 'payload["reason"] = reason' in kanban
 
         subprocess.run(
             [
@@ -89,6 +98,7 @@ def main() -> None:
                 "py_compile",
                 str(clone / "hermes_cli/uap_missions.py"),
                 str(clone / "hermes_cli/commands.py"),
+                str(clone / "hermes_cli/kanban.py"),
                 str(clone / "hermes_cli/kanban_db.py"),
                 str(clone / "gateway/run.py"),
                 str(clone / "gateway/platforms/api_server.py"),
@@ -246,6 +256,15 @@ def main() -> None:
                 assert kb._has_sticky_block(conn, task.id)
                 assert kb.list_runs(conn, task.id) == []
 
+                reference = "owner-answer:q-product:0123456789abcdef"
+                assert kb.unblock_task(conn, task.id, reason=reference)
+                sticky = next(
+                    event for event in reversed(kb.list_events(conn, task.id))
+                    if event.kind in {"blocked", "unblocked"}
+                )
+                assert sticky.kind == "unblocked"
+                assert sticky.payload["reason"] == reference
+
             with kb.connect_closing(database) as conn:
                 with kb.write_txn(conn):
                     conn.execute(
@@ -295,6 +314,7 @@ def main() -> None:
         image_root = pathlib.Path(temp) / "image-root"
         for relative in (
             "hermes_cli/commands.py",
+            "hermes_cli/kanban.py",
             "hermes_cli/kanban_db.py",
             "gateway/run.py",
             "gateway/platforms/api_server.py",
@@ -307,7 +327,7 @@ def main() -> None:
         image_apply = run(image_root, "--source-commit", COMMIT)
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
-        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 5
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 6
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")

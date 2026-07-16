@@ -27,8 +27,10 @@ def main() -> None:
         "name: mission-runtime",
         "--source-commit 7c1a029553d87c43ecff8a3821336bc95872213b",
         "HERMES_MISSION_PRODUCER_KEY",
+        "HERMES_MISSION_OWNER_KEY",
         "mountPath: /opt/hermes/hermes_cli/uap_missions.py",
         "mountPath: /opt/hermes/hermes_cli/commands.py",
+        "mountPath: /opt/hermes/hermes_cli/kanban.py",
         "mountPath: /opt/hermes/gateway/run.py",
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
     ):
@@ -41,13 +43,21 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v30-terminal-rejection"
+        "v32-owner-answer-audit"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
         if container["name"] == "bootstrap"
     )
     bootstrap_script = "\n".join(bootstrap["args"])
+    assert (
+        "cp /opt/hermes/hermes_cli/kanban.py "
+        "/mission-runtime/root/hermes_cli/kanban.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/hermes_cli/kanban.py "
+        "/mission-runtime/kanban.py"
+    ) in bootstrap_script
     assert (
         "cp /opt/hermes/hermes_cli/kanban_db.py "
         "/mission-runtime/root/hermes_cli/kanban_db.py"
@@ -60,6 +70,18 @@ def main() -> None:
         container for container in template["spec"]["containers"]
         if container["name"] == "gateway"
     )
+    assert {
+        "name": "HERMES_MISSION_OWNER_KEY",
+        "valueFrom": {
+            "secretKeyRef": {"name": "hermes-agent-owner", "key": "owner-key"}
+        },
+    } in gateway["env"]
+    assert {
+        "name": "mission-runtime",
+        "mountPath": "/opt/hermes/hermes_cli/kanban.py",
+        "subPath": "kanban.py",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
     assert {
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",
@@ -75,6 +97,22 @@ def main() -> None:
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
     assert "hermes-mission-runtime.yaml" in resources
     assert "hermes-agent-mission.sops.yaml" in resources
+    assert "hermes-agent-owner.sops.yaml" in resources
+
+    owner_secret = yaml.safe_load(
+        (ROOT / "clusters/prod/infra/hermes-agent-owner.sops.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert owner_secret["apiVersion"] == "v1"
+    assert owner_secret["kind"] == "Secret"
+    assert owner_secret["metadata"] == {
+        "name": "hermes-agent-owner",
+        "namespace": "uap-system",
+    }
+    assert set(owner_secret["data"]) == {"owner-key"}
+    assert owner_secret["data"]["owner-key"].startswith("ENC[AES256_GCM")
+    assert isinstance(owner_secret.get("sops"), dict)
     print("hermes-mission-deployment-ok")
 
 

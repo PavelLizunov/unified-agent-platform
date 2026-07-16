@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v30-terminal-rejection"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v32-owner-answer-audit"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -117,12 +117,14 @@ spec:
               # The overlay fingerprints upstream before modifying it and fails closed on drift.
               mkdir -p /mission-runtime/root/hermes_cli /mission-runtime/root/gateway/platforms
               cp /opt/hermes/hermes_cli/commands.py /mission-runtime/root/hermes_cli/commands.py
+              cp /opt/hermes/hermes_cli/kanban.py /mission-runtime/root/hermes_cli/kanban.py
               cp /opt/hermes/hermes_cli/kanban_db.py /mission-runtime/root/hermes_cli/kanban_db.py
               cp /opt/hermes/gateway/run.py /mission-runtime/root/gateway/run.py
               cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
               /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
                 --source-commit 7c1a029553d87c43ecff8a3821336bc95872213b
               cp /mission-runtime/root/hermes_cli/commands.py /mission-runtime/commands.py
+              cp /mission-runtime/root/hermes_cli/kanban.py /mission-runtime/kanban.py
               cp /mission-runtime/root/hermes_cli/kanban_db.py /mission-runtime/kanban_db.py
               cp /mission-runtime/root/hermes_cli/uap_missions.py /mission-runtime/uap_missions.py
               cp /mission-runtime/root/gateway/run.py /mission-runtime/gateway_run.py
@@ -198,6 +200,8 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-api, key: api-key } }
             - name: HERMES_MISSION_PRODUCER_KEY
               valueFrom: { secretKeyRef: { name: hermes-agent-mission, key: producer-key } }
+            - name: HERMES_MISSION_OWNER_KEY
+              valueFrom: { secretKeyRef: { name: hermes-agent-owner, key: owner-key } }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }
@@ -239,6 +243,7 @@ spec:
             - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js, subPath: web_index.js, readOnly: true }
             # ADR-030 central mission runtime, generated from the exact A6.3 overlay sources.
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/commands.py, subPath: commands.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban.py, subPath: kanban.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban_db.py, subPath: kanban_db.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_missions.py, subPath: uap_missions.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }

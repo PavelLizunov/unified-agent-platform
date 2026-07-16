@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 
 type Item = Record<string, string>
 
@@ -12,6 +12,7 @@ export type MissionView = {
   progress_percent: number
   goal?: string | null
   question?: { question_id: string; text: string } | null
+  answer?: { question_id: string; text: string } | null
   result?: string | null
   error?: string | null
   tasks: Array<Item>
@@ -63,6 +64,9 @@ function safeDeliveryUrl(value: string): string | null {
 
 export function MissionOverviewCard() {
   const [selectedId, setSelectedId] = useState('')
+  const [answerDraft, setAnswerDraft] = useState({ questionId: '', text: '' })
+  const [answerError, setAnswerError] = useState('')
+  const [answering, setAnswering] = useState(false)
   const query = useQuery<MissionResponse>({
     queryKey: ['central-missions'],
     queryFn: async () => {
@@ -77,6 +81,37 @@ export function MissionOverviewCard() {
   })
   const missions = query.data?.missions ?? []
   const mission = selectMission(missions, selectedId)
+
+  async function submitAnswer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const question = mission?.question
+    const text =
+      answerDraft.questionId === question?.question_id
+        ? answerDraft.text.trim()
+        : ''
+    if (!mission || !question || !text) return
+    setAnswering(true)
+    setAnswerError('')
+    try {
+      const response = await fetch('/api/missions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mission_id: mission.mission_id,
+          question_id: question.question_id,
+          text,
+        }),
+      })
+      const body = (await response.json()) as MissionResponse
+      if (!response.ok) throw new Error(body.error || `Mission API ${response.status}`)
+      setAnswerDraft({ questionId: '', text: '' })
+      await query.refetch()
+    } catch (error) {
+      setAnswerError(error instanceof Error ? error.message : 'Answer failed')
+    } finally {
+      setAnswering(false)
+    }
+  }
 
   if (query.isLoading) {
     return <div className="h-20 animate-pulse rounded-xl bg-[var(--theme-card)]" />
@@ -130,9 +165,40 @@ export function MissionOverviewCard() {
         />
       </div>
       {mission.question ? (
-        <p className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-sm">
-          Question: {mission.question.text}
-        </p>
+        <div className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-sm">
+          <p>Question: {mission.question.text}</p>
+          <form className="mt-2 flex gap-2" onSubmit={submitAnswer}>
+            <textarea
+              aria-label="Answer"
+              maxLength={4_000}
+              rows={2}
+              value={
+                answerDraft.questionId === mission.question.question_id
+                  ? answerDraft.text
+                  : ''
+              }
+              onChange={(event) =>
+                setAnswerDraft({
+                  questionId: mission.question!.question_id,
+                  text: event.target.value,
+                })
+              }
+              className="min-w-0 flex-1 rounded-md border border-[var(--theme-border)] bg-transparent px-2 py-1 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={
+                answering ||
+                answerDraft.questionId !== mission.question.question_id ||
+                !answerDraft.text.trim()
+              }
+              className="self-end rounded-md border border-[var(--theme-border)] px-3 py-1 text-xs disabled:opacity-50"
+            >
+              {answering ? 'Sending…' : 'Answer'}
+            </button>
+          </form>
+          {answerError ? <p className="mt-1 text-xs text-red-400">{answerError}</p> : null}
+        </div>
       ) : null}
       {mission.result ? <p className="mt-3 text-sm">Result: {mission.result}</p> : null}
       {mission.error ? <p className="mt-3 text-sm text-red-400">{mission.error}</p> : null}
