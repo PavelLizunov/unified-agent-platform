@@ -9,7 +9,9 @@ import subprocess
 import tempfile
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
+REPO_ROOT = TOOL.parents[2]
 COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
+LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -200,6 +202,31 @@ def main() -> None:
         assert upgraded.returncode == 0 and "overlay applied" in upgraded.stdout
         upgraded_check = run(clone, "--check")
         assert upgraded_check.returncode == 0 and "legacy-needs-overlay" not in upgraded_check.stdout
+
+        legacy_added = {
+            "src/routes/api/missions.ts":
+                "e92e59ee7556741adac03a0850b1166234e582ba7cdaaa16379a4347797c84ac",
+            "src/screens/dashboard/components/mission-overview-card.tsx":
+                "7ab5ceff84f8b8a6eefd8acf694dfd27047b57ac25d73956707fbf2ea9088c45",
+        }
+        for relative, expected in legacy_added.items():
+            previous_asset = subprocess.check_output(
+                [
+                    "git", "show",
+                    f"{LEGACY_UAP_COMMIT}:tools/hermes-workspace/files/{relative}",
+                ],
+                cwd=REPO_ROOT,
+            )
+            path = clone / relative
+            path.write_bytes(previous_asset)
+            assert hashlib.sha256(previous_asset).hexdigest() == expected
+        legacy_added_check = run(clone, "--check")
+        assert legacy_added_check.returncode == 0
+        assert legacy_added_check.stdout.count("legacy-needs-overlay") == 2
+        legacy_added_upgrade = run(clone)
+        assert legacy_added_upgrade.returncode == 0 and "overlay applied" in legacy_added_upgrade.stdout
+        final_check = run(clone, "--check")
+        assert final_check.returncode == 0 and "legacy-needs-overlay" not in final_check.stdout
 
         target = clone / "src/server/gateway-capabilities.ts"
         target.write_bytes(target.read_bytes() + b"\n// tamper\n")
