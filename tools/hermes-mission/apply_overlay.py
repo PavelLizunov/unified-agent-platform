@@ -21,7 +21,7 @@ PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "9ca1c2611cf3bed843ca5cd0a515ce0d94340821aab380555112a42a909a946a",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "3f42ebde3db1da10e4b7d396fa980f72fea1306cd39bc032a24f3ccc06e1834b",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -210,7 +210,8 @@ def connect(
             "from agent.redact import redact_sensitive_text",
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
-            "    MissionError, MissionStore, notify_subscribers, producer_key_valid,\n"
+            "    MissionError, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
+            "    notify_subscribers, producer_key_valid,\n"
             "    sanitize_producer_submission, terminal_request_allowed,\n"
             ")",
             "mission imports",
@@ -283,7 +284,9 @@ def connect(
         except (TypeError, ValueError) as error:
             return web.json_response({"error": str(error)}, status=400)
 
-    async def _notify_mission(self, store: MissionStore, event: Dict[str, Any]) -> None:
+    async def _notify_mission(
+        self, store: MissionStore, event: Dict[str, Any], *, defer: bool = True
+    ) -> None:
         async def send(subscription: Dict[str, Any], text: str) -> None:
             from gateway.run import _gateway_runner_ref
 
@@ -300,13 +303,18 @@ def connect(
             metadata = None
             if subscription["thread_id"]:
                 metadata = {"thread_id": subscription["thread_id"]}
-            result = await adapter.send(subscription["chat_id"], text, metadata=metadata)
+            result = await asyncio.wait_for(
+                adapter.send(subscription["chat_id"], text, metadata=metadata),
+                timeout=NOTIFICATION_SEND_TIMEOUT_SECONDS,
+            )
             if result is not None and getattr(result, "success", True) is False:
                 raise RuntimeError(getattr(result, "error", "mission notification failed"))
 
         try:
             await notify_subscribers(store, event, send)
         except Exception as error:
+            if not defer:
+                raise
             logger.warning("Mission notification deferred: %s", error)
 
     async def _handle_append_mission_event(self, request: "web.Request") -> "web.Response":
@@ -326,6 +334,13 @@ def connect(
             if created:
                 await self._notify_mission(store, event)
             completed = store.complete_if_ready(mission_id)
+            if completed is None:
+                notification = store.completion_notification(mission_id)
+                if notification is not None:
+                    await self._notify_mission(store, notification, defer=False)
+                    completed = store.complete_if_ready(mission_id)
+                    if completed is None:
+                        raise RuntimeError("mission completion checkpoint did not converge")
             if completed is not None and completed[1]:
                 await self._notify_mission(store, completed[0])
             return web.json_response({
@@ -346,8 +361,9 @@ def connect(
         try:
             body = await request.json()
             status = str(body.get("status") or "").strip()
+            if status == "completed":
+                raise MissionError("completed mission requires the automatic delivery contract")
             terminal = {
-                "completed": ("mission.completed", "result"),
                 "failed": ("mission.failed", "error"),
                 "cancelled": ("mission.cancelled", "reason"),
             }.get(status)

@@ -1,18 +1,19 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **executed six times on 2026-07-15; the autonomous failure path passed, but A7.3 is not accepted because a
-successful delivery has not been demonstrated**.
+Status: **executed seven times on 2026-07-15/16; recoverable target delivery passed, but A7.3 is not fully accepted
+until one clean uninterrupted repeat also proves the subscribed Telegram projection**.
 
-The six historical per-attempt approvals are exhausted. ADR-031 now provides standing authorization for OpenAI
-Luna/Sol/Terra model turns, ordinary subscription spend and automatic retry/escalation. The sixth attempt
-proved the same bounded crash recovery, one autonomous review repair, runtime-attested Sol/Terra `xhigh` routing,
-independent rejection and native/Central cleanup without a target PR. The coordinator foundation and exact evidence are recorded in
+The six historical per-attempt approvals are exhausted. ADR-031 provides standing authorization for OpenAI
+Luna/Sol/Terra model turns, ordinary subscription spend and automatic retry/escalation. Attempt 7 used the installed
+`openai-autonomy-v2` schema-v3 profile and reached accepted Sol/Terra `xhigh` review, required CI, exact-head merge,
+fresh-main Windows post-verify and cleanup. Four harness fixes were installed between durable ticks, so it proves the
+recoverable success path rather than one uninterrupted run on the corrected runtime. The coordinator foundation and
+exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
-Before another canary, the target contract must cover a differently named custom executable from the durable runtime
-owner record. PR #216 installed deterministic `openai-autonomy-v1` plus the atomic schema-v3/three-cycle profile.
-The next exact revision must install `openai-autonomy-v2`, which durably escalates after independent-review or
-required-CI failure or bounded CI timeout and repairs the same durably bound PR without owner intervention. It preserves only bounded CI
-name/outcome metadata, accepts exact compatible v1 attestations for an in-progress cycle, and refuses PR rebinding.
+The next canary reuses that fixed policy/runtime without a new per-attempt approval and must run uninterrupted. It must
+also bind a Telegram subscription before execution so the final Central, Workspace and Telegram projection can satisfy
+the acceptance bundle. V2 preserves only bounded CI name/outcome metadata, accepts compatible v1 attestations for an
+in-progress cycle, refuses PR rebinding, and autonomously repairs review/required-CI failures on the same exact PR.
 
 No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
 outside the standing authority.

@@ -74,6 +74,9 @@ _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
     "default_branch": "verified",
 }
+NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
+# ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
+_NOTIFICATION_LEASE_SECONDS = 300
 
 
 class MissionError(ValueError):
@@ -310,9 +313,15 @@ def telegram_text(view: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def completion_ready(view: dict[str, Any]) -> bool:
+def completion_ready(
+    view: dict[str, Any], *, telegram_terminal_ready: bool = False
+) -> bool:
     """Apply the narrow A7.3 one-task delivery completion policy."""
-    if view.get("status") != "active" or view.get("question") is not None:
+    if (
+        not telegram_terminal_ready
+        or view.get("status") != "active"
+        or view.get("question") is not None
+    ):
         return False
     tasks = view.get("tasks")
     workers = view.get("workers")
@@ -447,10 +456,31 @@ class MissionStore:
                     thread_id TEXT NOT NULL,
                     mission_id TEXT NOT NULL,
                     last_notified_sequence INTEGER NOT NULL DEFAULT 0,
+                    notification_lease TEXT,
+                    notification_lease_sequence INTEGER NOT NULL DEFAULT 0,
+                    notification_lease_until REAL NOT NULL DEFAULT 0,
                     PRIMARY KEY (platform, chat_id, thread_id)
                 );
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(mission_subscriptions)")
+            }
+            if "notification_lease" not in columns:
+                connection.execute(
+                    "ALTER TABLE mission_subscriptions ADD COLUMN notification_lease TEXT"
+                )
+            if "notification_lease_sequence" not in columns:
+                connection.execute(
+                    """ALTER TABLE mission_subscriptions
+                       ADD COLUMN notification_lease_sequence INTEGER NOT NULL DEFAULT 0"""
+                )
+            if "notification_lease_until" not in columns:
+                connection.execute(
+                    """ALTER TABLE mission_subscriptions
+                       ADD COLUMN notification_lease_until REAL NOT NULL DEFAULT 0"""
+                )
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:
@@ -589,10 +619,45 @@ class MissionStore:
     def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized = dict(submission)
         normalized["source"] = "central-hermes"
+        normalized = _validate_submission(mission_id, normalized)
+        if normalized["type"] == "mission.completed":
+            raise MissionError("mission completion requires the automatic delivery contract")
         return self._append(mission_id, normalized)
 
     def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         return self._append(mission_id, _producer_submission(mission_id, submission))
+
+    def completion_notification(self, mission_id: str) -> dict[str, Any] | None:
+        """Build the terminal Telegram projection without committing terminal state."""
+        mission_id = _require_id(mission_id, "mission_id")
+        with self._db() as connection:
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence",
+                (mission_id,),
+            ).fetchall()
+            previous = [self._row(row) for row in rows]
+            if not previous:
+                raise MissionError("mission not found")
+            telegram = connection.execute(
+                """SELECT 1 FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram' LIMIT 1""",
+                (mission_id,),
+            ).fetchone()
+        view = project(previous)
+        if not telegram or not completion_ready(view, telegram_terminal_ready=True):
+            return None
+        sequence = len(previous) + 1
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "sequence": sequence,
+            "event_id": f"{mission_id}:{sequence}",
+            "occurred_at": _utc_now(),
+            "type": "mission.completed",
+            "source": "central-hermes",
+            "correlation": {"producer_event_id": "central:auto-complete:v1"},
+            "payload": {"result": "Delivery completed, merged, and verified"},
+        }
 
     def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
         """Let Central, never the producer, append the terminal delivery event."""
@@ -607,7 +672,16 @@ class MissionStore:
             if not previous:
                 raise MissionError("mission not found")
             view = project(previous)
-            if completion_ready(view):
+            sequence = len(previous) + 1
+            telegram = connection.execute(
+                """SELECT last_notified_sequence FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram'""",
+                (mission_id,),
+            ).fetchall()
+            telegram_terminal_ready = bool(telegram) and all(
+                row["last_notified_sequence"] >= sequence for row in telegram
+            )
+            if completion_ready(view, telegram_terminal_ready=telegram_terminal_ready):
                 event_type = "mission.completed"
                 producer_event_id = "central:auto-complete:v1"
                 payload = {"result": "Delivery completed, merged, and verified"}
@@ -637,7 +711,6 @@ class MissionStore:
                     "payload": payload,
                 },
             )
-            sequence = len(previous) + 1
             event.update(
                 sequence=sequence,
                 event_id=f"{mission_id}:{sequence}",
@@ -724,12 +797,31 @@ class MissionStore:
         thread_id = str(thread_id or "").strip()
         if not chat_id or len(chat_id) > 256 or len(thread_id) > 256:
             raise MissionError("invalid mission subscription")
+        now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                """SELECT mission_id, notification_lease_until
+                   FROM mission_subscriptions
+                   WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
+                (platform, chat_id, thread_id),
+            ).fetchone()
+            if current and current["mission_id"] == mission_id:
+                return
+            if current and current["notification_lease_until"] > now:
+                raise MissionError("mission subscription notification in progress")
             connection.execute(
-                """INSERT INTO mission_subscriptions(platform, chat_id, thread_id, mission_id)
-                   VALUES (?, ?, ?, ?)
-                   ON CONFLICT(platform, chat_id, thread_id)
-                   DO UPDATE SET mission_id = excluded.mission_id, last_notified_sequence = 0""",
+                """INSERT INTO mission_subscriptions(
+                       platform, chat_id, thread_id, mission_id,
+                       last_notified_sequence, notification_lease,
+                       notification_lease_sequence, notification_lease_until
+                   ) VALUES (?, ?, ?, ?, 0, NULL, 0, 0)
+                   ON CONFLICT(platform, chat_id, thread_id) DO UPDATE SET
+                       mission_id = excluded.mission_id,
+                       last_notified_sequence = 0,
+                       notification_lease = NULL,
+                       notification_lease_sequence = 0,
+                       notification_lease_until = 0""",
                 (platform, chat_id, thread_id, mission_id),
             )
 
@@ -751,20 +843,93 @@ class MissionStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def mark_notified(self, subscription: dict[str, Any], sequence: int) -> None:
+    def claim_notification(self, subscription: dict[str, Any], sequence: int) -> str | None:
+        token = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
-            connection.execute(
-                """UPDATE mission_subscriptions SET last_notified_sequence = ?
+            updated = connection.execute(
+                """UPDATE mission_subscriptions
+                   SET notification_lease = ?, notification_lease_sequence = ?,
+                       notification_lease_until = ?
                    WHERE platform = ? AND chat_id = ? AND thread_id = ?
-                     AND last_notified_sequence < ?""",
+                     AND mission_id = ?
+                     AND last_notified_sequence < ?
+                     AND notification_lease_until <= ?""",
                 (
+                    token,
                     sequence,
+                    now + _NOTIFICATION_LEASE_SECONDS,
                     subscription["platform"],
                     subscription["chat_id"],
                     subscription["thread_id"],
+                    subscription["mission_id"],
                     sequence,
+                    now,
                 ),
             )
+        return token if updated.rowcount == 1 else None
+
+    def finish_notification(
+        self,
+        subscription: dict[str, Any],
+        sequence: int,
+        token: str,
+        *,
+        delivered: bool,
+    ) -> bool:
+        with self._db() as connection:
+            if delivered:
+                updated = connection.execute(
+                    """UPDATE mission_subscriptions
+                       SET last_notified_sequence = ?,
+                           notification_lease = NULL,
+                           notification_lease_sequence = 0,
+                           notification_lease_until = 0
+                       WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                         AND mission_id = ? AND notification_lease = ?
+                         AND notification_lease_sequence = ?""",
+                    (
+                        sequence,
+                        subscription["platform"],
+                        subscription["chat_id"],
+                        subscription["thread_id"],
+                        subscription["mission_id"],
+                        token,
+                        sequence,
+                    ),
+                )
+            else:
+                updated = connection.execute(
+                    """UPDATE mission_subscriptions
+                       SET notification_lease = NULL,
+                           notification_lease_sequence = 0,
+                           notification_lease_until = 0
+                       WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                         AND mission_id = ? AND notification_lease = ?
+                         AND notification_lease_sequence = ?""",
+                    (
+                        subscription["platform"],
+                        subscription["chat_id"],
+                        subscription["thread_id"],
+                        subscription["mission_id"],
+                        token,
+                        sequence,
+                    ),
+                )
+            if updated.rowcount == 1:
+                return True
+            current = connection.execute(
+                """SELECT last_notified_sequence FROM mission_subscriptions
+                   WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                     AND mission_id = ?""",
+                (
+                    subscription["platform"],
+                    subscription["chat_id"],
+                    subscription["thread_id"],
+                    subscription["mission_id"],
+                ),
+            ).fetchone()
+        return bool(delivered and current and current["last_notified_sequence"] >= sequence)
 
 
 async def notify_subscribers(
@@ -772,22 +937,39 @@ async def notify_subscribers(
     event: dict[str, Any],
     sender: Callable[[dict[str, Any], str], Awaitable[None]],
 ) -> int:
-    """Deliver only owner-relevant updates; a retry never duplicates a notification."""
+    """Deliver owner updates at least once; send-before-cursor crashes may duplicate."""
     if event["type"] not in NOTIFY_TYPES:
         return 0
-    view = store.projection(event["mission_id"])
+    history = store.events(event["mission_id"])
+    view = (
+        project([*history, event])
+        if event["type"] in TERMINAL_TYPES and event["sequence"] > len(history)
+        else project(history)
+    )
     text = telegram_text(view)
     sent = 0
     first_error: Exception | None = None
     for subscription in store.pending_subscriptions(event["mission_id"], event["sequence"]):
+        token = store.claim_notification(subscription, event["sequence"])
+        if token is None:
+            continue
         try:
             await sender(subscription, text)
         except Exception as error:
+            store.finish_notification(
+                subscription, event["sequence"], token, delivered=False
+            )
             first_error = first_error or error
         else:
-            store.mark_notified(subscription, event["sequence"])
-            sent += 1
-    if first_error is not None and sent == 0:
+            if store.finish_notification(
+                subscription, event["sequence"], token, delivered=True
+            ):
+                sent += 1
+            else:
+                first_error = first_error or RuntimeError(
+                    "mission subscription changed during notification"
+                )
+    if first_error is not None:
         raise first_error
     return sent
 

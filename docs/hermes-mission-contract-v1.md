@@ -168,12 +168,15 @@ service:
   mission event;
 - the central mission SQLite file and build-1 adapter JSON are owner-only (`0600`); adapter-created mission state
   directories are `0700` on POSIX;
-- only an authenticated direct loopback caller inside the Central Hermes process boundary may publish `completed`,
-  `failed` or `cancelled`; forwarded client headers are ignored, and terminal retries with the same status and
-  redacted message are idempotent;
+- only the automatic delivery contract may publish `completed`: at least one Telegram subscription must be bound,
+  every bound Telegram cursor must checkpoint the prospective terminal projection, and then Central commits the same
+  terminal sequence; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
+  forwarded client headers are ignored, and terminal retries with the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
   render from the exact same projection and `projection_id`;
+- notification delivery leases the exact mission binding for at most five minutes; a concurrent rebind either wins
+  before the lease and prevents the stale send, or fails closed until send/checkpoint releases or expires the lease;
 - terminal/question text is force-redacted at the Hermes API boundary and all stored/event frames are bounded.
 
 The Workspace card uses native expand/collapse and shows stage/progress first; tasks, workers, terminal, changes,

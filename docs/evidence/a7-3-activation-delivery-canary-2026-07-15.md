@@ -1,8 +1,8 @@
 # A7.3 Activation and Delivery Canary Evidence
 
-Date: 2026-07-15
+Date: 2026-07-15/16
 
-Status: **AUTONOMOUS FAILURE PATH PASS; SUCCESSFUL DELIVERY NOT YET PROVEN**
+Status: **SUCCESS PATH PASS WITH DURABLE LIVE RECOVERY; CLEAN UNINTERRUPTED REPEAT OPEN**
 
 ## Accepted boundary
 
@@ -25,7 +25,11 @@ approved a sixth model-strength comparison after the tri-state lock rule was fix
 - no Claude, Qwen, Ollama, vLLM, local inference, GPU, Spark Runner, tag, release or destructive test.
 
 The owner did not run commands or repair any attempt. The quality gate stopped all six candidates before a target
-PR was opened.
+PR was opened. Attempt 7 used the standing ADR-031 authority rather than a new per-attempt approval. It used the same
+Sol/Terra `xhigh` route and reached PR, required CI, exact-head merge, fresh-main Windows verification and cleanup.
+Codex maintained the still-under-development UAP harness between durable ticks when attempt 7 exposed four platform
+compatibility/runtime defects; therefore this proves the recoverable success path, not yet one uninterrupted run on
+the already-corrected runtime.
 
 ## Landed UAP foundation and corrections
 
@@ -42,6 +46,12 @@ PR was opened.
 | [#208](https://github.com/PavelLizunov/unified-agent-platform/pull/208) author-check rollout | `bad5ef9c59bf97e741305c82cb020e3d8fa335c6` | `7ef3eff619617c71e8b3a3e332e653b8fc2c6b19` | Config revision `v27-a7-3-author-checks` rolled the live Central failure policy |
 | [#209](https://github.com/PavelLizunov/unified-agent-platform/pull/209) first-tick timer arming | `6c7ccbc402c30aaebd716fb854454fc82850e7cb` | `da3ec15526c60b9c76a33b0234178f17f2b80e28` | `OnActiveSec` arms a newly enabled timer independently of the old user-manager boot time |
 | [#213](https://github.com/PavelLizunov/unified-agent-platform/pull/213) exact reasoning effort | `ee1317cfe8eb333c281bf2e6c657b1a3a3129cdc` | `040ac6053f0db2eb8abd2638c0635ac7dfe9d561` | Profile-bound author/reviewer effort is passed with strict Codex config and attested from rollout `turn_context` |
+| [#216](https://github.com/PavelLizunov/unified-agent-platform/pull/216) OpenAI autonomy policy | `3e936be8aa974f0fce7405d748388249f046a136` | `8203e4cd2f03b7433a70ca61d9c46403a2be51ba` | Standing-approved deterministic Luna/Sol/Terra routing, fail-closed outside the policy |
+| [#217](https://github.com/PavelLizunov/unified-agent-platform/pull/217) quality-failure repair | `f47870d56075f75bdcf9630364bd2762a917d1e9` | `21b19e83021006db2f350423769648092f61bf5d` | Review/required-CI failures durably escalate and repair the same exact PR |
+| [#218](https://github.com/PavelLizunov/unified-agent-platform/pull/218) compacted rollout compatibility | `6658d91987aa15682b9b4ea9c5085f992e181812` | `9dd0cd5840f33cabe46f90367369a0bebd55cb8c` | Exact-identical duplicate `turn_context` is accepted; conflicting context still fails closed |
+| [#219](https://github.com/PavelLizunov/unified-agent-platform/pull/219) legacy-gh PR recovery | `c33cf45debe70cb5018ef82ea68acf021f5cf053` | `97c7d766133d3203d044a21c240cda10c9da4004` | PR identity is recovered from `commits[-1].oid` on build-1's pinned `gh 2.4` |
+| [#220](https://github.com/PavelLizunov/unified-agent-platform/pull/220) exact-head merge on legacy gh | `11368e719eeac13537ab88560cb5e71fe732ec24` | `185748416f42c0e0a37a6a890a387951c15c6a04` | GitHub merge API atomically binds the merge to the reviewed candidate SHA |
+| [#221](https://github.com/PavelLizunov/unified-agent-platform/pull/221) Windows post-verify root | `0035e9c3afb5b6540c7d87ae51513034814faf92` | `dd8ea867d6918a9311dcdd519fcf31bbada4dbf2` | Versioned post-verify asset creates its disposable artifact parent before download |
 
 Every PR passed required `static-checks`. The #207 correction passed the full local gate with `secret-scan-ok`,
 `iac-static-ok` and `verify-local-ok`, 20 Windows/Linux coordinator tests and the mission-runtime checks. After two
@@ -249,6 +259,52 @@ VPNRouter issue #39 remains open, target `main` remains
 `c51f619fa98792c1726c1eadc2796f4e067048ba`, and PR lookup for the candidate branch is empty. The profile timer is
 disabled/inactive. No Codex, Qwen, Ollama, vLLM, local-model, GPU, swarm or Spark process remained after cleanup.
 
+## Attempt 7 - recoverable successful delivery
+
+| Identity | Value |
+|---|---|
+| Mission | `a7-vpnrouter-issue39-20260716-09` |
+| Profile | `build1-vpnrouter-a7-3h` |
+| Root / run | `t_a4e39dc5` / `29` |
+| Candidate | `fdb21265dc2ce4baf237394625ed2d5776b62858` |
+| Merge/default SHA | `6f7bdc98b1b0f1fe27bd838a0d2e4985adb3aefe` |
+| Sol author session | `019f689e-50d1-7cb3-8605-02eb2d4eb43f` |
+| Terra reviewer session | `019f68d3-8a7c-70c0-ac52-f36e531f3235` |
+| Target delivery | [VPNRouter PR #43](https://github.com/PavelLizunov/VPNRouter/pull/43) |
+
+The schema-v3 profile selected `openai-autonomy-v2` route `complex` from the closed signal
+`changed_files>=6`: Sol author and Terra reviewer, both `xhigh`. The matching rollout `turn_context` attested
+`gpt-5.6-sol`/`workspace-write` and `gpt-5.6-terra`/`read-only`; the sessions, models and sandboxes were distinct.
+The author changed exactly the six allowlisted files and the Windows candidate gate passed. The approved crash fired
+at `2026-07-16T02:48:36Z` after the durable author commit and before Central ACK. The next timer tick recovered the
+same task, run, worktree and candidate SHA without a second Sol turn. Terra reviewed the exact clean SHA, reran the
+Windows gate and returned `accept` with no findings.
+
+The coordinator pushed the exact candidate, opened PR #43, observed required `test=SUCCESS` and `grep=SUCCESS`, and
+merged through GitHub's API with candidate SHA as the atomic merge lease. GitHub API metadata was independently
+rechecked on 2026-07-16: PR #43 has `merged=true`, `merged_at=2026-07-16T03:14:21Z`, head
+`fdb21265dc2ce4baf237394625ed2d5776b62858` and merge commit
+`6f7bdc98b1b0f1fe27bd838a0d2e4985adb3aefe`; its body contains `Closes #39`. Issue #39 has `state=closed`,
+`state_reason=completed` and `closed_at=2026-07-16T03:14:22Z`. Remote `main` equals that merge SHA; the disposable
+remote branch, local branch and author/review worktrees are absent. The bounded machine-readable REST response fields
+are retained in [`a7-3-vpnrouter-target-2026-07-16.json`](a7-3-vpnrouter-target-2026-07-16.json), so this claim does not
+depend on a cached issue page.
+
+Four defects in the developing UAP harness surfaced at durable boundaries and were fixed in #218-#221 without
+rebinding the mission or replaying completed work: compacted Codex rollouts can repeat an identical `turn_context`,
+build-1's `gh 2.4` lacks `headRefOid`, the same CLI lacks `--match-head-commit`, and the Windows post-verify artifact
+parent did not yet exist. Each corrected runtime resumed from the saved phase. The first full Windows post-verify then
+hit the repository's known GC-sensitive `SingBoxManagerProcessExitLeakTests` failure; the next timer retry passed the
+unchanged merge SHA. The final state records the post-verify command exit `0` and
+`default_sha == merge_sha == 6f7bdc9...`.
+
+Native Kanban task/run are `done/completed` with summary `Reviewed change merged, verified, and cleaned`. Central and
+authenticated Workspace API returned the same projection: sequence `25`, projection `5741fd7785718c90`, status
+`completed`, stage `complete`, progress `100%`, one done task, one completed worker, deliveries `pull_request=merged`
+and `default_branch=verified`, plus gates `tests/review/ci/post-verify/cleanup=passed`. No Telegram subscription existed
+for this mission, so this attempt does not claim Telegram terminal delivery. The disposable timer is disabled/inactive
+and no forbidden model/runtime process name remained on build-1.
+
 ## Failure recovery and cleanup
 
 The original coordinator saved the final review files but raised before updating `delivery-state.json`. Because the
@@ -266,7 +322,8 @@ archived and active runs reclaimed. Their timers are disabled/inactive, disposab
 absent, and target PR lookup is empty. Their Central projections are sequence `7`, status `failed`, stage `testing`,
 progress `50%`; projection IDs are `825d56543d2fb5d0` and `9232b99540b6e45f`.
 
-Those historical gaps are closed for attempts 3-6. Two observation limitations remain: Central exposes only the generic
+Those historical gaps are closed for attempts 3-6. Attempt 7 proves successful durable recovery across later phases,
+including exact PR recovery, exact-head merge and post-verify retry. Two observation limitations remain: Central exposes only the generic
 error `Independent review rejected the candidate`, not the actionable reviewer finding, and the failed projection retains
 stage `testing` at `50%` with an empty terminal list. Telegram delivery of this terminal update was not independently
 verified.
@@ -289,14 +346,18 @@ Proven:
   fail-open lock-liveness defect;
 - a stronger Sol/Terra route with explicit `xhigh` effort still failed closed safely: it improved the candidate and
   independently found a remaining custom-executable enumeration defect instead of opening a PR.
+- a real non-toy mission reached accepted exact-SHA review, required CI, atomic exact-head merge, fresh-main Windows
+  verification, native/Central completion and disposable cleanup;
+- after each live harness defect, the saved mission resumed at its durable phase rather than repeating author/review,
+  creating another PR or rebinding the reviewed candidate;
+- Central and Workspace produced the same final authoritative projection.
 
 Not proven:
 
-- one successful real-project mission reaching PR, required CI, merge and fresh-main post-verify;
+- one uninterrupted real-project repeat starting after all #218-#221 corrections were already installed;
 - detailed review-finding projection and Workspace/Telegram terminal consistency for a rejected delivery;
 - CI-failure repair, merge conflict recovery, deploy/rollback, retention, soak or HA;
-- installation of the standing-authorized `openai-autonomy-v1` policy and atomic schema-v3 profile migration required
-  before another live author/reviewer mission.
+- Telegram terminal delivery for the successful mission; it had no subscription.
 
 ## Gate
 
@@ -309,15 +370,14 @@ Not proven:
 | Independent quality rejection | **PASS (fail-closed)** |
 | Autonomous failure closure and cleanup | **PASS** |
 | Newly enabled timer self-arms | **PASS after #209** |
-| Successful target delivery | **FAIL / NOT DEMONSTRATED** |
-| A7.3 Product Operating Contract milestone | **NOT COMPLETE** |
+| Successful target delivery | **PASS after #218-#221 live recovery** |
+| Central/Workspace terminal convergence | **PASS** |
+| Clean uninterrupted repeat on corrected runtime | **OPEN** |
+| Telegram-bound terminal convergence in that repeat | **OPEN** |
+| Full Product Operating Contract | **NOT COMPLETE: channel/lifecycle work remains** |
 
-Before another live canary, land and install the owner-approved ADR-031 `openai-autonomy-v1` machine policy, stop both
-coordinator units and atomically migrate the fixed profile to schema v3. Luna/Sol/Terra turns, reasoning escalation and
-subscription spend inside that policy require no fresh owner approval. Claude, a new provider, local inference/GPU,
-destructive operations or work outside the approved scope remain owner-gated. The next target contract must also
-enumerate verified executable basenames/paths from the durable owner record instead of hard-coding `sing-box`, with a
-cross-process behavioral test using a differently named custom executable.
-A successful PR/CI/merge/fresh-main post-verify route remains the A7.3 completion gate. Separately, project the
-actionable review finding and a terminal stage/progress into Central and verify Telegram delivery; neither requires
-claiming that the success path is complete.
+Before the next canary starts, bind its Telegram mission subscription. That same clean uninterrupted repeat on the
+already-corrected runtime must prove the final projection through Central, Workspace and Telegram; it does not need a
+new model or per-attempt approval. Separately, project actionable rejection findings and terminal stage/progress into
+Central. Claude, a new provider, local inference/GPU, destructive operations or work outside the accepted scope remain
+owner-gated.

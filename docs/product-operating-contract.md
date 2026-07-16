@@ -106,20 +106,21 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
    answer-and-resume loop for owner questions.
-2. The profile-bound A7 coordinator and schema-v3 three-cycle profile are installed. Current source adds durable
-   independent-review/required-CI escalation and same-PR repair, but that exact v2 revision and a successful
-   PR/CI/merge/post-verify delivery remain unproven live.
+2. The profile-bound A7 coordinator, schema-v3 profile and `openai-autonomy-v2` route are installed. One real mission
+   reached PR/required-CI/exact-head merge/fresh-main post-verify and cleanup, recovering durable checkpoints while
+   four harness corrections were installed. The next valid gate must bind Telegram before execution, then use one
+   clean uninterrupted repeat on the corrected runtime to prove matching Central/Workspace/Telegram terminal status.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
    complete retention/cleanup lifecycle. An open PR that exhausts all autonomous repair cycles is intentionally retained
    with its exact remote branch as bounded failure evidence because GitHub offers no conditional PR-close mutation.
-5. The Flow contract derives model and sandbox policy from the exact Codex rollout `turn_context`; the OpenAI-only
-   v1 route is installed and the v2 quality-failure route is validated in source but still awaits exact live rollout.
-   OS-independent read-only filesystem and credential isolation remain unproven.
-6. The prepared terminal endpoint now requires both the general API bearer and a direct loopback source. Producer
-   events use a closed schema and protect every allowed string before storage; mission DB and adapter state are
-   owner-only on POSIX. These offline hardening changes still await a verified A7 rollout.
+5. The Flow contract derives model, effort and sandbox policy from the exact Codex rollout `turn_context`; the
+   OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. OS-independent read-only filesystem and
+   credential isolation remain unproven.
+6. The terminal endpoint requires both the general API bearer and a direct loopback source. Producer events use a
+   closed schema and protect every allowed string before storage; mission DB and adapter state are owner-only on POSIX.
+   The A7 success path exercised terminal completion, but least-privilege process isolation remains follow-up work.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 

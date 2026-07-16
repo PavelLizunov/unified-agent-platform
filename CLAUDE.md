@@ -191,18 +191,17 @@ Good next tasks that do not require redesign:
    and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
 3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
    resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
-4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator is installed. Six approved VPNRouter canaries proved
-   bounded author-check retry, crash recovery and autonomous rejected-run closure/cleanup. The sixth used Sol author
-   plus exact-SHA read-only Terra review at runtime-attested `xhigh`; Terra rejected the final candidate because a
-   differently named custom executable remained invisible to the hard-coded process enumeration. PRs #205-#209 and
-   #213 close the platform defects exposed so far. A successful PR/CI/merge/post-verify canary is still required. Evidence:
-   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator reached its first successful real delivery on mission
+   `a7-vpnrouter-issue39-20260716-09`: runtime-attested Sol author, separate exact-SHA read-only Terra review, VPNRouter
+   PR #43, required CI, exact-head merge, fresh-main Windows post-verify and cleanup. PRs #218-#221 corrected four live
+   harness defects between durable ticks. The next valid proof must bind the Telegram mission subscription before
+   execution, then complete one clean uninterrupted repeat on the corrected runtime with matching terminal status in
+   Central, Workspace and Telegram. Evidence: `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the
-   mission remain gated. `openai-autonomy-v1` and the schema-v3 profile are installed. Land, install and verify
-   `openai-autonomy-v2`, which turns independent-review or required-CI failure into durable automatic route
-   escalation and same-PR repair, before the next canary. The same PR number and pushed head are durable identity;
+   mission remain gated. `openai-autonomy-v2` and the schema-v3 profile are installed and ran live. The same PR number
+   and pushed head are durable identity;
    final failure validates the durable PR number/head/base under a live claim and preserves an open exact PR/branch as
    bounded evidence because GitHub has no conditional close; an already closed PR's unchanged branch is lease-deleted.
    CI persistence is bounded, repair pushes use an exact prior-head lease,
