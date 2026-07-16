@@ -517,8 +517,10 @@ def _codex_rollout_context(
                     for item in payload.get("content", []):
                         if isinstance(item, dict) and isinstance(item.get("text"), str):
                             user_texts.append(item["text"])
-    if len(session_meta) != 1 or len(turn_context) != 1:
+    if len(session_meta) != 1 or not turn_context:
         raise ContractError("rollout must contain exactly one session_meta and one turn_context")
+    if any(context != turn_context[0] for context in turn_context[1:]):
+        raise ContractError("rollout turn_context entries conflict")
     meta, context = session_meta[0], turn_context[0]
     if _required_text(meta, "id", "rollout.session_meta") != session_id:
         raise ContractError("rollout session does not match telemetry thread")
