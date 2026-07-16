@@ -29,7 +29,7 @@ data:
         "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
         "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
         "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-        "gateway/platforms/api_server.py": "3f42ebde3db1da10e4b7d396fa980f72fea1306cd39bc032a24f3ccc06e1834b",  # gitleaks:allow -- pinned patched SHA-256
+            "gateway/platforms/api_server.py": "6305e75eef3ba6f128fb022983a8a5276f074a8d29b6ed329073bcd87433297b",  # gitleaks:allow -- pinned patched SHA-256
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -263,6 +263,12 @@ data:
                 return auth_error
             try:
                 body = await request.json()
+                if body.get("parent_mission_id") is not None and not producer_key_valid(
+                    request.headers.get("X-Hermes-Mission-Producer-Key")
+                ):
+                    return web.json_response(
+                        {"error": "Invalid mission producer key"}, status=401
+                    )
                 store = self._missions()
                 event, created = store.accept(
                     redact_sensitive_text(body.get("goal"), force=True),
@@ -270,6 +276,7 @@ data:
                     session_id=body.get("session_id"),
                     run_id=body.get("run_id"),
                     dispatch_profile=body.get("dispatch_profile"),
+                    parent_mission_id=body.get("parent_mission_id"),
                 )
                 return web.json_response({
                     "created": created,
@@ -544,7 +551,7 @@ data:
     }
     PAYLOAD_FIELDS = {
         **REQUIRED_PAYLOAD,
-        "mission.accepted": {"goal", "dispatch_profile"},
+        "mission.accepted": {"goal", "dispatch_profile", "parent_mission_id"},
         "task.upsert": {"task_id", "title", "status", "assignee"},
         "worker.upsert": {"worker_id", "status", "run_id", "profile"},
         "terminal.append": {"stream", "text", "offset"},
@@ -554,7 +561,7 @@ data:
     _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
     _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
     _ID_PAYLOAD_FIELDS = {
-        "assignee", "dispatch_profile", "gate_id", "kind", "profile", "question_id",
+        "assignee", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
         "run_id", "status", "stream", "task_id", "worker_id",
     }
     _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -693,6 +700,7 @@ data:
             "progress_percent": 0,
             "goal": None,
             "dispatch_profile": None,
+            "parent_mission_id": None,
             "question": None,
             "result": None,
             "error": None,
@@ -732,6 +740,7 @@ data:
                     stage="accepted",
                     goal=payload["goal"],
                     dispatch_profile=payload.get("dispatch_profile"),
+                    parent_mission_id=payload.get("parent_mission_id"),
                 )
             elif kind == "mission.stage":
                 progress = payload["progress_percent"]
@@ -849,7 +858,6 @@ data:
         if (
             view.get("status") != "active"
             or view.get("question") is not None
-            or view.get("deliveries")
         ):
             return False
         tasks = view.get("tasks")
@@ -868,10 +876,24 @@ data:
             for item in view.get("gates", [])
             if isinstance(item, dict)
         }
-        return gates in (
+        deliveries = {
+            item.get("kind"): item.get("status")
+            for item in view.get("deliveries", [])
+            if isinstance(item, dict)
+        }
+        if gates in (
             {"tests": "passed", "review": "failed", "cleanup": "passed"},
             {"tests": "failed", "cleanup": "passed"},
-        )
+        ):
+            return not deliveries
+        if gates == {
+            "tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed",
+        }:
+            return deliveries == {"pull_request": "failed"}
+        return gates == {
+            "tests": "passed", "review": "passed", "ci": "passed",
+            "post-verify": "failed", "cleanup": "passed",
+        } and deliveries == {"pull_request": "merged"}
 
 
     class MissionStore:
@@ -952,6 +974,21 @@ data:
                         notification_lease_sequence INTEGER NOT NULL DEFAULT 0,
                         notification_lease_until REAL NOT NULL DEFAULT 0,
                         PRIMARY KEY (platform, chat_id, thread_id)
+                    );
+                    CREATE TABLE IF NOT EXISTS mission_subscription_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        platform TEXT NOT NULL,
+                        chat_id TEXT NOT NULL,
+                        thread_id TEXT NOT NULL,
+                        previous_mission_id TEXT NOT NULL,
+                        mission_id TEXT NOT NULL,
+                        reason TEXT NOT NULL,
+                        related_mission_id TEXT NOT NULL,
+                        occurred_at TEXT NOT NULL,
+                        UNIQUE (
+                            platform, chat_id, thread_id, previous_mission_id,
+                            mission_id, reason, related_mission_id
+                        )
                     );
                     """
                 )
@@ -1071,6 +1108,7 @@ data:
             session_id: str | None = None,
             run_id: str | None = None,
             dispatch_profile: str | None = None,
+            parent_mission_id: str | None = None,
         ) -> tuple[dict[str, Any], bool]:
             goal = str(goal or "").strip()
             if not goal or len(goal) > 8_192:
@@ -1078,6 +1116,11 @@ data:
             mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
             if dispatch_profile is not None:
                 dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
+            if parent_mission_id is not None:
+                parent_mission_id = _require_id(parent_mission_id, "parent_mission_id")
+                if parent_mission_id == mission_id:
+                    raise MissionError("mission cannot be its own parent")
+                self._require_repair_parent(parent_mission_id, mission_id)
             correlation = {
                 key: value
                 for key, value in (("session_id", session_id), ("run_id", run_id))
@@ -1090,13 +1133,21 @@ data:
                     first["type"] == "mission.accepted"
                     and first["payload"].get("goal") == goal
                     and first["payload"].get("dispatch_profile") == dispatch_profile
+                    and first["payload"].get("parent_mission_id") == parent_mission_id
                 ):
+                    if (
+                        parent_mission_id is not None
+                        and self.projection(mission_id).get("status") == "active"
+                    ):
+                        self._inherit_parent_subscriptions(parent_mission_id, mission_id)
                     return first, False
                 raise MissionError("mission already accepted with different parameters")
             payload = {"goal": goal}
             if dispatch_profile is not None:
                 payload["dispatch_profile"] = dispatch_profile
-            return self._append(
+            if parent_mission_id is not None:
+                payload["parent_mission_id"] = parent_mission_id
+            accepted = self._append(
                 mission_id,
                 {
                     "schema_version": SCHEMA_VERSION,
@@ -1107,6 +1158,145 @@ data:
                     "payload": payload,
                 },
             )
+            if parent_mission_id is not None:
+                self._inherit_parent_subscriptions(parent_mission_id, mission_id)
+            return accepted
+
+        def _require_repair_parent(self, parent_mission_id: str, child_mission_id: str) -> None:
+            parent = self.projection(parent_mission_id)
+            if parent.get("status") != "active" or parent.get("parent_mission_id") is not None:
+                raise MissionError("repair parent must be an active root mission")
+            now = datetime.now(timezone.utc).timestamp()
+            with self._db() as connection:
+                rows = connection.execute(
+                    """SELECT * FROM mission_subscriptions
+                       WHERE mission_id = ? AND platform = 'telegram'""",
+                    (parent_mission_id,),
+                ).fetchall()
+                if rows:
+                    if any(row["notification_lease_until"] > now for row in rows):
+                        raise MissionError("repair parent notification in progress")
+                    return
+                inherited = connection.execute(
+                    """SELECT 1 FROM mission_subscription_history AS history
+                       JOIN mission_subscriptions AS current
+                         ON current.platform = history.platform
+                        AND current.chat_id = history.chat_id
+                        AND current.thread_id = history.thread_id
+                       WHERE history.previous_mission_id = ?
+                         AND history.mission_id = ?
+                         AND history.reason = 'repair-inherit'
+                         AND history.related_mission_id = ?
+                         AND current.mission_id = ?
+                       LIMIT 1""",
+                    (
+                        parent_mission_id, child_mission_id,
+                        child_mission_id, child_mission_id,
+                    ),
+                ).fetchone()
+            if not inherited:
+                raise MissionError("repair parent has no Telegram subscription")
+
+        @staticmethod
+        def _subscription_history(
+            connection: sqlite3.Connection,
+            row: sqlite3.Row | dict[str, Any],
+            previous_mission_id: str,
+            mission_id: str,
+            reason: str,
+            related_mission_id: str,
+        ) -> None:
+            connection.execute(
+                """INSERT OR IGNORE INTO mission_subscription_history(
+                       platform, chat_id, thread_id, previous_mission_id,
+                       mission_id, reason, related_mission_id, occurred_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    row["platform"], row["chat_id"], row["thread_id"],
+                    previous_mission_id, mission_id, reason, related_mission_id,
+                    _utc_now(),
+                ),
+            )
+
+        def _inherit_parent_subscriptions(
+            self, parent_mission_id: str, child_mission_id: str
+        ) -> None:
+            now = datetime.now(timezone.utc).timestamp()
+            with self._db() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                rows = connection.execute(
+                    """SELECT * FROM mission_subscriptions
+                       WHERE mission_id = ? AND platform = 'telegram'""",
+                    (parent_mission_id,),
+                ).fetchall()
+                if not rows:
+                    current = connection.execute(
+                        """SELECT 1 FROM mission_subscription_history AS history
+                           JOIN mission_subscriptions AS subscription
+                             ON subscription.platform = history.platform
+                            AND subscription.chat_id = history.chat_id
+                            AND subscription.thread_id = history.thread_id
+                           WHERE history.previous_mission_id = ?
+                             AND history.mission_id = ?
+                             AND history.reason = 'repair-inherit'
+                             AND history.related_mission_id = ?
+                             AND subscription.mission_id = ?
+                           LIMIT 1""",
+                        (
+                            parent_mission_id, child_mission_id,
+                            child_mission_id, child_mission_id,
+                        ),
+                    ).fetchone()
+                    if current:
+                        return
+                    raise MissionError("repair parent has no Telegram subscription")
+                if any(row["notification_lease_until"] > now for row in rows):
+                    raise MissionError("repair parent notification in progress")
+                for row in rows:
+                    connection.execute(
+                        """UPDATE mission_subscriptions
+                           SET mission_id = ?, last_notified_sequence = 0,
+                               notification_lease = NULL,
+                               notification_lease_sequence = 0,
+                               notification_lease_until = 0
+                           WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                             AND mission_id = ?""",
+                        (
+                            child_mission_id, row["platform"], row["chat_id"],
+                            row["thread_id"], parent_mission_id,
+                        ),
+                    )
+                    self._subscription_history(
+                        connection, row, parent_mission_id, child_mission_id,
+                        "repair-inherit", child_mission_id,
+                    )
+
+        def _restore_parent_subscriptions(
+            self, connection: sqlite3.Connection, child_mission_id: str, parent_mission_id: str
+        ) -> None:
+            rows = connection.execute(
+                """SELECT * FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram'""",
+                (child_mission_id,),
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """UPDATE mission_subscriptions
+                       SET mission_id = ?, last_notified_sequence = 0,
+                           notification_lease = NULL,
+                           notification_lease_sequence = 0,
+                           notification_lease_until = 0
+                       WHERE platform = ? AND chat_id = ? AND thread_id = ?
+                         AND mission_id = ?""",
+                    (
+                        parent_mission_id, row["platform"], row["chat_id"],
+                        row["thread_id"], child_mission_id,
+                    ),
+                )
+                self._subscription_history(
+                    connection, row, child_mission_id, parent_mission_id,
+                    "repair-restore", child_mission_id,
+                )
 
         def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             normalized = dict(submission)
@@ -1187,6 +1377,12 @@ data:
                     if gates.get("tests") == "failed":
                         producer_event_id = "central:auto-author-checks-failed:v1"
                         payload = {"error": "Author checks failed after the approved cycle limit"}
+                    elif gates.get("post-verify") == "failed":
+                        producer_event_id = "central:auto-post-verify-failed:v1"
+                        payload = {"error": "Post-verify failed after the approved repair mission"}
+                    elif gates.get("ci") == "failed":
+                        producer_event_id = "central:auto-ci-failed:v1"
+                        payload = {"error": "Required CI failed after the approved cycle limit"}
                     else:
                         producer_event_id = "central:auto-review-rejected:v1"
                         payload = {"error": "Independent review rejected the candidate"}
@@ -1225,6 +1421,11 @@ data:
                         event["correlation"]["producer_event_id"],
                     ),
                 )
+                parent_mission_id = view.get("parent_mission_id")
+                if isinstance(parent_mission_id, str):
+                    self._restore_parent_subscriptions(
+                        connection, mission_id, parent_mission_id
+                    )
             return event, True
 
         def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -1316,6 +1517,21 @@ data:
                            notification_lease_until = 0""",
                     (platform, chat_id, thread_id, mission_id),
                 )
+                self._subscription_history(
+                    connection,
+                    {"platform": platform, "chat_id": chat_id, "thread_id": thread_id},
+                    current["mission_id"] if current else "",
+                    mission_id,
+                    "manual-bind",
+                    mission_id,
+                )
+
+        def binding_history(self) -> list[dict[str, Any]]:
+            with self._db() as connection:
+                rows = connection.execute(
+                    "SELECT * FROM mission_subscription_history ORDER BY id"
+                ).fetchall()
+            return [dict(row) for row in rows]
 
         def bound_mission(self, platform: str, chat_id: str, thread_id: str | None = None) -> str | None:
             with self._db() as connection:

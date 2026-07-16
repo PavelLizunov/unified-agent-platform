@@ -895,6 +895,120 @@ def test_existing_subscription_table_gets_notification_lease_columns() -> None:
         } <= columns
 
 
+def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        parent = "mission-parent"
+        child = "mission-repair"
+        store.accept(
+            "Deliver change", mission_id=parent, dispatch_profile="build1-parent"
+        )
+        store.bind(parent, "telegram", "42", "7")
+        accepted, created = store.accept(
+            "Repair post-verify",
+            mission_id=child,
+            dispatch_profile="build1-repair",
+            parent_mission_id=parent,
+        )
+        assert created and accepted["payload"]["parent_mission_id"] == parent
+        assert store.projection(child)["parent_mission_id"] == parent
+        assert store.bound_mission("telegram", "42", "7") == child
+        assert not store.accept(
+            "Repair post-verify",
+            mission_id=child,
+            dispatch_profile="build1-repair",
+            parent_mission_id=parent,
+        )[1]
+
+        events = [
+            ("task.upsert", {"task_id": "task-1", "title": "Repair", "status": "done"}),
+            ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+            *(("gate.upsert", {"gate_id": gate, "status": "passed"})
+              for gate in missions._COMPLETION_GATES),
+            ("delivery.upsert", {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/2"}),
+            ("delivery.upsert", {"kind": "default_branch", "status": "verified", "url": "https://example.invalid/commit/2"}),
+        ]
+        for number, (event_type, payload) in enumerate(events, 1):
+            store.append_producer(
+                child,
+                {
+                    "schema_version": 1,
+                    "mission_id": child,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:repair:{number}"},
+                    "payload": payload,
+                },
+            )
+        notification = store.completion_notification(child)
+        assert notification is not None
+        subscription = store.pending_subscriptions(child, notification["sequence"])[0]
+        token = store.claim_notification(subscription, notification["sequence"])
+        assert token and store.finish_notification(
+            subscription, notification["sequence"], token, delivered=True
+        )
+        completed = store.complete_if_ready(child)
+        assert completed is not None and completed[0]["type"] == "mission.completed"
+        assert store.bound_mission("telegram", "42", "7") == parent
+        assert [item["reason"] for item in store.binding_history()] == [
+            "manual-bind", "repair-inherit", "repair-restore"
+        ]
+        assert not store.accept(
+            "Repair post-verify",
+            mission_id=child,
+            dispatch_profile="build1-repair",
+            parent_mission_id=parent,
+        )[1]
+        assert store.bound_mission("telegram", "42", "7") == parent
+
+
+def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+
+        def fail(mission_id: str, gates: list[tuple[str, str]], delivery: str) -> dict:
+            store.accept("Deliver", mission_id=mission_id)
+            events = [
+                ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+                ("worker.upsert", {"worker_id": "worker-1", "status": "completed"}),
+                *(("gate.upsert", {"gate_id": gate, "status": status}) for gate, status in gates),
+                ("delivery.upsert", {"kind": "pull_request", "status": delivery, "url": "https://example.invalid/pr/1"}),
+            ]
+            for number, (event_type, payload) in enumerate(events, 1):
+                store.append_producer(
+                    mission_id,
+                    {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": event_type,
+                        "source": "build1-flow",
+                        "correlation": {"producer_event_id": f"flow:{mission_id}:{number}"},
+                        "payload": payload,
+                    },
+                )
+            terminal = store.complete_if_ready(mission_id)
+            assert terminal is not None
+            return terminal[0]
+
+        ci = fail(
+            "mission-ci-failed",
+            [("tests", "passed"), ("review", "passed"), ("ci", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert ci["payload"]["error"] == "Required CI failed after the approved cycle limit"
+        post_verify = fail(
+            "mission-post-verify-failed",
+            [
+                ("tests", "passed"), ("review", "passed"), ("ci", "passed"),
+                ("post-verify", "failed"), ("cleanup", "passed"),
+            ],
+            "merged",
+        )
+        assert post_verify["payload"]["error"] == (
+            "Post-verify failed after the approved repair mission"
+        )
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
@@ -912,6 +1026,8 @@ def main() -> None:
     test_unresolved_question_survives_stage_and_blocks_auto_completion()
     test_mission_database_is_owner_only_on_posix()
     test_existing_subscription_table_gets_notification_lease_columns()
+    test_repair_mission_inherits_and_restores_telegram_binding()
+    test_terminal_failure_contracts_include_ci_and_post_verify()
     print("hermes mission runtime checks passed")
 
 
