@@ -124,19 +124,24 @@ async def smoke(checkout: pathlib.Path) -> None:
         view = (await listing.json())["missions"][0]
         assert view["stage"] == "testing" and view["progress_percent"] == 60
         assert view["dispatch_profile"] == "build1-smoke"
-        completed = await client.post(
+        manual_success = await client.post(
             "/api/missions/mission-smoke/terminal",
             json={"status": "completed", "message": "Smoke delivered"},
         )
-        assert completed.status == 201, await completed.text()
-        completed_replay = await client.post(
+        assert manual_success.status == 400, await manual_success.text()
+        cancelled = await client.post(
             "/api/missions/mission-smoke/terminal",
-            json={"status": "completed", "message": "Smoke delivered"},
+            json={"status": "cancelled", "message": "Smoke cleanup"},
         )
-        replay_body = await completed_replay.json()
-        assert completed_replay.status == 200 and replay_body["created"] is False
-        assert replay_body["mission"]["status"] == "completed"
-        assert replay_body["mission"]["result"] == "Smoke delivered"
+        assert cancelled.status == 201, await cancelled.text()
+        cancelled_replay = await client.post(
+            "/api/missions/mission-smoke/terminal",
+            json={"status": "cancelled", "message": "Smoke cleanup"},
+        )
+        replay_body = await cancelled_replay.json()
+        assert cancelled_replay.status == 200 and replay_body["created"] is False
+        assert replay_body["mission"]["status"] == "cancelled"
+        assert replay_body["mission"]["error"] == "Smoke cleanup"
     finally:
         await client.close()
 

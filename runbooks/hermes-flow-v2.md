@@ -8,10 +8,11 @@ Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
-Repository status (2026-07-15): the A6 adapter and profile-bound A7 coordinator are implemented and installed on
-build-1; six A7.3 attempts proved failure/recovery but not a successful delivery. ADR-031's policy-bound coordinator
-change is implemented offline and must be landed and installed before the next canary. Generic arbitrary-repository
-intake remains outside the current fixed-profile boundary.
+Repository status (2026-07-16): the A6 adapter, profile-bound A7 coordinator and `openai-autonomy-v2` schema-v3 profile
+are installed on build-1. Attempt 7 reached accepted review, required CI, exact-head merge, fresh-main post-verify and
+cleanup, while #218-#221 repaired four harness defects between durable ticks. This proves recoverable delivery; the
+next gate is one clean uninterrupted repeat on that corrected runtime, with a bound Telegram subscription. Generic
+arbitrary-repository intake remains outside the current fixed-profile boundary.
 
 ## When to use
 

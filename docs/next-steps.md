@@ -196,30 +196,19 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Automatic activation and delivery — ⚠️ FAILURE PATH PASS; SUCCESS PATH OPEN (2026-07-15).**
-   PRs #199-#209 installed the bounded coordinator and closed the recovery defects exposed by the live attempts;
-   PR #213 added strict runtime-attested author/reviewer reasoning effort.
-   Attempts 3-5 proved bounded repair, crash recovery and autonomous rejection cleanup while independent review kept
-   finding real cross-process, configuration-liveness and unavailable-lock defects. Attempt 6 added PR #213's
-   runtime-attested reasoning effort and used Sol author plus exact-SHA read-only Terra review, both at `xhigh`. It
-   recovered the approved author-commit crash, autonomously repaired three first-review findings and passed every
-   Windows checkpoint. Terra still rejected final SHA `43bffe0...`: the observer hard-coded the `sing-box` process
-   name and would miss an owner-recorded custom executable with a different basename. No target PR was opened. ADR-031
-   now standing-approves automatic Luna/Sol/Terra selection without per-attempt confirmation. PR #216 installed the
-   fail-closed `openai-autonomy-v1` decision and atomically migrated the stopped profile to schema v3/three cycles.
-   Before another canary, land and install `openai-autonomy-v2`: independent-review or required-CI failure must
-   durably select the next OpenAI route and repair the same PR. The durable PR number/head/base may not be rebound;
-   each repair push uses an exact prior-head lease. CI persistence is bounded to name/outcome. On final failure a live
-   claim and exact identity are required. GitHub has no conditional unsafe close, so an open failed PR/branch is kept
-   as bounded evidence and local disposables are removed; an already closed PR's unchanged branch is exact-lease
-   deleted. Compatible v1 in-progress
-   route/PR identity evidence and lost initial-push, PR-create or repair-push responses recover automatically. Also
-   behaviorally cover a differently named custom
-   executable and project the actionable
-   finding/terminal stage and verify Telegram
-   delivery. One successful
-   PR/CI/merge/post-verify route is still required by the executable
-   [A7.3 contract](a7-real-project-canary.md). See the exact
+3. **A7.3 — Automatic activation and delivery — ✅ RECOVERABLE SUCCESS PATH PASS; CLEAN REPEAT OPEN (2026-07-16).**
+   PRs #199-#217 provide the bounded coordinator, durable crash/quality recovery and standing-approved
+   `openai-autonomy-v2` routing. Mission `a7-vpnrouter-issue39-20260716-09` selected runtime-attested Sol author and
+   exact-SHA read-only Terra review at `xhigh`, recovered the approved post-commit crash without another author turn,
+   passed Windows gates, opened VPNRouter PR #43, observed required CI, atomically merged the reviewed head and passed
+   fresh-main Windows verification. Native task/run and Central completed, Central/Workspace projections matched, and
+   branch/worktree cleanup passed. The run exposed four compatibility/runtime defects; #218-#221 fixed compacted
+   rollout parsing, legacy-`gh` PR recovery, exact-head merge and the Windows post-verify artifact root. Each fix resumed
+   the same durable mission. This proves the success/recovery path, but not one uninterrupted run that starts with all
+   corrections already installed. Next: bind the existing Telegram mission subscription before starting the clean
+   repeat, then use that same uninterrupted run to prove the Central, Workspace and Telegram terminal projection.
+   Afterward, close the remaining observation/lifecycle contract: actionable rejection projection, cross-channel
+   answer/resume, retention and owner-only state invariants. See the [A7.3 contract](a7-real-project-canary.md) and exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A

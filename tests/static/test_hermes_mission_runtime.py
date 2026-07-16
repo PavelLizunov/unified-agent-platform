@@ -35,7 +35,8 @@ def test_reconnect_projects_one_canonical_state() -> None:
         database = Path(temp) / "missions.sqlite3"
         store = missions.MissionStore(database)
         for event in document["events"]:
-            stored, created = store.append_central(document["mission_id"], submission(event))
+            # The fixture includes a historical terminal frame; public Central callers cannot.
+            stored, created = store._append(document["mission_id"], submission(event))
             assert created and stored["sequence"] == event["sequence"]
 
         workspace = store.workspace_payload(document["mission_id"], after=5)
@@ -89,19 +90,31 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
             assert "testing · 60% · active" in deliveries[0][1]
             assert accepted["sequence"] == 1 and stored["sequence"] == 2
 
-            completed, _ = store.append_central(
+            terminal = {
+                "schema_version": 1,
+                "mission_id": "mission-retry",
+                "type": "mission.completed",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {"result": "Delivered"},
+            }
+            for event_type in ("mission.completed", " mission.completed "):
+                try:
+                    store.append_central("mission-retry", {**terminal, "type": event_type})
+                    raise AssertionError("direct Central completion bypassed delivery gates")
+                except missions.MissionError as error:
+                    assert "automatic delivery contract" in str(error)
+
+            failed, _ = store.append_central(
                 "mission-retry",
                 {
-                    "schema_version": 1,
-                    "mission_id": "mission-retry",
-                    "type": "mission.completed",
-                    "source": "central-hermes",
-                    "correlation": {},
-                    "payload": {"result": "Delivered"},
+                    **terminal,
+                    "type": "mission.failed",
+                    "payload": {"error": "Delivery failed"},
                 },
             )
-            assert await missions.notify_subscribers(store, completed, sender) == 1
-            assert "Result: Delivered" in deliveries[-1][1]
+            assert await missions.notify_subscribers(store, failed, sender) == 1
+            assert "Error: Delivery failed" in deliveries[-1][1]
 
     asyncio.run(scenario())
 
@@ -140,6 +153,91 @@ def test_notification_can_repeat_after_delivery_before_checkpoint() -> None:
 
             assert await missions.notify_subscribers(store, event, retry_sender) == 1
             assert len(deliveries) == 2
+
+    asyncio.run(scenario())
+
+
+def test_notification_checkpoint_cannot_cross_a_mission_rebind() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            new_mission = "mission-new-binding"
+            store.accept("New delivery", mission_id=new_mission)
+            ready = [
+                ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+                ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+                *(('gate.upsert', {"gate_id": gate_id, "status": "passed"})
+                  for gate_id in missions._COMPLETION_GATES),
+                ("delivery.upsert", {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"}),
+                ("delivery.upsert", {"kind": "default_branch", "status": "verified", "url": "https://example.invalid/commit/1"}),
+            ]
+            for number, (event_type, payload) in enumerate(ready, 1):
+                store.append_producer(
+                    new_mission,
+                    {
+                        "schema_version": 1,
+                        "mission_id": new_mission,
+                        "type": event_type,
+                        "source": "build1-flow",
+                        "correlation": {"producer_event_id": f"flow:new:{number}"},
+                        "payload": payload,
+                    },
+                )
+
+            old_mission = "mission-old-binding"
+            store.accept("Old delivery", mission_id=old_mission)
+            store.bind(old_mission, "telegram", "42", "7")
+            old_event = None
+            for number in range(12):
+                old_event, _ = store.append_central(
+                    old_mission,
+                    {
+                        "schema_version": 1,
+                        "mission_id": old_mission,
+                        "type": "mission.stage",
+                        "source": "central-hermes",
+                        "correlation": {},
+                        "payload": {"stage": "testing", "progress_percent": 50},
+                    },
+                )
+            assert old_event is not None
+
+            stale = store.pending_subscriptions(old_mission, old_event["sequence"])
+            assert len(stale) == 1
+            store.bind(new_mission, "telegram", "42", "7")
+            pending_subscriptions = store.pending_subscriptions
+            store.pending_subscriptions = lambda _mission, _sequence: stale
+            stale_sends: list[str] = []
+
+            async def sender(_target: dict, text: str) -> None:
+                stale_sends.append(text)
+
+            try:
+                assert await missions.notify_subscribers(store, old_event, sender) == 0
+            finally:
+                store.pending_subscriptions = pending_subscriptions
+            assert stale_sends == []
+
+            pending = store.pending_subscriptions(new_mission, old_event["sequence"])
+            assert len(pending) == 1 and pending[0]["last_notified_sequence"] == 0
+            assert store.completion_notification(new_mission) is not None
+            assert store.complete_if_ready(new_mission) is None
+
+            store.bind(old_mission, "telegram", "43")
+            leased = store.pending_subscriptions(old_mission, old_event["sequence"])[0]
+            token = store.claim_notification(leased, old_event["sequence"])
+            assert token is not None
+            try:
+                store.bind(new_mission, "telegram", "43")
+                raise AssertionError("rebind bypassed an active notification lease")
+            except missions.MissionError as error:
+                assert "notification in progress" in str(error)
+            assert store.bound_mission("telegram", "43") == old_mission
+            assert store.finish_notification(
+                leased, old_event["sequence"], token, delivered=False
+            )
+            store.bind(new_mission, "telegram", "43")
+            assert store.bound_mission("telegram", "43") == new_mission
 
     asyncio.run(scenario())
 
@@ -394,11 +492,74 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert store.complete_if_ready(mission_id) is None
 
         publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, number + 1)
+        assert store.completion_notification(mission_id) is None
+        assert store.complete_if_ready(mission_id) is None
+
+        store.bind(mission_id, "telegram", "42", "7")
+        store.bind(mission_id, "telegram", "43", "8")
+        notification = store.completion_notification(mission_id)
+        assert notification is not None and notification["type"] == "mission.completed"
+        subscription = store.pending_subscriptions(mission_id, notification["sequence"])[0]
+        wrong_sequence_token = store.claim_notification(subscription, 1)
+        assert wrong_sequence_token is not None
+        assert not store.finish_notification(
+            subscription,
+            notification["sequence"],
+            wrong_sequence_token,
+            delivered=True,
+        )
+        assert store.complete_if_ready(mission_id) is None
+        assert store.finish_notification(
+            subscription, 1, wrong_sequence_token, delivered=False
+        )
+
+        async def failing_sender(_target: dict, _text: str) -> None:
+            raise RuntimeError("simulated Telegram outage")
+
+        try:
+            asyncio.run(missions.notify_subscribers(store, notification, failing_sender))
+            raise AssertionError("terminal notification failure was hidden")
+        except RuntimeError as error:
+            assert "Telegram outage" in str(error)
+        assert store.complete_if_ready(mission_id) is None
+
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        notification = store.completion_notification(mission_id)
+        assert notification is not None
+        expected_terminal_text = missions.telegram_text(
+            missions.project([*store.events(mission_id), notification])
+        )
+        first_attempt: list[tuple[str, str]] = []
+
+        async def partial_sender(target: dict, text: str) -> None:
+            first_attempt.append((target["chat_id"], text))
+            if target["chat_id"] == "43":
+                raise RuntimeError("simulated partial Telegram outage")
+
+        try:
+            asyncio.run(missions.notify_subscribers(store, notification, partial_sender))
+            raise AssertionError("partial terminal notification failure was hidden")
+        except RuntimeError as error:
+            assert "partial Telegram outage" in str(error)
+        assert {chat_id for chat_id, _text in first_attempt} == {"42", "43"}
+        assert all(text == expected_terminal_text for _chat_id, text in first_attempt)
+        assert store.complete_if_ready(mission_id) is None
+
+        retry: list[tuple[str, str]] = []
+
+        async def retry_sender(target: dict, text: str) -> None:
+            retry.append((target["chat_id"], text))
+
+        assert asyncio.run(missions.notify_subscribers(store, notification, retry_sender)) == 1
+        assert retry == [("43", expected_terminal_text)]
         completed = store.complete_if_ready(mission_id)
         assert completed is not None and completed[1]
+        assert completed[0]["sequence"] == notification["sequence"]
         assert completed[0]["source"] == "central-hermes"
         assert completed[0]["type"] == "mission.completed"
         assert store.projection(mission_id)["status"] == "completed"
+        assert asyncio.run(missions.notify_subscribers(store, completed[0], retry_sender)) == 0
+        assert retry == [("43", expected_terminal_text)]
         assert store.complete_if_ready(mission_id) is None
 
 
@@ -418,11 +579,31 @@ def test_auto_completion_rejects_multiple_workers() -> None:
         ],
     )
     assert not missions.completion_ready(view)
+    assert not missions.completion_ready(view, telegram_terminal_ready=True)
     view.update(
         status="waiting_owner",
         workers=[{"worker_id": "worker-1", "status": "success"}],
     )
+    assert not missions.completion_ready(view, telegram_terminal_ready=True)
+
+
+def test_completion_ready_requires_telegram_terminal_checkpoint() -> None:
+    view = missions.empty_projection()
+    view.update(
+        status="active",
+        tasks=[{"task_id": "task-1", "status": "done"}],
+        workers=[{"worker_id": "worker-1", "status": "success"}],
+        gates=[
+            {"gate_id": gate_id, "status": "passed"}
+            for gate_id in missions._COMPLETION_GATES
+        ],
+        deliveries=[
+            {"kind": kind, "status": status}
+            for kind, status in missions._COMPLETION_DELIVERIES.items()
+        ],
+    )
     assert not missions.completion_ready(view)
+    assert missions.completion_ready(view, telegram_terminal_ready=True)
 
 
 def test_auto_failure_requires_one_cleaned_review_rejection() -> None:
@@ -542,6 +723,15 @@ def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> N
                     "payload": payload,
                 },
             )
+        store.bind(mission_id, "telegram", "42")
+        notification = store.completion_notification(mission_id)
+        assert notification is not None
+        subscription = store.pending_subscriptions(mission_id, notification["sequence"])[0]
+        token = store.claim_notification(subscription, notification["sequence"])
+        assert token is not None
+        assert store.finish_notification(
+            subscription, notification["sequence"], token, delivered=True
+        )
 
         readiness_entered = threading.Event()
         release_completion = threading.Event()
@@ -549,10 +739,10 @@ def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> N
         outcome: dict[str, object] = {}
         original = missions.completion_ready
 
-        def observed(view: dict) -> bool:
+        def observed(view: dict, *, telegram_terminal_ready: bool = False) -> bool:
             readiness_entered.set()
             assert release_completion.wait(5)
-            return original(view)
+            return original(view, telegram_terminal_ready=telegram_terminal_ready)
 
         def complete() -> None:
             try:
@@ -672,10 +862,44 @@ def test_mission_database_is_owner_only_on_posix() -> None:
         assert stat.S_IMODE(database.stat().st_mode) == 0o600
 
 
+def test_existing_subscription_table_gets_notification_lease_columns() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        database = Path(temp) / "missions.sqlite3"
+        connection = sqlite3.connect(database)
+        try:
+            connection.execute(
+                """CREATE TABLE mission_subscriptions (
+                       platform TEXT NOT NULL,
+                       chat_id TEXT NOT NULL,
+                       thread_id TEXT NOT NULL,
+                       mission_id TEXT NOT NULL,
+                       last_notified_sequence INTEGER NOT NULL DEFAULT 0,
+                       PRIMARY KEY (platform, chat_id, thread_id)
+                   )"""
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        missions.MissionStore(database)
+        connection = sqlite3.connect(database)
+        try:
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(mission_subscriptions)")
+            }
+        finally:
+            connection.close()
+        assert {
+            "notification_lease",
+            "notification_lease_sequence",
+            "notification_lease_until",
+        } <= columns
+
+
 def main() -> None:
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()
+    test_notification_checkpoint_cannot_cross_a_mission_rebind()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
     test_dispatch_candidates_do_not_starve_behind_newer_missions()
@@ -683,9 +907,11 @@ def main() -> None:
     test_terminal_authority_is_loopback_only()
     test_central_auto_completion_requires_the_full_delivery_contract()
     test_auto_completion_rejects_multiple_workers()
+    test_completion_ready_requires_telegram_terminal_checkpoint()
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
     test_unresolved_question_survives_stage_and_blocks_auto_completion()
     test_mission_database_is_owner_only_on_posix()
+    test_existing_subscription_table_gets_notification_lease_columns()
     print("hermes mission runtime checks passed")
 
 
