@@ -21,7 +21,7 @@ PATCHED_FILES = {
     "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
     "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
     "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-        "gateway/platforms/api_server.py": "6305e75eef3ba6f128fb022983a8a5276f074a8d29b6ed329073bcd87433297b",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "f8a2fa9d3f248eec845ccf201d4afb75b95c713b5c4e1a5cbe90a1ba6308a431",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -255,6 +255,8 @@ def connect(
             return auth_error
         try:
             body = await request.json()
+            if not isinstance(body, dict):
+                raise MissionError("mission request must be an object")
             if body.get("parent_mission_id") is not None and not producer_key_valid(
                 request.headers.get("X-Hermes-Mission-Producer-Key")
             ):

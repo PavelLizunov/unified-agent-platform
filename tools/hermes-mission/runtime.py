@@ -708,10 +708,14 @@ class MissionStore:
         related_mission_id: str,
     ) -> None:
         connection.execute(
-            """INSERT OR IGNORE INTO mission_subscription_history(
+            """INSERT INTO mission_subscription_history(
                    platform, chat_id, thread_id, previous_mission_id,
                    mission_id, reason, related_mission_id, occurred_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(
+                   platform, chat_id, thread_id, previous_mission_id,
+                   mission_id, reason, related_mission_id
+               ) DO NOTHING""",
             (
                 row["platform"], row["chat_id"], row["thread_id"],
                 previous_mission_id, mission_id, reason, related_mission_id,
@@ -754,7 +758,7 @@ class MissionStore:
             if any(row["notification_lease_until"] > now for row in rows):
                 raise MissionError("repair parent notification in progress")
             for row in rows:
-                connection.execute(
+                updated = connection.execute(
                     """UPDATE mission_subscriptions
                        SET mission_id = ?, last_notified_sequence = 0,
                            notification_lease = NULL,
@@ -767,6 +771,8 @@ class MissionStore:
                         row["thread_id"], parent_mission_id,
                     ),
                 )
+                if updated.rowcount != 1:
+                    raise MissionError("repair subscription inheritance lost its binding")
                 self._subscription_history(
                     connection, row, parent_mission_id, child_mission_id,
                     "repair-inherit", child_mission_id,
@@ -781,7 +787,7 @@ class MissionStore:
             (child_mission_id,),
         ).fetchall()
         for row in rows:
-            connection.execute(
+            updated = connection.execute(
                 """UPDATE mission_subscriptions
                    SET mission_id = ?, last_notified_sequence = 0,
                        notification_lease = NULL,
@@ -794,6 +800,8 @@ class MissionStore:
                     row["thread_id"], child_mission_id,
                 ),
             )
+            if updated.rowcount != 1:
+                raise MissionError("repair subscription restoration lost its binding")
             self._subscription_history(
                 connection, row, child_mission_id, parent_mission_id,
                 "repair-restore", child_mission_id,

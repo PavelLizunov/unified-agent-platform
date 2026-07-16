@@ -29,7 +29,7 @@ data:
         "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
         "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
         "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-            "gateway/platforms/api_server.py": "6305e75eef3ba6f128fb022983a8a5276f074a8d29b6ed329073bcd87433297b",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "f8a2fa9d3f248eec845ccf201d4afb75b95c713b5c4e1a5cbe90a1ba6308a431",  # gitleaks:allow -- pinned patched SHA-256
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -263,6 +263,8 @@ data:
                 return auth_error
             try:
                 body = await request.json()
+                if not isinstance(body, dict):
+                    raise MissionError("mission request must be an object")
                 if body.get("parent_mission_id") is not None and not producer_key_valid(
                     request.headers.get("X-Hermes-Mission-Producer-Key")
                 ):
@@ -1207,10 +1209,14 @@ data:
             related_mission_id: str,
         ) -> None:
             connection.execute(
-                """INSERT OR IGNORE INTO mission_subscription_history(
+                """INSERT INTO mission_subscription_history(
                        platform, chat_id, thread_id, previous_mission_id,
                        mission_id, reason, related_mission_id, occurred_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(
+                       platform, chat_id, thread_id, previous_mission_id,
+                       mission_id, reason, related_mission_id
+                   ) DO NOTHING""",
                 (
                     row["platform"], row["chat_id"], row["thread_id"],
                     previous_mission_id, mission_id, reason, related_mission_id,
@@ -1253,7 +1259,7 @@ data:
                 if any(row["notification_lease_until"] > now for row in rows):
                     raise MissionError("repair parent notification in progress")
                 for row in rows:
-                    connection.execute(
+                    updated = connection.execute(
                         """UPDATE mission_subscriptions
                            SET mission_id = ?, last_notified_sequence = 0,
                                notification_lease = NULL,
@@ -1266,6 +1272,8 @@ data:
                             row["thread_id"], parent_mission_id,
                         ),
                     )
+                    if updated.rowcount != 1:
+                        raise MissionError("repair subscription inheritance lost its binding")
                     self._subscription_history(
                         connection, row, parent_mission_id, child_mission_id,
                         "repair-inherit", child_mission_id,
@@ -1280,7 +1288,7 @@ data:
                 (child_mission_id,),
             ).fetchall()
             for row in rows:
-                connection.execute(
+                updated = connection.execute(
                     """UPDATE mission_subscriptions
                        SET mission_id = ?, last_notified_sequence = 0,
                            notification_lease = NULL,
@@ -1293,6 +1301,8 @@ data:
                         row["thread_id"], child_mission_id,
                     ),
                 )
+                if updated.rowcount != 1:
+                    raise MissionError("repair subscription restoration lost its binding")
                 self._subscription_history(
                     connection, row, child_mission_id, parent_mission_id,
                     "repair-restore", child_mission_id,
