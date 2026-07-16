@@ -289,7 +289,9 @@ def _ci_decision(checks: Any, required: list[str]) -> str:
     """Return pending/passed/failed for one exact PR check rollup."""
     if not isinstance(checks, list) or not checks:
         return "pending"
-    pending = {None, "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED"}
+    pending = {
+        None, "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "REQUESTED", "WAITING",
+    }
     passing = {"SUCCESS", "NEUTRAL", "SKIPPED"}
     by_name: dict[str, list[dict[str, Any]]] = {}
     for item in checks:
@@ -1436,13 +1438,86 @@ class DeliveryCoordinator:
         raise CIFailed("PR CI timed out", checks)
 
     def _ci_rollup(self, state: dict[str, Any]) -> Any:
-        value = json.loads(self._run(
-            [
-                self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
-                "--repo", self.profile["repo"], "--json", "statusCheckRollup",
-            ]
-        ).stdout)
-        return value.get("statusCheckRollup")
+        repo = self.profile["repo"]
+        head = state.get("pr_head_sha")
+        pr_number = state.get("pr_number")
+        branch = state.get("branch")
+        if (
+            not isinstance(head, str) or not head
+            or not isinstance(pr_number, int)
+            or not isinstance(branch, str) or not branch
+        ):
+            raise DeliveryError("PR CI has no durable identity")
+        value = json.loads(self._run([
+            self.profile["gh_bin"], "api", "--method", "GET",
+            f"repos/{repo}/actions/runs", "-f", f"head_sha={head}",
+            "-f", "per_page=100",
+        ]).stdout)
+        runs = value.get("workflow_runs") if isinstance(value, dict) else None
+        if not isinstance(runs, list) or value.get("total_count") != len(runs):
+            raise DeliveryError("GitHub returned an invalid or truncated workflow run list")
+
+        selected: dict[int, dict[str, Any]] = {}
+        for run in runs:
+            if (
+                not isinstance(run, dict)
+                or not isinstance(run.get("id"), int)
+                or not isinstance(run.get("workflow_id"), int)
+                or run.get("head_sha") != head
+            ):
+                raise DeliveryError("GitHub returned an invalid workflow run identity")
+            pull_requests = run.get("pull_requests")
+            if not isinstance(pull_requests, list):
+                raise DeliveryError("GitHub returned an invalid workflow PR association")
+            associated = any(
+                isinstance(item, dict)
+                and item.get("number") == pr_number
+                and isinstance(item.get("head"), dict)
+                and item["head"].get("ref") == branch
+                and item["head"].get("sha") == head
+                and isinstance(item.get("base"), dict)
+                and item["base"].get("ref") == self.profile["default_branch"]
+                for item in pull_requests
+            )
+            event = run.get("event")
+            if (
+                run.get("head_branch") != branch
+                or (event == "pull_request" and not associated)
+                or (event == "push" and pull_requests and not associated)
+                or event not in {"pull_request", "push"}
+            ):
+                continue
+            current = selected.get(run["workflow_id"])
+            rank = (run.get("event") == "pull_request", run["id"])
+            if current is None or rank > (
+                current.get("event") == "pull_request", current["id"]
+            ):
+                selected[run["workflow_id"]] = run
+
+        checks = []
+        for run in sorted(selected.values(), key=lambda item: item["id"]):
+            checks.append({
+                "name": f"workflow:{run.get('name') or run['id']}",
+                "status": str(run.get("status") or "").upper() or None,
+                "conclusion": str(run.get("conclusion") or "").upper() or None,
+            })
+            jobs_value = json.loads(self._run([
+                self.profile["gh_bin"], "api", "--method", "GET",
+                f"repos/{repo}/actions/runs/{run['id']}/jobs",
+                "-f", "filter=latest", "-f", "per_page=100",
+            ]).stdout)
+            jobs = jobs_value.get("jobs") if isinstance(jobs_value, dict) else None
+            if not isinstance(jobs, list) or jobs_value.get("total_count") != len(jobs):
+                raise DeliveryError("GitHub returned an invalid or truncated workflow job list")
+            for job in jobs:
+                if not isinstance(job, dict) or job.get("head_sha") != head:
+                    raise DeliveryError("GitHub returned an invalid workflow job identity")
+                checks.append({
+                    "name": job.get("name"),
+                    "status": str(job.get("status") or "").upper() or None,
+                    "conclusion": str(job.get("conclusion") or "").upper() or None,
+                })
+        return checks
 
     def _require_ci_green_now(self, state: dict[str, Any]) -> None:
         checks = self._ci_rollup(state)
