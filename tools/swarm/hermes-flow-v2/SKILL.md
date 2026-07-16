@@ -20,7 +20,8 @@ not continue such work through a chain of `chat --resume` sessions.
    merge → cleanup`. Store artifacts under `/home/uap/swarm-out/<mission>/` and attach their paths to task results.
 2. Before any write, run `/home/uap/swarm-bin/flow_contract.py delivery-route` with the installed policy/signals and then
    `guard-repo` for the exact repository, remote, branch, and disposable worktree. An activated profile must be schema
-   v3 with exactly three bounded review cycles; migrate it only while its timer is stopped.
+   v3 with exactly three bounded correction retries after the initial candidate; migrate it only while its timer is
+   stopped.
 3. Use only the exact standing-approved OpenAI route returned by the policy. Never substitute another provider or a
    local/GPU model. Ordinary Luna/Sol/Terra use and subscription spend do not require owner confirmation.
 4. Run the author with the exact model returned by the route. The author edits/tests only; the orchestrator stages
@@ -33,8 +34,9 @@ not continue such work through a chain of `chat --resume` sessions.
    diff, runs checks, and produces `verification.json`; it never edits, commits, pushes, or merges.
 6. Validate `summary.json` and `verification.json` against the persisted canonical route decision, current HEAD and
    green required CI. No manual model/review waiver exists.
-7. At most three quality/fix cycles. Failed author gate, independent review rejection or required-CI failure increments
-   the same routing signal and automatically escalates the next OpenAI route. Persist only redacted bounded author
+7. At most three correction retries after the initial author/review attempt. Failed author gate, independent review
+   rejection or required-CI failure increments the same routing signal and automatically escalates the next OpenAI
+   route. Persist only redacted bounded author
    diagnostics and bounded CI
    check-name/outcome metadata, never raw logs. Reconcile lost initial-push, PR-create or repair-push responses only
    when the exact branch/candidate/base identity matches. Exhausted pre-commit author gates retain only redacted bounded

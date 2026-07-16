@@ -1918,7 +1918,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
             self.assertTrue(result["state"]["crash_injected"])
 
-    def test_final_review_rejection_checkpoint_is_durable(self):
+    def test_three_rejections_get_one_final_correction_before_terminal(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -1985,9 +1985,37 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 self.assertFalse(instance._review(state, paths))
 
             persisted = coordinator.mission_adapter._read_json(paths["state"])
-            self.assertEqual("review_rejected", persisted["phase"])
+            self.assertEqual("needs_fix", persisted["phase"])
+            self.assertEqual(4, persisted["review_cycle"])
+            self.assertEqual(3, persisted["prior_review_rejections"])
             self.assertEqual(["still broken"], persisted["review_findings"])
             self.assertEqual("reject", persisted["review_verification"]["verdict"])
+
+            persisted["phase"] = "author_committed"
+            instance._ensure_route(persisted, paths)
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git"),
+                mock.patch.object(instance, "_checks", return_value=[]),
+                mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source-sha"},
+                ),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "summarize_codex_events",
+                    return_value=telemetry,
+                ),
+            ):
+                self.assertFalse(instance._review(persisted, paths))
+
+            exhausted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("review_rejected", exhausted["phase"])
+            self.assertEqual(4, exhausted["review_cycle"])
+            self.assertEqual(4, exhausted["prior_review_rejections"])
 
     def test_failed_author_checks_checkpoint_one_bounded_retry(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2124,7 +2152,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 author_checks=[["fail-check"]],
                 codex_bin="codex",
                 codex_home=str(root / "codex"),
-                max_review_cycles=2,
+                max_review_cycles=1,
             )
             client = RejectionClient()
             backend = RejectionBackend()
