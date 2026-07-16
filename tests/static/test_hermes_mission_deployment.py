@@ -27,6 +27,7 @@ def main() -> None:
         "name: mission-runtime",
         "--source-commit 7c1a029553d87c43ecff8a3821336bc95872213b",
         "HERMES_MISSION_PRODUCER_KEY",
+        "HERMES_MISSION_OWNER_KEY",
         "mountPath: /opt/hermes/hermes_cli/uap_missions.py",
         "mountPath: /opt/hermes/hermes_cli/commands.py",
         "mountPath: /opt/hermes/gateway/run.py",
@@ -61,6 +62,12 @@ def main() -> None:
         if container["name"] == "gateway"
     )
     assert {
+        "name": "HERMES_MISSION_OWNER_KEY",
+        "valueFrom": {
+            "secretKeyRef": {"name": "hermes-agent-owner", "key": "owner-key"}
+        },
+    } in gateway["env"]
+    assert {
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",
         "subPath": "kanban_db.py",
@@ -75,6 +82,7 @@ def main() -> None:
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
     assert "hermes-mission-runtime.yaml" in resources
     assert "hermes-agent-mission.sops.yaml" in resources
+    assert "hermes-agent-owner.sops.yaml" in resources
     print("hermes-mission-deployment-ok")
 
 

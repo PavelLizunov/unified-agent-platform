@@ -167,6 +167,8 @@ service:
   producer-event endpoints;
 - producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
   mission event;
+- owner answers require a separate `HERMES_MISSION_OWNER_KEY` injected only into Central Hermes and the Workspace
+  service, not the coordinator environment; the build-1 producer bearer/key pair cannot forge an owner answer;
 - the central mission SQLite file and build-1 adapter JSON are owner-only (`0600`); adapter-created mission state
   directories are `0700` on POSIX;
 - only the automatic delivery contract may publish `completed`: at least one Telegram subscription must be bound,

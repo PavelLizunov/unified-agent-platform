@@ -123,21 +123,27 @@ async def smoke(checkout: pathlib.Path) -> None:
         )
         assert question_response.status == 201, await question_response.text()
         answer_body = {"question_id": "q-smoke", "text": "Preserve behavior"}
-        answer = await client.post(
+        missing_owner_key = await client.post(
             "/api/missions/mission-smoke/answer", json=answer_body
+        )
+        assert missing_owner_key.status == 401
+        owner_headers = {"X-Hermes-Mission-Owner-Key": "test-owner-key"}
+        answer = await client.post(
+            "/api/missions/mission-smoke/answer", json=answer_body, headers=owner_headers
         )
         answer_json = await answer.json()
         assert answer.status == 201 and answer_json["mission"]["status"] == "active"
         assert answer_json["mission"]["question"] is None
         assert answer_json["mission"]["answer"] == answer_body
         answer_replay = await client.post(
-            "/api/missions/mission-smoke/answer", json=answer_body
+            "/api/missions/mission-smoke/answer", json=answer_body, headers=owner_headers
         )
         assert answer_replay.status == 200
         assert (await answer_replay.json())["created"] is False
         conflicting_answer = await client.post(
             "/api/missions/mission-smoke/answer",
             json={"question_id": "q-smoke", "text": "Change behavior"},
+            headers=owner_headers,
         )
         assert conflicting_answer.status == 400
         forged = await client.post(
@@ -186,6 +192,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="hermes-mission-api-") as home:
         os.environ["HERMES_HOME"] = home
         os.environ["HERMES_MISSION_PRODUCER_KEY"] = "test-producer-key"
+        os.environ["HERMES_MISSION_OWNER_KEY"] = "test-owner-key"
         asyncio.run(smoke(args.checkout.resolve()))
     print("hermes mission API smoke passed")
 

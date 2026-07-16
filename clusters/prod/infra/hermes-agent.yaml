@@ -198,6 +198,8 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-api, key: api-key } }
             - name: HERMES_MISSION_PRODUCER_KEY
               valueFrom: { secretKeyRef: { name: hermes-agent-mission, key: producer-key } }
+            - name: HERMES_MISSION_OWNER_KEY
+              valueFrom: { secretKeyRef: { name: hermes-agent-owner, key: owner-key } }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }

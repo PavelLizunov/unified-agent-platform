@@ -1265,6 +1265,11 @@ def producer_key_valid(provided: str | None) -> bool:
     return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
 
 
+def owner_key_valid(provided: str | None) -> bool:
+    expected = os.environ.get("HERMES_MISSION_OWNER_KEY", "").strip()
+    return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
+
+
 def terminal_request_allowed(remote: str | None) -> bool:
     """Keep terminal mission authority inside the Central Hermes process boundary."""
     try:

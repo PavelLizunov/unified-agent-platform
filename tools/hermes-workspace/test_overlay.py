@@ -170,6 +170,8 @@ def main() -> None:
         assert "POST: async ({ request })" in mission_route
         assert "/answer`" in mission_route
         assert "JSON.stringify({ question_id: questionId, text })" in mission_route
+        assert "HERMES_MISSION_OWNER_KEY" in mission_route
+        assert "X-Hermes-Mission-Owner-Key" in mission_route
         mission_card = (
             clone / "src/screens/dashboard/components/mission-overview-card.tsx"
         ).read_text()

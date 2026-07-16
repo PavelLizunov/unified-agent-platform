@@ -445,6 +445,26 @@ def test_terminal_authority_is_loopback_only() -> None:
     assert not missions.terminal_request_allowed("not-an-address")
 
 
+def test_owner_answer_capability_is_separate_from_the_producer_key() -> None:
+    previous_owner = os.environ.get("HERMES_MISSION_OWNER_KEY")
+    previous_producer = os.environ.get("HERMES_MISSION_PRODUCER_KEY")
+    try:
+        os.environ["HERMES_MISSION_OWNER_KEY"] = "owner-secret"
+        os.environ["HERMES_MISSION_PRODUCER_KEY"] = "producer-secret"
+        assert missions.owner_key_valid("owner-secret")
+        assert not missions.owner_key_valid("producer-secret")
+        assert not missions.owner_key_valid(None)
+    finally:
+        if previous_owner is None:
+            os.environ.pop("HERMES_MISSION_OWNER_KEY", None)
+        else:
+            os.environ["HERMES_MISSION_OWNER_KEY"] = previous_owner
+        if previous_producer is None:
+            os.environ.pop("HERMES_MISSION_PRODUCER_KEY", None)
+        else:
+            os.environ["HERMES_MISSION_PRODUCER_KEY"] = previous_producer
+
+
 def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -1141,6 +1161,7 @@ def main() -> None:
     test_dispatch_candidates_do_not_starve_behind_newer_missions()
     test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
+    test_owner_answer_capability_is_separate_from_the_producer_key()
     test_central_auto_completion_requires_the_full_delivery_contract()
     test_auto_completion_rejects_multiple_workers()
     test_completion_ready_requires_telegram_terminal_checkpoint()

@@ -29,7 +29,7 @@ data:
         "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
         "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
         "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-        "gateway/platforms/api_server.py": "6858d30cb3461d2acf58c4c484692e0d0173edcb042e6fabba84a33fd9224f4b",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "fa4b9f275ae1377330d678c2b3e78987aa0aae0d470e7916d9315cb73b0ca1b7",  # gitleaks:allow -- pinned patched SHA-256
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -241,7 +241,7 @@ data:
                 "from agent.redact import redact_sensitive_text\n"
                 "from hermes_cli.uap_missions import (\n"
                 "    MissionError, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-                "    notify_subscribers, producer_key_valid,\n"
+                "    notify_subscribers, owner_key_valid, producer_key_valid,\n"
                 "    sanitize_producer_submission, terminal_request_allowed,\n"
                 ")",
                 "mission imports",
@@ -393,6 +393,8 @@ data:
         async def _handle_answer_mission(self, request: "web.Request") -> "web.Response":
             if auth_error := self._check_auth(request):
                 return auth_error
+            if not owner_key_valid(request.headers.get("X-Hermes-Mission-Owner-Key")):
+                return web.json_response({"error": "Invalid mission owner key"}, status=401)
             try:
                 body = await request.json()
                 if not isinstance(body, dict) or set(body) != {"question_id", "text"}:
@@ -1808,6 +1810,11 @@ data:
 
     def producer_key_valid(provided: str | None) -> bool:
         expected = os.environ.get("HERMES_MISSION_PRODUCER_KEY", "").strip()
+        return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
+
+
+    def owner_key_valid(provided: str | None) -> bool:
+        expected = os.environ.get("HERMES_MISSION_OWNER_KEY", "").strip()
         return bool(expected and provided and hmac.compare_digest(expected, provided.strip()))
 
 
