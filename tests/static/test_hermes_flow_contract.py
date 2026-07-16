@@ -423,11 +423,11 @@ class FlowContractTests(unittest.TestCase):
     def test_review_cycles_and_terminal_lifecycle_are_bounded(self):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
-        verification["review_cycle"] = 4
+        verification["review_cycle"] = 8
         validate_review(
             summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True
         )
-        verification["review_cycle"] = 5
+        verification["review_cycle"] = 9
         with self.assertRaisesRegex(flow.ContractError, "review_cycle"):
             validate_review(
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True

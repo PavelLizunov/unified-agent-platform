@@ -517,8 +517,10 @@
   счётчики причины и не просит владельца исправлять CI. До первого commit/PR исчерпание author-gate retries сохраняет
   только redacted bounded diagnostics и завершается после локальной очистки без несуществующего PR evidence. После
   создания PR coordinator повторно использует тот же PR/branch: номер PR, head SHA и base branch являются durable
-  identity, а repair push использует exact-head lease. GitHub не предоставляет server-side compare-and-swap для unsafe
-  PR-close, поэтому после начальной попытки и трёх bounded correction retries coordinator с действующим Kanban claim
+  identity, а repair push использует exact-head lease. Обычный профиль сохраняет три bounded correction retries;
+  сложный профиль может зафиксировать до семи, а canonical contract fail-closed отклоняет `review_cycle > 8`.
+  GitHub не предоставляет server-side compare-and-swap для unsafe PR-close, поэтому после исчерпания профильного
+  bounded budget coordinator с действующим Kanban claim
   повторно проверяет identity и сохраняет
   открытый failed PR вместе с exact remote branch как bounded evidence, не пытаясь закрыть его после локального
   read/check. Если PR уже закрыт внешне, совпадающая branch/SHA удаляется exact lease. Локальный disposable state

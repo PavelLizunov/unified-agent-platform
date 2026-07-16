@@ -47,8 +47,9 @@ python3 tools/swarm/install_flow_v2.py \
 ```
 
 The helper rechecks that both matching units are exactly `inactive`, validates the complete v3 profile before
-`os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2 profile or any value other than three bounded
-correction retries after the initial candidate fails closed in the coordinator.
+`os.replace`, keeps mode `0600`, and is idempotent. A schema v1/2 profile or a correction budget outside three to
+seven retries after the initial candidate fails closed in the coordinator; the canonical contract rejects review
+cycles above eight.
 
 This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` skill under
 `~/.hermes/skills`. Long missions load that skill and use native Kanban for their durable checkpoint DAG while

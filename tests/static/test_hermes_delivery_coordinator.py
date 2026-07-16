@@ -284,11 +284,28 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
     def _post_verify(self, state, paths):
         state.update(default_sha="default-sha", post_verify_checks=[])
 
-    def _cleanup(self, state, paths):
+    def _cleanup(self, state, paths, *, preserve_remote=False):
         self.counters["cleanups"] += 1
         for name in ("author", "review", "verify"):
             if paths[name].exists():
                 paths[name].rmdir()
+
+
+class TickReviewCoordinator(HermeticCoordinator):
+    _review = coordinator.DeliveryCoordinator._review
+
+    def _publish_stage(self, _state, _stage, _progress):
+        return None
+
+    def _reconcile(self, *, before_publish=None, event_source=None):
+        if event_source is None or self.client.mission["status"] != "active":
+            return
+        mission_id = self.client.mission["mission_id"]
+        adapter_state = {"root_task_id": self.backend.task["id"]}
+        for event in event_source(mission_id, adapter_state):
+            if before_publish is not None:
+                before_publish(mission_id, event)
+            self.client.publish(mission_id, event)
 
 
 class RepairClient(FakeClient):
@@ -661,6 +678,19 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             with self.assertRaisesRegex(coordinator.DeliveryError, "route_flags"):
                 coordinator.load_profile(path)
+
+            for retries in (3, 7):
+                value = profile(pathlib.Path(directory))
+                value["max_review_cycles"] = retries
+                path.write_text(json.dumps(value), encoding="utf-8")
+                self.assertEqual(retries, coordinator.load_profile(path)["max_review_cycles"])
+
+            for retries in (2, 8):
+                value = profile(pathlib.Path(directory))
+                value["max_review_cycles"] = retries
+                path.write_text(json.dumps(value), encoding="utf-8")
+                with self.assertRaisesRegex(coordinator.DeliveryError, "between 3 and 7"):
+                    coordinator.load_profile(path)
 
             value = profile(pathlib.Path(directory))
             value["author_model"] = "gpt-9-unapproved"
@@ -2009,104 +2039,98 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
             self.assertTrue(result["state"]["crash_injected"])
 
-    def test_three_rejections_get_one_final_correction_before_terminal(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            approved = profile(root)
-            approved.update(codex_bin="codex", codex_home=str(root / "codex"))
-            client = FakeClient()
-            backend = FakeBackend()
-            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
-
-            def runner(command, **_kwargs):
-                self.assertIn("--strict-config", command)
-                self.assertIn('model_reasoning_effort="xhigh"', command)
-                last = pathlib.Path(
-                    command[command.index("--output-last-message") + 1]
+    def test_cycle_eight_accepts_or_terminates_without_a_ninth_tick_review(self):
+        for verdict in ("accept", "reject"):
+            with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved.update(
+                    codex_bin="codex", codex_home=str(root / "codex"), max_review_cycles=7
                 )
-                last.write_text(
-                    json.dumps({"verdict": "reject", "findings": ["still broken"]}),
-                    encoding="utf-8",
+                client = FakeClient() if verdict == "accept" else RejectionClient()
+                client.mission["tasks"] = [{"task_id": "task-1"}]
+                backend = FakeBackend() if verdict == "accept" else RejectionBackend()
+                if isinstance(backend, RejectionBackend):
+                    backend.fail_after_complete_once = False
+                backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+                counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+                review_calls = 0
+
+                def runner(command, **_kwargs):
+                    nonlocal review_calls
+                    review_calls += 1
+                    last = pathlib.Path(
+                        command[command.index("--output-last-message") + 1]
+                    )
+                    last.write_text(
+                        json.dumps({"verdict": verdict, "findings": [] if verdict == "accept" else ["still broken"]}),
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout='{"type":"thread.started","thread_id":"review-session"}\n',
+                        stderr="",
+                    )
+
+                instance = TickReviewCoordinator(
+                    approved, client, backend, root / "state", counters=counters, runner=runner
                 )
-                return subprocess.CompletedProcess(
-                    command,
-                    0,
-                    stdout='{"type":"thread.started","thread_id":"review-session"}\n',
-                    stderr="",
-                )
+                paths = instance._paths("mission-a7-3")
+                paths["review"].mkdir(parents=True)
+                instance._save(paths, {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": "author_committed",
+                    "branch": "codex/a7-3-vpnrouter-deadbeef",
+                    "review_cycle": 8,
+                    "prior_review_rejections": 7,
+                    "prior_ci_failures": 0,
+                    "prior_author_failures": 0,
+                    "route_decisions": {},
+                    "crash_injected": True,
+                    "candidate_sha": "candidate-sha",
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                    "author_summary": {},
+                    "author_telemetry": {},
+                })
+                telemetry = {
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "xhigh",
+                    "session_id": "review-session",
+                }
+                with (
+                    mock.patch.object(instance, "_checks", return_value=[]),
+                    mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
+                    mock.patch.object(
+                        coordinator.flow_contract,
+                        "source_attestation",
+                        return_value={"sha256": "source-sha"},
+                    ),
+                    mock.patch.object(
+                        coordinator.flow_contract,
+                        "summarize_codex_events",
+                        return_value=telemetry,
+                    ),
+                ):
+                    result = instance.tick()
 
-            instance = coordinator.DeliveryCoordinator(
-                approved, client, backend, root / "state", runner=runner
-            )
-            paths = instance._paths("mission-a7-3")
-            paths["review"].mkdir(parents=True)
-            state = {
-                "schema_version": 1,
-                "mission_id": "mission-a7-3",
-                "dispatch_profile": approved["dispatch_profile"],
-                "phase": "author_committed",
-                "branch": "codex/a7-3-vpnrouter-deadbeef",
-                "review_cycle": 3,
-                "crash_injected": True,
-                "candidate_sha": "candidate-sha",
-                "root_task_id": "task-1",
-                "run_id": "7",
-                "prior_review_rejections": 2,
-                "route_decisions": {},
-            }
-            instance._ensure_route(state, paths)
-            telemetry = {"model": "gpt-5.6-sol", "session_id": "review-session"}
-            with (
-                mock.patch.object(instance, "_assert_claim"),
-                mock.patch.object(instance, "_remove_worktree"),
-                mock.patch.object(instance, "_git"),
-                mock.patch.object(instance, "_checks", return_value=[]),
-                mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
-                mock.patch.object(
-                    coordinator.flow_contract,
-                    "source_attestation",
-                    return_value={"sha256": "source-sha"},
-                ),
-                mock.patch.object(
-                    coordinator.flow_contract,
-                    "summarize_codex_events",
-                    return_value=telemetry,
-                ),
-            ):
-                self.assertFalse(instance._review(state, paths))
-
-            persisted = coordinator.mission_adapter._read_json(paths["state"])
-            self.assertEqual("needs_fix", persisted["phase"])
-            self.assertEqual(4, persisted["review_cycle"])
-            self.assertEqual(3, persisted["prior_review_rejections"])
-            self.assertEqual(["still broken"], persisted["review_findings"])
-            self.assertEqual("reject", persisted["review_verification"]["verdict"])
-
-            persisted["phase"] = "author_committed"
-            instance._ensure_route(persisted, paths)
-            with (
-                mock.patch.object(instance, "_assert_claim"),
-                mock.patch.object(instance, "_remove_worktree"),
-                mock.patch.object(instance, "_git"),
-                mock.patch.object(instance, "_checks", return_value=[]),
-                mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
-                mock.patch.object(
-                    coordinator.flow_contract,
-                    "source_attestation",
-                    return_value={"sha256": "source-sha"},
-                ),
-                mock.patch.object(
-                    coordinator.flow_contract,
-                    "summarize_codex_events",
-                    return_value=telemetry,
-                ),
-            ):
-                self.assertFalse(instance._review(persisted, paths))
-
-            exhausted = coordinator.mission_adapter._read_json(paths["state"])
-            self.assertEqual("review_rejected", exhausted["phase"])
-            self.assertEqual(4, exhausted["review_cycle"])
-            self.assertEqual(4, exhausted["prior_review_rejections"])
+                self.assertEqual("complete", result["action"])
+                self.assertEqual(1, review_calls)
+                self.assertEqual(0, counters["authors"])
+                self.assertEqual(8, result["state"]["review_cycle"])
+                if verdict == "accept":
+                    self.assertEqual("completed", client.get_mission("mission-a7-3")["status"])
+                else:
+                    self.assertEqual("review_rejected", result["state"]["outcome"])
+                with mock.patch.object(instance, "_review", side_effect=AssertionError("ninth review")):
+                    repeated = instance.tick()
+                if verdict == "accept":
+                    self.assertEqual("complete", repeated["action"])
+                else:
+                    self.assertIsNone(repeated)
 
     def test_failed_author_checks_checkpoint_one_bounded_retry(self):
         with tempfile.TemporaryDirectory() as directory:
