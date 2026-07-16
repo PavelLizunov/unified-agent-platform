@@ -41,7 +41,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v29-repair-lineage"
+        "v30-terminal-rejection"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
