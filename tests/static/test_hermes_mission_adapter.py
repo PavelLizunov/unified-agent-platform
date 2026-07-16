@@ -301,7 +301,11 @@ class MissionAdapterTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             if action == "unblock":
                 state["status"] = "ready"
-                state["events"].append({"kind": "unblocked"})
+                reason = command[command.index("--reason") + 1]
+                state["events"].append({
+                    "kind": "unblocked",
+                    "payload": {"reason": reason},
+                })
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             if action == "show":
                 output = {
@@ -342,6 +346,42 @@ class MissionAdapterTests(unittest.TestCase):
             answer_digest=digest,
         )
         self.assertEqual(first_unblocks, sum("unblock" in command for command in commands))
+
+    def test_owner_answer_resume_rejects_unrelated_unblock(self):
+        digest = hashlib.sha256(b"private owner answer").hexdigest()
+
+        def runner(command):
+            action = command[command.index("central") + 1]
+            if action != "show":
+                raise AssertionError(command)
+            output = {
+                "task": {
+                    "id": "task-1",
+                    "status": "ready",
+                    "assignee": "approved-profile",
+                    "workspace_kind": "worktree",
+                    "workspace_path": "/tmp/repo",
+                },
+                "events": [
+                    {"kind": "created"},
+                    {"kind": "blocked"},
+                    {"kind": "unblocked", "payload": {"reason": "manual-recovery"}},
+                ],
+                "runs": [],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps(output), stderr=""
+            )
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        with self.assertRaisesRegex(adapter.AdapterError, "exact durable"):
+            backend.resume_root_from_answer(
+                "task-1",
+                assignee="approved-profile",
+                workspace="worktree:/tmp/repo",
+                question_id="q-product",
+                answer_digest=digest,
+            )
 
     def test_native_claim_and_completion_are_fail_closed(self):
         commands = []

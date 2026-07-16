@@ -32,6 +32,19 @@ REQUIRED_PAYLOAD = {
 MAX_LOG_BYTES = 1024 * 1024
 
 
+def _latest_sticky_event(events: Any) -> dict[str, Any] | None:
+    if not isinstance(events, list) or not all(isinstance(event, dict) for event in events):
+        raise AdapterError("Hermes Kanban task events are invalid")
+    return next(
+        (
+            event
+            for event in reversed(events)
+            if event.get("kind") in {"blocked", "unblocked"}
+        ),
+        None,
+    )
+
+
 def _read_json(path: str | pathlib.Path) -> Any:
     with open(path, encoding="utf-8") as handle:
         return json.load(handle)
@@ -197,6 +210,7 @@ class HermesKanbanBackend:
             or any(character not in "0123456789abcdef" for character in answer_digest)
         ):
             raise AdapterError("owner-answer resume contract is invalid")
+        reference = f"owner-answer:{question_id}:{answer_digest[:16]}"
         snapshot = self.show(task_id)
         task = snapshot["task"]
         runs = snapshot.get("runs")
@@ -211,24 +225,29 @@ class HermesKanbanBackend:
         ):
             raise AdapterError("owner-answer resume selected an invalid Kanban root")
         if task.get("status") == "blocked":
+            sticky = _latest_sticky_event(snapshot.get("events"))
+            if sticky is None or sticky.get("kind") != "blocked":
+                raise AdapterError("owner-answer root is not atomically sticky-blocked")
             if task.get("assignee") is None:
                 self._run("assign", task_id, assignee)
                 snapshot = self.show(task_id)
                 task = snapshot["task"]
                 if task.get("status") != "blocked" or task.get("assignee") != assignee:
                     raise AdapterError("owner-answer assignee did not persist")
-            reference = f"owner-answer:{question_id}:{answer_digest[:16]}"
             self._run("unblock", "--reason", reference, task_id)
             snapshot = self.show(task_id)
             task = snapshot["task"]
         if task.get("status") not in {"ready", "running"} or task.get("assignee") != assignee:
             raise AdapterError("owner-answer resume did not make the task runnable")
-        events = snapshot.get("events")
-        if not isinstance(events, list) or not any(
-            isinstance(event, dict) and event.get("kind") == "unblocked"
-            for event in events
+        sticky = _latest_sticky_event(snapshot.get("events"))
+        payload = sticky.get("payload") if sticky else None
+        if (
+            sticky is None
+            or sticky.get("kind") != "unblocked"
+            or not isinstance(payload, dict)
+            or payload.get("reason") != reference
         ):
-            raise AdapterError("owner-answer resume lacks a durable Kanban checkpoint")
+            raise AdapterError("owner-answer resume lacks its exact durable Kanban checkpoint")
         runs = snapshot.get("runs")
         active = [
             run for run in runs or []

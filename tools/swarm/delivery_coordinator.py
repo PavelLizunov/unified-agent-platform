@@ -689,11 +689,14 @@ class DeliveryCoordinator:
             raise DeliveryError("owner question does not reference the exact Kanban root")
         snapshot = self.backend.show(adapter_state["root_task_id"])
         task = snapshot.get("task")
+        sticky = mission_adapter._latest_sticky_event(snapshot.get("events"))
         if (
             not isinstance(task, dict)
             or task.get("status") != "blocked"
             or task.get("assignee") is not None
             or snapshot.get("runs") != []
+            or sticky is None
+            or sticky.get("kind") != "blocked"
         ):
             raise DeliveryError("owner question root is not inert and sticky-blocked")
         state.update(

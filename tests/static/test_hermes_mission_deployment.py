@@ -30,6 +30,7 @@ def main() -> None:
         "HERMES_MISSION_OWNER_KEY",
         "mountPath: /opt/hermes/hermes_cli/uap_missions.py",
         "mountPath: /opt/hermes/hermes_cli/commands.py",
+        "mountPath: /opt/hermes/hermes_cli/kanban.py",
         "mountPath: /opt/hermes/gateway/run.py",
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
     ):
@@ -42,13 +43,21 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v31-owner-answer"
+        "v32-owner-answer-audit"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
         if container["name"] == "bootstrap"
     )
     bootstrap_script = "\n".join(bootstrap["args"])
+    assert (
+        "cp /opt/hermes/hermes_cli/kanban.py "
+        "/mission-runtime/root/hermes_cli/kanban.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/hermes_cli/kanban.py "
+        "/mission-runtime/kanban.py"
+    ) in bootstrap_script
     assert (
         "cp /opt/hermes/hermes_cli/kanban_db.py "
         "/mission-runtime/root/hermes_cli/kanban_db.py"
@@ -67,6 +76,12 @@ def main() -> None:
             "secretKeyRef": {"name": "hermes-agent-owner", "key": "owner-key"}
         },
     } in gateway["env"]
+    assert {
+        "name": "mission-runtime",
+        "mountPath": "/opt/hermes/hermes_cli/kanban.py",
+        "subPath": "kanban.py",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
     assert {
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",

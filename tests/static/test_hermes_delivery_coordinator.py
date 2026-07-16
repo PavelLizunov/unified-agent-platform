@@ -235,7 +235,14 @@ class OwnerAnswerBackend(FakeBackend):
         assert kwargs["workspace"] == f"worktree:{self.task['workspace_path']}"
         if self.task["status"] == "blocked":
             self.task.update(status="ready", assignee=kwargs["assignee"])
-            self.events.append({"kind": "unblocked"})
+            reference = (
+                f"owner-answer:{kwargs['question_id']}:"
+                f"{kwargs['answer_digest'][:16]}"
+            )
+            self.events.append({
+                "kind": "unblocked",
+                "payload": {"reason": reference},
+            })
         if self.failure_point == "after":
             self.failure_point = None
             raise coordinator.mission_adapter.AdapterError("crash after Kanban update")
@@ -435,6 +442,49 @@ class RepairCoordinator(HermeticCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def test_owner_question_rejects_nonsticky_blocked_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = OwnerAnswerClient()
+            backend = OwnerAnswerBackend(None)
+            state_root = root / "state"
+            accepted = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "sequence": 1,
+                "type": "mission.accepted",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {
+                    "goal": approved["goal"],
+                    "dispatch_profile": approved["dispatch_profile"],
+                },
+            }
+            digest = coordinator.hashlib.sha256(b"mission-a7-3").hexdigest()[:12]
+            adapter_state = coordinator.mission_adapter.accept_mission(
+                accepted,
+                state_root,
+                backend,
+                workspace=f"worktree:{root / 'worktrees' / ('author-' + digest)}",
+            )
+            client.mission["tasks"] = [{
+                "task_id": adapter_state["root_task_id"],
+                "title": "Mission mission-a7-3",
+                "status": "blocked",
+                "assignee": None,
+            }]
+            backend.events = [
+                {"kind": "created"},
+                {"kind": "unblocked", "payload": {"reason": "manual-recovery"}},
+            ]
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "sticky-blocked"):
+                instance.tick()
+
     def test_owner_answer_resumes_same_mission_across_both_crash_windows(self):
         for failure_point in ("before", "after"):
             with self.subTest(failure_point=failure_point), tempfile.TemporaryDirectory() as directory:
