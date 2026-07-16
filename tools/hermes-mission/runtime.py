@@ -386,7 +386,7 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         {"tests": "passed", "review": "failed", "cleanup": "passed"},
         {"tests": "failed", "cleanup": "passed"},
     ):
-        return not deliveries
+        return not deliveries or deliveries == {"pull_request": "failed"}
     if gates == {
         "tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed",
     }:

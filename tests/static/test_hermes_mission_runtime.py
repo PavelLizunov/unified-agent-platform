@@ -962,7 +962,7 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
         assert store.bound_mission("telegram", "42", "7") == parent
 
 
-def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
+def test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
 
@@ -990,6 +990,20 @@ def test_terminal_failure_contracts_include_ci_and_post_verify() -> None:
             assert terminal is not None
             return terminal[0]
 
+        review = fail(
+            "mission-review-failed-after-pr",
+            [("tests", "passed"), ("review", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert review["payload"]["error"] == "Independent review rejected the candidate"
+        author_checks = fail(
+            "mission-author-checks-failed-after-pr",
+            [("tests", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert author_checks["payload"]["error"] == (
+            "Author checks failed after the approved cycle limit"
+        )
         ci = fail(
             "mission-ci-failed",
             [("tests", "passed"), ("review", "passed"), ("ci", "failed"), ("cleanup", "passed")],
@@ -1027,7 +1041,7 @@ def main() -> None:
     test_mission_database_is_owner_only_on_posix()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()
-    test_terminal_failure_contracts_include_ci_and_post_verify()
+    test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
     print("hermes mission runtime checks passed")
 
 
