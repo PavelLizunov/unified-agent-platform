@@ -35,6 +35,10 @@ class CIFailed(DeliveryError):
         self.checks = checks
 
 
+class PostVerifyFailed(DeliveryError):
+    pass
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
@@ -44,9 +48,10 @@ _PROFILE_FIELDS = {
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
+    "post_verify_repair",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
-    "route_flags", "codex_bin", "gh_bin", "codex_home",
+    "route_flags", "codex_bin", "gh_bin", "codex_home", "post_verify_repair",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -54,6 +59,8 @@ _AUTHOR_CHECKS_RESULT = "author_checks_failed"
 _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
 _CI_RESULT = "ci_failed"
 _CI_SUMMARY = "Required CI failed after the approved cycle limit"
+_POST_VERIFY_RESULT = "post_verify_failed"
+_POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
@@ -176,6 +183,19 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     profile.setdefault("codex_bin", "/home/uap/.local/bin/codex")
     profile.setdefault("gh_bin", "gh")
     profile.setdefault("codex_home", str(pathlib.Path.home() / ".codex"))
+    repair = profile.get("post_verify_repair")
+    if repair is not None:
+        if not isinstance(repair, dict) or set(repair) != {"dispatch_profile", "goal"}:
+            raise DeliveryError(
+                "profile.post_verify_repair must contain only dispatch_profile and goal"
+            )
+        repair = {
+            name: _required_text(repair.get(name), f"post_verify_repair.{name}")
+            for name in ("dispatch_profile", "goal")
+        }
+        if repair["dispatch_profile"] == profile["dispatch_profile"]:
+            raise DeliveryError("post-verify repair must use a distinct dispatch profile")
+        profile["post_verify_repair"] = repair
     return profile
 
 
@@ -497,6 +517,12 @@ class DeliveryCoordinator:
                 mission = self.client.get_mission(recoverable[0]["mission_id"])
         if mission is not None and mission.get("goal") != self.profile["goal"]:
             raise DeliveryError("mission goal does not match the owner-approved profile")
+        if (
+            mission is not None
+            and mission.get("parent_mission_id") is not None
+            and self.profile.get("post_verify_repair") is not None
+        ):
+            raise DeliveryError("repair missions cannot recursively dispatch another repair")
         return mission
 
     def _paths(self, mission_id: str) -> dict[str, pathlib.Path]:
@@ -510,6 +536,7 @@ class DeliveryCoordinator:
             "author": root / f"author-{digest}",
             "review": root / f"review-{digest}",
             "verify": root / f"verify-{digest}",
+            "repair_context": directory / "post-verify-repair.json",
         }
 
     def _load_state(self, mission_id: str, paths: dict[str, pathlib.Path]) -> dict[str, Any]:
@@ -553,7 +580,7 @@ class DeliveryCoordinator:
                 self._save(paths, state)
             return state
         digest = hashlib.sha256(mission_id.encode()).hexdigest()[:12]
-        return {
+        state = {
             "schema_version": 1,
             "mission_id": mission_id,
             "dispatch_profile": self.profile["dispatch_profile"],
@@ -566,6 +593,31 @@ class DeliveryCoordinator:
             "route_decisions": {},
             "crash_injected": False,
         }
+        if paths["repair_context"].is_file():
+            context = mission_adapter._read_json(paths["repair_context"])
+            expected = {
+                "schema_version", "mission_id", "parent_mission_id",
+                "dispatch_profile", "diagnostic", "failed_default_sha",
+            }
+            if (
+                not isinstance(context, dict)
+                or set(context) != expected
+                or context.get("schema_version") != 1
+                or context.get("mission_id") != mission_id
+                or context.get("dispatch_profile") != self.profile["dispatch_profile"]
+                or not isinstance(context.get("parent_mission_id"), str)
+                or not isinstance(context.get("failed_default_sha"), str)
+            ):
+                raise DeliveryError("post-verify repair context is invalid")
+            diagnostic = _bounded_diagnostic(
+                str(context.get("diagnostic") or ""), "post-verify failed"
+            )
+            state.update(
+                parent_mission_id=context["parent_mission_id"],
+                repair_failed_default_sha=context["failed_default_sha"],
+                review_findings=[diagnostic],
+            )
+        return state
 
     def _save(self, paths: dict[str, pathlib.Path], state: dict[str, Any]) -> None:
         mission_adapter._write_json(paths["state"], state, private_parent=True)
@@ -744,6 +796,24 @@ class DeliveryCoordinator:
                 })
             return result, summary, events
 
+        if state.get("failure_kind") == "post_verify":
+            pr_url = state.get("pr_url")
+            if not isinstance(pr_url, str) or not pr_url:
+                raise DeliveryError("post-verify failure has no merged PR identity")
+            return (
+                _POST_VERIFY_RESULT,
+                _POST_VERIFY_SUMMARY,
+                [
+                    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "passed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "post-verify", "status": "failed"}},
+                    {"type": "delivery.upsert", "payload": {
+                        "kind": "pull_request", "status": "merged", "url": pr_url,
+                    }},
+                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+                ],
+            )
         if state.get("failure_kind") == "ci":
             return finish(
                 _CI_RESULT,
@@ -848,9 +918,11 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
-        if state["phase"] in {"review_rejected", "author_checks_failed", "ci_failed"}:
+        if state["phase"] in {
+            "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed"
+        }:
             preserve_remote = False
-            if state.get("pr_number") is not None:
+            if state.get("pr_number") is not None and state.get("failure_kind") != "post_verify":
                 preserve_remote = self._finalize_failed_pr(state)
             self._cleanup(state, paths, preserve_remote=preserve_remote)
             state["failed_pr_preserved"] = preserve_remote
@@ -1576,7 +1648,141 @@ class DeliveryCoordinator:
         state["default_sha"] = self._git(source, "rev-parse", default_ref)
         self._remove_worktree(paths["verify"])
         self._git(source, "worktree", "add", "--detach", str(paths["verify"]), state["default_sha"])
-        state["post_verify_checks"] = self._checks("post_verify_checks", paths["verify"], state, paths)
+        try:
+            state["post_verify_checks"] = self._checks(
+                "post_verify_checks", paths["verify"], state, paths
+            )
+        except DeliveryError as error:
+            raise PostVerifyFailed(str(error)) from error
+
+    @staticmethod
+    def _repair_mission_id(mission_id: str) -> str:
+        digest = hashlib.sha256(mission_id.encode()).hexdigest()[:32]
+        return f"repair-{digest}"
+
+    def _record_post_verify_failure(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        error: Exception,
+    ) -> None:
+        diagnostic = _bounded_diagnostic(str(error), "post-verify failed")
+        repair = self.profile.get("post_verify_repair")
+        if repair is None or state.get("repair_mission_id") is not None:
+            state.update(
+                phase="post_verify_failed",
+                failure_kind="post_verify",
+                failure_error=diagnostic,
+            )
+        else:
+            state.update(
+                phase="post_verify_repair_pending",
+                post_verify_failure=diagnostic,
+                failed_default_sha=state.get("default_sha", ""),
+                repair_mission_id=self._repair_mission_id(state["mission_id"]),
+            )
+        self._save(paths, state)
+
+    def _dispatch_post_verify_repair(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any]:
+        repair = self.profile.get("post_verify_repair")
+        if not isinstance(repair, dict):
+            raise DeliveryError("post-verify repair profile disappeared")
+        child_id = state.get("repair_mission_id")
+        if not isinstance(child_id, str) or not child_id:
+            raise DeliveryError("post-verify repair identity is missing")
+        context = {
+            "schema_version": 1,
+            "mission_id": child_id,
+            "parent_mission_id": state["mission_id"],
+            "dispatch_profile": repair["dispatch_profile"],
+            "diagnostic": _bounded_diagnostic(
+                str(state.get("post_verify_failure") or ""), "post-verify failed"
+            ),
+            "failed_default_sha": str(state.get("failed_default_sha") or ""),
+        }
+        child_paths = self._paths(child_id)
+        mission_adapter._write_json(
+            child_paths["repair_context"], context, private_parent=True
+        )
+        child = self.client.accept_mission(
+            mission_id=child_id,
+            goal=repair["goal"],
+            dispatch_profile=repair["dispatch_profile"],
+            parent_mission_id=state["mission_id"],
+        )
+        if (
+            child.get("mission_id") != child_id
+            or child.get("goal") != repair["goal"]
+            or child.get("dispatch_profile") != repair["dispatch_profile"]
+            or child.get("parent_mission_id") != state["mission_id"]
+        ):
+            raise DeliveryError("Central accepted the wrong post-verify repair mission")
+        state["phase"] = "post_verify_repair_waiting"
+        self._save(paths, state)
+        return {
+            "action": state["phase"],
+            "mission_id": state["mission_id"],
+            "repair_mission_id": child_id,
+            "state": state,
+        }
+
+    def _observe_post_verify_repair(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any] | None:
+        child_id = state.get("repair_mission_id")
+        repair = self.profile.get("post_verify_repair")
+        if not isinstance(child_id, str) or not isinstance(repair, dict):
+            raise DeliveryError("post-verify repair state is invalid")
+        child = self.client.get_mission(child_id)
+        if (
+            child.get("mission_id") != child_id
+            or child.get("goal") != repair["goal"]
+            or child.get("dispatch_profile") != repair["dispatch_profile"]
+            or child.get("parent_mission_id") != state["mission_id"]
+        ):
+            raise DeliveryError("post-verify repair mission identity changed")
+        if child.get("status") in {"active", "waiting_owner"}:
+            return {
+                "action": state["phase"],
+                "mission_id": state["mission_id"],
+                "repair_mission_id": child_id,
+                "state": state,
+            }
+        if child.get("status") == "completed":
+            state["phase"] = "post_verify_repair_completed"
+            self._save(paths, state)
+            return None
+        if child.get("status") not in {"failed", "cancelled"}:
+            raise DeliveryError("post-verify repair has an invalid terminal status")
+        self._record_post_verify_failure(
+            state,
+            paths,
+            DeliveryError(
+                _bounded_diagnostic(
+                    str(child.get("error") or "repair mission failed"),
+                    "repair mission failed",
+                )
+            ),
+        )
+        return None
+
+    def _retry_post_verify_after_repair(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        failed_sha = state.get("failed_default_sha")
+        try:
+            self._post_verify(state, paths)
+            if not failed_sha or state.get("default_sha") == failed_sha:
+                raise PostVerifyFailed(
+                    "repair mission completed without changing the default branch"
+                )
+        except PostVerifyFailed as error:
+            self._record_post_verify_failure(state, paths, error)
+            return
+        state["phase"] = "verified"
+        self._save(paths, state)
 
     def _events(self, state: dict[str, Any], *, cleanup: bool) -> list[dict[str, Any]]:
         events = [
@@ -1638,7 +1844,7 @@ class DeliveryCoordinator:
             state = self._load_state(mission_id, paths)
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
-                "rejection_task_completed",
+                "post_verify_failed", "rejection_task_completed",
             }:
                 return self._finish_rejection(state, paths)
             if mission.get("status") == "completed":
@@ -1661,6 +1867,24 @@ class DeliveryCoordinator:
                     self._assert_claim(state)
                 self._ensure_worktree(state, paths)
                 self._save(paths, state)
+
+            if state["phase"] == "post_verify_repair_pending":
+                self._assert_claim(state)
+                return self._dispatch_post_verify_repair(state, paths)
+
+            if state["phase"] == "post_verify_repair_waiting":
+                self._assert_claim(state)
+                waiting = self._observe_post_verify_repair(state, paths)
+                if waiting is not None:
+                    return waiting
+                if state["phase"] == "post_verify_failed":
+                    return self._finish_rejection(state, paths)
+
+            if state["phase"] == "post_verify_repair_completed":
+                self._assert_claim(state)
+                self._retry_post_verify_after_repair(state, paths)
+                if state["phase"] == "post_verify_failed":
+                    return self._finish_rejection(state, paths)
 
             if state["phase"] == "new":
                 self._assert_nonroutable_assignee()
@@ -1732,9 +1956,16 @@ class DeliveryCoordinator:
 
             if state["phase"] == "merged":
                 self._assert_claim(state)
-                self._post_verify(state, paths)
-                state["phase"] = "verified"
-                self._save(paths, state)
+                try:
+                    self._post_verify(state, paths)
+                except PostVerifyFailed as error:
+                    self._record_post_verify_failure(state, paths, error)
+                    if state["phase"] == "post_verify_failed":
+                        return self._finish_rejection(state, paths)
+                    return self._dispatch_post_verify_repair(state, paths)
+                else:
+                    state["phase"] = "verified"
+                    self._save(paths, state)
 
             if state["phase"] == "verified":
                 self._assert_claim(state)

@@ -348,6 +348,29 @@ class CentralMissionClient:
             raise AdapterError("central mission API returned an invalid projection")
         return mission
 
+    def accept_mission(
+        self,
+        *,
+        mission_id: str,
+        goal: str,
+        dispatch_profile: str,
+        parent_mission_id: str,
+    ) -> dict[str, Any]:
+        result = self._request(
+            "POST",
+            "/api/missions",
+            {
+                "mission_id": mission_id,
+                "goal": goal,
+                "dispatch_profile": dispatch_profile,
+                "parent_mission_id": parent_mission_id,
+            },
+        )
+        mission = result.get("mission")
+        if not isinstance(mission, dict):
+            raise AdapterError("central mission API returned an invalid accepted mission")
+        return mission
+
     def publish(self, mission_id: str, event: dict[str, Any]) -> None:
         self._request("POST", f"/api/missions/{urllib.parse.quote(mission_id, safe='')}/events", event)
 

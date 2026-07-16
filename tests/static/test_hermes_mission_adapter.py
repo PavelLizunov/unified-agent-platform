@@ -596,10 +596,15 @@ class MissionAdapterTests(unittest.TestCase):
         listing.__enter__.return_value.read.return_value = b'{"missions": []}'
         reconciling = mock.MagicMock()
         reconciling.__enter__.return_value.read.return_value = b'{"missions": []}'
+        accepted = mock.MagicMock()
+        accepted.__enter__.return_value.read.return_value = (
+            b'{"mission":{"mission_id":"repair-1","goal":"Repair",'
+            b'"dispatch_profile":"build1-repair","parent_mission_id":"mission-1"}}'
+        )
         published = mock.MagicMock()
         published.__enter__.return_value.read.return_value = b'{"created": true}'
         opener = mock.MagicMock()
-        opener.open.side_effect = [listing, reconciling, published]
+        opener.open.side_effect = [listing, reconciling, accepted, published]
         with mock.patch.object(
             adapter.urllib.request, "build_opener", return_value=opener
         ) as build_opener:
@@ -610,17 +615,38 @@ class MissionAdapterTests(unittest.TestCase):
             )
             self.assertEqual([], client.list_missions("build1-uap"))
             self.assertEqual([], client.list_missions("build1-uap", reconcile=True))
+            self.assertEqual(
+                "repair-1",
+                client.accept_mission(
+                    mission_id="repair-1",
+                    goal="Repair",
+                    dispatch_profile="build1-repair",
+                    parent_mission_id="mission-1",
+                )["mission_id"],
+            )
             client.publish("mission-1", {"type": "task.upsert"})
 
         proxy_handler = build_opener.call_args.args[0]
         self.assertEqual({}, proxy_handler.proxies)
         first_request = opener.open.call_args_list[0].args[0]
         reconcile_request = opener.open.call_args_list[1].args[0]
-        second_request = opener.open.call_args_list[2].args[0]
+        accept_request = opener.open.call_args_list[2].args[0]
+        second_request = opener.open.call_args_list[3].args[0]
         first_headers = {key.lower(): value for key, value in first_request.header_items()}
         second_headers = {key.lower(): value for key, value in second_request.header_items()}
         self.assertEqual("Bearer api-token", first_headers["authorization"])
         self.assertEqual("producer-key", second_headers["x-hermes-mission-producer-key"])
+        self.assertEqual("POST", accept_request.method)
+        self.assertEqual("/api/missions", adapter.urllib.parse.urlsplit(accept_request.full_url).path)
+        self.assertEqual(
+            {
+                "mission_id": "repair-1",
+                "goal": "Repair",
+                "dispatch_profile": "build1-repair",
+                "parent_mission_id": "mission-1",
+            },
+            json.loads(accept_request.data),
+        )
         self.assertIn("dispatch_profile=build1-uap", first_request.full_url)
         self.assertIn("limit=1", first_request.full_url)
         self.assertNotIn("reconcile=1", first_request.full_url)

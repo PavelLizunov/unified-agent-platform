@@ -291,6 +291,44 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
                 paths[name].rmdir()
 
 
+class RepairClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.children = {}
+        self.accept_calls = 0
+        self.lose_first_accept_response = True
+
+    def accept_mission(self, **document):
+        self.accept_calls += 1
+        child = self.children.setdefault(
+            document["mission_id"],
+            {
+                **document,
+                "status": "active",
+                "stage": "accepted",
+                "tasks": [],
+            },
+        )
+        if self.lose_first_accept_response:
+            self.lose_first_accept_response = False
+            raise coordinator.mission_adapter.AdapterError("lost child accept response")
+        return dict(child)
+
+    def get_mission(self, mission_id):
+        if mission_id in self.children:
+            return dict(self.children[mission_id])
+        return {**self.mission, "status": "completed"}
+
+
+class RepairCoordinator(HermeticCoordinator):
+    def _post_verify(self, state, paths):
+        self.counters["post_verify"] = self.counters.get("post_verify", 0) + 1
+        if state.get("repair_mission_id") is None:
+            state["default_sha"] = "failed-default-sha"
+            raise coordinator.PostVerifyFailed("windows post-verify token=super-secret failed")
+        state.update(default_sha="repaired-default-sha", post_verify_checks=[])
+
+
 class DeliveryCoordinatorTests(unittest.TestCase):
     def test_command_failure_keeps_bounded_stderr_and_stdout_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2292,6 +2330,139 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             with mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")):
                 self.assertIsNone(instance.tick())
+
+    def test_post_verify_repair_is_idempotent_and_resumes_parent_after_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["post_verify_repair"] = {
+                "dispatch_profile": "build1-vpnrouter-repair",
+                "goal": "Repair the exact post-verify failure",
+            }
+            client = RepairClient()
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            instance = RepairCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "merged",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": True,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "candidate_sha": "candidate-sha",
+                "pr_url": "https://example.invalid/pr/39",
+            })
+
+            with self.assertRaisesRegex(
+                coordinator.mission_adapter.AdapterError, "lost child accept response"
+            ):
+                instance.tick()
+            pending = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("post_verify_repair_pending", pending["phase"])
+            child_id = pending["repair_mission_id"]
+            self.assertEqual(1, len(client.children))
+            self.assertNotIn("super-secret", pending["post_verify_failure"])
+
+            waiting = instance.tick()
+            self.assertEqual("post_verify_repair_waiting", waiting["action"])
+            self.assertEqual(2, client.accept_calls)
+            self.assertEqual(1, len(client.children))
+            self.assertEqual("post_verify_repair_waiting", instance.tick()["action"])
+            self.assertEqual(1, counters["post_verify"])
+
+            repair_profile = profile(root)
+            repair_profile.update(
+                dispatch_profile="build1-vpnrouter-repair",
+                goal="Repair the exact post-verify failure",
+            )
+            child_instance = coordinator.DeliveryCoordinator(
+                repair_profile, client, backend, root / "state"
+            )
+            child_paths = child_instance._paths(child_id)
+            child_state = child_instance._load_state(child_id, child_paths)
+            self.assertEqual("mission-a7-3", child_state["parent_mission_id"])
+            self.assertEqual(["windows post-verify [REDACTED] failed"], child_state["review_findings"])
+
+            client.children[child_id]["status"] = "completed"
+            result = instance.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(2, counters["post_verify"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual("repaired-default-sha", result["state"]["default_sha"])
+            self.assertEqual(1, counters["cleanups"])
+
+    def test_failed_repair_cannot_spawn_recursively_and_preserves_merged_pr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["post_verify_repair"] = {
+                "dispatch_profile": "build1-vpnrouter-repair",
+                "goal": "Repair the exact post-verify failure",
+            }
+            client = RepairClient()
+            client.lose_first_accept_response = False
+            child_id = coordinator.DeliveryCoordinator._repair_mission_id("mission-a7-3")
+            client.children[child_id] = {
+                "mission_id": child_id,
+                "goal": "Repair the exact post-verify failure",
+                "dispatch_profile": "build1-vpnrouter-repair",
+                "parent_mission_id": "mission-a7-3",
+                "status": "failed",
+                "error": "repair exhausted",
+            }
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "post_verify_repair_waiting",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 3,
+                "crash_injected": True,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_url": "https://example.invalid/pr/39",
+                "repair_mission_id": child_id,
+                "failed_default_sha": "failed-default-sha",
+            }
+            self.assertIsNone(instance._observe_post_verify_repair(state, paths))
+            self.assertEqual("post_verify_failed", state["phase"])
+            self.assertEqual("post_verify", state["failure_kind"])
+            result, summary, events = instance._failure_contract(state)
+            self.assertEqual("post_verify_failed", result)
+            self.assertIn("Post-verify failed", summary)
+            self.assertIn(
+                {
+                    "type": "delivery.upsert",
+                    "payload": {
+                        "kind": "pull_request",
+                        "status": "merged",
+                        "url": "https://example.invalid/pr/39",
+                    },
+                },
+                events,
+            )
+            self.assertNotIn(
+                {"type": "delivery.upsert", "payload": {"kind": "pull_request", "status": "failed"}},
+                events,
+            )
+            before = state["repair_mission_id"]
+            instance._record_post_verify_failure(
+                state, paths, coordinator.PostVerifyFailed("second failure")
+            )
+            self.assertEqual(before, state["repair_mission_id"])
+            self.assertEqual("post_verify_failed", state["phase"])
 
 
 if __name__ == "__main__":
