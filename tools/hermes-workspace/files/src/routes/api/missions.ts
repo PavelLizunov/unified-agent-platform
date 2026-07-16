@@ -32,6 +32,52 @@ export const Route = createFileRoute('/api/missions')({
           )
         }
       },
+      POST: async ({ request }) => {
+        if (!isAuthenticated(request)) {
+          return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+        const body = (await request.json().catch(() => null)) as Record<
+          string,
+          unknown
+        > | null
+        const missionId = body?.mission_id
+        const questionId = body?.question_id
+        const text = body?.text
+        if (
+          typeof missionId !== 'string' ||
+          typeof questionId !== 'string' ||
+          typeof text !== 'string' ||
+          !text.trim() ||
+          text.length > 4_000
+        ) {
+          return Response.json({ error: 'Invalid mission answer' }, { status: 400 })
+        }
+        try {
+          const response = await gatewayFetch(
+            `/api/missions/${encodeURIComponent(missionId)}/answer`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ question_id: questionId, text }),
+              signal: AbortSignal.timeout(5_000),
+            },
+          )
+          return new Response(await response.text(), {
+            status: response.status,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        } catch (error) {
+          return Response.json(
+            {
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Central mission API unavailable',
+            },
+            { status: 503 },
+          )
+        }
+      },
     },
   },
 })

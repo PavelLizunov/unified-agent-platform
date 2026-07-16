@@ -27,6 +27,9 @@ async def smoke(checkout: pathlib.Path) -> None:
         "/api/missions/{mission_id}/events", adapter._handle_append_mission_event
     )
     app.router.add_post(
+        "/api/missions/{mission_id}/answer", adapter._handle_answer_mission
+    )
+    app.router.add_post(
         "/api/missions/{mission_id}/terminal", adapter._handle_finish_mission
     )
     client = TestClient(TestServer(app))
@@ -107,6 +110,36 @@ async def smoke(checkout: pathlib.Path) -> None:
             "/api/missions?dispatch_profile=build1-smoke&reconcile=yes&limit=1"
         )
         assert invalid_reconcile.status == 400
+        question = {
+            "schema_version": 1,
+            "mission_id": "mission-smoke",
+            "type": "mission.question",
+            "source": "build1-flow",
+            "correlation": {"producer_event_id": "flow:smoke:question"},
+            "payload": {"question_id": "q-smoke", "text": "Choose behavior"},
+        }
+        question_response = await client.post(
+            "/api/missions/mission-smoke/events", json=question, headers=headers
+        )
+        assert question_response.status == 201, await question_response.text()
+        answer_body = {"question_id": "q-smoke", "text": "Preserve behavior"}
+        answer = await client.post(
+            "/api/missions/mission-smoke/answer", json=answer_body
+        )
+        answer_json = await answer.json()
+        assert answer.status == 201 and answer_json["mission"]["status"] == "active"
+        assert answer_json["mission"]["question"] is None
+        assert answer_json["mission"]["answer"] == answer_body
+        answer_replay = await client.post(
+            "/api/missions/mission-smoke/answer", json=answer_body
+        )
+        assert answer_replay.status == 200
+        assert (await answer_replay.json())["created"] is False
+        conflicting_answer = await client.post(
+            "/api/missions/mission-smoke/answer",
+            json={"question_id": "q-smoke", "text": "Change behavior"},
+        )
+        assert conflicting_answer.status == 400
         forged = await client.post(
             "/api/missions/mission-forged/events",
             json={

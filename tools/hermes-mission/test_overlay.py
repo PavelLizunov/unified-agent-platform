@@ -66,6 +66,7 @@ def main() -> None:
             '"/api/missions"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
+            '"/api/missions/{mission_id}/answer"',
             '"/api/missions/{mission_id}/terminal"',
         ):
             assert route in api
@@ -76,7 +77,10 @@ def main() -> None:
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
+        assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
+        assert 'requested.startswith("answer ")' in gateway
+        assert "store.answer(" in gateway
         assert "atomic sticky initial block" not in kanban
         assert '"blocked",\n                        {"reason": None, "kind": "needs_input"}' in kanban
         assert "uq_tasks_active_idempotency" in kanban

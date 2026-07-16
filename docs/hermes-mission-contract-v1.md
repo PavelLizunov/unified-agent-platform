@@ -56,6 +56,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 | `mission.accepted` | `goal`; optional `dispatch_profile` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
+| `mission.answer` | `question_id`, `text` | records the redacted owner answer, clears that exact question and resumes `active` |
 | `task.upsert` | `task_id`, `title`, `status` | creates or replaces one task projection |
 | `worker.upsert` | `worker_id`, `status` | creates or replaces one worker projection |
 | `terminal.append` | `stream`, `text` | appends bounded terminal/tool output |
@@ -162,8 +163,8 @@ Hermes source by `tools/hermes-mission/apply_overlay.py`. It is part of the exis
 service:
 
 - SQLite at `$HERMES_HOME/missions-v1.sqlite3` owns the canonical log and Telegram subscriptions;
-- the existing authenticated gateway API exposes mission list/create/read, central-terminal and producer-event
-  endpoints;
+- the existing authenticated gateway API exposes mission list/create/read, owner-answer, central-terminal and
+  producer-event endpoints;
 - producer writes require a separate `HERMES_MISSION_PRODUCER_KEY`, are idempotent, and cannot publish a terminal
   mission event;
 - the central mission SQLite file and build-1 adapter JSON are owner-only (`0600`); adapter-created mission state
@@ -173,8 +174,9 @@ service:
   terminal sequence; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
   forwarded client headers are ignored, and terminal retries with the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
-- Telegram `/mission [mission-id]` binds a chat to that mission, and owner-relevant stage/question/terminal events
-  render from the exact same projection and `projection_id`;
+- Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open
+  question on that binding. Workspace posts the same closed answer shape through its authenticated mission route, and
+  owner-relevant stage/question/answer/terminal events render from the same projection and `projection_id`;
 - notification delivery leases the exact mission binding for at most five minutes; a concurrent rebind either wins
   before the lease and prevents the stale send, or fails closed until send/checkpoint releases or expires the lease;
 - terminal/question text is force-redacted at the Hermes API boundary and all stored/event frames are bounded.

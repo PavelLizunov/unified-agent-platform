@@ -799,11 +799,12 @@ def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> N
         assert store.projection(mission_id)["status"] == "completed"
 
 
-def test_unresolved_question_survives_stage_and_blocks_auto_completion() -> None:
+def test_owner_answer_is_idempotent_and_resumes_the_same_mission() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
         mission_id = "mission-question-block"
         store.accept("Wait for owner", mission_id=mission_id)
+        store.bind(mission_id, "telegram", "42")
         store.append_central(
             mission_id,
             {
@@ -846,8 +847,55 @@ def test_unresolved_question_survives_stage_and_blocks_auto_completion() -> None
                 },
             )
         view = store.projection(mission_id)
-        assert view["status"] == "active" and view["question"]["question_id"] == "q-1"
+        assert view["status"] == "waiting_owner"
+        assert view["question"]["question_id"] == "q-1"
         assert store.complete_if_ready(mission_id) is None
+        try:
+            store.append_producer(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.answer",
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": "flow:forged-answer"},
+                    "payload": {"question_id": "q-1", "text": "Forged answer"},
+                },
+            )
+            raise AssertionError("producer forged an owner answer")
+        except missions.MissionError as error:
+            assert "producer cannot publish" in str(error)
+        try:
+            store.answer(mission_id, "q-other", "Wrong question")
+            raise AssertionError("mismatched owner answer was accepted")
+        except missions.MissionError as error:
+            assert "open question" in str(error)
+        answer, created = store.answer(mission_id, "q-1", "Preserve the current behavior")
+        assert created and answer["type"] == "mission.answer"
+        replay, replay_created = store.answer(
+            mission_id, "q-1", "Preserve the current behavior"
+        )
+        assert not replay_created and replay == answer
+        try:
+            store.answer(mission_id, "q-1", "Change the behavior")
+            raise AssertionError("conflicting owner answer was accepted")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+        resumed = store.projection(mission_id)
+        assert resumed["status"] == "active" and resumed["question"] is None
+        assert resumed["answer"] == {
+            "question_id": "q-1",
+            "text": "Preserve the current behavior",
+        }
+        deliveries: list[str] = []
+
+        async def send(_subscription: dict, text: str) -> None:
+            deliveries.append(text)
+
+        assert asyncio.run(missions.notify_subscribers(store, answer, send)) == 1
+        assert deliveries and "Answer received: Preserve the current behavior" in deliveries[0]
+        assert store.pending_subscriptions(mission_id, answer["sequence"]) == []
+        assert missions.completion_ready(resumed, telegram_terminal_ready=True)
 
 
 def test_mission_database_is_owner_only_on_posix() -> None:
@@ -1097,7 +1145,7 @@ def main() -> None:
     test_auto_completion_rejects_multiple_workers()
     test_completion_ready_requires_telegram_terminal_checkpoint()
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
-    test_unresolved_question_survives_stage_and_blocks_auto_completion()
+    test_owner_answer_is_idempotent_and_resumes_the_same_mission()
     test_mission_database_is_owner_only_on_posix()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()

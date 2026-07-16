@@ -167,12 +167,17 @@ def main() -> None:
         mission_route = (clone / "src/routes/api/missions.ts").read_text()
         assert "gatewayFetch" in mission_route
         assert "Central mission API unavailable" in mission_route
+        assert "POST: async ({ request })" in mission_route
+        assert "/answer`" in mission_route
+        assert "JSON.stringify({ question_id: questionId, text })" in mission_route
         mission_card = (
             clone / "src/screens/dashboard/components/mission-overview-card.tsx"
         ).read_text()
         assert "refetchInterval: 2_000" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
+        assert 'aria-label="Answer"' in mission_card
+        assert "question_id: question.question_id" in mission_card
 
         for relative, expected in (
             (

@@ -35,11 +35,12 @@ STAGES = (
     "complete",
 )
 TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
-NOTIFY_TYPES = {"mission.stage", "mission.question", *TERMINAL_TYPES}
+NOTIFY_TYPES = {"mission.stage", "mission.question", "mission.answer", *TERMINAL_TYPES}
 REQUIRED_PAYLOAD = {
     "mission.accepted": {"goal"},
     "mission.stage": {"stage", "progress_percent"},
     "mission.question": {"question_id", "text"},
+    "mission.answer": {"question_id", "text"},
     "task.upsert": {"task_id", "title", "status"},
     "worker.upsert": {"worker_id", "status"},
     "terminal.append": {"stream", "text"},
@@ -58,7 +59,9 @@ PAYLOAD_FIELDS = {
     "terminal.append": {"stream", "text", "offset"},
 }
 CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
-PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {"mission.accepted", *TERMINAL_TYPES}
+PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
+    "mission.accepted", "mission.answer", *TERMINAL_TYPES,
+}
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
@@ -69,6 +72,7 @@ _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
 _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
+_MAX_OWNER_ANSWER_CHARS = 4_000
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -203,6 +207,7 @@ def empty_projection() -> dict[str, Any]:
         "dispatch_profile": None,
         "parent_mission_id": None,
         "question": None,
+        "answer": None,
         "result": None,
         "error": None,
         "tasks": [],
@@ -247,12 +252,24 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             progress = payload["progress_percent"]
             if progress < view["progress_percent"]:
                 raise MissionError("mission progress decreased")
-            view.update(status="active", stage=payload["stage"], progress_percent=progress)
+            view.update(stage=payload["stage"], progress_percent=progress)
+            if view.get("question") is None:
+                view["status"] = "active"
         elif kind == "mission.question":
             view.update(
                 status="waiting_owner",
                 question={"question_id": payload["question_id"], "text": payload["text"]},
+                answer=None,
             )
+        elif kind == "mission.answer":
+            question = view.get("question")
+            if (
+                view.get("status") != "waiting_owner"
+                or not isinstance(question, dict)
+                or question.get("question_id") != payload["question_id"]
+            ):
+                raise MissionError("mission answer does not match the open question")
+            view.update(status="active", question=None, answer=dict(payload))
         elif kind == "task.upsert":
             tasks[str(payload["task_id"])] = dict(payload)
         elif kind == "worker.upsert":
@@ -300,6 +317,8 @@ def telegram_text(view: dict[str, Any]) -> str:
     ]
     if view.get("question"):
         lines.append(f"Question: {view['question']['text']}")
+    if view.get("answer"):
+        lines.append(f"Answer received: {view['answer']['text']}")
     if view.get("result"):
         lines.append(f"Result: {view['result']}")
     if view.get("error"):
@@ -832,6 +851,29 @@ class MissionStore:
                 "repair-restore", child_mission_id,
             )
 
+    def answer(
+        self, mission_id: str, question_id: str, text: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Record one idempotent owner answer to the currently open question."""
+        question_id = _require_id(question_id, "question_id")
+        text = str(text or "").strip()
+        if not text or len(text) > _MAX_OWNER_ANSWER_CHARS:
+            raise MissionError("owner answer must contain 1..4000 characters")
+        fingerprint = hashlib.sha256(question_id.encode("utf-8")).hexdigest()[:32]
+        return self.append_central(
+            mission_id,
+            {
+                "schema_version": SCHEMA_VERSION,
+                "mission_id": mission_id,
+                "type": "mission.answer",
+                "source": "central-hermes",
+                "correlation": {
+                    "producer_event_id": f"central:answer:{fingerprint}"
+                },
+                "payload": {"question_id": question_id, "text": text},
+            },
+        )
+
     def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized = dict(submission)
         normalized["source"] = "central-hermes"
@@ -986,6 +1028,14 @@ class MissionStore:
                     raise MissionError("mission is terminal")
                 if event["type"] == "mission.stage" and event["payload"]["progress_percent"] < current["progress_percent"]:
                     raise MissionError("mission progress decreased")
+                if event["type"] == "mission.answer":
+                    question = current.get("question")
+                    if (
+                        current.get("status") != "waiting_owner"
+                        or not isinstance(question, dict)
+                        or question.get("question_id") != event["payload"]["question_id"]
+                    ):
+                        raise MissionError("mission answer does not match the open question")
             sequence = len(previous) + 1
             event.update(
                 sequence=sequence,

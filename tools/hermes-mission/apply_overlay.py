@@ -18,10 +18,10 @@ FILES = {
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
 }
 PATCHED_FILES = {
-    "hermes_cli/commands.py": "a15d100256f8e7fec986bd44fbbae47b561e3e7a2b206bce0c2740e30431a173",
+    "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
     "hermes_cli/kanban_db.py": "9610e5d3fb6a4448c72835396e583958c0f1b6c8db95ef0f69637bf0528897da",
-    "gateway/run.py": "72fe0d51d8752942f48b37b469870de83ddfa00d2f726f33cb84df4214ca0d1e",
-    "gateway/platforms/api_server.py": "f8a2fa9d3f248eec845ccf201d4afb75b95c713b5c4e1a5cbe90a1ba6308a431",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
+    "gateway/platforms/api_server.py": "6858d30cb3461d2acf58c4c484692e0d0173edcb042e6fabba84a33fd9224f4b",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -43,8 +43,8 @@ def transform(relative: str, text: str) -> str:
             text,
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),',
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),\n'
-            '    CommandDef("mission", "Show or follow one central UAP mission", "Session",\n'
-            '               args_hint="[mission-id]", gateway_only=True),',
+            '    CommandDef("mission", "Show, bind, or answer one central UAP mission", "Session",\n'
+            '               args_hint="[mission-id | answer <text>]", gateway_only=True),',
             "mission command",
         )
     if relative == "hermes_cli/kanban_db.py":
@@ -191,6 +191,28 @@ def connect(
             chat_id = str(source.chat_id)
             thread_id = str(source.thread_id or "")
             requested = event.get_command_args().strip()
+            if requested == "answer" or requested.startswith("answer "):
+                mission_id = store.bound_mission(platform, chat_id, thread_id)
+                answer = requested[len("answer"):].strip()
+                if not mission_id:
+                    return "No mission is bound to this chat. Use /mission <mission-id> first."
+                if not answer:
+                    return "Usage: /mission answer <your answer>"
+                try:
+                    from agent.redact import redact_sensitive_text
+
+                    view = store.projection(mission_id)
+                    question = view.get("question")
+                    if not isinstance(question, dict):
+                        return "The bound mission has no open owner question."
+                    store.answer(
+                        mission_id,
+                        question["question_id"],
+                        redact_sensitive_text(answer, force=True),
+                    )
+                    return telegram_text(store.projection(mission_id))
+                except MissionError as error:
+                    return f"Mission unavailable: {error}"
             mission_id = requested or store.bound_mission(platform, chat_id, thread_id) or store.latest()
             if not mission_id:
                 return "No central missions yet."
@@ -360,6 +382,28 @@ def connect(
         except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
             return web.json_response({"error": str(error)}, status=400)
 
+    async def _handle_answer_mission(self, request: "web.Request") -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {"question_id", "text"}:
+                raise MissionError("mission answer must contain question_id and text")
+            store = self._missions()
+            event, created = store.answer(
+                request.match_info["mission_id"],
+                body.get("question_id"),
+                redact_sensitive_text(body.get("text"), force=True),
+            )
+            await self._notify_mission(store, event)
+            return web.json_response({
+                "created": created,
+                "event": event,
+                "mission": store.projection(event["mission_id"]),
+            }, status=201 if created else 200)
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            return web.json_response({"error": str(error)}, status=400)
+
     async def _handle_finish_mission(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
             return auth_error
@@ -423,6 +467,7 @@ def connect(
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
             self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
+            self._app.router.add_post("/api/missions/{mission_id}/answer", self._handle_answer_mission)
             self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
             self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
             "mission routes",
