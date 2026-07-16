@@ -63,6 +63,17 @@ def _required_text(value: Any, name: str) -> str:
     return value.strip()
 
 
+def _pr_head_oid(info: dict[str, Any]) -> str | None:
+    direct = info.get("headRefOid")
+    if isinstance(direct, str) and direct:
+        return direct
+    commits = info.get("commits")
+    if not isinstance(commits, list) or not commits or not isinstance(commits[-1], dict):
+        return None
+    oid = commits[-1].get("oid")
+    return oid if isinstance(oid, str) and oid else None
+
+
 def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     profile = mission_adapter._read_json(path)
     if not isinstance(profile, dict) or profile.get("schema_version") != 3:
@@ -1141,7 +1152,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        fields = "number,url,state,headRefName,headRefOid,baseRefName"
+        fields = "number,url,state,headRefName,commits,baseRefName"
         bound = state.get("pr_number")
         if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
             raise DeliveryError("durable PR identity is invalid")
@@ -1163,7 +1174,7 @@ class DeliveryCoordinator:
                 or previous.get("baseRefName") != previous_base
             ):
                 raise DeliveryError("durable PR changed before repair push")
-            observed_head = previous.get("headRefOid")
+            observed_head = _pr_head_oid(previous)
             if observed_head not in {previous_head, state["candidate_sha"]}:
                 raise DeliveryError("durable PR changed before repair push")
         else:
@@ -1222,7 +1233,7 @@ class DeliveryCoordinator:
             or not isinstance(info.get("url"), str)
             or info.get("state") != "OPEN"
             or info.get("headRefName") != state["branch"]
-            or info.get("headRefOid") != state["candidate_sha"]
+            or _pr_head_oid(info) != state["candidate_sha"]
             or info.get("baseRefName") != self.profile["default_branch"]
             or (bound is not None and info.get("number") != bound)
         ):
@@ -1294,7 +1305,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        fields = "state,headRefName,headRefOid,baseRefName"
+        fields = "state,headRefName,commits,baseRefName"
         expected_head = state.get("pr_head_sha")
         if not isinstance(expected_head, str) or not expected_head:
             raise DeliveryError("failed PR has no durable head identity")
@@ -1313,7 +1324,7 @@ class DeliveryCoordinator:
         def require_identity(info: dict[str, Any], *states: str) -> None:
             if (
                 info.get("headRefName") != state["branch"]
-                or info.get("headRefOid") != expected_head
+                or _pr_head_oid(info) != expected_head
                 or info.get("baseRefName") != expected_base
                 or info.get("state") not in states
             ):
@@ -1350,11 +1361,12 @@ class DeliveryCoordinator:
         info = json.loads(self._run(
             [
                 self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
-                "--repo", self.profile["repo"], "--json", "headRefOid,baseRefName",
+                "--repo", self.profile["repo"], "--json", "headRefName,commits,baseRefName",
             ]
         ).stdout)
         if (
-            info.get("headRefOid") != state["candidate_sha"]
+            info.get("headRefName") != state["branch"]
+            or _pr_head_oid(info) != state["candidate_sha"]
             or info.get("baseRefName") != state.get("pr_base_branch")
             or info.get("baseRefName") != self.profile["default_branch"]
         ):
@@ -1384,7 +1396,7 @@ class DeliveryCoordinator:
             [
                 self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
                 "--repo", self.profile["repo"],
-                "--json", "state,mergedAt,mergeCommit,url,headRefOid,baseRefName",
+                "--json", "state,mergedAt,mergeCommit,url,headRefName,commits,baseRefName",
             ]
         ).stdout)
         if info.get("state") != "MERGED":
@@ -1404,13 +1416,14 @@ class DeliveryCoordinator:
                 [
                     self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
                     "--repo", self.profile["repo"],
-                    "--json", "state,mergedAt,mergeCommit,url,headRefOid,baseRefName",
+                    "--json", "state,mergedAt,mergeCommit,url,headRefName,commits,baseRefName",
                 ]
             ).stdout)
         if (
             info.get("state") != "MERGED"
             or not info.get("mergedAt")
-            or info.get("headRefOid") != state["candidate_sha"]
+            or info.get("headRefName") != state["branch"]
+            or _pr_head_oid(info) != state["candidate_sha"]
             or info.get("baseRefName") != state.get("pr_base_branch")
             or info.get("baseRefName") != self.profile["default_branch"]
         ):

@@ -780,7 +780,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "url": "https://example.invalid/pr/39",
                         "state": "OPEN",
                         "headRefName": "codex/fix",
-                        "headRefOid": "candidate-sha",
+                        "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
                     return subprocess.CompletedProcess(
@@ -821,9 +821,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
             pr_exists = False
             create_calls = 0
+            commands = []
 
             def runner(command, **_kwargs):
                 nonlocal pr_exists, create_calls
+                commands.append(command)
                 if command[0] == "git" and "ls-remote" in command:
                     output = "candidate-sha\trefs/heads/codex/fix\n"
                     return subprocess.CompletedProcess(
@@ -839,7 +841,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "url": "https://example.invalid/pr/39",
                         "state": "OPEN",
                         "headRefName": "codex/fix",
-                        "headRefOid": "candidate-sha",
+                        "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
                     return subprocess.CompletedProcess(
@@ -871,6 +873,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(1, create_calls)
             self.assertEqual(39, state["pr_number"])
             self.assertEqual("candidate-sha", state["pr_head_sha"])
+            self.assertFalse(any("headRefOid" in argument for command in commands for argument in command))
 
     def test_merge_requeries_ci_and_stops_when_a_green_check_turns_failed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -883,15 +886,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             def runner(command, **_kwargs):
                 commands.append(command)
-                if "headRefOid,baseRefName" in command:
+                if "headRefName,commits,baseRefName" in command:
                     output = json.dumps({
-                        "headRefOid": "candidate-sha",
+                        "headRefName": "codex/fix",
+                        "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
-                elif "state,mergedAt,mergeCommit,url,headRefOid,baseRefName" in command:
+                elif "state,mergedAt,mergeCommit,url,headRefName,commits,baseRefName" in command:
                     output = json.dumps({
                         "state": "OPEN", "mergedAt": None, "mergeCommit": None,
-                        "headRefOid": "candidate-sha",
+                        "headRefName": "codex/fix",
+                        "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
                 elif "statusCheckRollup" in command:
@@ -908,6 +913,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             state = {
                 "root_task_id": "task-1",
                 "run_id": "7",
+                "branch": "codex/fix",
                 "candidate_sha": "candidate-sha",
                 "pr_number": 39,
                 "pr_base_branch": approved["default_branch"],
@@ -944,7 +950,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "mergedAt": "2026-07-15T00:00:00Z",
                         "mergeCommit": {"oid": "merge-sha"},
                         "url": "https://example.invalid/pr/39",
-                        "headRefOid": "unreviewed-sha",
+                        "headRefName": "codex/fix",
+                        "commits": [{"oid": "unreviewed-sha"}],
                         "baseRefName": approved["default_branch"],
                     })
                     return subprocess.CompletedProcess(
@@ -957,6 +964,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             state = {
                 "candidate_sha": "reviewed-sha", "pr_number": 39,
+                "branch": "codex/fix",
                 "pr_base_branch": approved["default_branch"],
             }
             with (
