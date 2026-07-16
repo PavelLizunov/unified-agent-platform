@@ -976,6 +976,66 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 with self.assertRaisesRegex(coordinator.DeliveryError, "merged state"):
                     instance._merge(state)
 
+    def test_merge_uses_exact_head_api_and_deletes_only_that_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            commands = []
+            merged = False
+            remote_head = "candidate-sha"
+
+            def runner(command, **_kwargs):
+                nonlocal merged, remote_head
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps({
+                        "state": "MERGED" if merged else "OPEN",
+                        "mergedAt": "2026-07-16T00:00:00Z" if merged else None,
+                        "mergeCommit": {"oid": "merge-sha"} if merged else None,
+                        "url": "https://example.invalid/pr/39",
+                        "headRefName": "codex/fix",
+                        "commits": [{"oid": "candidate-sha"}],
+                        "baseRefName": approved["default_branch"],
+                    })
+                elif command[0:2] == ["gh", "api"]:
+                    merged = True
+                    output = json.dumps({"merged": True, "sha": "merge-sha"})
+                elif command[0] == "git" and "ls-remote" in command:
+                    output = (
+                        "candidate-sha\trefs/heads/codex/fix\n" if remote_head else ""
+                    )
+                elif command[0] == "git" and "push" in command:
+                    remote_head = ""
+                    output = ""
+                elif command[0] == "git":
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {
+                "candidate_sha": "candidate-sha", "pr_number": 39,
+                "branch": "codex/fix", "pr_base_branch": approved["default_branch"],
+            }
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_pr_head"),
+                mock.patch.object(instance, "_wait_ci"),
+                mock.patch.object(instance, "_validate_review"),
+                mock.patch.object(instance, "_require_ci_green_now"),
+            ):
+                instance._merge(state)
+
+            api = next(command for command in commands if command[0:2] == ["gh", "api"])
+            self.assertIn("sha=candidate-sha", api)
+            self.assertNotIn("--match-head-commit", api)
+            self.assertEqual("merge-sha", state["merge_sha"])
+            self.assertEqual("", remote_head)
+
     def test_ci_failure_is_checkpointed_and_escalates_after_restart(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

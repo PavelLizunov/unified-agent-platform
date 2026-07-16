@@ -1405,13 +1405,15 @@ class DeliveryCoordinator:
             )
             self._assert_pr_head(state)
             self._require_ci_green_now(state)
-            self._run(
+            merge_result = json.loads(self._run(
                 [
-                    self.profile["gh_bin"], "pr", "merge", str(state["pr_number"]),
-                    "--repo", self.profile["repo"], "--merge", "--delete-branch",
-                    "--match-head-commit", state["candidate_sha"],
+                    self.profile["gh_bin"], "api", "--method", "PUT",
+                    f"repos/{self.profile['repo']}/pulls/{state['pr_number']}/merge",
+                    "-f", "merge_method=merge", "-f", f"sha={state['candidate_sha']}",
                 ]
-            )
+            ).stdout)
+            if merge_result.get("merged") is not True:
+                raise DeliveryError("GitHub rejected the exact-head merge")
             info = json.loads(self._run(
                 [
                     self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
@@ -1444,6 +1446,19 @@ class DeliveryCoordinator:
             check=False,
         ).returncode:
             raise DeliveryError("merge commit is not on the fetched default branch")
+        remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
+        if remote:
+            if remote.split() != [
+                state["candidate_sha"], f"refs/heads/{state['branch']}"
+            ]:
+                raise DeliveryError("merged PR branch moved before cleanup")
+            self._git(
+                source, "push",
+                f"--force-with-lease=refs/heads/{state['branch']}:{state['candidate_sha']}",
+                "origin", "--delete", state["branch"],
+            )
+            if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+                raise DeliveryError("merged PR branch cleanup did not converge")
         state["merge_sha"] = merge_sha
 
     def _post_verify(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
