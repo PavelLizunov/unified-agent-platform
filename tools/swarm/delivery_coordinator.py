@@ -163,8 +163,10 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         value = profile.get(name)
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise DeliveryError(f"profile.{name}: positive integer required")
-    if profile["max_review_cycles"] != 3:
-        raise DeliveryError("profile.max_review_cycles must be 3 bounded correction retries")
+    if not 3 <= profile["max_review_cycles"] <= 7:
+        raise DeliveryError(
+            "profile.max_review_cycles must be between 3 and 7 bounded correction retries"
+        )
     if profile["claim_ttl_seconds"] < (
         profile["command_timeout_seconds"] + profile["ci_timeout_seconds"] + 600
     ):
