@@ -542,6 +542,24 @@ class FlowContractTests(unittest.TestCase):
                         reasoning_effort="high", rollout=rollout, sandbox="workspace-write",
                         worktree=".", head="aaa",
                     )
+                with rollout.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(rollout_events[1]) + "\n")
+                duplicate_result = flow.summarize_codex_events(
+                    path, component="author", model="gpt-5.3-codex-spark",
+                    reasoning_effort="xhigh", rollout=rollout,
+                    sandbox="workspace-write", worktree=".", head="aaa",
+                )
+                self.assertEqual("gpt-5.3-codex-spark", duplicate_result["model"])
+                conflicting_context = json.loads(json.dumps(rollout_events[1]))
+                conflicting_context["payload"]["model"] = "gpt-5.6-luna"
+                with rollout.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(conflicting_context) + "\n")
+                with self.assertRaisesRegex(flow.ContractError, "turn_context entries conflict"):
+                    flow.summarize_codex_events(
+                        path, component="author", model="gpt-5.3-codex-spark",
+                        reasoning_effort="xhigh", rollout=rollout,
+                        sandbox="workspace-write", worktree=".", head="aaa",
+                    )
                 bad_provider = json.loads(json.dumps(rollout_events))
                 bad_provider[0]["payload"]["model_provider"] = "unapproved-provider"
                 with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
