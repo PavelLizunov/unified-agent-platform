@@ -106,10 +106,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
    answer-and-resume loop for owner questions.
-2. The profile-bound A7 coordinator, schema-v3 profile and `openai-autonomy-v2` route are installed. One real mission
-   reached PR/required-CI/exact-head merge/fresh-main post-verify and cleanup, recovering durable checkpoints while
-   four harness corrections were installed. The next valid gate must bind Telegram before execution, then use one
-   clean uninterrupted repeat on the corrected runtime to prove matching Central/Workspace/Telegram terminal status.
+2. The profile-bound A7 coordinator, schema-v3 profile and `openai-autonomy-v2` route are installed. A Telegram-bound
+   real-project mission reached independent review, PR/required-CI/exact-head merge/fresh-main post-verify and cleanup,
+   then autonomously repaired a pre-existing target test and resumed to matching Central/Workspace/Telegram terminal
+   status. The autonomous delivery gate is complete; bounded rich failure diagnostics remain a follow-up.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
 4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no

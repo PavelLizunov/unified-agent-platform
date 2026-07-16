@@ -196,7 +196,7 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Automatic activation and delivery — ✅ RECOVERABLE SUCCESS PATH PASS; CLEAN REPEAT OPEN (2026-07-16).**
+3. **A7.3 — Automatic activation and delivery — ✅ AUTONOMOUS SUCCESSFUL-DELIVERY GATE PASS (2026-07-16).**
    PRs #199-#217 provide the bounded coordinator, durable crash/quality recovery and standing-approved
    `openai-autonomy-v2` routing. Mission `a7-vpnrouter-issue39-20260716-09` selected runtime-attested Sol author and
    exact-SHA read-only Terra review at `xhigh`, recovered the approved post-commit crash without another author turn,
@@ -204,12 +204,14 @@ not add an application service, workflow engine or mission database.
    fresh-main Windows verification. Native task/run and Central completed, Central/Workspace projections matched, and
    branch/worktree cleanup passed. The run exposed four compatibility/runtime defects; #218-#221 fixed compacted
    rollout parsing, legacy-`gh` PR recovery, exact-head merge and the Windows post-verify artifact root. Each fix resumed
-   the same durable mission. This proves the success/recovery path, but not one uninterrupted run that starts with all
-   corrections already installed. Next: bind the existing Telegram mission subscription before starting the clean
-   repeat, then use that same uninterrupted run to prove the Central, Workspace and Telegram terminal projection.
-   Afterward, close the remaining observation/lifecycle contract: actionable rejection projection, cross-channel
-   answer/resume, retention and owner-only state invariants. See the [A7.3 contract](a7-real-project-canary.md) and exact
-   [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
+   the same durable mission. A later Telegram-bound mission started on the corrected runtime, recovered the planned
+   crash, merged VPNRouter PR #44 and autonomously diagnosed a pre-existing post-verify failure through repair mission
+   PR #45. It then resumed without another original author, passed fresh-main Windows verification and completed with
+   identical Central/Workspace projections and Telegram cursor `22`. The A7.3 delivery gate is complete. Next: close
+   rich bounded failure diagnostics, cross-channel full-history answer/resume, retention and owner-only lifecycle
+   invariants. See the [A7.3 contract](a7-real-project-canary.md), historical
+   [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md) and final
+   [Telegram-bound evidence](evidence/a7-3-telegram-bound-autonomous-canary-2026-07-16.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.

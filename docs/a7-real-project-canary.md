@@ -1,7 +1,6 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **executed seven times on 2026-07-15/16; recoverable target delivery passed, but A7.3 is not fully accepted
-until one clean uninterrupted repeat also proves the subscribed Telegram projection**.
+Status: **accepted on 2026-07-16 after the Telegram-bound autonomous successful-delivery canary**.
 
 The six historical per-attempt approvals are exhausted. ADR-031 provides standing authorization for OpenAI
 Luna/Sol/Terra model turns, ordinary subscription spend and automatic retry/escalation. Attempt 7 used the installed
@@ -10,13 +9,15 @@ fresh-main Windows post-verify and cleanup. Four harness fixes were installed be
 recoverable success path rather than one uninterrupted run on the corrected runtime. The coordinator foundation and
 exact evidence are recorded in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
-The next canary reuses that fixed policy/runtime without a new per-attempt approval and must run uninterrupted. It must
-also bind a Telegram subscription before execution so the final Central, Workspace and Telegram projection can satisfy
-the acceptance bundle. V2 preserves only bounded CI name/outcome metadata, accepts compatible v1 attestations for an
-in-progress cycle, refuses PR rebinding, and autonomously repairs review/required-CI failures on the same exact PR.
+The final canary reused that fixed policy/runtime without a new per-attempt approval, bound Telegram before execution,
+completed the acceptance bundle and autonomously repaired a pre-existing target post-verify failure through a second
+mission. Exact evidence is in
+[`evidence/a7-3-telegram-bound-autonomous-canary-2026-07-16.md`](evidence/a7-3-telegram-bound-autonomous-canary-2026-07-16.md).
+V2 preserves only bounded CI name/outcome metadata, accepts compatible v1 attestations for an in-progress cycle,
+refuses PR rebinding, and autonomously repairs review/required-CI failures on the same exact PR.
 
-No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
-outside the standing authority.
+No disposable canary profile timer remains enabled. Claude, local inference/GPU, new credentials/providers and
+destructive actions remain outside the standing authority.
 
 ## Scope
 

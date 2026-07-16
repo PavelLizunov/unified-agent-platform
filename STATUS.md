@@ -47,19 +47,18 @@ Last updated: 2026-07-16
   `a7-blocked-20260715-7214ad7-03` produced one blocked/unassigned root, one `task.upsert`, zero runs and a null second
   poll, with no worker/model process. The poll is still manually invoked: no timer, activation or autonomous delivery
   loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
-- **A7.3 recoverable success path passed; clean uninterrupted repeat remains open (2026-07-16).** Mission
-  `a7-vpnrouter-issue39-20260716-09` used the installed `openai-autonomy-v2` complex route: runtime-attested Sol
-  author and separate exact-SHA read-only Terra reviewer, both `xhigh`. It recovered the approved post-commit crash
-  without a duplicate author, passed the Windows candidate/review gates, opened
-  [VPNRouter #43](https://github.com/PavelLizunov/VPNRouter/pull/43), observed required CI, atomically merged exact
-  candidate `fdb2126...` and passed fresh-main Windows verification at merge/default SHA `6f7bdc9...`. Native task/run
-  and Central reached terminal success; Central and Workspace projections matched at sequence 25 with all five gates
-  passed, and branch/worktree cleanup completed. Live durable recovery exposed and retained progress through four UAP
-  compatibility fixes (#218-#221), so this proves the success/recovery path but not yet one uninterrupted run begun
-  after all corrections were installed. The successful mission had no Telegram subscription; no Telegram terminal
-  claim is made. The next valid canary must bind that subscription before execution and use the same uninterrupted
-  repeat to prove matching Central, Workspace and Telegram terminal status. Exact evidence:
-  `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+- **A7.3 autonomous successful-delivery gate complete (2026-07-16).** Telegram-bound mission
+  `a7-vpnrouter-reconnect-20260716-10` started after all known harness corrections, selected runtime-attested Sol
+  author and separate exact-SHA read-only Terra reviewer, recovered the contracted post-commit crash, passed target
+  and GitHub gates, and merged [VPNRouter #44](https://github.com/PavelLizunov/VPNRouter/pull/44). Fresh-main Windows
+  verification then exposed a pre-existing false-positive test; the exact pre-PR baseline reproduced it. UAP
+  autonomously created repair mission `a7-vpnrouter-test-gc-20260716-11`, retried its author gate, merged
+  [VPNRouter #45](https://github.com/PavelLizunov/VPNRouter/pull/45), verified fresh main, resumed the original mission
+  without another original author and completed it. Native tasks/runs are done, Central and Workspace canonical
+  projections match, the original Telegram cursor equals terminal sequence `22`, and disposable timers, worktrees and
+  branches are removed. Exact evidence:
+  `docs/evidence/a7-3-telegram-bound-autonomous-canary-2026-07-16.md`. The autonomous delivery gate is complete;
+  cross-channel full history/answer-resume, richer bounded failure diagnostics and retention/security lifecycle remain.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
@@ -75,8 +74,8 @@ Last updated: 2026-07-16
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
   repair push.
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
-  `openai-autonomy-v2` for the successful seventh canary. A Telegram-bound clean uninterrupted repeat remains; later
-  channel/lifecycle work must not be confused with that repeat's required terminal convergence.
+  `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound A7.3 canary completed the required
+  terminal convergence; channel-history, diagnostics and lifecycle work remain separate later gates.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -397,12 +396,12 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
-- **Remaining automation gap after the A7.3 success-path canary:** the installed profile-bound timer can intake,
-  activate, author, test, review, recover a durable crash, create an exact PR, observe CI, merge exact reviewed head,
-  post-verify and clean up. Attempt 7 reached that terminal path, but Codex landed four UAP harness corrections between
-  durable ticks. Before the next valid clean uninterrupted repeat starts, its Telegram mission subscription must be
-  bound; that same run must prove matching Central, Workspace and Telegram terminal status. Rejected projections still
-  expose only a generic error/stage. No general timer is enabled; the disposable canary timer is disabled.
+- **Remaining automation gap after the A7.3 successful-delivery gate:** the installed profile-bound coordinator can
+  intake, activate, author, test, review, recover a durable crash, create an exact PR, observe CI, merge exact reviewed
+  head, post-verify and clean up. The Telegram-bound canary and its autonomous repair mission proved that terminal
+  path on the corrected runtime. Author-check feedback still persists only a short failure summary, and the full
+  cross-channel history/question-resume plus retention lifecycle remain open. No general timer or disposable canary
+  timer is enabled.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

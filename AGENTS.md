@@ -104,10 +104,9 @@ NousResearch hermes-agent, ADR-022..031): здесь следуй приняты
 остаётся основой. Workspace и Telegram должны показывать одну central Hermes mission/history; build-1, Flow/Kanban,
 coding workers и test VM — execution plane этой mission, не вторая точка управления. A6 и A7.1/A7.2 завершили
 central mission projection и safe blocked handoff. A7.3 доказал recoverable success path до
-PR/CI/exact-head merge/fresh-main post-verify/cleanup на `openai-autonomy-v2`; четыре harness correction были
-установлены между durable ticks. Текущий шаг — заранее привязать Telegram subscription и тем же чистым непрерывным
-повтором на уже исправленном runtime доказать единый Central/Workspace/Telegram terminal status; затем закрыть
-question/resume и lifecycle/retention, без нового сервиса, dashboard, Claude, local model или GPU.
+PR/CI/exact-head merge/fresh-main post-verify/cleanup на `openai-autonomy-v2`; Telegram-bound повтор и автономная
+repair mission затем доказали единый Central/Workspace/Telegram terminal status. Текущий шаг — закрыть rich bounded
+failure feedback, question/resume и lifecycle/retention, без нового сервиса, dashboard, Claude, local model или GPU.
 Инфра-слой (k3s/Flux/SOPS) построен и стабилен; **VPS и HA отложены владельцем на неопределённый срок из-за бюджета**.
 Третий k3s server не является active owner action. Фазированный план — `docs/next-steps.md` (Track A — пилот
 hermes-agent, Track B — blast-radius + DR при текущей single-control-plane стратегии). HA-заявления — только после

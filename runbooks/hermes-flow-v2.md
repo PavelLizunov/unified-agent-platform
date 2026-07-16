@@ -11,7 +11,8 @@ restart was required.
 Repository status (2026-07-16): the A6 adapter, profile-bound A7 coordinator and `openai-autonomy-v2` schema-v3 profile
 are installed on build-1. Attempt 7 reached accepted review, required CI, exact-head merge, fresh-main post-verify and
 cleanup, while #218-#221 repaired four harness defects between durable ticks. This proves recoverable delivery; the
-next gate is one clean uninterrupted repeat on that corrected runtime, with a bound Telegram subscription. Generic
+later Telegram-bound repeat and its autonomous repair mission completed the terminal acceptance bundle on the
+corrected runtime. Rich bounded author-check feedback, cross-channel question/resume and retention remain. Generic
 arbitrary-repository intake remains outside the current fixed-profile boundary.
 
 ## When to use
