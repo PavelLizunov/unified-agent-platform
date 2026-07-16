@@ -164,7 +164,7 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise DeliveryError(f"profile.{name}: positive integer required")
     if profile["max_review_cycles"] != 3:
-        raise DeliveryError("profile.max_review_cycles must be 3 for bounded escalation")
+        raise DeliveryError("profile.max_review_cycles must be 3 bounded correction retries")
     if profile["claim_ttl_seconds"] < (
         profile["command_timeout_seconds"] + profile["ci_timeout_seconds"] + 600
     ):
@@ -1142,7 +1142,7 @@ class DeliveryCoordinator:
         failure = _bounded_diagnostic(str(error), "author checks failed")
         self._quality_failures(state)
         state["prior_author_failures"] = state.get("prior_author_failures", 0) + 1
-        if retryable and state["review_cycle"] < self.profile["max_review_cycles"]:
+        if retryable and state["review_cycle"] <= self.profile["max_review_cycles"]:
             state.update(
                 phase="needs_fix",
                 review_cycle=state["review_cycle"] + 1,
@@ -1312,7 +1312,7 @@ class DeliveryCoordinator:
             self._save(paths, state)
             return True
         state["prior_review_rejections"] = state.get("prior_review_rejections", 0) + 1
-        if cycle >= self.profile["max_review_cycles"]:
+        if cycle > self.profile["max_review_cycles"]:
             state.update(
                 phase="review_rejected",
                 review_findings=verification["findings"],
@@ -1462,7 +1462,7 @@ class DeliveryCoordinator:
         self._quality_failures(state)
         state["ci_checks"] = summaries
         state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
-        if state["review_cycle"] < self.profile["max_review_cycles"]:
+        if state["review_cycle"] <= self.profile["max_review_cycles"]:
             state.update(
                 phase="needs_fix",
                 review_cycle=state["review_cycle"] + 1,
