@@ -11,6 +11,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -62,6 +63,7 @@ _CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
+_COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
@@ -384,6 +386,9 @@ class DeliveryCoordinator:
         self.client = client
         self.backend = backend
         self.state_root = state_root
+        self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix":
+            os.chmod(self.state_root, 0o700)
         self.runner = runner
         self.policy = policy or flow_contract.load_json(
             pathlib.Path(__file__).with_name("flow-policy.json")
@@ -891,7 +896,7 @@ class DeliveryCoordinator:
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         expected_metadata = {"mission_events": self._events(state, cleanup=True)}
         if (
-            task.get("status") != "done"
+            task.get("status") not in {"done", "archived"}
             or task.get("result") != "success"
             or len(matching) != 1
             or matching[0].get("status") not in {"done", "completed"}
@@ -1015,7 +1020,7 @@ class DeliveryCoordinator:
             return False
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         if (
-            task.get("status") != "done"
+            task.get("status") not in {"done", "archived"}
             or task.get("result") != result
             or len(matching) != 1
             or matching[0].get("status") not in {"done", "completed"}
@@ -1099,6 +1104,7 @@ class DeliveryCoordinator:
             self._reconcile_rejected(state)
             if self.client.get_mission(state["mission_id"]).get("status") != "failed":
                 raise DeliveryError("Central did not fail the rejected mission")
+            self._archive_task(state, paths)
             state.update(phase="complete", outcome=result)
             self._save(paths, state)
         return {"action": state["phase"], "mission_id": state["mission_id"], "state": state}
@@ -2065,7 +2071,47 @@ class DeliveryCoordinator:
         elif remote:
             raise DeliveryError("disposable remote branch still exists")
 
+    def _archive_task(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+        if state.get("task_archived") is True:
+            return
+        self.backend.archive(state["root_task_id"])
+        state["task_archived"] = True
+        state["kanban_gc_ran"] = self.backend.gc()
+        self._save(paths, state)
+
+    def _prune_completed_states(self) -> None:
+        cutoff = time.time() - _COMPLETED_STATE_RETENTION_SECONDS
+        for path in self.state_root.glob("mission-*/delivery-state.json"):
+            try:
+                state = mission_adapter._read_json(path)
+                retained_at = path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if (
+                isinstance(state, dict)
+                and state.get("dispatch_profile") == self.profile["dispatch_profile"]
+                and state.get("phase") == "complete"
+                and state.get("task_archived") is True
+            ):
+                if state.get("kanban_gc_ran") is not True:
+                    state["kanban_gc_ran"] = self.backend.gc()
+                    if state["kanban_gc_ran"] is not True:
+                        continue
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
+                if retained_at >= cutoff:
+                    continue
+                try:
+                    shutil.rmtree(path.parent)
+                except FileNotFoundError:
+                    pass
+
     def tick(self) -> dict[str, Any] | None:
+        self._prune_completed_states()
         mission = self._mission()
         if mission is None:
             return None
@@ -2083,6 +2129,7 @@ class DeliveryCoordinator:
                     self._recover_task_completion(state, paths)
                 if state.get("phase") not in {"task_completed", "complete"}:
                     raise DeliveryError("Central completed before local delivery cleanup")
+                self._archive_task(state, paths)
                 state["phase"] = "complete"
                 self._save(paths, state)
                 return {"action": "complete", "mission_id": mission_id, "state": state}
@@ -2239,6 +2286,7 @@ class DeliveryCoordinator:
                 terminal = self.client.get_mission(mission_id)
                 if terminal.get("status") != "completed":
                     raise DeliveryError("Central did not complete the fully verified mission")
+                self._archive_task(state, paths)
                 state["phase"] = "complete"
                 self._save(paths, state)
             return {"action": state["phase"], "mission_id": mission_id, "state": state}

@@ -189,8 +189,11 @@ Good next tasks that do not require redesign:
 1. A6.0 is a pre-rollout snapshot in `docs/hermes-mission-state-map.md`; use `STATUS.md` for current live facts.
 2. A6.1-A6.4 are complete through one controlled canary. The central mission runtime, fail-closed Workspace overlay
    and build-1 adapter are installed; `docs/evidence/a6-4-controlled-canary-2026-07-14.md` records the boundary.
-3. Workspace and Telegram synchronize only the mission projection, not complete chat/session history or owner-answer
-   resume state. Telegram delivery is at-least-once and may duplicate after send-before-cursor crash.
+3. Workspace and Telegram synchronize mission state and the owner question/answer resume path, but not complete
+   cross-channel chat/session history. Telegram delivery is at-least-once and may duplicate after send-before-cursor
+   crash. Central retains 100 recent unbound terminal missions and protects the bound mission plus active repair chains;
+   completed native tasks are archived, native GC runs only while the board is idle, and private delivery state expires
+   after 30 days.
 4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator reached its first successful real delivery on mission
    `a7-vpnrouter-issue39-20260716-09`: runtime-attested Sol author, separate exact-SHA read-only Terra review, VPNRouter
    PR #43, required CI, exact-head merge, fresh-main Windows post-verify and cleanup. PRs #218-#221 corrected four live

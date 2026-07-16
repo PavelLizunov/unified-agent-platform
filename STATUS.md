@@ -60,6 +60,15 @@ Last updated: 2026-07-16
   claim is made. The next valid canary must bind that subscription before execution and use the same uninterrupted
   repeat to prove matching Central, Workspace and Telegram terminal status. Exact evidence:
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+- **A7 observation and lifecycle baseline implemented (2026-07-17).** Workspace owns the separate owner-answer
+  capability and resumes the same durable mission/root; coordinator processes explicitly lack that key. Central keeps
+  the latest 100 unbound terminal mission histories while protecting the currently bound mission; payload-free
+  tombstones prevent reuse of retired stable IDs. Terminal pruning also removes obsolete subscription-history
+  references. Successful and exhausted deliveries archive their native Kanban
+  task. Hermes' existing 30-day event/log GC runs only while the board has no nonterminal task and is retried when
+  deferred, preventing cleanup from truncating a long-running worker log. Delivery evidence remains owner-only for 30 days; deliveries remove
+  disposable worktrees immediately. Central DB/WAL/SHM, adapter state and the common state root are owner-only on POSIX.
+  The remaining acceptance gate is the clean Telegram-bound non-toy canary, not another lifecycle service.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
@@ -403,8 +412,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   activate, author, test, review, recover a durable crash, create an exact PR, observe CI, merge exact reviewed head,
   post-verify and clean up. Attempt 7 reached that terminal path, but Codex landed four UAP harness corrections between
   durable ticks. Before the next valid clean uninterrupted repeat starts, its Telegram mission subscription must be
-  bound; that same run must prove matching Central, Workspace and Telegram terminal status. Rejected projections still
-  expose only a generic error/stage. No general timer is enabled; the disposable canary timer is disabled.
+  bound; that same run must prove matching Central, Workspace and Telegram terminal status. Owner answer/resume and the
+  bounded lifecycle baseline are installed. Rejected projections still expose only a generic error/stage. No generic
+  arbitrary-repository timer is enabled; only exact owner-approved profiles run.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

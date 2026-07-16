@@ -82,6 +82,12 @@ def main() -> None:
         assert "complete_if_ready" in api
         assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
+        terminal_handler = api[api.index("    async def _handle_finish_mission"):]
+        assert terminal_handler.index(
+            "await self._notify_mission(store, event, defer=False)"
+        ) < terminal_handler.index(
+            'store.restore_parent_after_terminal_notification(event["mission_id"])'
+        )
         assert 'requested.startswith("answer ")' in gateway
         assert "store.answer(" in gateway
         assert "atomic sticky initial block" not in kanban

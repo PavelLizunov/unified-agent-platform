@@ -207,8 +207,11 @@ not add an application service, workflow engine or mission database.
    the same durable mission. This proves the success/recovery path, but not one uninterrupted run that starts with all
    corrections already installed. Next: bind the existing Telegram mission subscription before starting the clean
    repeat, then use that same uninterrupted run to prove the Central, Workspace and Telegram terminal projection.
-   Afterward, close the remaining observation/lifecycle contract: actionable rejection projection, cross-channel
-   answer/resume, retention and owner-only state invariants. See the [A7.3 contract](a7-real-project-canary.md) and exact
+   Cross-channel owner answer/resume is deployed. The lifecycle baseline now retains 100 recent unbound terminal
+   missions, protects the bound mission and active repair chains, archives completed native tasks, and runs native
+   30-day Kanban GC only on an idle board (retrying deferred GC). It keeps private delivery evidence for 30 days and
+   removes disposable worktrees immediately. The clean Telegram-bound repeat remains
+   the next product gate. See the [A7.3 contract](a7-real-project-canary.md) and exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A

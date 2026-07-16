@@ -146,6 +146,42 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(2, restarted_backend.create_calls)
             self.assertEqual(1, len(restarted_backend.tasks))
             self.assertEqual("task-1", state["root_task_id"])
+            if os.name == "posix":
+                self.assertEqual(0o700, state_root.stat().st_mode & 0o777)
+
+    def test_native_archive_is_idempotent_and_gc_uses_existing_cli(self):
+        calls = []
+        statuses = iter(("done", "archived", "archived"))
+
+        def runner(command):
+            calls.append(command)
+            if "show" in command:
+                return subprocess.CompletedProcess(
+                    command, 0,
+                    stdout=json.dumps({"task": {"id": "task-1", "status": next(statuses)}}),
+                    stderr="",
+                )
+            if "list" in command:
+                return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        backend = adapter.HermesKanbanBackend("hermes", "default", runner)
+        self.assertEqual("archived", backend.archive("task-1")["task"]["status"])
+        self.assertEqual("archived", backend.archive("task-1")["task"]["status"])
+        backend.gc()
+        self.assertEqual(1, sum("archive" in command for command in calls))
+        self.assertEqual(1, sum("gc" in command for command in calls))
+
+        def active_runner(command):
+            calls.append(command)
+            return subprocess.CompletedProcess(
+                command, 0, stdout='[{"id":"task-2","status":"running"}]', stderr=""
+            )
+
+        self.assertFalse(adapter.HermesKanbanBackend(
+            "hermes", "default", active_runner
+        ).gc())
+        self.assertEqual(1, sum("gc" in command for command in calls))
 
     def test_restart_replay_converges_with_correlated_delivery_events(self):
         backend = FakeKanban()

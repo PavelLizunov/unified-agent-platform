@@ -23,7 +23,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
     "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-    "gateway/platforms/api_server.py": "fa4b9f275ae1377330d678c2b3e78987aa0aae0d470e7916d9315cb73b0ca1b7",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -499,8 +499,8 @@ def connect(
                     "payload": {payload_field: message},
                 },
             )
-            if created:
-                await self._notify_mission(store, event)
+            await self._notify_mission(store, event, defer=False)
+            store.restore_parent_after_terminal_notification(event["mission_id"])
             return web.json_response({
                 "created": created,
                 "event": event,
