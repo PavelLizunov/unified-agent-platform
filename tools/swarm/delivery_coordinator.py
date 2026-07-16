@@ -55,6 +55,20 @@ _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
 _CI_RESULT = "ci_failed"
 _CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _MAX_CHECK_FAILURE_CHARS = 4000
+_DIAGNOSTIC_REDACTIONS = (
+    re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
+    re.compile(
+        r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
+        r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+    ),
+    re.compile(r"(?i)://[^/\s@]+@"),
+    re.compile(
+        r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
+        r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+|"
+        r"AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|[0-9]{8,10}:[A-Za-z0-9_-]{35})\b"
+    ),
+    re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])"),
+)
 
 
 def _required_text(value: Any, name: str) -> str:
@@ -177,6 +191,78 @@ def _private_text(path: pathlib.Path, text: str) -> None:
     os.replace(temporary, path)
     if os.name == "posix":
         os.chmod(path, 0o600)
+
+
+@contextlib.contextmanager
+def _temporary_private_output():
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        path = pathlib.Path(handle.name)
+    if os.name == "posix":
+        os.chmod(path, 0o600)
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def _private_codex_events(path: pathlib.Path, text: str) -> None:
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        try:
+            event = json.loads(raw_line)
+        except json.JSONDecodeError:
+            lines.append("[REDACTED non-json Codex event]")
+            continue
+        if not isinstance(event, dict):
+            lines.append("[REDACTED invalid Codex event]")
+            continue
+        containers = [event]
+        if isinstance(event.get("item"), dict):
+            containers.append(event["item"])
+        for container in containers:
+            for field in ("aggregated_output", "command", "message", "output", "text"):
+                if isinstance(container.get(field), str):
+                    container[field] = _bounded_diagnostic(container[field])
+        lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+    _private_text(path, "\n".join(lines) + ("\n" if lines else ""))
+
+
+def _redact_diagnostic(value: str) -> str:
+    value = value.replace("\x00", "?")
+    for pattern in _DIAGNOSTIC_REDACTIONS:
+        value = pattern.sub("[REDACTED]", value)
+    return value
+
+
+def _bounded_diagnostic(value: str, default: str = "") -> str:
+    value = _redact_diagnostic(value).strip()
+    return value[-_MAX_CHECK_FAILURE_CHARS:] if value else default
+
+
+def _sanitize_findings(value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise DeliveryError("delivery diagnostics must be a string array")
+    return [_bounded_diagnostic(item) for item in value[:16] if item.strip()]
+
+
+def _command_failure(result: subprocess.CompletedProcess[str], command: list[str]) -> str:
+    streams = [
+        f"{name}:\n{_redact_diagnostic(text).strip()}"
+        for name, text in (("stderr", result.stderr), ("stdout", result.stdout))
+        if text and text.strip()
+    ]
+    if not streams:
+        return "command failed without diagnostic output"
+    separators = len(streams) - 1
+    budget = (_MAX_CHECK_FAILURE_CHARS - separators) // len(streams)
+    marker = "\n...[truncated]...\n"
+    bounded = []
+    for item in streams:
+        if len(item) > budget:
+            head = (budget - len(marker)) // 2
+            item = item[:head] + marker + item[-(budget - len(marker) - head):]
+        bounded.append(item)
+    return "\n".join(bounded)
 
 
 def _ci_decision(checks: Any, required: list[str]) -> str:
@@ -309,8 +395,7 @@ class DeliveryCoordinator:
             env=environment or self._safe_env(),
         )
         if check and result.returncode:
-            message = (result.stderr or result.stdout).strip()
-            raise DeliveryError(message or f"command failed: {shlex.join(command)}")
+            raise DeliveryError(_command_failure(result, command))
         return result
 
     def _model_env(self, paths: dict[str, pathlib.Path]) -> dict[str, str]:
@@ -339,6 +424,7 @@ class DeliveryCoordinator:
     @staticmethod
     def _quality_failures(state: dict[str, Any]) -> int:
         values = [
+            state.get("prior_author_failures", 0),
             state.get("prior_review_rejections", 0),
             state.get("prior_ci_failures", 0),
         ]
@@ -437,8 +523,19 @@ class DeliveryCoordinator:
                 raise DeliveryError("delivery state identity mismatch")
             state.setdefault("prior_review_rejections", 0)
             state.setdefault("prior_ci_failures", 0)
+            state.setdefault("prior_author_failures", 0)
             state.setdefault("route_decisions", {})
             migrated = False
+            if "review_findings" in state:
+                findings = _sanitize_findings(state["review_findings"])
+                if findings != state["review_findings"]:
+                    state["review_findings"] = findings
+                    migrated = True
+            if isinstance(state.get("failure_error"), str):
+                failure = _bounded_diagnostic(state["failure_error"])
+                if failure != state["failure_error"]:
+                    state["failure_error"] = failure
+                    migrated = True
             if state.get("pr_number") is not None and "pr_base_branch" not in state:
                 state["pr_base_branch"] = self.profile["default_branch"]
                 migrated = True
@@ -465,6 +562,7 @@ class DeliveryCoordinator:
             "review_cycle": 1,
             "prior_review_rejections": 0,
             "prior_ci_failures": 0,
+            "prior_author_failures": 0,
             "route_decisions": {},
             "crash_injected": False,
         }
@@ -969,7 +1067,9 @@ class DeliveryCoordinator:
         *,
         retryable: bool = True,
     ) -> None:
-        failure = str(error).strip()[-_MAX_CHECK_FAILURE_CHARS:] or "author checks failed"
+        failure = _bounded_diagnostic(str(error), "author checks failed")
+        self._quality_failures(state)
+        state["prior_author_failures"] = state.get("prior_author_failures", 0) + 1
         if retryable and state["review_cycle"] < self.profile["max_review_cycles"]:
             state.update(
                 phase="needs_fix",
@@ -989,7 +1089,7 @@ class DeliveryCoordinator:
         actor = self._actor(state, "author")
         events = paths["directory"] / f"author-{cycle}.jsonl"
         last = paths["directory"] / f"author-{cycle}-last.txt"
-        findings = state.get("review_findings", [])
+        findings = _sanitize_findings(state.get("review_findings", []))
         prompt = (
             "Implement the owner-approved mission in this exact repository. "
             "Read and obey all repository instructions. Do not commit, push, open a PR, merge, tag, release, "
@@ -1003,19 +1103,20 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        result = self._run(
-            [
-                self.profile["codex_bin"], "exec", "--ignore-user-config",
-                *self._reasoning_args(state, "author"),
-                "--model", actor["model"], "--sandbox", "workspace-write",
-                "--cd", str(paths["author"]), "--json", "--output-last-message", str(last), "-",
-            ],
-            cwd=paths["author"], input_text=prompt,
-            environment=self._model_env(paths),
-        )
-        _private_text(events, result.stdout)
-        if last.exists() and os.name == "posix":
-            os.chmod(last, 0o600)
+        with _temporary_private_output() as raw_last:
+            result = self._run(
+                [
+                    self.profile["codex_bin"], "exec", "--ignore-user-config",
+                    *self._reasoning_args(state, "author"),
+                    "--model", actor["model"], "--sandbox", "workspace-write",
+                    "--cd", str(paths["author"]), "--json", "--output-last-message", str(raw_last), "-",
+                ],
+                cwd=paths["author"], input_text=prompt,
+                environment=self._model_env(paths),
+            )
+            _private_codex_events(events, result.stdout)
+            if raw_last.is_file():
+                _private_text(last, _bounded_diagnostic(raw_last.read_text(encoding="utf-8")))
         changed = self._changed_files(paths["author"])
         allowed = set(self.profile["required_files"])
         if not changed or not changed <= allowed:
@@ -1081,21 +1182,20 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        result = self._run(
-            [
-                self.profile["codex_bin"], "exec", "--ignore-user-config",
-                *self._reasoning_args(state, "reviewer"),
-                "--model", actor["model"], "--sandbox", "read-only",
-                "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
-                "--output-last-message", str(last), "-",
-            ],
-            cwd=paths["review"], input_text=prompt,
-            environment=self._model_env(paths),
-        )
-        _private_text(events, result.stdout)
-        if last.exists() and os.name == "posix":
-            os.chmod(last, 0o600)
-        response = mission_adapter._read_json(last)
+        with _temporary_private_output() as raw_last:
+            result = self._run(
+                [
+                    self.profile["codex_bin"], "exec", "--ignore-user-config",
+                    *self._reasoning_args(state, "reviewer"),
+                    "--model", actor["model"], "--sandbox", "read-only",
+                    "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
+                    "--output-last-message", str(raw_last), "-",
+                ],
+                cwd=paths["review"], input_text=prompt,
+                environment=self._model_env(paths),
+            )
+            _private_codex_events(events, result.stdout)
+            response = mission_adapter._read_json(raw_last)
         if (
             not isinstance(response, dict)
             or response.get("verdict") not in {"accept", "reject"}
@@ -1115,6 +1215,9 @@ class DeliveryCoordinator:
             head=state["candidate_sha"],
             source_attestation_path=attestation_path,
         )
+        findings = _sanitize_findings(response["findings"])
+        response = {"verdict": response["verdict"], "findings": findings}
+        mission_adapter._write_json(last, response, private_parent=True)
         verification = {
             "schema_version": 1,
             "reviewed_sha": state["candidate_sha"],
@@ -1125,7 +1228,7 @@ class DeliveryCoordinator:
             "session_id": telemetry["session_id"],
             "review_mode": route["review_mode"],
             "route_decision_id": route["decision_id"],
-            "findings": response["findings"],
+            "findings": findings,
             "checks": checks,
             "review_cycle": cycle,
         }
@@ -1283,7 +1386,7 @@ class DeliveryCoordinator:
     ) -> None:
         summaries = _ci_summaries(error.checks)
         details = ", ".join(f"{item['name']}={item['outcome']}" for item in summaries)
-        finding = f"{error}: {details or 'invalid check rollup'}"
+        finding = _bounded_diagnostic(f"{error}: {details or 'invalid check rollup'}")
         self._quality_failures(state)
         state["ci_checks"] = summaries
         state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
@@ -1291,13 +1394,13 @@ class DeliveryCoordinator:
             state.update(
                 phase="needs_fix",
                 review_cycle=state["review_cycle"] + 1,
-                review_findings=[finding[:_MAX_CHECK_FAILURE_CHARS]],
+                review_findings=[finding],
             )
         else:
             state.update(
                 phase="ci_failed",
                 failure_kind="ci",
-                failure_error=finding[:_MAX_CHECK_FAILURE_CHARS],
+                failure_error=finding,
             )
         self._save(paths, state)
 
@@ -1704,7 +1807,8 @@ def main(argv: list[str] | None = None) -> int:
         ValueError,
         subprocess.SubprocessError,
     ) as error:
-        print(f"hermes-delivery-coordinator-error: {error}", file=sys.stderr)
+        diagnostic = _bounded_diagnostic(str(error), "delivery failed")
+        print(f"hermes-delivery-coordinator-error: {diagnostic}", file=sys.stderr)
         return 2
 
 

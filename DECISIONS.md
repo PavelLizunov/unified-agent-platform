@@ -508,15 +508,20 @@
   Платформа детерминированно выбирает сложность, reasoning effort, retry и escalation. Все reviewer runs используют
   отдельную read-only session, exact candidate SHA и runtime-derived model/sandbox attestation. Один OpenAI provider
   является принятой продуктовой политикой, а не degraded mode.
-  `openai-autonomy-v2` считает independent-review rejection, required-CI failure или истечение bounded CI timeout
-  одним quality-failure signal:
+  `openai-autonomy-v2` считает failed author gate, independent-review rejection, required-CI failure или истечение
+  bounded CI timeout одним quality-failure signal. Дополнение от 2026-07-16 явно подтверждено владельцем: ошибка
+  компиляции/теста до commit является таким же сигналом недостаточной текущей route, поэтому следующий bounded author
+  retry автоматически повышает модель без отдельного вопроса владельцу. Диагностика перед сохранением, логированием и
+  передачей следующей модели redacted и ограничена по размеру:
   после первого сбоя следующий цикл получает `complex`, после второго — `escalated`. Coordinator сохраняет раздельные
-  счётчики причины, повторно использует тот же PR/branch и не просит владельца исправлять CI. Номер PR, head SHA и
-  base branch являются durable identity; repair push использует exact-head lease. GitHub не предоставляет server-side
-  compare-and-swap для unsafe PR-close, поэтому после трёх циклов coordinator с действующим Kanban claim повторно
-  проверяет identity и сохраняет открытый failed PR вместе с exact remote branch как bounded evidence, не пытаясь
-  закрыть его после локального read/check. Если PR уже закрыт внешне, совпадающая branch/SHA удаляется exact lease.
-  Локальный disposable state удаляется, delivery публикуется как failed, mission завершается честным failure.
+  счётчики причины и не просит владельца исправлять CI. До первого commit/PR исчерпание author-gate retries сохраняет
+  только redacted bounded diagnostics и завершается после локальной очистки без несуществующего PR evidence. После
+  создания PR coordinator повторно использует тот же PR/branch: номер PR, head SHA и base branch являются durable
+  identity, а repair push использует exact-head lease. GitHub не предоставляет server-side compare-and-swap для unsafe
+  PR-close, поэтому после трёх циклов coordinator с действующим Kanban claim повторно проверяет identity и сохраняет
+  открытый failed PR вместе с exact remote branch как bounded evidence, не пытаясь закрыть его после локального
+  read/check. Если PR уже закрыт внешне, совпадающая branch/SHA удаляется exact lease. Локальный disposable state
+  удаляется, delivery публикуется как failed, mission завершается честным failure.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой

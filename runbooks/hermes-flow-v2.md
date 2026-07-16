@@ -55,8 +55,8 @@ This installs the contract/policy under `~/swarm-bin` and the `hermes-flow-v2` s
 Codex CLI provides the separately sandboxed author/reviewer executions.
 
 `openai-autonomy-v2` is a deterministic repo-contract decision, not an LLM classifier. The planner supplies a closed JSON
-record with the allowed-file count, prior independent-review/required-CI quality failures for the same task and
-explicit risk flags:
+record with the allowed-file count, prior author-gate/review/required-CI quality failures for the same task and explicit
+risk flags:
 
 ```json
 {
@@ -80,7 +80,7 @@ The installed policy has three standing-approved outcomes:
 
 - `standard`: Luna author (`medium`) / Sol reviewer (`low`);
 - `complex`: Sol author / Terra reviewer at `xhigh`;
-- `escalated`: two prior review or required-CI failures select Terra author / Sol reviewer at `xhigh`.
+- `escalated`: any two prior author-gate, review or required-CI failures select Terra author / Sol reviewer at `xhigh`.
 
 Unknown flags fail closed. Local/GPU, destructive, architecture, credential/external-authority and new-provider flags
 can never become runnable through this command. Canonical signals, the full policy SHA-256 and exact model/effort
@@ -90,8 +90,9 @@ requested. Luna/Sol/Terra selection and ordinary spend require no confirmation; 
 A failed required CI check is a normal autonomous repair signal. The coordinator persists only bounded check
 name/outcome metadata, increments the durable quality-failure count, selects the next route, reruns the author and
 independent exact-SHA review, verifies the previously bound PR number/branch/head/base before the repair push, pushes
-with an exact prior-head lease to that same PR and verifies the new head. It never sends raw CI logs to a model. If the
-third cycle still fails, every failure kind requires a live claim and exact PR identity. GitHub does not support
+with an exact prior-head lease to that same PR and verifies the new head. It never sends raw CI logs to a model. Exhausted
+pre-commit author gates have no PR identity: they retain only redacted bounded diagnostics and terminate after local
+cleanup. Once a PR exists, terminal failure requires a live claim and exact PR identity. GitHub does not support
 conditional requests for unsafe PR-close mutations, so an open exact failed PR/branch is preserved as bounded evidence;
 if the PR is already closed, only its unchanged branch/SHA is lease-deleted. Local disposable state is still cleaned and
 the failed delivery is projected. Compatible exact v1 route and PR identity remain usable for their in-progress cycle. Restarts after a
@@ -300,12 +301,13 @@ Use a separate disposable repository. Required behavioral evidence:
 - wrong remote is rejected before write;
 - author commit after `accept` makes review stale;
 - same-provider review requires the explicit independent mode, distinct exact models and distinct sessions;
-- repeated review rejection, required-CI failure or bounded CI timeout automatically escalates the OpenAI route
-  and reuses the same PR;
+- repeated author-gate failure, review rejection, required-CI failure or bounded CI timeout automatically escalates
+  the OpenAI route; a PR is reused only after one exists;
 - successful/failed CI state contains only bounded name/outcome metadata;
 - lost responses after initial push, PR create or repair push reconcile the exact remote identity without duplication;
-- any final failure under a live claim preserves an open exact PR/branch as bounded evidence, while an already closed
-  PR permits exact-lease deletion of only its unchanged branch/SHA;
+- exhausted pre-commit author gates retain redacted bounded diagnostics and no PR evidence; after PR creation, final
+  failure under a live claim preserves an open exact PR/branch as bounded evidence, while an already closed PR permits
+  exact-lease deletion of only its unchanged branch/SHA;
 - an exact compatible v1 in-progress decision resumes under v2 while a tampered decision fails closed;
 - merge is not called before review+CI;
 - terminal completion is withheld until branch/worktree cleanup.

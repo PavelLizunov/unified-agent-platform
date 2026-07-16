@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
 import os
 import pathlib
@@ -291,6 +292,219 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def test_command_failure_keeps_bounded_stderr_and_stdout_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["codex_home"] = str(root / "codex")
+            result = subprocess.CompletedProcess(
+                ["gate"], 1, stdout="diagnostic line\n" * 500, stderr="[FAIL] gate"
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                runner=lambda *_args, **_kwargs: result,
+            )
+
+            with self.assertRaises(coordinator.DeliveryError) as raised:
+                instance._run(["gate"])
+
+            message = str(raised.exception)
+            self.assertLessEqual(len(message), coordinator._MAX_CHECK_FAILURE_CHARS)
+            self.assertIn("[FAIL] gate", message)
+            self.assertIn("diagnostic", message)
+
+    def test_command_failure_redacts_secret_shaped_output_before_persistence(self):
+        result = subprocess.CompletedProcess(
+            ["gate"],
+            1,
+            stdout="API_TOKEN=ghp_" + ("a" * 36) + "\ncompile failed",
+            stderr="Authorization: Bearer sk-proj-" + ("b" * 40),
+        )
+
+        message = coordinator._command_failure(result, result.args)
+
+        self.assertIn("compile failed", message)
+        self.assertIn("[REDACTED]", message)
+        self.assertNotIn("ghp_", message)
+        self.assertNotIn("sk-proj", message)
+
+    def test_command_failure_redacts_single_token_uri_userinfo(self):
+        secret = "single-token-credential"
+        result = subprocess.CompletedProcess(
+            ["gate"], 1, stdout=f"failed at https://{secret}@host/path", stderr=""
+        )
+
+        message = coordinator._command_failure(result, result.args)
+
+        self.assertIn("[REDACTED]", message)
+        self.assertNotIn(secret, message)
+
+    def test_persisted_codex_events_redact_and_bound_command_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "events.jsonl"
+            secret = "single-token-credential"
+            event = {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": f"curl https://{secret}@host/path",
+                    "aggregated_output": "failure " + secret + ("x" * 5000),
+                    "status": "failed",
+                },
+            }
+
+            coordinator._private_codex_events(
+                path, json.dumps(event) + "\nraw non-json secret=" + secret
+            )
+
+            persisted = path.read_text(encoding="utf-8")
+            parsed = json.loads(persisted.splitlines()[0])
+            self.assertIn("[REDACTED]", parsed["item"]["command"])
+            self.assertLessEqual(
+                len(parsed["item"]["aggregated_output"]),
+                coordinator._MAX_CHECK_FAILURE_CHARS,
+            )
+            self.assertNotIn(secret, persisted)
+            self.assertEqual("[REDACTED non-json Codex event]", persisted.splitlines()[1])
+
+    def test_main_redacts_uri_userinfo_from_error_output(self):
+        secret = "single-token-credential"
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                coordinator,
+                "load_profile",
+                side_effect=coordinator.flow_contract.ContractError(
+                    f"remote mismatch: https://{secret}@host/repo.git"
+                ),
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            status = coordinator.main(["--profile", "unused.json"])
+
+        self.assertEqual(2, status)
+        self.assertIn("[REDACTED]", stderr.getvalue())
+        self.assertNotIn(secret, stderr.getvalue())
+
+    def test_failed_author_run_removes_raw_last_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            raw_paths = []
+
+            def runner(command, **_kwargs):
+                raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                raw_paths.append(raw)
+                raw.write_text("https://single-token-credential@host", encoding="utf-8")
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="author failed")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("failed-author-output")
+            state = {"review_cycle": 1}
+            with (
+                mock.patch.object(
+                    instance,
+                    "_actor",
+                    return_value={"model": "gpt-5.6-luna", "reasoning_effort": "medium"},
+                ),
+                mock.patch.object(instance, "_assert_claim"),
+                self.assertRaisesRegex(coordinator.DeliveryError, "author failed"),
+            ):
+                instance._author(state, paths)
+
+            self.assertTrue(raw_paths)
+            self.assertTrue(all(not path.exists() for path in raw_paths))
+            self.assertFalse((paths["directory"] / "author-1-last.txt").exists())
+
+    def test_invalid_reviewer_output_removes_raw_last_message(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            raw_paths = []
+
+            def runner(command, **_kwargs):
+                raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                raw_paths.append(raw)
+                raw.write_text('{"verdict":"reject","findings":["secret"', encoding="utf-8")
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("invalid-review-output")
+            state = {"review_cycle": 1, "candidate_sha": "candidate"}
+            route = {
+                "reviewer": {"model": "gpt-5.6-sol", "reasoning_effort": "low"},
+                "review_mode": "same_provider_independent",
+                "decision_id": "decision",
+            }
+            with (
+                mock.patch.object(instance, "_current_route", return_value=route),
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source"},
+                ),
+                self.assertRaises(ValueError),
+            ):
+                instance._review(state, paths)
+
+            self.assertTrue(raw_paths)
+            self.assertTrue(all(not path.exists() for path in raw_paths))
+            self.assertFalse((paths["directory"] / "review-1-last.json").exists())
+
+    def test_legacy_findings_are_sanitized_before_the_next_author_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["codex_bin"] = "codex"
+            approved["codex_home"] = str(root / "codex-home")
+            secret = "legacy-single-token"
+            captured = {}
+
+            def runner(_command, **kwargs):
+                captured["prompt"] = kwargs["input"]
+                raise RuntimeError("prompt captured")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("legacy-diagnostic")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "legacy-diagnostic",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "needs_fix",
+                "review_cycle": 2,
+                "prior_author_failures": 1,
+                "review_findings": [f"failed at https://{secret}@host/path"],
+                "route_decisions": {},
+            })
+
+            state = instance._load_state("legacy-diagnostic", paths)
+            with (
+                mock.patch.object(
+                    instance,
+                    "_actor",
+                    return_value={"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
+                ),
+                mock.patch.object(instance, "_assert_claim"),
+                self.assertRaisesRegex(RuntimeError, "prompt captured"),
+            ):
+                instance._author(state, paths)
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(["failed at https[REDACTED]host/path"], persisted["review_findings"])
+            self.assertIn("[REDACTED]", captured["prompt"])
+            self.assertNotIn(secret, captured["prompt"])
+
     def test_route_escalates_durably_without_profile_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -1777,13 +1991,50 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             persisted = coordinator.mission_adapter._read_json(paths["state"])
             self.assertEqual("needs_fix", persisted["phase"])
             self.assertEqual(2, persisted["review_cycle"])
-            self.assertEqual(4000, len(persisted["review_findings"][0]))
+            self.assertEqual(1, persisted["prior_author_failures"])
+            self.assertLessEqual(
+                len(persisted["review_findings"][0]), coordinator._MAX_CHECK_FAILURE_CHARS
+            )
+            self.assertIn("[REDACTED]", persisted["review_findings"][0])
             with mock.patch.object(
                 instance, "_changed_files", return_value=set(approved["required_files"])
             ), mock.patch.object(
                 instance, "_candidate_fingerprint", return_value="candidate-v1"
             ):
                 self.assertFalse(instance._recover_author_commit(persisted, paths))
+
+    def test_repeated_author_check_failures_escalate_the_next_author(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-author-escalation")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-author-escalation",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "review_cycle": 1,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "route_decisions": {},
+            }
+
+            instance._record_author_check_failure(
+                state, paths, coordinator.DeliveryError("first gate failure")
+            )
+            self.assertEqual("complex", instance._ensure_route(state, paths)["route"])
+            instance._record_author_check_failure(
+                state, paths, coordinator.DeliveryError("second gate failure")
+            )
+            escalated = instance._ensure_route(state, paths)
+
+            self.assertEqual(2, state["prior_author_failures"])
+            self.assertEqual("escalated", escalated["route"])
+            self.assertEqual("gpt-5.6-terra", escalated["author"]["model"])
+            self.assertEqual("gpt-5.6-sol", escalated["reviewer"]["model"])
 
     def test_author_check_mutation_fails_without_reusing_the_candidate(self):
         with tempfile.TemporaryDirectory() as directory:
