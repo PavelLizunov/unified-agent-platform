@@ -71,6 +71,9 @@ def main() -> None:
             assert route in api
         assert "X-Hermes-Mission-Producer-Key" in api
         assert "producer_key_valid" in api
+        assert 'if not isinstance(body, dict)' in api
+        assert 'body.get("parent_mission_id") is not None' in api
+        assert 'parent_mission_id=body.get("parent_mission_id")' in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
         assert "_handle_finish_mission" in api
