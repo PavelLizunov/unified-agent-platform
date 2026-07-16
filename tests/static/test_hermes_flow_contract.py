@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
 import hashlib
+import io
 import json
 import pathlib
 import subprocess
@@ -472,6 +473,23 @@ class FlowContractTests(unittest.TestCase):
                 flow.guard_repo(
                     repo, "https://github.com/PavelLizunov/hermes-flow-pilot.git", "flow-test"
                 )
+
+            credential_remote = "https://single-token-credential@github.com/owner/other"
+            with self.assertRaisesRegex(flow.ContractError, "userinfo") as raised:
+                flow.guard_repo(repo, credential_remote, "flow-test")
+            self.assertNotIn("single-token-credential", str(raised.exception))
+
+            stderr = io.StringIO()
+            with mock.patch("sys.stderr", stderr):
+                status = flow.main([
+                    "guard-repo",
+                    "--path", str(repo),
+                    "--remote", credential_remote,
+                    "--branch", "flow-test",
+                ])
+            self.assertEqual(2, status)
+            self.assertNotIn("single-token-credential", stderr.getvalue())
+            self.assertIn("userinfo is forbidden", stderr.getvalue())
 
     def test_primary_checkout_is_not_accepted_as_worker_worktree(self):
         with tempfile.TemporaryDirectory() as directory:

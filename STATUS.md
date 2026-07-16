@@ -66,10 +66,12 @@ Last updated: 2026-07-16
   retry and escalation require no owner confirmation. Unknown signals and genuinely privileged flags remain blocked;
   Claude, local inference and GPU are outside this route. PR #216 installed `openai-autonomy-v1` and atomically
   migrated the stopped build-1 profile to schema v3/three cycles. Current source `openai-autonomy-v2` additionally
-  treats independent-review and required-CI failures as durable quality failures: the next tick automatically raises
-  the OpenAI route and repairs the same durably bound PR. Both successful and failed CI retain only bounded
-  name/outcome metadata. PR number/head/base are durable identity and repair pushes use an exact prior-head lease.
-  Final failure requires a live Kanban claim and exact PR identity. Because GitHub has no server-side conditional close,
+  treats failed author gates, independent-review rejection and required-CI failure as durable quality failures: the next
+  tick automatically raises the OpenAI route. Before a PR exists, exhausted author gates retain only redacted bounded
+  diagnostics and terminate after local cleanup without PR evidence. Once a PR exists, the coordinator repairs the same
+  durably bound PR. Both successful and failed CI retain only bounded name/outcome metadata. PR number/head/base are
+  durable identity and repair pushes use an exact prior-head lease. Final post-PR failure requires a live Kanban claim and
+  exact PR identity. Because GitHub has no server-side conditional close,
   an open failed PR and exact remote branch are preserved as bounded evidence while local disposable state is cleaned;
   if the PR is already closed, only its unchanged branch/head is lease-deleted. Compatible in-progress v1 route
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful

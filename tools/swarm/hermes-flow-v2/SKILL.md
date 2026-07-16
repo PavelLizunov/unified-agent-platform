@@ -33,12 +33,14 @@ not continue such work through a chain of `chat --resume` sessions.
    diff, runs checks, and produces `verification.json`; it never edits, commits, pushes, or merges.
 6. Validate `summary.json` and `verification.json` against the persisted canonical route decision, current HEAD and
    green required CI. No manual model/review waiver exists.
-7. At most three quality/fix cycles. Independent review rejection or required-CI failure increments the same routing
-   signal, automatically escalates the next OpenAI route, and reuses the same PR. Persist only bounded CI
+7. At most three quality/fix cycles. Failed author gate, independent review rejection or required-CI failure increments
+   the same routing signal and automatically escalates the next OpenAI route. Persist only redacted bounded author
+   diagnostics and bounded CI
    check-name/outcome metadata, never raw logs. Reconcile lost initial-push, PR-create or repair-push responses only
-   when the exact branch/candidate/base identity matches. After any final failure, require a live claim and exact durable
-   PR number/head/base. Preserve an open exact failed PR/branch as bounded evidence; if already closed, lease-delete only
-   its unchanged branch/SHA. Clean local disposable state and publish terminal failure. Complete a
+   when the exact branch/candidate/base identity matches. Exhausted pre-commit author gates retain only redacted bounded
+   diagnostics and terminate after cleanup without PR evidence. After a PR exists, final failure requires a live claim
+   and its exact durable number/head/base. Preserve an open exact failed PR/branch as bounded evidence; if already closed,
+   lease-delete only its unchanged branch/SHA. Clean local disposable state and publish terminal failure. Complete a
    successful root card only after merge,
    default-branch proof, remote/local branch deletion, disposable worktree removal, and a green `terminal-check`.
 8. When the task belongs to a central Hermes mission, use the installed `mission_adapter.py` ingress/sync boundary and

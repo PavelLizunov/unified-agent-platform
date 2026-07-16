@@ -8,14 +8,33 @@ import datetime as dt
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 
 class ContractError(ValueError):
     pass
+
+
+def _safe_error(value: object) -> str:
+    text = str(value).replace("\x00", "?")
+    text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
+    text = re.sub(
+        r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+",
+        "[REDACTED]",
+        text,
+    )
+    text = re.sub(
+        r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
+        r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+)\b",
+        "[REDACTED]",
+        text,
+    )
+    return text[-4000:] or "contract failed"
 
 
 def load_json(path: str | pathlib.Path) -> dict[str, Any]:
@@ -724,6 +743,9 @@ def summarize_codex_events(
 
 def canonical_remote(value: str) -> str:
     value = value.strip().removesuffix(".git").removesuffix("/")
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() in {"http", "https"} and parsed.username is not None:
+        raise ContractError("remote URL userinfo is forbidden")
     if value.startswith("git@github.com:"):
         value = "https://github.com/" + value.split(":", 1)[1]
     return value.lower()
@@ -746,7 +768,7 @@ def guard_repo(path: str | pathlib.Path, expected_remote: str, expected_branch: 
     remote = _git(root, "remote", "get-url", "origin")
     branch = _git(root, "branch", "--show-current")
     if canonical_remote(remote) != canonical_remote(expected_remote):
-        raise ContractError(f"remote mismatch: expected {expected_remote}, actual {remote}")
+        raise ContractError("remote mismatch")
     if branch != expected_branch or branch in {"main", "master"}:
         raise ContractError(f"branch mismatch or protected default branch: {branch!r}")
     worktrees = [
@@ -860,7 +882,7 @@ def main(argv: list[str] | None = None) -> int:
             print("hermes-flow-telemetry-ok")
             return 0
     except (ContractError, OSError, json.JSONDecodeError) as error:
-        print(f"hermes-flow-error: {error}", file=sys.stderr)
+        print(f"hermes-flow-error: {_safe_error(error)}", file=sys.stderr)
         return 2
     return 2
 
