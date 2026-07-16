@@ -1,6 +1,6 @@
 apiVersion: v1
 data:
-    owner-key: ENC[AES256_GCM,data:FPOpe+ez2rrshkJ2F2nl7Jv0ZEiGRLRgZae5VL09CzW2R47kOjO5TKCHoLg924ovyJucQyz4avN1IOzs/W59Lrnk/m0m54rQ5oEjHa35rWn+pbgCwnNT/Q==,iv:90LryotskKiFOdzWoF0hhf7EVcwYATFXZ42/bl047B8=,tag:Av8z07wmtNCnvIxdC3MK3A==,type:str]
+    owner-key: ENC[AES256_GCM,data:72uvvE7rqrUMT5QLZsDt9OZvC1r2wu9aF/AcJmIMMyGecO+pE4IPFnTCi7rIu6P5OeFJxp46vz576/0Xkck6Ybh+uXUIUQsuTmD+xRHzPYT4lbhSKiuUHXfUCS2uadn5zgfIj+Dg1grRtIPzNKYYmcLrNN7GgfUL3xfyBoQn7A4=,iv:lJ8aURUH8dlQvsIy4fAQ0eDOZclOnKgUzZYs/Nhxoys=,tag:UgGkAQhpP2HA/8hDL/S6wQ==,type:str]
 kind: Secret
 metadata:
     name: hermes-agent-owner
@@ -9,14 +9,14 @@ sops:
     age:
         - enc: |
             -----BEGIN AGE ENCRYPTED FILE-----
-            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBnOEZSYUQwWmVRUDNyQ2Fn
-            aERhcFJlVkFyZTVOV3lOaXFjMHh0eTd1aFVZCmZIU1RWenp4U0h4aThONi96OUpX
-            MDFGZGMxU2RWV3RJbTZudlNsU05JdFEKLS0tIDQxQ256YUlkMUppZXpYSzVJLzRw
-            SjkvMkxrcnlPSU1neFhEL3htck9OeXMKSEnjx7p5i5iVKsyewYJRDtHR/HNqh9xc
-            uO/i/RZYt9s7OfERaO8NOiLH7sXCuqYP24mWfYBHVxgEhUj8TnTyLg==
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB2TFI3WWw1UTkwVDNoMHUx
+            NHA4aHN5OW15bURoanFBM0FMcGNQQThhaWdFClBQQW95Uk9xaFBEemlLYmduZFhq
+            UnZpc0xCWjlrWEpXY0ROT1BmL2ZsbFUKLS0tIG5MMysrcEFPaXp2VGxHUWY5REVo
+            K1JCREZ1bE5RdkVwa1dlMjkxQVBETVEKYL5wcOlgW5hTYgA2rwSw/jvp1iq0Bot3
+            cXMZX9cQ0sb8caWPJ4UidxZOY3BNBIprmzJSOXqcD+k6yrWeC2MoCg==
             -----END AGE ENCRYPTED FILE-----
           recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-07-16T21:32:58Z"
-    mac: ENC[AES256_GCM,data:I7nX7nvq5aCYh1diMUovgdYRipcl1/s/jmXrWrWuJvVYnZFfGni4AF33rhrlnNeBdrpxrWBIOs7J3zn4N9RmWC1KRXEovIFybFaIDDsLCv3n9jJtrBgKIUqZ36IyyjDUkESGIlNsxBMGoqIXh9uxLd7oiSC9ja43OH1X9vhsH8g=,iv:m/SgBaexP1f5MUMem+pk3wcrcfdbDNf5GpukW2+CjhY=,tag:HBp9TSWZ1RTAau1V9DT38A==,type:str]
+    lastmodified: "2026-07-16T21:51:34Z"
+    mac: ENC[AES256_GCM,data:h2xA4FqlgohQKm6stOELuVMy2BnxxR3DSECQBePvuV7M2B02DCpNFML3M/DHbqLancLDmN6P+1HJsTaBbdPvHbVTe6iy6FagSbpp9a0YxH0tBIU8AEywYvWkjjm559Fo+dTAy1C1wdIl9VOhp70AEcGmgDM/PnouEZYvZXqBWHk=,iv:3nkhgKv+xVE3Q2BjtWAErAxc69Yoyl/Rhf69YYaH2aI=,tag:LRQ1+Mzl+lGa186t21fHrA==,type:str]
     version: 3.13.1

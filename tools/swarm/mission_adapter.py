@@ -177,6 +177,67 @@ class HermesKanbanBackend:
     def list_task_ids(self, mission_id: str) -> list[str]:
         return sorted(task["id"] for task in self.list_tasks(mission_id))
 
+    def resume_root_from_answer(
+        self,
+        task_id: str,
+        *,
+        assignee: str,
+        workspace: str,
+        question_id: str,
+        answer_digest: str,
+    ) -> dict[str, Any]:
+        if (
+            not assignee
+            or not workspace.startswith("worktree:")
+            or not workspace.removeprefix("worktree:")
+            or not question_id
+            or len(question_id) > 128
+            or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-" for character in question_id)
+            or len(answer_digest) != 64
+            or any(character not in "0123456789abcdef" for character in answer_digest)
+        ):
+            raise AdapterError("owner-answer resume contract is invalid")
+        snapshot = self.show(task_id)
+        task = snapshot["task"]
+        runs = snapshot.get("runs")
+        if (
+            task.get("id") != task_id
+            or task.get("status") not in {"blocked", "ready", "running"}
+            or task.get("assignee") not in {None, assignee}
+            or task.get("workspace_kind") != "worktree"
+            or task.get("workspace_path") != workspace.removeprefix("worktree:")
+            or not isinstance(runs, list)
+            or sum(run.get("status") == "running" for run in runs if isinstance(run, dict)) > 1
+        ):
+            raise AdapterError("owner-answer resume selected an invalid Kanban root")
+        if task.get("status") == "blocked":
+            if task.get("assignee") is None:
+                self._run("assign", task_id, assignee)
+                snapshot = self.show(task_id)
+                task = snapshot["task"]
+                if task.get("status") != "blocked" or task.get("assignee") != assignee:
+                    raise AdapterError("owner-answer assignee did not persist")
+            reference = f"owner-answer:{question_id}:{answer_digest[:16]}"
+            self._run("unblock", "--reason", reference, task_id)
+            snapshot = self.show(task_id)
+            task = snapshot["task"]
+        if task.get("status") not in {"ready", "running"} or task.get("assignee") != assignee:
+            raise AdapterError("owner-answer resume did not make the task runnable")
+        events = snapshot.get("events")
+        if not isinstance(events, list) or not any(
+            isinstance(event, dict) and event.get("kind") == "unblocked"
+            for event in events
+        ):
+            raise AdapterError("owner-answer resume lacks a durable Kanban checkpoint")
+        runs = snapshot.get("runs")
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if not isinstance(runs, list) or (task.get("status") == "ready" and active) or len(active) > 1:
+            raise AdapterError("owner-answer resume has an invalid run state")
+        return snapshot
+
     def list_tasks(self, mission_id: str) -> list[dict[str, Any]]:
         tasks = self._json("list", "--tenant", mission_id, "--json")
         if not isinstance(tasks, list):

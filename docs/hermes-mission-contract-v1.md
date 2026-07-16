@@ -179,6 +179,12 @@ service:
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open
   question on that binding. Workspace posts the same closed answer shape through its authenticated mission route, and
   owner-relevant stage/question/answer/terminal events render from the same projection and `projection_id`;
+- a pre-execution owner question is accepted only after the handoff has created one inert sticky-blocked root. The coordinator stores the redacted
+  answer in its owner-only durable state before changing Kanban, assigns and unblocks only that exact root with a
+  question/answer-hash audit reference, and binds the answer into the next author prompt. Retry before or after the
+  Kanban update converges to one root, one answer checkpoint and one claimed run; replay never starts a second model;
+- owner questions after a worker has started fail closed in v1. The platform must ask the rare product/stack question
+  before execution rather than silently pausing an in-flight mutable worktree;
 - notification delivery leases the exact mission binding for at most five minutes; a concurrent rebind either wins
   before the lease and prevents the stale send, or fails closed until send/checkpoint releases or expires the lease;
 - terminal/question text is force-redacted at the Hermes API boundary and all stored/event frames are bounded.

@@ -158,6 +158,94 @@ class FakeBackend:
         return ""
 
 
+class OwnerAnswerClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.mission.update(
+            status="waiting_owner",
+            question={"question_id": "q-product", "text": "Preserve current behavior?"},
+            answer=None,
+        )
+
+    def list_missions(self, _profile, *, reconcile=False):
+        has_tasks = bool(self.mission["tasks"])
+        return [self.mission] if reconcile == has_tasks else []
+
+    def publish(self, _mission_id, event):
+        super().publish(_mission_id, event)
+        if event.get("type") == "task.upsert":
+            self.mission["tasks"] = [dict(event["payload"])]
+
+    def get_mission(self, _mission_id):
+        return dict(self.mission)
+
+    def answer(self, text="Keep the existing behavior"):
+        self.mission.update(
+            status="active",
+            question=None,
+            answer={"question_id": "q-product", "text": text},
+        )
+
+
+class OwnerAnswerBackend(FakeBackend):
+    def __init__(self, failure_point):
+        super().__init__()
+        self.task = None
+        self.events = []
+        self.failure_point = failure_point
+        self.resume_calls = 0
+
+    def ensure_root(self, *, mission_id, goal, allow_dispatch, assignee, workspace):
+        assert not allow_dispatch and assignee is None and workspace.startswith("worktree:")
+        if self.task is None:
+            self.task = {
+                "id": "task-1",
+                "title": f"Mission {mission_id}",
+                "status": "blocked",
+                "assignee": None,
+                "created_by": "central-hermes",
+                "tenant": mission_id,
+                "workspace_kind": "worktree",
+                "workspace_path": workspace.removeprefix("worktree:"),
+            }
+            self.events = [{"kind": "created"}, {"kind": "blocked"}]
+        return dict(self.task)
+
+    def list_tasks(self, _mission_id):
+        return [] if self.task is None else [dict(self.task)]
+
+    def list_task_ids(self, _mission_id):
+        return [] if self.task is None else [self.task["id"]]
+
+    def show(self, _task_id):
+        assert self.task is not None
+        return {
+            "task": dict(self.task),
+            "events": [dict(event) for event in self.events],
+            "runs": [dict(run) for run in self.runs],
+        }
+
+    def resume_root_from_answer(self, task_id, **kwargs):
+        self.resume_calls += 1
+        if self.failure_point == "before":
+            self.failure_point = None
+            raise coordinator.mission_adapter.AdapterError("crash before Kanban update")
+        assert self.task is not None and self.task["id"] == task_id
+        assert kwargs["question_id"] == "q-product"
+        assert kwargs["workspace"] == f"worktree:{self.task['workspace_path']}"
+        if self.task["status"] == "blocked":
+            self.task.update(status="ready", assignee=kwargs["assignee"])
+            self.events.append({"kind": "unblocked"})
+        if self.failure_point == "after":
+            self.failure_point = None
+            raise coordinator.mission_adapter.AdapterError("crash after Kanban update")
+        return self.show(task_id)
+
+    def claim(self, task_id, *, ttl_seconds):
+        assert self.task is not None
+        return super().claim(task_id, ttl_seconds=ttl_seconds)
+
+
 class MutatingCompletionBackend(FakeBackend):
     def __init__(self):
         super().__init__()
@@ -347,6 +435,122 @@ class RepairCoordinator(HermeticCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def test_owner_answer_resumes_same_mission_across_both_crash_windows(self):
+        for failure_point in ("before", "after"):
+            with self.subTest(failure_point=failure_point), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                client = OwnerAnswerClient()
+                backend = OwnerAnswerBackend(failure_point)
+                state_root = root / "state"
+                accepted = {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "sequence": 1,
+                    "type": "mission.accepted",
+                    "source": "central-hermes",
+                    "correlation": {},
+                    "payload": {
+                        "goal": approved["goal"],
+                        "dispatch_profile": approved["dispatch_profile"],
+                    },
+                }
+                digest = coordinator.hashlib.sha256(b"mission-a7-3").hexdigest()[:12]
+                adapter_state = coordinator.mission_adapter.accept_mission(
+                    accepted,
+                    state_root,
+                    backend,
+                    workspace=f"worktree:{root / 'worktrees' / ('author-' + digest)}",
+                )
+                client.mission["tasks"] = [{
+                    "task_id": adapter_state["root_task_id"],
+                    "title": "Mission mission-a7-3",
+                    "status": "blocked",
+                    "assignee": None,
+                }]
+                instance = coordinator.DeliveryCoordinator(
+                    approved, client, backend, state_root
+                )
+
+                waiting = instance.tick()
+                self.assertEqual("waiting_owner", waiting["action"])
+                self.assertEqual("blocked", backend.task["status"])
+                self.assertIsNone(backend.task["assignee"])
+                self.assertEqual([], backend.runs)
+
+                client.answer()
+                with self.assertRaisesRegex(
+                    coordinator.mission_adapter.AdapterError, "crash .* Kanban update"
+                ):
+                    instance.tick()
+                paths = instance._paths("mission-a7-3")
+                pending = coordinator.mission_adapter._read_json(paths["state"])
+                self.assertEqual("owner_answer_pending", pending["phase"])
+                self.assertEqual("q-product", pending["owner_answers"][0]["question_id"])
+
+                restarted = coordinator.DeliveryCoordinator(
+                    approved, client, backend, state_root
+                )
+                with (
+                    mock.patch.object(restarted, "_assert_nonroutable_assignee"),
+                    mock.patch.object(restarted, "_ensure_worktree"),
+                    mock.patch.object(restarted, "_publish_stage"),
+                    mock.patch.object(restarted, "_reconcile_active"),
+                    mock.patch.object(restarted, "_recover_author_commit", return_value=False),
+                    mock.patch.object(
+                        restarted,
+                        "_author",
+                        side_effect=coordinator.InjectedCrash("stop after owner resume"),
+                    ),
+                    self.assertRaisesRegex(coordinator.InjectedCrash, "stop after owner resume"),
+                ):
+                    restarted.tick()
+
+                resumed = coordinator.mission_adapter._read_json(paths["state"])
+                self.assertEqual("claimed", resumed["phase"])
+                self.assertEqual("task-1", resumed["root_task_id"])
+                self.assertEqual(1, len(resumed["owner_answers"]))
+                self.assertEqual("running", backend.task["status"])
+                self.assertEqual(1, backend.claims)
+                self.assertEqual(2, backend.resume_calls)
+
+    def test_owner_answer_is_bound_into_the_next_author_prompt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            captured = {}
+
+            def runner(_command, **kwargs):
+                captured["prompt"] = kwargs["input"]
+                raise RuntimeError("prompt captured")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            text = "Keep the existing behavior"
+            state = {
+                "review_cycle": 1,
+                "owner_answers": [{
+                    "question_id": "q-product",
+                    "text": text,
+                    "sha256": coordinator.hashlib.sha256(text.encode()).hexdigest(),
+                }],
+            }
+            with (
+                mock.patch.object(
+                    instance,
+                    "_actor",
+                    return_value={"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
+                ),
+                mock.patch.object(instance, "_assert_claim"),
+                self.assertRaisesRegex(RuntimeError, "prompt captured"),
+            ):
+                instance._author(state, instance._paths("owner-answer-prompt"))
+
+            self.assertIn("q-product", captured["prompt"])
+            self.assertIn(text, captured["prompt"])
+
     def test_command_failure_keeps_bounded_stderr_and_stdout_diagnostics(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

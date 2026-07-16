@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -283,6 +284,64 @@ class MissionAdapterTests(unittest.TestCase):
                     "type": "mission.completed", "payload": {"result": "forged"},
                 }]},
             )
+
+    def test_owner_answer_resume_is_idempotent_and_keeps_text_off_argv(self):
+        commands = []
+        state = {
+            "status": "blocked",
+            "assignee": None,
+            "events": [{"kind": "created"}, {"kind": "blocked"}],
+        }
+
+        def runner(command):
+            commands.append(command)
+            action = command[command.index("central") + 1]
+            if action == "assign":
+                state["assignee"] = command[-1]
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if action == "unblock":
+                state["status"] = "ready"
+                state["events"].append({"kind": "unblocked"})
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if action == "show":
+                output = {
+                    "task": {
+                        "id": "task-1",
+                        "status": state["status"],
+                        "assignee": state["assignee"],
+                        "workspace_kind": "worktree",
+                        "workspace_path": "/tmp/repo",
+                    },
+                    "events": list(state["events"]),
+                    "runs": [],
+                }
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=json.dumps(output), stderr=""
+                )
+            raise AssertionError(command)
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        digest = hashlib.sha256(b"private owner answer").hexdigest()
+        first = backend.resume_root_from_answer(
+            "task-1",
+            assignee="approved-profile",
+            workspace="worktree:/tmp/repo",
+            question_id="q-product",
+            answer_digest=digest,
+        )
+        self.assertEqual("ready", first["task"]["status"])
+        self.assertEqual("approved-profile", first["task"]["assignee"])
+        self.assertFalse(any("private owner answer" in argument for command in commands for argument in command))
+        first_unblocks = sum("unblock" in command for command in commands)
+
+        backend.resume_root_from_answer(
+            "task-1",
+            assignee="approved-profile",
+            workspace="worktree:/tmp/repo",
+            question_id="q-product",
+            answer_digest=digest,
+        )
+        self.assertEqual(first_unblocks, sum("unblock" in command for command in commands))
 
     def test_native_claim_and_completion_are_fail_closed(self):
         commands = []
