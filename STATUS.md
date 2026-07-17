@@ -23,7 +23,8 @@ Last updated: 2026-07-17
   creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
   workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
   duplicate work/events. At the A6.2 checkpoint the adapter was not installed live; A6.4 later installed and exercised
-  it once. Automatic central intake-to-dispatch remains absent.
+  it once. At that A6.2 checkpoint automatic central intake-to-dispatch was absent; A7.3 later installed and accepted
+  the fixed-profile timer path described below.
 - **A6.3 synchronized observation live and A6.4 canary complete 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
   stdlib/SQLite mission log and reducer inside the pinned central Hermes modular monolith. The pinned Hermes overlay
   adds authenticated mission API routes and Telegram `/mission`/notifications; the Workspace overlay adds a compact
@@ -38,15 +39,17 @@ Last updated: 2026-07-17
   `codex exec --json` thread ID to the matching local rollout and derives the exact model, provider and sandbox policy
   from its single runtime `turn_context`. Declared-label, wrong-sandbox and reroute mismatches fail closed. Read-only
   reprocessing of the saved A6.4 author/reviewer artifacts confirmed Luna/workspace-write and Sol/read-only on Codex
-  CLI `0.144.3`; the addendum is in the canary evidence. The gate is not wired into a live worker yet and does not
-  prove an OS-independent read-only filesystem or credential boundary.
+  CLI `0.144.3`; the addendum is in the canary evidence. At that post-A6 checkpoint the gate was not yet wired into a
+  live worker; A7.3 later used the runtime attestation live. It still does not prove an OS-independent read-only
+  filesystem or credential boundary.
 - **A7.1 merged and A7.2 live blocked handoff complete 2026-07-15.** PR #189 folded the reviewed bounded pull,
   starvation fix, retry/collision guards, local terminal authority, closed/redacted producer schema and owner-only
   state into `master`. PRs #190/#191 made the no-activate native root atomically sticky-blocked in pinned Hermes and
   fixed exact deployment staging. Flux is Ready at `7214ad78`; Central and build-1 carry the exact Kanban patch. Mission
   `a7-blocked-20260715-7214ad7-03` produced one blocked/unassigned root, one `task.upsert`, zero runs and a null second
-  poll, with no worker/model process. The poll is still manually invoked: no timer, activation or autonomous delivery
-  loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
+  poll, with no worker/model process. At the A7.2 checkpoint the poll was manually invoked and no timer, activation or
+  autonomous delivery loop was installed; A7.3 subsequently installed and accepted that path. Exact A7.2 evidence:
+  `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
 - **A7.3 fixed-profile autonomous delivery accepted (2026-07-17).** After the earlier recoverable VPNRouter run and
   its four harness corrections (#218-#221), PR #238 was independently reviewed, passed exact-head CI, merged and was
   installed on build-1. Telegram-bound mission `a7-clean-ledger-list-20260717-a0fc5a` then ran on the corrected runtime
