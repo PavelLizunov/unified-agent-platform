@@ -89,7 +89,7 @@ _AMBIGUOUS_STATE_FIELDS = {
 }
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
-    re.compile(r"(?i)\b(?:set-cookie|cookie)\s*:\s*[^\r\n]+"),
+    re.compile(r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+"),
     re.compile(
         r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
         r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
@@ -819,10 +819,17 @@ class DeliveryCoordinator:
         if waiting is None or waiting["claim_parked"]:
             return
         snapshot = self.backend.show(state["root_task_id"])
-        task = snapshot.get("task", {})
+        task = snapshot.get("task")
         runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("capacity wait found a different Kanban task owner")
         active = [
-            run for run in runs or []
+            run for run in runs
             if isinstance(run, dict) and run.get("status") == "running"
         ]
         if task.get("status") in {"running", "ready"}:
@@ -833,15 +840,28 @@ class DeliveryCoordinator:
                 raise DeliveryError("capacity wait cannot park a different active Kanban run")
             if task.get("status") == "ready" and active:
                 raise DeliveryError("capacity wait found an active run on a ready Kanban task")
+            if task.get("status") == "ready":
+                self._ensure_claimed(state)
+                self._save(paths, state)
+            self._assert_claim(state)
             snapshot = self.backend.schedule(
                 state["root_task_id"], reason="automatic OpenAI capacity cooldown"
             )
-            task = snapshot.get("task", {})
+            task = snapshot.get("task")
             runs = snapshot.get("runs")
+        matching = [
+            run for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) == str(state.get("run_id"))
+        ]
         if (
-            task.get("status") != "scheduled"
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or task.get("status") != "scheduled"
             or not isinstance(runs, list)
             or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+            or len(matching) != 1
+            or matching[0].get("status") != "scheduled"
         ):
             raise DeliveryError("capacity wait did not park the exact Kanban task")
         waiting["claim_parked"] = True
@@ -854,18 +874,38 @@ class DeliveryCoordinator:
         if waiting is None or not waiting["claim_parked"]:
             return
         snapshot = self.backend.show(state["root_task_id"])
-        task = snapshot.get("task", {})
+        task = snapshot.get("task")
         runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("capacity retry found a different Kanban task owner")
         active = [
-            run for run in runs or []
+            run for run in runs
             if isinstance(run, dict) and run.get("status") == "running"
         ]
         if task.get("status") == "scheduled":
+            matching = [
+                run for run in runs
+                if isinstance(run, dict) and str(run.get("id")) == str(state.get("run_id"))
+            ]
+            if len(matching) != 1 or matching[0].get("status") != "scheduled":
+                raise DeliveryError("capacity retry lost the exact parked Kanban run")
             snapshot = self.backend.unblock(
                 state["root_task_id"], reason="automatic OpenAI capacity retry due"
             )
-            task = snapshot.get("task", {})
+            task = snapshot.get("task")
             runs = snapshot.get("runs")
+            if (
+                not isinstance(task, dict)
+                or task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+                or not isinstance(runs, list)
+            ):
+                raise DeliveryError("capacity retry unblocked a different Kanban task owner")
             active = []
         if task.get("status") == "ready" and not active:
             self._ensure_claimed(state)
@@ -1424,7 +1464,11 @@ class DeliveryCoordinator:
         snapshot = self.backend.show(state["root_task_id"])
         task = snapshot.get("task", {})
         runs = snapshot.get("runs")
-        if task.get("assignee") != self.profile["assignee"] or not isinstance(runs, list):
+        if (
+            task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
             raise DeliveryError("Kanban task is outside the approved assignee/run contract")
         active = [
             run for run in runs or []
@@ -1436,6 +1480,11 @@ class DeliveryCoordinator:
             )
             task = snapshot.get("task", {})
             runs = snapshot["runs"]
+            if (
+                task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+            ):
+                raise DeliveryError("Kanban claim changed the approved task owner")
             active = [
                 run for run in runs
                 if isinstance(run, dict) and run.get("status") == "running"
@@ -1453,11 +1502,18 @@ class DeliveryCoordinator:
         run_id = state.get("run_id")
         if not isinstance(task_id, str) or not task_id or run_id is None:
             raise DeliveryError("delivery has no durable Kanban task/run identity")
-        self.backend.verify_claim(
+        snapshot = self.backend.verify_claim(
             task_id,
             str(run_id),
             min_remaining_seconds=min_remaining_seconds,
         )
+        task = snapshot.get("task") if isinstance(snapshot, dict) else None
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("assignee") != self.profile["assignee"]
+        ):
+            raise DeliveryError("Kanban claim no longer belongs to the approved task owner")
 
     def _assert_nonroutable_assignee(self) -> None:
         hermes_home = pathlib.Path(

@@ -407,6 +407,18 @@ class FlowContractTests(unittest.TestCase):
         self.assertTrue(result["thread_started"])
         self.assertTrue(result["turn_started"])
 
+    def test_completed_turn_blocks_stderr_capacity_retry(self):
+        message = "Selected model is at capacity. Please try a different model."
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            handle.write(json.dumps({"type": "turn.completed"}) + "\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path, f"ERROR: {message}\n")
+        finally:
+            path.unlink()
+        self.assertEqual("unknown", result["error_class"])
+        self.assertFalse(result["safe_before_side_effects"])
+
     def test_delivery_policy_identity_is_semantic_and_binds_the_exact_policy(self):
         signals = {
             "schema_version": 1,

@@ -744,6 +744,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "headers": [
                         "Cookie: session=header-cookie-secret; Path=/",
                         "Set-Cookie: session=response-cookie-secret; Secure",
+                        "Cookie=session=equals-cookie-secret; Path=/",
+                        "Set-Cookie=session=equals-response-secret; Secure",
                     ],
                 },
                 "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},
@@ -781,6 +783,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("[REDACTED]", parsed["error"]["Cookie"])
             self.assertEqual("[REDACTED]", parsed["error"]["setCookie"])
             self.assertTrue(all("cookie-secret" not in item for item in parsed["error"]["headers"]))
+            self.assertTrue(all("equals-response-secret" not in item for item in parsed["error"]["headers"]))
             self.assertEqual(123, parsed["usage"]["input_tokens"])
             self.assertEqual("ordinary-count-label", parsed["usage"]["inputTokens"])
             self.assertEqual("[REDACTED non-json Codex event]", lines[2])
@@ -1209,9 +1212,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     state, paths, role="author", failure=failure
                 )
             with mock.patch.object(coordinator.time, "time", return_value=1001):
-                waiting = instance._capacity_wait_result(
-                    state, "capacity-lease", paths
-                )
+                with mock.patch.object(
+                    instance, "_assert_claim", wraps=instance._assert_claim
+                ) as verify_claim:
+                    waiting = instance._capacity_wait_result(
+                        state, "capacity-lease", paths
+                    )
+                verify_claim.assert_called_once_with(state)
             self.assertEqual("capacity_wait", waiting["action"])
             self.assertEqual("scheduled", backend.task["status"])
             self.assertTrue(state["model_capacity"]["claim_parked"])
@@ -1226,6 +1233,99 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("8", state["run_id"])
             self.assertEqual(2, backend.claims)
             self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
+
+    def test_capacity_wait_rejects_reassignment_before_park_or_resume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-owner")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-owner",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "f" * 64,
+                    },
+                )
+
+            backend.task["assignee"] = "another-coordinator"
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "different Kanban task owner"):
+                    instance._capacity_wait_result(state, "capacity-owner", paths)
+            self.assertEqual("running", backend.task["status"])
+
+            backend.task["assignee"] = approved["assignee"]
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(state, "capacity-owner", paths)
+            self.assertEqual("scheduled", backend.task["status"])
+            backend.task["assignee"] = "another-coordinator"
+            with mock.patch.object(coordinator.time, "time", return_value=1006):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "different Kanban task owner"):
+                    instance._capacity_wait_result(state, "capacity-owner", paths)
+            self.assertEqual("scheduled", backend.task["status"])
+
+    def test_capacity_resume_requires_the_exact_parked_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-run")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-run",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "1" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(state, "capacity-run", paths)
+            state["run_id"] = "different-run"
+            with mock.patch.object(coordinator.time, "time", return_value=1006):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "exact parked Kanban run"):
+                    instance._capacity_wait_result(state, "capacity-run", paths)
+            self.assertEqual("scheduled", backend.task["status"])
 
     def test_capacity_state_rejects_non_finite_retry_time(self):
         with tempfile.TemporaryDirectory() as directory:

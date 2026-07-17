@@ -380,6 +380,7 @@ def parse_codex_failure(
     """Classify only trusted terminal Codex failure locations; never inspect tool/model output."""
     thread_started = False
     turn_started = False
+    turn_completed = False
     item_seen = False
     permanent_signal = False
     terminal_records = 0
@@ -404,6 +405,9 @@ def parse_codex_failure(
                 thread_started = True
             elif event_type == "turn.started":
                 turn_started = True
+            elif event_type == "turn.completed":
+                turn_started = True
+                turn_completed = True
             elif isinstance(event_type, str) and event_type.startswith("item."):
                 item_seen = True
             if event_type in {"error", "turn.failed"}:
@@ -440,6 +444,7 @@ def parse_codex_failure(
     capacity_source = None
     if (
         not malformed_records
+        and not turn_completed
         and terminal_records == terminal_records_with_messages
         and terminal_messages
         and all(message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages)
@@ -448,6 +453,7 @@ def parse_codex_failure(
         capacity_source = terminal_messages[0][0]
     elif (
         not malformed_records
+        and not turn_completed
         and terminal_records == 0
         and stderr_messages
         and all(
