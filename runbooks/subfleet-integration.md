@@ -138,7 +138,8 @@ Verify also:
   flag); **confirm a high-reasoning reply actually thinks** before relying on it. Budget-0 path is safe.
 - **Egress** — through the foreign exit (no `403`); check exit country.
 - **Backpressure** — burst > `BRIDGE_MAX_CONCURRENT` ⇒ `429`; LiteLLM retries.
-- **Fallback** — kill the subscription path ⇒ requests fall to `cheap-local` (Ollama).
+- **Failure boundary** — a failed subscription path must be surfaced. Current ADR-031 Flow does not fall through to
+  `cheap-local`; do not enable or test local inference/GPU without the separate owner decision and **GPU for UAP** mode.
 
 ## Pinned-egress repoint + re-pin (owner-gated)
 

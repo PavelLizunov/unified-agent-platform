@@ -203,21 +203,13 @@ strict `static-checks` CI check; direct push to master blocked). See next-steps 
 SQLite/FTS memory, subagents, cron, checkpoints/rollback, git worktrees, 20+ messaging platforms. It
 **supersedes** the bespoke `hermes.py` ("Hermes-legacy"), which is parked as a fallback.
 
-```
-            phone (Telegram, outbound long-poll — NAT/RU-friendly, no inbound port)
-                                  |
-                          hermes-agent gateway
-                     (Docker, on an always-on Linux node)
-                                  |
-         +------------------------+-----------------------------------+
-     BRAIN (native function-calling — REQUIRED)            CODING (skills, shelled out)
-   +--------------+---------------+                  +----------+----------+
-   Codex codex_app_server     local FC model         claude -p             codex exec
-   (ChatGPT sub, OAuth,       (RTX 5060 Ti, vLLM/    (non-Max Claude,      (ChatGPT sub)
-    no API key)                llama.cpp, >=64k ctx)   Claude Code harness)
-         |                          |                       |
-      egress proxy             local, no egress         egress proxy        egress proxy
-   (non-RU, ADR-018)                                  (reuses subfleet creds)
+```text
+Workspace / Telegram
+        -> Central Hermes (mission authority; Codex Luna brain)
+        -> configured fixed-profile build-1 timer/coordinator
+        -> OpenAI Luna/Sol/Terra author + distinct exact-SHA read-only reviewer
+        -> repository gates -> PR/CI -> merge -> deploy/release when defined -> post-verify
+        -> one Central mission projection returned to Workspace / Telegram
 ```
 
 > **Live today:** Central Hermes uses Codex `gpt-5.6-luna` through `codex_app_server`, and ADR-031's automatic

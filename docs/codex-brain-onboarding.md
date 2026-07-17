@@ -216,8 +216,8 @@ Read-order for anything model/agent/coding, then stop at the file that answers y
 | Closed decisions / why | `DECISIONS.md` (ADRs) |
 | Fleet + what-runs-where | `docs/infrastructure.md`, `docs/fleet-map.md` |
 | Handoff + boundaries | `CLAUDE.md` |
-| Brain (current, local router) | `runbooks/local-models-router.md` |
-| Brain (Codex era + config ownership + auth) | `runbooks/hermes-agent-codex-brain.md` |
+| Brain (current Codex + config ownership + auth) | `runbooks/hermes-agent-codex-brain.md` |
+| Manual local fallback | `runbooks/local-models-router.md` |
 | Egress / RU constraint | `runbooks/llm-egress-vless.md` |
 | Coding acceptance (the cycle) | `runbooks/vibe-coding-acceptance.md` |
 | Knowledge base (retrieval-first) | `runbooks/knowledge-system.md` |

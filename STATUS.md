@@ -129,8 +129,8 @@ Last updated: 2026-07-17
   skips" is false: `hermes backup` drops to uid 10000 internally regardless of dump-container privileges).
   GitHub's mergeable check was stale (computed pre-#38); a local rebase surfaced the real conflict. Pushed
   a correction onto `chore/pin-harden-hermes-agent` (commit `dafa3f9`) that keeps #38's logic and only the
-  legitimate digest pins — **PR #35 is now MERGEABLE + green, still owner-gated.** PR #36 was unaffected
-  (no file overlap). Also committed the 3 local-only Codex audit docs that never made it into git (PR #39,
+  legitimate digest pins. At that checkpoint PR #35 was mergeable + green and PR #36 was unaffected; both merged
+  later on 2026-06-30. Also committed the 3 local-only Codex audit docs that never made it into git (PR #39,
   merged) and closed the doc gaps they exposed: a stale CLAUDE.md bug-hunt pointer, and a 5th hermes-legacy
   finding (summarizer drops the untrusted-tool-result boundary) missing from `hermes/README.md`'s
   accepted-as-parked-risk list. Ported the BOM-proof base64 SSH transport to `check-ops-node.ps1` /
@@ -279,7 +279,7 @@ The model + agent value layers are deployed in namespace `uap-system`. **All of 
 - **subfleet** (Flux-managed): wraps the **Claude subscription** as an OpenAI-compatible **chat** API (spawns the
   bundled `claude` CLI per request; drops `tools`/`tool_calls`). `subfleet-bridge.uap-system.svc:18902`. Egress to
   Anthropic via the in-cluster `singbox-egress` (VLESS+REALITY, ADR-018). Retained for the owner's **other**
-  projects (a Telegram bot + web sessions); redundant for in-repo coding (which uses `claude -p` directly).
+  projects (a Telegram bot + web sessions); it is not an automatic route in current ADR-031 UAP Flow delivery.
 - **LiteLLM** v1.89.0 — deployed + smoke-verified, **Flux-reconciled** (`clusters/prod/infra/litellm.yaml` +
   `litellm-keys.sops.yaml` are now referenced by the kustomization). OpenAI gateway, groups
   `smart-cloud`/`-think`/`balanced-cloud`/`cheap-cloud`/`smart-cloud-pinned`; tailnet via `tailscale serve` on
