@@ -488,8 +488,11 @@ def validate_review(
         isinstance(item, str) and item for item in changed_files
     ):
         raise ContractError("summary.changed_files: non-empty string list required")
-    if not isinstance(verification.get("findings"), list):
-        raise ContractError("verification.findings: list required")
+    findings = verification.get("findings")
+    if not isinstance(findings, list) or not all(isinstance(item, str) for item in findings):
+        raise ContractError("verification.findings: string list required")
+    if findings:
+        raise ContractError("accepted review has actionable findings")
     _validate_checks(summary.get("checks"), "summary.checks")
     _validate_checks(verification.get("checks"), "verification.checks")
     cycles = verification.get("review_cycle")
