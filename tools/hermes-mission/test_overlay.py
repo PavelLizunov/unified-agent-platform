@@ -96,6 +96,9 @@ def main() -> None:
         assert "def _harden_db_permissions" in kanban
         assert "kb.unblock_task(conn, tid, reason=reason)" in kanban_cli
         assert 'payload["reason"] = reason' in kanban
+        assert '"--require-idle"' in kanban_cli
+        assert "GC deferred: board is not idle" in kanban_cli
+        assert "with kb.write_txn(conn):" in kanban_cli
 
         subprocess.run(
             [
@@ -119,7 +122,9 @@ def main() -> None:
             import threading
             import time
             from pathlib import Path
+            from types import SimpleNamespace
 
+            from hermes_cli import kanban as cli
             from hermes_cli import kanban_db as kb
             from hermes_cli import profiles
 
@@ -283,6 +288,73 @@ def main() -> None:
                     sidecar = Path(f"{database}{suffix}")
                     assert sidecar.exists(), sidecar
                     assert (sidecar.stat().st_mode & 0o777) == 0o600
+
+            idle_args = SimpleNamespace(
+                require_idle=True,
+                event_retention_days=30,
+                log_retention_days=30,
+            )
+            original_gc_logs = kb.gc_worker_logs
+            gc_log_calls = []
+
+            def observed_gc_logs(*args, **kwargs):
+                gc_log_calls.append(True)
+                return original_gc_logs(*args, **kwargs)
+
+            kb.gc_worker_logs = observed_gc_logs
+            assert cli._cmd_gc(idle_args) == 3
+            assert gc_log_calls == []
+
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute("UPDATE tasks SET status = 'archived'")
+
+            gc_entered = threading.Event()
+            release_gc = threading.Event()
+
+            def paused_gc_logs(*args, **kwargs):
+                gc_entered.set()
+                if not release_gc.wait(5):
+                    raise AssertionError("concurrent creator did not reach idle GC")
+                return original_gc_logs(*args, **kwargs)
+
+            kb.gc_worker_logs = paused_gc_logs
+            gc_results = []
+
+            def run_idle_gc():
+                try:
+                    gc_results.append(cli._cmd_gc(idle_args))
+                except BaseException as error:
+                    failures.append(error)
+
+            def create_during_gc():
+                try:
+                    with kb.connect_closing(database) as conn:
+                        kb.create_task(
+                            conn,
+                            title="Created during GC",
+                            tenant="mission-gc-race",
+                            idempotency_key="central-mission:mission-gc-race",
+                            initial_status="blocked",
+                        )
+                except BaseException as error:
+                    failures.append(error)
+
+            gc_thread = threading.Thread(target=run_idle_gc)
+            gc_thread.start()
+            assert gc_entered.wait(5)
+            creator_thread = threading.Thread(target=create_during_gc)
+            creator_thread.start()
+            time.sleep(0.05)
+            assert creator_thread.is_alive(), "creator bypassed the idle GC write lock"
+            release_gc.set()
+            gc_thread.join(5)
+            creator_thread.join(5)
+            kb.gc_worker_logs = original_gc_logs
+            assert not gc_thread.is_alive() and not creator_thread.is_alive()
+            assert not failures, failures
+            assert gc_results == [0]
+            assert cli._cmd_gc(idle_args) == 3
 
             legacy = Path(os.environ["HERMES_HOME"]) / "legacy-duplicates.db"
             with kb.connect_closing(legacy) as conn:

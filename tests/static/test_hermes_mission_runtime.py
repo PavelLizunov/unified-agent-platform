@@ -1328,18 +1328,64 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
         assert token and store.finish_notification(
             subscription, notification["sequence"], token, delivered=True
         )
-        completed = store.complete_if_ready(child)
+        store.append_central(
+            parent,
+            {
+                "schema_version": 1,
+                "mission_id": parent,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {
+                    "producer_event_id": "central:cancel:repair-parent"
+                },
+                "payload": {"reason": "parent stopped during repair"},
+            },
+        )
+        for number in range(missions._MAX_RETAINED_TERMINAL_MISSIONS):
+            mission_id = f"mission-auto-repair-fill-{number:03d}"
+            store.accept("Fill repair retention", mission_id=mission_id)
+            store.append_central(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {
+                        "producer_event_id": f"central:cancel:repair-fill:{number}"
+                    },
+                    "payload": {"reason": "fill repair retention"},
+                },
+            )
+
+        def reject_separate_prune(*_args, **_kwargs):
+            raise AssertionError(
+                "automatic completion used a second retention transaction"
+            )
+
+        original_prune = store.prune_terminal
+        store.prune_terminal = reject_separate_prune
+        try:
+            completed = store.complete_if_ready(child)
+        finally:
+            store.prune_terminal = original_prune
         assert completed is not None and completed[0]["type"] == "mission.completed"
         assert store.bound_mission("telegram", "42", "7") == parent
+        connection = sqlite3.connect(store.path)
+        try:
+            unbound = connection.execute(
+                """SELECT COUNT(DISTINCT events.mission_id)
+                   FROM mission_events AS events
+                   LEFT JOIN mission_subscriptions AS subscriptions
+                     ON subscriptions.mission_id = events.mission_id
+                   WHERE subscriptions.mission_id IS NULL"""
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        assert unbound == missions._MAX_RETAINED_TERMINAL_MISSIONS, unbound
         assert [item["reason"] for item in store.binding_history()] == [
             "manual-bind", "repair-inherit", "repair-restore"
         ]
-        assert not store.accept(
-            "Repair post-verify",
-            mission_id=child,
-            dispatch_profile="build1-repair",
-            parent_mission_id=parent,
-        )[1]
         assert store.bound_mission("telegram", "42", "7") == parent
 
 

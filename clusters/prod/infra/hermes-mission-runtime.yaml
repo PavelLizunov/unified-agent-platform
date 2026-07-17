@@ -28,7 +28,7 @@ data:
     }
     PATCHED_FILES = {
         "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
-        "hermes_cli/kanban.py": "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
+        "hermes_cli/kanban.py": "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
         "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
         "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
         "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
@@ -65,13 +65,119 @@ data:
                 '''    failed: list[str] = []''',
                 "atomic unblock audit author removal",
             )
-            return replace(
+            text = replace(
                 text,
                 '''            if reason:
                     kb.add_comment(conn, tid, author, f"UNBLOCK: {reason}")
                 if not kb.unblock_task(conn, tid):''',
                 '''            if not kb.unblock_task(conn, tid, reason=reason):''',
                 "atomic unblock audit reference",
+            )
+            text = replace(
+                text,
+                '''    p_gc.add_argument("--log-retention-days", type=int, default=30,
+                          help="Delete worker log files older than N days (default: 30)")''',
+                '''    p_gc.add_argument("--log-retention-days", type=int, default=30,
+                          help="Delete worker log files older than N days (default: 30)")
+        p_gc.add_argument("--require-idle", action="store_true",
+                          help="Fail closed unless the board is idle while old logs are removed")''',
+                "atomic idle GC option",
+            )
+            return replace(
+                text,
+                '''def _cmd_gc(args: argparse.Namespace) -> int:
+        """Remove scratch workspaces of archived tasks, prune old events, and
+        delete old worker logs."""
+        import shutil
+        scratch_root = kb.workspaces_root()
+        removed_ws = 0
+        with kb.connect_closing() as conn:
+            rows = conn.execute(
+                "SELECT id, workspace_kind, workspace_path FROM tasks WHERE status = 'archived'"
+            ).fetchall()
+        for row in rows:
+            if row["workspace_kind"] != "scratch":
+                continue
+            path = Path(row["workspace_path"] or (scratch_root / row["id"]))
+            try:
+                path = path.resolve()
+            except OSError:
+                continue
+            try:
+                path.relative_to(scratch_root.resolve())
+            except ValueError:
+                # Safety: never delete outside the scratch root.
+                continue
+            if path.exists() and path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                removed_ws += 1
+
+        event_days = getattr(args, "event_retention_days", 30)
+        log_days = getattr(args, "log_retention_days", 30)
+        with kb.connect_closing() as conn:
+            removed_events = kb.gc_events(
+                conn, older_than_seconds=event_days * 24 * 3600,
+            )
+        removed_logs = kb.gc_worker_logs(
+            older_than_seconds=log_days * 24 * 3600,
+        )
+        print(f"GC complete: {removed_ws} workspace(s), "
+              f"{removed_events} event row(s), {removed_logs} log file(s) removed")
+        return 0''',
+                '''def _cmd_gc(args: argparse.Namespace) -> int:
+        """Remove scratch workspaces of archived tasks, prune old events, and
+        delete old worker logs."""
+        import shutil
+        scratch_root = kb.workspaces_root()
+        event_days = getattr(args, "event_retention_days", 30)
+        log_days = getattr(args, "log_retention_days", 30)
+        removed_logs = None
+        if getattr(args, "require_idle", False):
+            with kb.connect_closing() as conn:
+                with kb.write_txn(conn):
+                    if conn.execute(
+                        "SELECT 1 FROM tasks WHERE status NOT IN ('done', 'archived') LIMIT 1"
+                    ).fetchone():
+                        print("GC deferred: board is not idle")
+                        return 3
+                    removed_logs = kb.gc_worker_logs(
+                        older_than_seconds=log_days * 24 * 3600,
+                    )
+
+        removed_ws = 0
+        with kb.connect_closing() as conn:
+            rows = conn.execute(
+                "SELECT id, workspace_kind, workspace_path FROM tasks WHERE status = 'archived'"
+            ).fetchall()
+        for row in rows:
+            if row["workspace_kind"] != "scratch":
+                continue
+            path = Path(row["workspace_path"] or (scratch_root / row["id"]))
+            try:
+                path = path.resolve()
+            except OSError:
+                continue
+            try:
+                path.relative_to(scratch_root.resolve())
+            except ValueError:
+                # Safety: never delete outside the scratch root.
+                continue
+            if path.exists() and path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                removed_ws += 1
+
+        with kb.connect_closing() as conn:
+            removed_events = kb.gc_events(
+                conn, older_than_seconds=event_days * 24 * 3600,
+            )
+        if removed_logs is None:
+            removed_logs = kb.gc_worker_logs(
+                older_than_seconds=log_days * 24 * 3600,
+            )
+        print(f"GC complete: {removed_ws} workspace(s), "
+              f"{removed_events} event row(s), {removed_logs} log file(s) removed")
+        return 0''',
+                "atomic idle GC",
             )
         if relative == "hermes_cli/kanban_db.py":
             text = replace(
@@ -1671,7 +1777,7 @@ data:
                     self._restore_parent_subscriptions(
                         connection, mission_id, parent_mission_id
                     )
-            self.prune_terminal()
+                self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
             return event, True
 
         def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:

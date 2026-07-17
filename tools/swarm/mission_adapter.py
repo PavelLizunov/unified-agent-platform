@@ -378,12 +378,14 @@ class HermesKanbanBackend:
         return snapshot
 
     def gc(self) -> bool:
-        tasks = self._json("list", "--archived", "--json")
-        if not isinstance(tasks, list) or not all(isinstance(task, dict) for task in tasks):
-            raise AdapterError("Hermes Kanban list response is invalid during GC")
-        if any(task.get("status") not in {"done", "archived"} for task in tasks):
+        result = self.runner(self._command("gc", "--require-idle"))
+        if result.returncode == 3:
             return False
-        self._run("gc")
+        if result.returncode:
+            raise AdapterError(
+                (result.stderr or result.stdout).strip()
+                or "Hermes Kanban command failed"
+            )
         return True
 
     def edit_metadata(

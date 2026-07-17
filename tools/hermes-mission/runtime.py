@@ -1067,7 +1067,7 @@ class MissionStore:
                 self._restore_parent_subscriptions(
                     connection, mission_id, parent_mission_id
                 )
-        self.prune_terminal()
+            self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
         return event, True
 
     def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:

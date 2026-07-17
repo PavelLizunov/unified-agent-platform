@@ -2073,16 +2073,53 @@ class DeliveryCoordinator:
             raise DeliveryError("disposable remote branch still exists")
 
     def _archive_task(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+        retained_at, current_time = self._retention_clock(paths["state"])
         if state.get("task_archived") is True:
+            self._task_archive_time(state, retained_at, current_time)
             return
+        if "task_archived_at" in state:
+            raise DeliveryError("completed state has invalid task archive time")
         self.backend.archive(state["root_task_id"])
         state["task_archived"] = True
         archived_at = time.time()
-        if not math.isfinite(archived_at) or archived_at <= 0:
+        if (
+            not math.isfinite(archived_at)
+            or archived_at <= 0
+            or archived_at < retained_at
+        ):
             raise DeliveryError("cannot checkpoint the Kanban task archive clock")
         state["task_archived_at"] = archived_at
         state["kanban_gc_ran"] = self.backend.gc()
         self._save(paths, state)
+
+    @staticmethod
+    def _retention_clock(path: pathlib.Path) -> tuple[float, float]:
+        retained_at = path.stat().st_mtime
+        current_time = time.time()
+        if (
+            not math.isfinite(retained_at)
+            or retained_at <= 0
+            or not math.isfinite(current_time)
+            or current_time <= 0
+            or retained_at > current_time
+        ):
+            raise DeliveryError("completed state has invalid retention clock")
+        return retained_at, current_time
+
+    @staticmethod
+    def _task_archive_time(
+        state: dict[str, Any], retained_at: float, current_time: float
+    ) -> float:
+        archived_at = state.get("task_archived_at", retained_at)
+        if (
+            isinstance(archived_at, bool)
+            or not isinstance(archived_at, (int, float))
+            or not math.isfinite(float(archived_at))
+            or float(archived_at) <= 0
+            or float(archived_at) > current_time
+        ):
+            raise DeliveryError("completed state has invalid task archive time")
+        return float(archived_at)
 
     def _prune_completed_states(self) -> None:
         # Rename before recursive deletion so a crash after delivery-state.json
@@ -2095,18 +2132,17 @@ class DeliveryCoordinator:
         for path in self.state_root.glob("mission-*/delivery-state.json"):
             try:
                 state = mission_adapter._read_json(path)
-                retained_at = path.stat().st_mtime
             except FileNotFoundError:
                 continue
-            if not math.isfinite(retained_at) or retained_at <= 0:
-                raise DeliveryError("completed state has invalid retention clock")
             if (
                 isinstance(state, dict)
                 and state.get("dispatch_profile") == self.profile["dispatch_profile"]
                 and state.get("phase") == "complete"
             ):
-                gc_now: bool | None = None
+                retained_at, current_time = self._retention_clock(path)
                 if state.get("task_archived") is not True:
+                    if "task_archived_at" in state:
+                        raise DeliveryError("completed state has invalid task archive time")
                     self.backend.archive(state["root_task_id"])
                     archived_at = time.time()
                     if (
@@ -2124,26 +2160,13 @@ class DeliveryCoordinator:
                         private_parent=True,
                         retained_mtime=retained_at,
                     )
-                archived_at = state.get("task_archived_at", retained_at)
-                current_time = time.time()
-                if (
-                    not math.isfinite(current_time)
-                    or current_time <= 0
-                    or retained_at > current_time
-                ):
-                    raise DeliveryError("completed state has invalid retention clock")
-                if (
-                    isinstance(archived_at, bool)
-                    or not isinstance(archived_at, (int, float))
-                    or not math.isfinite(float(archived_at))
-                    or float(archived_at) <= 0
-                    or float(archived_at) > current_time
-                ):
-                    raise DeliveryError("completed state has invalid task archive time")
+                    current_time = archived_at
+                archived_at = self._task_archive_time(
+                    state, retained_at, current_time
+                )
                 if state.get("kanban_gc_ran") is not True:
-                    gc_now = self.backend.gc()
-                    state["kanban_gc_ran"] = gc_now
-                    if not gc_now:
+                    state["kanban_gc_ran"] = self.backend.gc()
+                    if state["kanban_gc_ran"] is not True:
                         continue
                     mission_adapter._write_json(
                         path,
@@ -2158,9 +2181,7 @@ class DeliveryCoordinator:
                 ):
                     continue
                 if state.get("kanban_retention_gc_ran") is not True:
-                    if gc_now is None:
-                        gc_now = self.backend.gc()
-                    if not gc_now:
+                    if not self.backend.gc():
                         continue
                     state["kanban_retention_gc_ran"] = True
                     mission_adapter._write_json(
