@@ -2292,8 +2292,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             state_root = root / "state"
+            backend = FakeBackend()
             instance = coordinator.DeliveryCoordinator(
-                profile(root), FakeClient(), FakeBackend(), state_root
+                profile(root), FakeClient(), backend, state_root
             )
             paths = instance._paths("mission-a7-3")
             instance._save(paths, {
@@ -2308,6 +2309,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             os.utime(paths["state"], (old, old))
             instance._prune_completed_states()
             self.assertFalse(paths["directory"].exists())
+            self.assertEqual(1, backend.gcs)
             instance._prune_completed_states()
             if os.name == "posix":
                 self.assertEqual(0o700, state_root.stat().st_mode & 0o777)
@@ -2399,7 +2401,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             })
             old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
             os.utime(paths["state"], (old, old))
-            instance.backend.gc = mock.Mock(side_effect=(False, True))
+            instance.backend.gc = mock.Mock(side_effect=(False, True, True))
 
             instance._prune_completed_states()
             self.assertTrue(paths["state"].exists())
@@ -2423,7 +2425,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(old, paths["state"].stat().st_mtime)
             instance._prune_completed_states()
             self.assertFalse(paths["directory"].exists())
-            self.assertEqual(2, instance.backend.gc.call_count)
+            self.assertEqual(3, instance.backend.gc.call_count)
 
     def test_restart_reuses_task_run_worktree_and_author_commit(self):
         with tempfile.TemporaryDirectory() as directory:

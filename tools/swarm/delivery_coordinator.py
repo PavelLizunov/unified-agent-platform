@@ -2099,6 +2099,7 @@ class DeliveryCoordinator:
                 and state.get("dispatch_profile") == self.profile["dispatch_profile"]
                 and state.get("phase") == "complete"
             ):
+                gc_now: bool | None = None
                 if state.get("task_archived") is not True:
                     self.backend.archive(state["root_task_id"])
                     state["task_archived"] = True
@@ -2110,8 +2111,9 @@ class DeliveryCoordinator:
                         retained_mtime=retained_at,
                     )
                 if state.get("kanban_gc_ran") is not True:
-                    state["kanban_gc_ran"] = self.backend.gc()
-                    if state["kanban_gc_ran"] is not True:
+                    gc_now = self.backend.gc()
+                    state["kanban_gc_ran"] = gc_now
+                    if not gc_now:
                         continue
                     mission_adapter._write_json(
                         path,
@@ -2121,6 +2123,18 @@ class DeliveryCoordinator:
                     )
                 if retained_at >= cutoff:
                     continue
+                if state.get("kanban_retention_gc_ran") is not True:
+                    if gc_now is None:
+                        gc_now = self.backend.gc()
+                    if not gc_now:
+                        continue
+                    state["kanban_retention_gc_ran"] = True
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
                 pending = self.state_root / f".prune-{path.parent.name}"
                 try:
                     path.parent.replace(pending)

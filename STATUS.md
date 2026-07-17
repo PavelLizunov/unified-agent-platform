@@ -66,7 +66,8 @@ Last updated: 2026-07-16
   tombstones prevent reuse of retired stable IDs. Terminal pruning also removes obsolete subscription-history
   references. Successful and exhausted deliveries archive their native Kanban
   task. Hermes' existing 30-day event/log GC runs only while the board has no nonterminal task and is retried when
-  deferred, preventing cleanup from truncating a long-running worker log. Delivery evidence remains owner-only for 30 days; deliveries remove
+  deferred, preventing cleanup from truncating a long-running worker log. Removing 30-day delivery state requires a
+  separate successful GC checkpoint after that deadline; an earlier completion-time GC is not sufficient. Delivery evidence remains owner-only for 30 days; deliveries remove
   disposable worktrees immediately. Central DB/WAL/SHM, adapter state and the common state root are owner-only on POSIX.
   The remaining acceptance gate is the clean Telegram-bound non-toy canary, not another lifecycle service.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
