@@ -177,8 +177,7 @@ def main() -> int:
     source = pathlib.Path(__file__).resolve().parent
     home = args.home.expanduser().resolve()
     hermes_root = args.hermes_root.expanduser().resolve()
-    if not args.check:
-        _require_all_profile_units_inactive(home)
+    _require_all_profile_units_inactive(home)
     (check if args.check else install)(source, home, hermes_root)
     if args.migrate_profile:
         changed = migrate_profile(args.migrate_profile)

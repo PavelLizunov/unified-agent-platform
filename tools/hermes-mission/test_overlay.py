@@ -397,6 +397,18 @@ def main() -> None:
                     )
             assert cli._cmd_gc(idle_args) == 1
             assert outside.is_dir()
+            scratch_root = kb.workspaces_root()
+            root_guard_sentinel = scratch_root / "root-guard-sentinel"
+            root_guard_sentinel.mkdir(parents=True, exist_ok=True)
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(scratch_root), concurrent_ids[0]),
+                    )
+            assert cli._cmd_gc(idle_args) == 1
+            assert root_guard_sentinel.is_dir()
+            scratch.mkdir(parents=True, exist_ok=True)
             with kb.connect_closing(database) as conn:
                 with kb.write_txn(conn):
                     conn.execute(
@@ -484,17 +496,15 @@ def main() -> None:
         race_env["HERMES_HOME"] = str(pathlib.Path(temp) / "hermes-home")
         race_env["HERMES_KANBAN_DB"] = str(pathlib.Path(temp) / "atomic-kanban.db")
         subprocess.run([sys.executable, "-c", race], env=race_env, check=True)
-        hermes_python = (
-            source / ".venv/bin/python"
+        hermes_executable = (
+            source / ".venv/bin/hermes"
             if isinstance(source, pathlib.Path)
             else None
         )
-        if hermes_python is not None and hermes_python.is_file():
+        if hermes_executable is not None and hermes_executable.is_file():
             executable_gc = subprocess.run(
                 [
-                    str(hermes_python),
-                    "-c",
-                    "from hermes_cli.main import main; raise SystemExit(main())",
+                    str(hermes_executable),
                     "kanban",
                     "--board",
                     "default",
@@ -507,6 +517,13 @@ def main() -> None:
             )
             assert executable_gc.returncode == 3, executable_gc.stderr
             assert executable_gc.stdout.strip() == "GC deferred: board is not idle"
+            project_list = subprocess.run(
+                [str(hermes_executable), "project", "list"],
+                env=race_env,
+                text=True,
+                capture_output=True,
+            )
+            assert project_list.returncode == 0, project_list.stderr
 
         image_root = pathlib.Path(temp) / "image-root"
         for relative in (

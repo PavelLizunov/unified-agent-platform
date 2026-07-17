@@ -22,7 +22,7 @@ FILES = {
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
-    "hermes_cli/kanban.py": "4c137a14ca8a880a95e2fe58a4c410afbc8e2f2547f63b474bc959aab6415502",
+    "hermes_cli/kanban.py": "92d6c82cf7c7adf3eace25173aa00a8434367a4403f14942fee60013056bd6bb",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
@@ -206,6 +206,9 @@ def transform(relative: str, text: str) -> str:
             path.relative_to(scratch_root)
         except ValueError:
             print("GC failed: scratch workspace is outside the scratch root", file=sys.stderr)
+            return 1
+        if path == scratch_root:
+            print("GC failed: scratch workspace is the scratch root", file=sys.stderr)
             return 1
         try:
             mode = path.stat().st_mode
