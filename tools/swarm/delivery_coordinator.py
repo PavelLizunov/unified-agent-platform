@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Any, Callable
 
@@ -67,6 +68,7 @@ _PRE_REVIEW_CI_SUMMARY = (
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
+_MAX_SUBPROCESS_CAPTURE_BYTES = 16 * 1024
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
 _DIAGNOSTIC_REDACTIONS = (
@@ -431,6 +433,47 @@ class DeliveryCoordinator:
         if check and result.returncode:
             raise DeliveryError(_command_failure(result, command))
         return result
+
+    def _run_bounded(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        """Drain untrusted command output while retaining only a small tail in memory."""
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            env=self._safe_env(),
+        )
+        if process.stdout is None:
+            raise DeliveryError("bounded command output pipe is unavailable")
+        captured = bytearray()
+
+        def drain() -> None:
+            while chunk := process.stdout.read(8192):
+                captured.extend(chunk)
+                if len(captured) > _MAX_SUBPROCESS_CAPTURE_BYTES:
+                    del captured[:-_MAX_SUBPROCESS_CAPTURE_BYTES]
+
+        reader = threading.Thread(target=drain, daemon=True)
+        reader.start()
+        timed_out = False
+        try:
+            process.wait(timeout=self.profile["command_timeout_seconds"])
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            process.kill()
+            process.wait()
+        reader.join(timeout=5)
+        if reader.is_alive():
+            process.stdout.close()
+            reader.join(timeout=1)
+        else:
+            process.stdout.close()
+        text = captured.decode("utf-8", "replace")
+        if timed_out:
+            text += "\ncommand timed out"
+        return subprocess.CompletedProcess(
+            command, 124 if timed_out else process.returncode, stdout=text, stderr=""
+        )
 
     def _model_env(self, paths: dict[str, pathlib.Path]) -> dict[str, str]:
         home = paths["directory"] / "model-home"
@@ -1403,6 +1446,35 @@ class DeliveryCoordinator:
         if remote.split() != [candidate, f"refs/heads/{state['branch']}"]:
             raise DeliveryError("pre-review candidate branch identity changed")
 
+    def _bound_pr(
+        self, state: dict[str, Any], *, allowed_heads: set[str]
+    ) -> dict[str, Any]:
+        bound = state.get("pr_number")
+        base = state.get("pr_base_branch")
+        if (
+            isinstance(bound, bool)
+            or not isinstance(bound, int)
+            or base != self.profile["default_branch"]
+            or not allowed_heads
+        ):
+            raise DeliveryError("durable PR identity is invalid")
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
+        info = json.loads(self._run([
+            self.profile["gh_bin"], "pr", "view", str(bound),
+            "--repo", self.profile["repo"], "--json", fields,
+        ]).stdout)
+        if (
+            info.get("number") != bound
+            or not isinstance(info.get("url"), str)
+            or info.get("state") != "OPEN"
+            or not isinstance(info.get("isDraft"), bool)
+            or info.get("headRefName") != state["branch"]
+            or info.get("baseRefName") != base
+            or _pr_head_oid(info) not in allowed_heads
+        ):
+            raise DeliveryError("durable PR changed before candidate delivery")
+        return info
+
     def _push_candidate(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> None:
@@ -1412,6 +1484,18 @@ class DeliveryCoordinator:
             raise DeliveryError("pre-review platform gate has no exact candidate")
         if previous is not None and (not isinstance(previous, str) or not previous):
             raise DeliveryError("durable pre-review candidate identity is invalid")
+        bound = state.get("pr_number")
+        if bound is not None:
+            previous_pr_head = state.get("pr_head_sha")
+            if (
+                not isinstance(previous_pr_head, str)
+                or not previous_pr_head
+                or previous != previous_pr_head
+            ):
+                raise DeliveryError("durable repair PR checkpoint is inconsistent")
+            self._bound_pr(
+                state, allowed_heads={previous_pr_head, candidate}
+            )
         remote = self._git(
             paths["author"], "ls-remote", "--heads", "origin", state["branch"]
         )
@@ -1436,7 +1520,67 @@ class DeliveryCoordinator:
                 "--set-upstream", "origin", state["branch"],
             )
         self._assert_candidate_branch(state)
+        if bound is not None:
+            info = self._bound_pr(state, allowed_heads={candidate})
+            state.update(
+                pr_head_sha=candidate,
+                pr_url=info["url"],
+                pr_is_draft=info["isDraft"],
+            )
         state.update(phase="candidate_pushed", candidate_push_sha=candidate)
+        self._save(paths, state)
+
+    def _ensure_candidate_pr(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        self._assert_candidate_branch(state)
+        if state.get("candidate_push_sha") != state.get("candidate_sha"):
+            raise DeliveryError("pre-review PR has no exact pushed candidate")
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
+        bound = state.get("pr_number")
+        if bound is None:
+            view = self._run([
+                self.profile["gh_bin"], "pr", "view", state["branch"],
+                "--repo", self.profile["repo"], "--json", fields,
+            ], check=False)
+            if view.returncode:
+                self._assert_claim(
+                    state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+                )
+                self._run([
+                    self.profile["gh_bin"], "pr", "create", "--draft",
+                    "--repo", self.profile["repo"],
+                    "--base", self.profile["default_branch"],
+                    "--head", state["branch"],
+                    "--title", self.profile["pull_request_title"],
+                    "--body", self.profile["pull_request_body"],
+                ], cwd=paths["author"], check=False)
+                view = self._run([
+                    self.profile["gh_bin"], "pr", "view", state["branch"],
+                    "--repo", self.profile["repo"], "--json", fields,
+                ], check=False)
+            if view.returncode:
+                raise DeliveryError("pre-review draft PR could not be created or recovered")
+            info = json.loads(view.stdout)
+            if (
+                not isinstance(info.get("number"), int)
+                or not isinstance(info.get("url"), str)
+                or info.get("state") != "OPEN"
+                or info.get("isDraft") is not True
+                or info.get("headRefName") != state["branch"]
+                or info.get("baseRefName") != self.profile["default_branch"]
+                or _pr_head_oid(info) != state["candidate_sha"]
+            ):
+                raise DeliveryError("GitHub returned an invalid pre-review draft PR")
+            state.update(
+                pr_number=info["number"], pr_url=info["url"],
+                pr_head_sha=state["candidate_sha"],
+                pr_base_branch=info["baseRefName"], pr_is_draft=True,
+            )
+        else:
+            info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+            state.update(pr_url=info["url"], pr_is_draft=info["isDraft"])
+        state["phase"] = "candidate_pr_open"
         self._save(paths, state)
 
     def _wait_candidate_ci(
@@ -1470,6 +1614,8 @@ class DeliveryCoordinator:
         if state["phase"] == "author_committed":
             self._push_candidate(state, paths)
         if state["phase"] == "candidate_pushed":
+            self._ensure_candidate_pr(state, paths)
+        if state["phase"] == "candidate_pr_open":
             self._wait_candidate_ci(state, paths)
         if state["phase"] != "pre_review_ci_green":
             raise DeliveryError("pre-review platform gate did not reach green")
@@ -1588,7 +1734,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        fields = "number,url,state,headRefName,commits,baseRefName"
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
         bound = state.get("pr_number")
         if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):
             raise DeliveryError("durable PR identity is invalid")
@@ -1606,6 +1752,7 @@ class DeliveryCoordinator:
             if (
                 previous.get("number") != bound
                 or previous.get("state") != "OPEN"
+                or not isinstance(previous.get("isDraft"), bool)
                 or previous.get("headRefName") != state["branch"]
                 or previous.get("baseRefName") != previous_base
             ):
@@ -1668,15 +1815,35 @@ class DeliveryCoordinator:
             not isinstance(info.get("number"), int)
             or not isinstance(info.get("url"), str)
             or info.get("state") != "OPEN"
+            or not isinstance(info.get("isDraft"), bool)
             or info.get("headRefName") != state["branch"]
             or _pr_head_oid(info) != state["candidate_sha"]
             or info.get("baseRefName") != self.profile["default_branch"]
             or (bound is not None and info.get("number") != bound)
         ):
             raise DeliveryError("GitHub returned invalid PR identity")
+        if info["isDraft"]:
+            self._run([
+                self.profile["gh_bin"], "pr", "ready", str(info["number"]),
+                "--repo", self.profile["repo"],
+            ], check=False)
+            info = json.loads(self._run([
+                self.profile["gh_bin"], "pr", "view", str(info["number"]),
+                "--repo", self.profile["repo"], "--json", fields,
+            ]).stdout)
+            if (
+                info.get("number") != bound
+                or info.get("state") != "OPEN"
+                or info.get("isDraft") is not False
+                or info.get("headRefName") != state["branch"]
+                or _pr_head_oid(info) != state["candidate_sha"]
+                or info.get("baseRefName") != self.profile["default_branch"]
+            ):
+                raise DeliveryError("pre-review PR did not become ready at the exact candidate")
         state.update(
             phase="pr_open", pr_number=info["number"], pr_url=info["url"],
             pr_head_sha=state["candidate_sha"], pr_base_branch=info["baseRefName"],
+            pr_is_draft=False,
         )
         self._save(paths, state)
 
@@ -1722,8 +1889,10 @@ class DeliveryCoordinator:
             )
         ):
             raise DeliveryError("pre-review platform checks have no durable identity")
+        if not isinstance(pr_number, int):
+            raise DeliveryError("pre-review platform checks have no draft PR identity")
         return self._actions_rollup(
-            head, branch, pr_number=pr_number, push_only=True
+            head, branch, pr_number=pr_number, pull_request_only=True
         )
 
     def _actions_rollup(
@@ -1732,7 +1901,7 @@ class DeliveryCoordinator:
         branch: str,
         *,
         pr_number: int | None,
-        push_only: bool = False,
+        pull_request_only: bool = False,
     ) -> list[dict[str, Any]]:
         repo = self.profile["repo"]
         value = json.loads(self._run([
@@ -1769,8 +1938,8 @@ class DeliveryCoordinator:
             event = run.get("event")
             if run.get("head_branch") != branch:
                 continue
-            if push_only:
-                if event != "push" or (pull_requests and not associated):
+            if pull_request_only:
+                if event != "pull_request" or not associated:
                     continue
             elif (
                 (event == "pull_request" and not associated)
@@ -1780,11 +1949,11 @@ class DeliveryCoordinator:
                 continue
             current = selected.get(run["workflow_id"])
             rank = (
-                not push_only and pr_number is not None and event == "pull_request",
+                pr_number is not None and event == "pull_request",
                 run["id"],
             )
             current_rank = (
-                not push_only and pr_number is not None and current is not None
+                pr_number is not None and current is not None
                 and current.get("event") == "pull_request",
                 current["id"] if current is not None else -1,
             )
@@ -1848,7 +2017,7 @@ class DeliveryCoordinator:
                 self.profile["gh_bin"], "run", "view", str(run_id),
                 "--repo", self.profile["repo"], "--log-failed",
             ]
-            result = self._run(command, check=False)
+            result = self._run_bounded(command)
             raw = _command_failure(result, command) if result.returncode else result.stdout
             if raw and raw.strip():
                 diagnostics.append(f"workflow run {run_id}:\n{raw.strip()}")
@@ -2487,7 +2656,9 @@ class DeliveryCoordinator:
                 self._save(paths, state)
                 raise InjectedCrash("approved crash after durable author commit before Central ACK")
 
-            if state["phase"] in {"author_committed", "candidate_pushed"}:
+            if state["phase"] in {
+                "author_committed", "candidate_pushed", "candidate_pr_open"
+            }:
                 self._assert_claim(state)
                 if self._git(paths["author"], "rev-parse", "HEAD") != state["candidate_sha"]:
                     raise DeliveryError("restart did not preserve the exact author commit")
@@ -2505,6 +2676,7 @@ class DeliveryCoordinator:
             if state["phase"] == "pre_review_ci_green":
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
+                self._bound_pr(state, allowed_heads={state["candidate_sha"]})
                 if not self._review(state, paths):
                     if state["phase"] == "review_rejected":
                         return self._finish_rejection(state, paths)
