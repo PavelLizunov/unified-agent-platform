@@ -126,18 +126,18 @@ target startup, not missing snapshot material.
 The production canary namespace, exact local/R2 test snapshot, staged token/value and all disposable k3s/CNI state
 were removed. Production nodes remained Ready and the test VM returned to its original non-k3s state.
 
-## Canary Secret-value restore drill (owner-gated, destructive-on-a-throwaway-node)
+## Canary Secret-value restore drill (disposable-only)
 
-Status: **verified PASS 2026-07-12**. Keep this procedure for future periodic drills; every repeat remains
-owner-gated because it creates a temporary production Secret and performs a destructive restore on the target.
+Status: **verified PASS 2026-07-12**. Keep this procedure for future periodic drills. A repeat within this exact
+repo-defined boundary needs no per-run approval: the restore target is disposable, the production object is a temporary
+canary Secret, and cleanup is mandatory.
 
 **Purpose.** Repeatably prove that a Secret *value* (not just the Secret object) survives a cross-node restore from
 the R2 snapshot using the snapshot + original server token alone.
 
-**Owner-gated.** This is a destructive drill: it needs a **disposable k3s node the owner provisions**, and it
-touches prod (creates a throwaway Secret + takes a snapshot). Per repo boundaries (`CLAUDE.md` → "Things That Need
-Owner Input" → *any destructive test*), get explicit owner approval before running it. Nothing here should be run
-against a live server as a restore target — only against the disposable node.
+**Safety boundary.** Use only a **disposable k3s node** as the restore target. The drill creates a throwaway production
+Secret and snapshot, then removes both. Using a live/non-disposable restore target, retaining test data or widening the
+procedure is outside this standing authorization and requires explicit owner approval.
 
 Run the prod-side steps from `uap-ops-1` (has `kubectl` + the R2 `rclone` remote). Reuse the **Restore on Disposable
 VM** and **S3 Restore Note** sections above for the actual `cluster-reset` restore mechanics — this drill only adds

@@ -128,13 +128,14 @@ all five gates=passed
 ```
 
 The following is an explicitly labeled live read-only evidence block from the authenticated Central private API. It
-records every canonical envelope field except payload and unused optional session/worker correlation, without chat
-identity. `run_id` was not present in these canonical event correlations; the native run `38` is evidenced separately
-by the task snapshot above.
+records every canonical envelope field except payload and unused optional session correlation, without chat identity.
+`run_id` was not present in these canonical event correlations; the native run `38` is evidenced separately by the
+task snapshot above. Both `worker.upsert` events correlated worker `t_1d60193c:run:38`; `worker_id` was absent elsewhere.
 
 ```text
 schema_version=1
 mission_id=a7-clean-ledger-list-20260717-a0fc5a
+worker_id(sequence 5,11)=t_1d60193c:run:38
 
 seq | event_id                                      | occurred_at              | type              | source         | task_id    | run_id | producer_event_id
 1   | a7-clean-ledger-list-20260717-a0fc5a:1       | 2026-07-17T12:05:11.263Z | mission.accepted  | central-hermes | -          | -      | -

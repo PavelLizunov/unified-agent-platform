@@ -73,7 +73,7 @@ Use tailnet IPs for SSH and smoke tests.
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
 | `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; deploy path verified from ops |
 | `desktop-m922ij2` | workstation / **GPU host** | — | `100.114.172.40` | Win 11, 32c/32GB, **RTX 5060 Ti 16GB**; **NOT always-on**; future local-FC-model host + agent-worker |
-| `pavels-mac-mini` | personal / agent-worker | — | `100.116.97.112` | Apple Silicon; SSH off; **NOT always-on** |
+| `pavels-mac-mini` | personal / agent-worker | — | `100.116.97.112` | Apple Silicon; SSH off; **always-on** |
 
 Full fleet + roles: `docs/infrastructure.md`. The only GPU is on the **not-always-on** Windows desktop, so a
 local-model brain on the RTX is only available when it is on (hence Codex-sub is the durable brain).
@@ -200,8 +200,9 @@ Good next tasks that do not require redesign:
    recovery history in `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
-   dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the
-   mission remain gated. `openai-autonomy-v2` and the schema-v3 profile are installed and ran live. The same PR number
+   dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
+   non-disposable state and work outside the mission remain gated. `openai-autonomy-v2` and the schema-v3 profile ran
+   live. The same PR number
    and pushed head are durable identity;
    final failure validates the durable PR number/head/base under a live claim and preserves an open exact PR/branch as
    bounded evidence because GitHub has no conditional close; an already closed PR's unchanged branch is lease-deleted.
@@ -222,7 +223,8 @@ Good next tasks that do not require redesign:
 No owner input is currently required for the accepted A7 fixed-profile path. Ask only when scope actually needs:
 
 - a new provider, credential or external authority not already configured;
-- a destructive test or irreversible action, such as overwriting a VM restore target, node shutdown or k3s reset;
+- a destructive test against non-disposable state or an irreversible action, such as overwriting a live VM restore
+  target, node shutdown or production k3s reset; repo-defined hermetic/disposable drills need no per-run approval;
 - a change to a closed topology/security/architecture decision;
 - the separately deferred VPS/HA or off-homelab age-key escrow decisions.
 

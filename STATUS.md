@@ -388,9 +388,9 @@ over bare Docker.
   `/opt/data/.claude/settings.json` is defense-in-depth (the pod is the real boundary, Bash is unconstrained).
   **Verified in-cluster:** `claude -p` returns a result through the egress with the secret-injected token, and the
   deny rule blocks a decoy secret read. Recipe + gotchas in memory `uap-claude-worker`; config-rev `v7-claude-worker`.
-  **Current commercial state (owner update 2026-07-13):** the Claude subscription is no longer Max and its present
-  usage is exhausted. Flow v2 therefore treats Claude as quota-aware secondary/reviewer, not guaranteed capacity;
-  Codex has the current x20 capacity. These capacity labels are not model IDs.
+  **Historical commercial checkpoint (owner update 2026-07-13):** the Claude subscription was no longer Max and its
+  usage was exhausted. Since ADR-031, current Flow v2 automatic coding/review is OpenAI-only Luna/Sol/Terra; Claude is
+  retained separate legacy capacity and requires an explicit owner decision.
 - **A5 coding engines + worktree isolation — verified 2026-06-26:** BOTH coding engines work in-cluster —
   `codex exec "<task>"` (the 2nd engine, via the Codex auth + egress) edits files autonomously, and `claude -p -w <name>`
   runs in an **isolated git worktree** (`.claude/worktrees/<name>`, its own branch) so a coding task never touches the
