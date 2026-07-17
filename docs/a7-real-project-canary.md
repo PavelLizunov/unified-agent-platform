@@ -1,22 +1,24 @@
 # A7.3 Real-Project Canary Contract
 
-Status: **executed seven times on 2026-07-15/16; recoverable target delivery passed, but A7.3 is not fully accepted
-until one clean uninterrupted repeat also proves the subscribed Telegram projection**.
+Status: **fixed-profile acceptance canary passed on 2026-07-17**.
 
 The six historical per-attempt approvals are exhausted. ADR-031 provides standing authorization for OpenAI
 Luna/Sol/Terra model turns, ordinary subscription spend and automatic retry/escalation. Attempt 7 used the installed
-`openai-autonomy-v2` schema-v3 profile and reached accepted Sol/Terra `xhigh` review, required CI, exact-head merge,
-fresh-main Windows post-verify and cleanup. Four harness fixes were installed between durable ticks, so it proves the
-recoverable success path rather than one uninterrupted run on the corrected runtime. The coordinator foundation and
-exact evidence are recorded in
+`openai-autonomy-v2` schema-v3 profile and proved the recoverable target-delivery path while four harness fixes landed
+between durable ticks. The later mission `a7-clean-ledger-list-20260717-a0fc5a` began after those corrections were
+installed, was bound to Telegram before execution, and completed the same contract from timer intake through Sol/Terra
+`xhigh` author/review, multi-platform CI, exact-head merge, fresh-main post-verify, Central/Workspace/Telegram terminal
+convergence and cleanup. Its planned crash checkpoint recovered without a duplicate author or candidate and required
+no mid-run code/profile repair. Exact evidence is recorded in
+[`evidence/a7-3-clean-telegram-canary-2026-07-17.md`](evidence/a7-3-clean-telegram-canary-2026-07-17.md); the earlier
+recovery history remains in
 [`evidence/a7-3-activation-delivery-canary-2026-07-15.md`](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
-The next canary reuses that fixed policy/runtime without a new per-attempt approval and must run uninterrupted. It must
-also bind a Telegram subscription before execution so the final Central, Workspace and Telegram projection can satisfy
-the acceptance bundle. V2 preserves only bounded CI name/outcome metadata, accepts compatible v1 attestations for an
-in-progress cycle, refuses PR rebinding, and autonomously repairs review/required-CI failures on the same exact PR.
+V2 preserves only bounded CI name/outcome metadata, accepts compatible v1 attestations for an in-progress cycle,
+refuses PR rebinding, and autonomously repairs review/required-CI failures on the same exact PR.
 
-No profile timer is enabled. Claude, local inference/GPU, new credentials/providers and destructive actions remain
-outside the standing authority.
+The one-shot acceptance profile timer was stopped after cleanup; previously active fixed-profile timers were restored
+only after a zero-candidate check. Claude, local inference/GPU, new credentials/providers and destructive actions
+remain outside the standing authority.
 
 ## Scope
 

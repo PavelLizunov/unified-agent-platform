@@ -4,7 +4,8 @@
 > gateway. Written **brain-agnostic** (the brain is one config line, ADR-025); the current brain is
 > stated in §4.
 >
-> The live brain returned to **Codex `gpt-5.5`** on 2026-07-11 after owner device-auth (#119).
+> The live brain returned to Codex on 2026-07-11 after owner device-auth (#119); the current managed default is
+> **`gpt-5.6-luna`**.
 > The local qwen/ornith router remains the manual fallback (§4).
 
 ## How to read this doc (LOAD DISCIPLINE — read §0 before anything)
@@ -74,7 +75,7 @@ The seven hard rules (full RU text in the `user-profile` key):
 
 ## 4. Your brain & the model layer (CURRENT = Codex)
 
-**Core.** **Brain today = Codex `gpt-5.5`** via `codex_app_server` and the ChatGPT-Plus OAuth store.
+**Core.** **Brain today = Codex `gpt-5.6-luna`** via `codex_app_server` and the ChatGPT-Plus OAuth store.
 Cloud traffic leaves through `singbox-egress-ha`; the owner re-authenticated the single-use token lineage
 on 2026-07-11. The ops-1 router remains the manual local fallback: `qwen-35b` on the not-always-on desktop,
 then `ornith-9b` on the always-on Mac. Switching is documented, not automatic. The router IP
@@ -117,7 +118,9 @@ in the repo worktree on build-1. Tool availability must be checked, not inferred
 **Core.** North star = **vibe-coding**: owner supplies ideas + infra and **does not review generated
 code** (ADR-022). Therefore **your own self-test IS the quality gate** — "done" = tests green + behaviour
 verified, not "looks right". Every change ships with its own test. Acceptance was run and **accepted at
-~98%** (must-pass gates all green: brain alive, work on build-1, push works, context < 100K tokens).
+~98%** on 2026-07-03; that point-in-time claim is superseded by the current gate-based A7 evidence. The configured
+fixed-profile autonomous canary passed, while generic repository intake and full cross-channel chat/session history
+remain explicit product gaps.
 **Pointer:** ADR-022 (`DECISIONS.md`); `runbooks/vibe-coding-acceptance.md`; `runbooks/validation-matrix.md`.
 
 ## 9. Secrets model (SOPS — reference by location, never print)
@@ -215,8 +218,8 @@ Read-order for anything model/agent/coding, then stop at the file that answers y
 | Closed decisions / why | `DECISIONS.md` (ADRs) |
 | Fleet + what-runs-where | `docs/infrastructure.md`, `docs/fleet-map.md` |
 | Handoff + boundaries | `CLAUDE.md` |
-| Brain (current, local router) | `runbooks/local-models-router.md` |
-| Brain (Codex era + config ownership + auth) | `runbooks/hermes-agent-codex-brain.md` |
+| Brain (current Codex + config ownership + auth) | `runbooks/hermes-agent-codex-brain.md` |
+| Manual local fallback | `runbooks/local-models-router.md` |
 | Egress / RU constraint | `runbooks/llm-egress-vless.md` |
 | Coding acceptance (the cycle) | `runbooks/vibe-coding-acceptance.md` |
 | Knowledge base (retrieval-first) | `runbooks/knowledge-system.md` |

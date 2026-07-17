@@ -115,10 +115,9 @@ version, edit that manifest (see Step 3) via a PR and let Flux reconcile.
 
 Already promoted to `clusters/prod/infra/litellm.yaml`: it points the cloud groups at the bridge
 `api_base` with `api_key: os.environ/SUBFLEET_KEY` and forwards `reasoning_effort`. `SUBFLEET_KEY`
-(= `BRIDGE_SECRET`) and `LITELLM_MASTER_KEY` come from `litellm-keys.sops.yaml`. (Note: the LIVE
-hermes-agent brain no longer routes through this LiteLLM — it uses the ops-1 local-models-router at
-`http://100.82.241.121:8090/v1`, model `qwen-35b`; subfleet/LiteLLM is retained for the owner's other
-subscription consumers. See memory `uap-local-models-router`.)
+(= `BRIDGE_SECRET`) and `LITELLM_MASTER_KEY` come from `litellm-keys.sops.yaml`. The live hermes-agent brain does
+not route through LiteLLM: it uses Codex `gpt-5.6-luna` via `codex_app_server`. Subfleet/LiteLLM is retained for the
+owner's other subscription consumers; the ops-1 `qwen-35b`/`ornith-9b` router is a manual fallback only.
 
 ## Step 6 — smoke tests
 
@@ -138,7 +137,8 @@ Verify also:
   flag); **confirm a high-reasoning reply actually thinks** before relying on it. Budget-0 path is safe.
 - **Egress** — through the foreign exit (no `403`); check exit country.
 - **Backpressure** — burst > `BRIDGE_MAX_CONCURRENT` ⇒ `429`; LiteLLM retries.
-- **Fallback** — kill the subscription path ⇒ requests fall to `cheap-local` (Ollama).
+- **Failure boundary** — a failed subscription path must be surfaced. Current ADR-031 Flow does not fall through to
+  `cheap-local`; do not enable or test local inference/GPU without the separate owner decision and **GPU for UAP** mode.
 
 ## Pinned-egress repoint + re-pin (owner-gated)
 

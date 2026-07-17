@@ -192,8 +192,9 @@ kubectl -n uap-system run egress-test --rm -it --image=curlimages/curl --restart
 - The config above balances over >=2 VLESS servers (`leastPing` + observatory health probes) — run them in
   different ASNs/countries so one server (or one Secret) is not a single point of failure. Alert on tunnel failure.
 - The Deployment uses `podAntiAffinity` so the 2 xray replicas land on different nodes.
-- Egress is a SPOF for Plane B. If the foreign channel is fully down, the `smart-cloud -> cloud-fallback`
-  chain also fails — the ultimate fallback is `cheap-local` (Ollama in RU): degradation, not outage.
+- Egress is a SPOF for Plane B. If the foreign channel is fully down, the current ADR-031 OpenAI-only route uses its
+  bounded retries and then fails closed. `cheap-local` is a historical/manual capability, never an automatic fallback;
+  local inference/GPU still requires the separate owner decision and **GPU for UAP** mode.
 - Related: Tailscale's own control plane may be throttled in RU (RISKS #16) — keep a Headscale migration plan.
 
 ## Deployed: sing-box HA egress for hermes-agent (urltest failover, 2026-06-25)

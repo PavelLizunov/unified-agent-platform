@@ -36,11 +36,10 @@ NousResearch hermes-agent, ADR-022..031): здесь следуй приняты
 
 ## Порядок работы
 
-1. Прочитай [README.md](README.md) → [ARCHITECTURE.md](ARCHITECTURE.md) → [DECISIONS.md](DECISIONS.md) →
-   [BUILD-PLAN.md](BUILD-PLAN.md) → [RISKS.md](RISKS.md).
-2. Реализуй по [BUILD-PLAN.md](BUILD-PLAN.md) **строго по этапам**. Этап 0 выполняет владелец (VPS + сеть).
-   Твоя работа начинается с Этапа 1.
-3. Этап считается выполненным **только** когда проходит его «веха» (тест на отказоустойчивость).
+1. Следуй каноническому порядку чтения из TL;DR выше; не создавай второй конкурирующий список.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) и [BUILD-PLAN.md](BUILD-PLAN.md) используй как design/history context для
+   затронутых старых этапов. Текущий model/agent план и факты определяют `docs/next-steps.md` и `STATUS.md`.
+3. Активный этап считается выполненным **только** когда проходит его репозиторная «веха».
    Не переходи к следующему этапу, пока веха не зелёная.
 
 ## Правила
@@ -100,14 +99,15 @@ NousResearch hermes-agent, ADR-022..031): здесь следуй приняты
 
 ## Текущий фокус
 
-**2026-07-16: автономный Hermes mission delivery** (ADR-030/031, `docs/product-operating-contract.md`). Внешний hermes-agent
+**2026-07-17: автономный Hermes mission delivery** (ADR-030/031, `docs/product-operating-contract.md`). Внешний hermes-agent
 остаётся основой. Workspace и Telegram должны показывать одну central Hermes mission/history; build-1, Flow/Kanban,
 coding workers и test VM — execution plane этой mission, не вторая точка управления. A6 и A7.1/A7.2 завершили
-central mission projection и safe blocked handoff. A7.3 доказал recoverable success path до
-PR/CI/exact-head merge/fresh-main post-verify/cleanup на `openai-autonomy-v2`; четыре harness correction были
-установлены между durable ticks. Текущий шаг — заранее привязать Telegram subscription и тем же чистым непрерывным
-повтором на уже исправленном runtime доказать единый Central/Workspace/Telegram terminal status; затем закрыть
-question/resume и lifecycle/retention, без нового сервиса, dashboard, Claude, local model или GPU.
+central mission projection и safe blocked handoff. A7.3 прошёл fixed-profile acceptance canary на исправленном
+`openai-autonomy-v2`: timer intake, runtime-attested Sol/Terra author/review, recovery planned durable checkpoint,
+multi-platform CI, exact-head merge, fresh-main post-verify, единый Central/Workspace/Telegram terminal status и
+cleanup без ручного coordinator tick или mid-run repair. Это не доказывает generic arbitrary-repository intake или
+полную cross-channel chat/session history. Question/resume и lifecycle/retention уже установлены; дальнейшие правки
+делать без нового сервиса, dashboard, Claude, local model или GPU.
 Инфра-слой (k3s/Flux/SOPS) построен и стабилен; **VPS и HA отложены владельцем на неопределённый срок из-за бюджета**.
 Третий k3s server не является active owner action. Фазированный план — `docs/next-steps.md` (Track A — пилот
 hermes-agent, Track B — blast-radius + DR при текущей single-control-plane стратегии). HA-заявления — только после

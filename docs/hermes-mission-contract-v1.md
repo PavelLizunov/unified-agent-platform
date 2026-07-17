@@ -153,8 +153,11 @@ WAL/SHM/journal files are owner-only `0600`. `--activate` additionally requires 
 leaves a ready card. A crash after
 Kanban commit but before the central POST repeats the same Kanban idempotency key and producer event ID, so it converges
 to one root task and one central task event without a dispatch lease table. The hermetic test uses a fake Kanban and
-fake central API and invokes no model. A periodic service/timer and its exact assignee/profile remain a separate
-owner-approved live rollout; enabling `--activate` can cause the existing Kanban dispatcher to launch a worker.
+fake central API and invokes no model. At the A7.1 contract checkpoint, a periodic service/timer and its exact
+assignee/profile remained a separate owner-approved live rollout because enabling `--activate` can cause the existing
+Kanban dispatcher to launch a worker. ADR-031 later supplied standing authority, and the exact configured-profile timer
+passed the A7.3 acceptance canary recorded in
+`docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`; generic profile creation remains outside this contract.
 
 ## Central runtime and channel projections
 

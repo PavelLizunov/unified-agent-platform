@@ -23,7 +23,8 @@ Last updated: 2026-07-17
   creates one root task under a deterministic idempotency key, and emits correlated producer events for tasks,
   workers, bounded terminal output, files, tests/review and PR/deploy evidence. Fault injection proves restart without
   duplicate work/events. At the A6.2 checkpoint the adapter was not installed live; A6.4 later installed and exercised
-  it once. Automatic central intake-to-dispatch remains absent.
+  it once. At that A6.2 checkpoint automatic central intake-to-dispatch was absent; A7.3 later installed and accepted
+  the fixed-profile timer path described below.
 - **A6.3 synchronized observation live and A6.4 canary complete 2026-07-14.** `tools/hermes-mission/runtime.py` adds one
   stdlib/SQLite mission log and reducer inside the pinned central Hermes modular monolith. The pinned Hermes overlay
   adds authenticated mission API routes and Telegram `/mission`/notifications; the Workspace overlay adds a compact
@@ -38,27 +39,29 @@ Last updated: 2026-07-17
   `codex exec --json` thread ID to the matching local rollout and derives the exact model, provider and sandbox policy
   from its single runtime `turn_context`. Declared-label, wrong-sandbox and reroute mismatches fail closed. Read-only
   reprocessing of the saved A6.4 author/reviewer artifacts confirmed Luna/workspace-write and Sol/read-only on Codex
-  CLI `0.144.3`; the addendum is in the canary evidence. The gate is not wired into a live worker yet and does not
-  prove an OS-independent read-only filesystem or credential boundary.
+  CLI `0.144.3`; the addendum is in the canary evidence. At that post-A6 checkpoint the gate was not yet wired into a
+  live worker; A7.3 later used the runtime attestation live. It still does not prove an OS-independent read-only
+  filesystem or credential boundary.
 - **A7.1 merged and A7.2 live blocked handoff complete 2026-07-15.** PR #189 folded the reviewed bounded pull,
   starvation fix, retry/collision guards, local terminal authority, closed/redacted producer schema and owner-only
   state into `master`. PRs #190/#191 made the no-activate native root atomically sticky-blocked in pinned Hermes and
   fixed exact deployment staging. Flux is Ready at `7214ad78`; Central and build-1 carry the exact Kanban patch. Mission
   `a7-blocked-20260715-7214ad7-03` produced one blocked/unassigned root, one `task.upsert`, zero runs and a null second
-  poll, with no worker/model process. The poll is still manually invoked: no timer, activation or autonomous delivery
-  loop is installed. Exact evidence: `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
-- **A7.3 recoverable success path passed; clean uninterrupted repeat remains open (2026-07-16).** Mission
-  `a7-vpnrouter-issue39-20260716-09` used the installed `openai-autonomy-v2` complex route: runtime-attested Sol
-  author and separate exact-SHA read-only Terra reviewer, both `xhigh`. It recovered the approved post-commit crash
-  without a duplicate author, passed the Windows candidate/review gates, opened
-  [VPNRouter #43](https://github.com/PavelLizunov/VPNRouter/pull/43), observed required CI, atomically merged exact
-  candidate `fdb2126...` and passed fresh-main Windows verification at merge/default SHA `6f7bdc9...`. Native task/run
-  and Central reached terminal success; Central and Workspace projections matched at sequence 25 with all five gates
-  passed, and branch/worktree cleanup completed. Live durable recovery exposed and retained progress through four UAP
-  compatibility fixes (#218-#221), so this proves the success/recovery path but not yet one uninterrupted run begun
-  after all corrections were installed. The successful mission had no Telegram subscription; no Telegram terminal
-  claim is made. The next valid canary must bind that subscription before execution and use the same uninterrupted
-  repeat to prove matching Central, Workspace and Telegram terminal status. Exact evidence:
+  poll, with no worker/model process. At the A7.2 checkpoint the poll was manually invoked and no timer, activation or
+  autonomous delivery loop was installed; A7.3 subsequently installed and accepted that path. Exact A7.2 evidence:
+  `docs/evidence/a7-2-live-blocked-handoff-2026-07-15.md`.
+- **A7.3 fixed-profile autonomous delivery accepted (2026-07-17).** After the earlier recoverable VPNRouter run and
+  its four harness corrections (#218-#221), PR #238 was independently reviewed, passed exact-head CI, merged and was
+  installed on build-1. Telegram-bound mission `a7-clean-ledger-list-20260717-a0fc5a` then ran on the corrected runtime
+  from the profile timer with no manual coordinator tick or mid-run repair. The deterministic complex route used a
+  runtime-attested Sol `xhigh` author and a distinct exact-SHA read-only Terra `xhigh` reviewer. The planned
+  post-author-commit crash resumed without a duplicate author or candidate. Target
+  [PR #5](https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/5) passed Python/Linux/macOS/Windows CI, merged exact
+  candidate `0389b7b...` as `811c24a...`, and fresh-main `cargo test --all-targets --locked` passed. Central and
+  Workspace returned the same terminal projection hash at sequence 22, the bound Telegram cursor reached 22, and the
+  task/run, branch and worktrees converged to their required cleanup state. This accepts A7.3 at the configured
+  fixed-profile boundary, not as generic arbitrary-repository intake or complete cross-channel chat history. Exact
+  evidence: `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`; the earlier recovery evidence remains in
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 - **A7 observation and lifecycle baseline implemented (2026-07-17).** Workspace owns the separate owner-answer
   capability and resumes the same durable mission/root; coordinator processes explicitly lack that key. Central keeps
@@ -72,8 +75,8 @@ Last updated: 2026-07-17
   evidence remains owner-only for 30 days; deliveries remove disposable worktrees immediately. Central DB/WAL/SHM,
   adapter state and the common state root are owner-only on POSIX.
   PRs #235/#236 are deployed centrally and on build-1; exact rollout evidence is in
-  `docs/evidence/a7-lifecycle-rollout-2026-07-17.md`. The remaining acceptance gate is the clean Telegram-bound
-  non-toy canary, not another lifecycle service.
+  `docs/evidence/a7-lifecycle-rollout-2026-07-17.md`. The Telegram-bound non-toy acceptance canary subsequently passed;
+  no additional lifecycle service is required for the fixed-profile A7.3 boundary.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
@@ -91,8 +94,8 @@ Last updated: 2026-07-17
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
   repair push.
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
-  `openai-autonomy-v2` for the successful seventh canary. A Telegram-bound clean uninterrupted repeat remains; later
-  channel/lifecycle work must not be confused with that repeat's required terminal convergence.
+  `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound acceptance canary passed on the
+  corrected runtime; channel/session work beyond the authoritative mission projection remains a separate product gap.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -126,8 +129,8 @@ Last updated: 2026-07-17
   skips" is false: `hermes backup` drops to uid 10000 internally regardless of dump-container privileges).
   GitHub's mergeable check was stale (computed pre-#38); a local rebase surfaced the real conflict. Pushed
   a correction onto `chore/pin-harden-hermes-agent` (commit `dafa3f9`) that keeps #38's logic and only the
-  legitimate digest pins — **PR #35 is now MERGEABLE + green, still owner-gated.** PR #36 was unaffected
-  (no file overlap). Also committed the 3 local-only Codex audit docs that never made it into git (PR #39,
+  legitimate digest pins. At that checkpoint PR #35 was mergeable + green and PR #36 was unaffected; both merged
+  later on 2026-06-30. Also committed the 3 local-only Codex audit docs that never made it into git (PR #39,
   merged) and closed the doc gaps they exposed: a stale CLAUDE.md bug-hunt pointer, and a 5th hermes-legacy
   finding (summarizer drops the untrusted-tool-result boundary) missing from `hermes/README.md`'s
   accepted-as-parked-risk list. Ported the BOM-proof base64 SSH transport to `check-ops-node.ps1` /
@@ -276,7 +279,7 @@ The model + agent value layers are deployed in namespace `uap-system`. **All of 
 - **subfleet** (Flux-managed): wraps the **Claude subscription** as an OpenAI-compatible **chat** API (spawns the
   bundled `claude` CLI per request; drops `tools`/`tool_calls`). `subfleet-bridge.uap-system.svc:18902`. Egress to
   Anthropic via the in-cluster `singbox-egress` (VLESS+REALITY, ADR-018). Retained for the owner's **other**
-  projects (a Telegram bot + web sessions); redundant for in-repo coding (which uses `claude -p` directly).
+  projects (a Telegram bot + web sessions); it is not an automatic route in current ADR-031 UAP Flow delivery.
 - **LiteLLM** v1.89.0 — deployed + smoke-verified, **Flux-reconciled** (`clusters/prod/infra/litellm.yaml` +
   `litellm-keys.sops.yaml` are now referenced by the kustomization). OpenAI gateway, groups
   `smart-cloud`/`-think`/`balanced-cloud`/`cheap-cloud`/`smart-cloud-pinned`; tailnet via `tailscale serve` on
@@ -293,8 +296,9 @@ LiteLLM/Hermes and the hermes-agent stack are now *running + verified* **and** *
 Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain on the RTX, no cloud egress.
 
 - **Host:** `desktop-m922ij2` (RTX 5060 Ti 16 GB, Blackwell sm_120, driver 610.62 / CUDA 13.3); **not always-on**, so
-  this brain is **opportunistic** (the live durable brain is now the ops-1 local-models-router — `qwen-35b`/`ornith-9b`;
-  see "Brain reality" in Phase).
+  this historical A1 brain is **opportunistic**. It is not the current durable brain: since 2026-07-11 Central Hermes
+  uses Codex Luna, while the ops-1 `qwen-35b`/`ornith-9b` router is only a manual fallback (see "Brain reality" in
+  Phase).
 - **Stack:** **Ollama 0.16.1** (native Windows) serving **`gpt-oss:20b`** — already on disk, so **no model download
   over the RU network**. Chosen over a fresh Hermes/Qwen pull for that reason; `--tool-call-parser hermes` (vLLM) /
   `--jinja` (llama.cpp) are the equivalents if a Hermes/Qwen GGUF is swapped in. **WSL2/Docker are NOT installed**, so
@@ -384,9 +388,9 @@ over bare Docker.
   `/opt/data/.claude/settings.json` is defense-in-depth (the pod is the real boundary, Bash is unconstrained).
   **Verified in-cluster:** `claude -p` returns a result through the egress with the secret-injected token, and the
   deny rule blocks a decoy secret read. Recipe + gotchas in memory `uap-claude-worker`; config-rev `v7-claude-worker`.
-  **Current commercial state (owner update 2026-07-13):** the Claude subscription is no longer Max and its present
-  usage is exhausted. Flow v2 therefore treats Claude as quota-aware secondary/reviewer, not guaranteed capacity;
-  Codex has the current x20 capacity. These capacity labels are not model IDs.
+  **Historical commercial checkpoint (owner update 2026-07-13):** the Claude subscription was no longer Max and its
+  usage was exhausted. Since ADR-031, current Flow v2 automatic coding/review is OpenAI-only Luna/Sol/Terra; Claude is
+  retained separate legacy capacity and requires an explicit owner decision.
 - **A5 coding engines + worktree isolation — verified 2026-06-26:** BOTH coding engines work in-cluster —
   `codex exec "<task>"` (the 2nd engine, via the Codex auth + egress) edits files autonomously, and `claude -p -w <name>`
   runs in an **isolated git worktree** (`.claude/worktrees/<name>`, its own branch) so a coding task never touches the
@@ -413,13 +417,12 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Hermes Kanban swarm pilot (#94/#98/#99)** — native multi-agent orchestration (KB → swarm → artifacts → verify →
   synth → KB write-back, retrieval-first); `runbooks/hermes-kanban-swarm-pilot.md`.
 - **hermes-workspace webcenter (#101)** — the user-facing web center on `build-1:3000` (tailnet-only).
-- **Remaining automation gap after the A7.3 success-path canary:** the installed profile-bound timer can intake,
-  activate, author, test, review, recover a durable crash, create an exact PR, observe CI, merge exact reviewed head,
-  post-verify and clean up. Attempt 7 reached that terminal path, but Codex landed four UAP harness corrections between
-  durable ticks. Before the next valid clean uninterrupted repeat starts, its Telegram mission subscription must be
-  bound; that same run must prove matching Central, Workspace and Telegram terminal status. Owner answer/resume and the
-  bounded lifecycle baseline are installed. Rejected projections still expose only a generic error/stage. No generic
-  arbitrary-repository timer is enabled; only exact owner-approved profiles run.
+- **A7.3 automation boundary after acceptance:** the installed profile-bound timer has now proved intake, activation,
+  authoring, tests, exact-SHA read-only review, durable crash recovery, PR/CI, exact-head merge, fresh-main post-verify,
+  Central/Workspace/Telegram terminal convergence and cleanup in one corrected-runtime canary. Owner answer/resume and
+  the bounded lifecycle baseline are installed. Rejected projections still expose only a generic error/stage, and
+  complete Workspace/Telegram chat-session history is not unified. No generic arbitrary-repository timer is enabled;
+  only exact owner-approved profiles run.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

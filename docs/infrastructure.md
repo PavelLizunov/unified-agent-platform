@@ -6,26 +6,27 @@
 > Target architecture and the 2026-06 pivot are tracked in [docs/next-steps.md](next-steps.md) and
 > the research notes under [docs/research/](research/).
 >
-> Last reviewed: 2026-07-11.
+> Last reviewed: 2026-07-17.
 
 ## TL;DR
 
 - **3 always-on Linux VMs** on local Proxmox form the operational core: a k3s server, a k3s agent,
   and an operator VM. **No GPU on any of them.**
-- **2 GPU/personal machines** (Windows desktop with an RTX 5060 Ti, Mac mini) are on the tailnet but
-  are **NOT always-on** and are **NOT** k3s/etcd members — they are future external agent-workers.
+- **2 GPU/personal machines** (Windows desktop with an RTX 5060 Ti, always-on Mac mini) are on the tailnet
+  but are **NOT** k3s/etcd members — they are external agent-worker/fallback hosts, not the current brain.
 - **NOT HA; HA/VPS deferred indefinitely for budget.** One k3s server/control-plane + one agent = a single
   etcd member. The current strategy is one control-plane, R2 backups, and the verified 2026-07-12 restore drill.
   A 3rd independent k3s server remains a future HA prerequisite, not an active owner action. See
   [CLAUDE.md → Important Boundaries](../CLAUDE.md).
 - Network = **Tailscale mesh**; cloud LLM egress from Russia goes through a **sing-box / VLESS+REALITY**
   proxy (ADR-018), because Anthropic/OpenAI/OpenRouter are unreachable directly from RU.
-- **Model backend today:** subfleet (the Claude subscription wrapped as an OpenAI-compatible **chat**
-  API) behind a LiteLLM gateway, plus the bespoke single-file `hermes.py` agent.
+- **Model/agent runtime today:** Central external hermes-agent uses Codex `gpt-5.6-luna` through
+  `codex_app_server`; build-1 delivery uses the automatic OpenAI-only Luna/Sol/Terra policy. subfleet/LiteLLM and the
+  bespoke `hermes.py` remain installed separate/legacy capacities, not automatic coding fallbacks.
 - **The harness is now LIVE:** the external **NousResearch hermes-agent** is the vibe-coding harness —
-  phone control via Telegram, coding via `claude -p` + `codex exec` skills. The bespoke Hermes is parked
-  as a fallback.
-- **Brain today (2026-07-11):** Codex `gpt-5.5` via `codex_app_server` is live after owner re-auth (#119).
+  control through Telegram/Workspace and coding through the build-1 Codex Luna/Sol/Terra routes. Claude
+  remains a separately gated legacy capability, not an automatic route. The bespoke Hermes is parked.
+- **Brain today (2026-07-11 onward):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth (#119).
   The `local-models-router` on `uap-ops-1` remains the manual fallback over `qwen-35b` (RTX desktop) and
   `ornith-9b` (always-on Mac). See [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md)
   and [runbooks/local-models-router.md](../runbooks/local-models-router.md).
@@ -43,15 +44,15 @@ shown intermittent resets (see [CLAUDE.md](../CLAUDE.md)).
 | `uap-home-2` | `100.94.228.67` | Debian 12 | 6 vCPU / 8 GB / no GPU | k3s **agent** (worker only); runs the **hermes-agent** brain pod + subfleet bridge (resized 6c/8G in #86/#87) | **Yes** |
 | `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** fallback endpoint `:8090` | **Yes** |
 | `uap-build-1` | `100.85.56.31` | Ubuntu 22.04 | 8 vCPU / 16 GB / no GPU | always-on build/dev VM — **not** a k3s node, **not** in GitOps; runs the knowledge system, the Hermes Kanban swarm, ai-search, and the hermes-workspace webcenter (`:3000`) — all systemd | **Yes** |
-| `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; serves **`qwen-35b`** (llama.cpp) — the **primary local brain** | **No** |
-| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | serves **`ornith-9b`** (mlx) — the local **coder / fallback brain** | **Yes** |
+| `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; can serve the manual **`qwen-35b`** fallback (llama.cpp) | **No** |
+| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | can serve the manual **`ornith-9b`** fallback (mlx) | **Yes** |
 
 Notes:
 - The k3s nodes (`uap-home-1`, `uap-home-2`) and `uap-ops-1` have **no GPU**. The only **discrete/CUDA**
-  GPU in the fleet is the RTX on the **not-always-on** Windows desktop — so `qwen-35b` (the primary brain)
-  is only available when the desktop is on. The **always-on Mac mini** (Apple GPU) serves `ornith-9b`, the
-  fallback brain / local coder that keeps working when the desktop is off. This brain topology is served
-  through the `local-models-router` on `uap-ops-1` (see §3 and `runbooks/local-models-router.md`).
+  GPU in the fleet is the RTX on the **not-always-on** Windows desktop, so the manual `qwen-35b` fallback
+  is available only while that desktop is on. The **always-on Mac mini** (Apple GPU) serves the manual
+  `ornith-9b` fallback. Neither local route is the current brain; Codex Luna is current, and switching to
+  the `local-models-router` on `uap-ops-1` is explicit (see §3 and `runbooks/local-models-router.md`).
 - `uap-ops-1` runs on the **same physical Proxmox node** as `uap-home-1`, so it shares a failure
   domain with the control plane (see Track B in [next-steps.md](next-steps.md)).
 - Windows-to-`uap-ops-1` tailnet SSH has intermittently timed out after enrollment; workstation→ops
@@ -135,16 +136,17 @@ exactly what the hermes-agent pilot reuses.
 | **subfleet** | Rust gateway wrapping the **Claude subscription** as an OpenAI-compatible **chat** API; spawns the real `claude` CLI per request. Drops `tools`/`tool_calls` — chat passthrough only. | `subfleet-bridge.uap-system.svc:18902/v1` | **Flux** |
 | **LiteLLM** (v1.89.0) | The OpenAI-compatible gateway devices/agents hit; routes model groups to subfleet. Groups: `smart-cloud` (opus), `smart-cloud-think`, `balanced-cloud` (sonnet), `cheap-cloud` (haiku), `smart-cloud-pinned` (`claude-opus-4-8`). Reached from tailnet via `tailscale serve` on `uap-home-1`; master key via SOPS `litellm-keys`. | `litellm.uap-system.svc:4000` | **Flux** |
 | **Hermes (bespoke, "Hermes-legacy")** | Single-file stdlib `hermes/hermes.py`; turns the chat backend into a **prompt-based ReAct/ReWOO** tool-using agent (native FC is infeasible through the subfleet CLI). Read-only kube tools, SSRF-guarded HTTP, per-tool scopes. 41 unit + 8 integration tests. **PARKED.** | NodePort `:30890` (in-cluster `:8900`) | **Flux** |
-| **hermes-agent** | The **live** external NousResearch hermes-agent (vibe-coding harness). **Brain today = local `qwen-35b`/`ornith-9b` via the ops-1 router** (paid limits ran out; the Codex-brain path in `runbooks/hermes-agent-codex-brain.md` is parked as the revert route). Coding via `claude -p`/`codex exec` skills; Telegram phone control. | pod on `uap-home-2` (Telegram outbound long-poll) | **Flux** |
+| **hermes-agent** | The **live** external NousResearch hermes-agent (vibe-coding harness). **Brain today = Codex `gpt-5.6-luna` via `codex_app_server`**; build-1 coding/review follows ADR-031's OpenAI Luna/Sol/Terra policy. The ops-1 local router is manual fallback only. | pod on `uap-home-2` (Telegram outbound long-poll) | **Flux** |
 
 ### Operator VM (`uap-ops-1`) — ad-hoc, outside GitOps
 
 - The deploy/control machine: git `origin` (SSH, repo-scoped read-WRITE deploy key), `kubectl`, full
   toolchain (`tofu`, `ansible`, `flux`, `sops`, `age`, `gh`, `tailscale`, `jq`).
 - Also runs **ad-hoc, NOT in GitOps:** host-local **sing-box** egress and **Vaultwarden**; the
-  **`local-models-router`** systemd service (`local-model-router`) — the OpenAI-compatible endpoint
-  (`:8090`) that is the hermes-agent's **live brain** (routes `qwen-35b`→RTX desktop, `ornith-9b`→Mac; it
-  lives here because in-cluster pods can't reach the tailnet `100.x` model boxes, but ops-1 can). See
+  **`local-models-router`** systemd service (`local-model-router`) — the manual OpenAI-compatible fallback endpoint
+  (`:8090`) for `qwen-35b`→RTX desktop and `ornith-9b`→Mac. It lives here because in-cluster pods cannot reach the
+  tailnet `100.x` model boxes, but ops-1 can. It is not the current brain and must not be selected without owner
+  approval. See
   `runbooks/local-models-router.md`. A daily age-encrypted `ops-backup` timer ships Vaultwarden +
   `~/.secrets` + units to R2.
 - This VM's **concentration of secrets + capabilities is the dominant open risk** — see
@@ -168,23 +170,21 @@ crates.io + rust-lang.org are RU-blocked, so cargo builds go through the VLESS e
 
 ---
 
-## 4. Subscriptions (the brains and the coders)
+## 4. Subscriptions (the brain and coding routes)
 
-> **Current state (2026-07-06):** the paid limits ran out, so **neither subscription is the live brain
-> right now** — the hermes-agent brain runs **fully local** (`qwen-35b`/`ornith-9b` via the ops-1 router,
-> [runbooks/local-models-router.md](../runbooks/local-models-router.md)). The table below is the
-> **subscription design** and the revert-to-cloud target; Codex-as-brain + the `claude -p`/`codex exec`
-> coders resume when the limits reset.
+> **Current state (2026-07-17):** the ChatGPT subscription is the live Central brain through Codex
+> `codex_app_server`, and ADR-031's OpenAI Luna/Sol/Terra policy is the automatic build-1 coding/review route. The
+> `qwen-35b`/`ornith-9b` ops-1 router is manual fallback only. Claude/subfleet remains installed separate capacity and
+> is not an automatic route.
 
 | Subscription | Count | Used for | Notes |
 |---|---|---|---|
-| **ChatGPT Plus** | 2 (shared with friends) | Target **brain** for hermes-agent via the **Codex `codex_app_server`** runtime (native function-calling, **no API key**, OAuth) | The sharers don't use Codex, so the Codex capacity is effectively ours; two accounts = rate-limit headroom. |
-| **Claude (current non-Max plan)** | 1 | Quota-aware **review/secondary coding** via `claude -p` (full Claude Code harness) and as the backend behind subfleet | Capacity is not guaranteed; do not invoke while `quota_blocked`. The Claude subscription **cannot** be hermes-agent's *brain* (the subfleet/Claude path drops `tool_calls`; hermes-agent has no prompt-based fallback). |
+| **ChatGPT Plus** | 2 (shared with friends) | Live **brain** for hermes-agent via Codex `codex_app_server`, plus the standing-approved Luna/Sol/Terra delivery routes | Native function-calling, OAuth, no API key; exact route selection follows ADR-031. |
+| **Claude (current non-Max plan)** | 1 | Separate legacy/other-project capacity behind subfleet and optional `claude -p` | Not an automatic UAP coding/review fallback; use requires an explicit owner decision. It cannot be hermes-agent's brain because the subfleet path drops `tool_calls`. |
 
-Why this split: Codex can be a hermes-agent brain because the Codex CLI is a drivable app-server that
-owns its own native tool loop; the Claude CLI has no equivalent runtime in hermes-agent. So **Codex =
-brain, Claude = a coder.** Spreading coding across `claude -p` and `codex exec` keeps either subscription
-under its limits.
+Codex can be a hermes-agent brain because the Codex CLI is a drivable app-server that owns its own native tool loop;
+the Claude CLI has no equivalent runtime in hermes-agent. Current UAP therefore uses Codex/OpenAI for both the brain
+and automatic coding/review, while Claude remains an explicitly gated separate capacity.
 
 ---
 
@@ -203,26 +203,18 @@ strict `static-checks` CI check; direct push to master blocked). See next-steps 
 SQLite/FTS memory, subagents, cron, checkpoints/rollback, git worktrees, 20+ messaging platforms. It
 **supersedes** the bespoke `hermes.py` ("Hermes-legacy"), which is parked as a fallback.
 
-```
-            phone (Telegram, outbound long-poll — NAT/RU-friendly, no inbound port)
-                                  |
-                          hermes-agent gateway
-                     (Docker, on an always-on Linux node)
-                                  |
-         +------------------------+-----------------------------------+
-     BRAIN (native function-calling — REQUIRED)            CODING (skills, shelled out)
-   +--------------+---------------+                  +----------+----------+
-   Codex codex_app_server     local FC model         claude -p             codex exec
-   (ChatGPT sub, OAuth,       (RTX 5060 Ti, vLLM/    (non-Max Claude,      (ChatGPT sub)
-    no API key)                llama.cpp, >=64k ctx)   Claude Code harness)
-         |                          |                       |
-      egress proxy             local, no egress         egress proxy        egress proxy
-   (non-RU, ADR-018)                                  (reuses subfleet creds)
+```text
+Workspace / Telegram
+        -> Central Hermes (mission authority; Codex Luna brain)
+        -> configured fixed-profile build-1 timer/coordinator
+        -> OpenAI Luna/Sol/Terra author + distinct exact-SHA read-only reviewer
+        -> repository gates -> PR/CI -> merge -> deploy/release when defined -> post-verify
+        -> one Central mission projection returned to Workspace / Telegram
 ```
 
-> **Live today:** the **local FC** brain tier is what is actually running — `qwen-35b`/`ornith-9b` behind
-> the `local-models-router` on `uap-ops-1` — because the paid limits ran out, so the Codex brain and the
-> `claude -p`/`codex exec` coders are currently idle. Restoring them is the documented revert path. See
+> **Live today:** Central Hermes uses Codex `gpt-5.6-luna` through `codex_app_server`, and ADR-031's automatic
+> OpenAI-only delivery routes use Luna/Sol/Terra on build-1. `qwen-35b`/`ornith-9b` behind the ops-1
+> `local-models-router` are documented manual fallbacks, not current or automatic routes. See
 > [runbooks/local-models-router.md](../runbooks/local-models-router.md) and
 > [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md).
 

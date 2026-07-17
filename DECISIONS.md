@@ -74,6 +74,9 @@
 > **Уточнён (2026-06-23):** LiteLLM-группы реализованы как `smart-cloud`/`balanced-cloud`/`cheap-cloud`/… поверх
 > **subfleet** (Claude-подписка), не Ollama-`cheap-local` по умолчанию (ADR-023). Главное: мозгу hermes-agent нужен
 > **native function-calling** — subfleet (chat-only, дропает `tool_calls`) им быть НЕ может (ADR-025).
+>
+> **Superseded для текущего Flow (2026-07-15):** ADR-031 заменил эту model-routing часть на автоматическую
+> OpenAI-only Luna/Sol/Terra policy; Claude, OpenRouter и local inference не являются fallback. Текст ниже исторический.
 
 - **Контекст:** нужен единый эндпоинт, fallback и маршрутизация «простое → дёшево, сложное → Claude».
 - **Решение:** **LiteLLM proxy** (×2 реплики). Группы моделей: `smart-cloud` (Claude),
@@ -274,8 +277,9 @@
   best-practice против DPI РФ/КН (маскировка под реальный TLS-сайт, без своего домена/серта).
 - **Отвергнуто:** гнать весь исходящий трафик кластера через прокси; полагаться на OpenRouter как обход
   блокировки; ставить egress-прокси в путь etcd/Flux.
-- **Последствия:** egress становится SPOF Плоскости B → держать ≥2 эндпоинта в разных ASN/странах + health-check;
-  при полном отвале зарубежного канала срабатывает `cheap-local` (Ollama в РФ) как fallback. Секреты VLESS
+- **Последствия:** egress становится SPOF Плоскости B → держать ≥2 эндпоинта в разных ASN/странах + health-check.
+  Исторический `cheap-local` fallback для текущего Flow superseded ADR-031: маршрут делает bounded retry и fail-closed,
+  а local inference/GPU остаётся owner-gated. Секреты VLESS
   (UUID, REALITY-ключи, адрес сервера) — через SOPS/age, не в git. Зарубежная VPS из Этапа 0 получает двойную
   роль (кворум + egress), что повышает её приоритет. Для Plan A egress-нода должна быть **адекватного профиля**
   (НЕ «тонкий» 1 ГБ etcd-VPS — см. BUILD-PLAN, Этап 2 → размещение). Связанный риск — достижимость самого

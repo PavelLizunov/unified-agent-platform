@@ -5,28 +5,18 @@ project decisions in `DECISIONS.md`.
 
 ## Read First
 
-This mirrors the **canonical read-order in `AGENTS.md` → TL;DR** (both files list the same sequence and the
-same two orientation indexes — `runbooks/README.md` and `tools/README.md`). `STATUS.md` is the source of truth
-for current facts; if this handoff and `STATUS.md` disagree, `STATUS.md` wins.
+This mirrors the canonical order in `AGENTS.md`. `STATUS.md` is the source of truth for current facts; if this handoff
+and `STATUS.md` disagree, `STATUS.md` wins.
 
-1. `AGENTS.md` (its TL;DR has the layer-status table + this exact read-order)
-2. `README.md`
-3. `DECISIONS.md`
-4. `BUILD-PLAN.md`
-5. `STATUS.md`
-6. `runbooks/validation-matrix.md`
+1. `AGENTS.md` → `README.md` → `DECISIONS.md` → `STATUS.md` → `RISKS.md`
+2. `docs/product-operating-contract.md` → `docs/infrastructure.md` → `docs/next-steps.md`
+3. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` — why
+   hermes-agent; always take the current brain/runtime from `STATUS.md`, not historical research wording
+4. `runbooks/README.md` + `tools/README.md` — procedure and subsystem indexes
+5. `runbooks/validation-matrix.md` + `runbooks/vibe-coding-acceptance.md` — required gates and end-to-end acceptance
 
-**Model/agent layer + the 2026-06 pivot — read these before touching anything model/agent/coding:**
-
-7. `docs/infrastructure.md` — consolidated fleet + what-runs-where + target architecture
-8. `docs/next-steps.md` — the hermes-agent pilot plan + the still-open foundation work
-9. `docs/research/nousresearch-hermes-agent.md` + `docs/research/hermes-codex-subscription-brain.md` — why hermes-agent; the original "brain = Codex" is now the **local-models router** (`qwen-35b`, fallback `ornith-9b`), cloud tier OFF — see `STATUS.md`
-10. `hermes/README.md` + `hermes/docs/claude-code-autonomous-reference.md` — the parked bespoke agent + the Claude Code headless reference
-
-**Top-down orientation indexes (read to find the right procedure/tool fast):**
-
-11. `runbooks/README.md` — table of every runbook (purpose + when-to-use trigger)
-12. `tools/README.md` — the `tools/` subsystems (purpose | entrypoint | owning runbook | self-test)
+`BUILD-PLAN.md`, `ARCHITECTURE.md` and the parked `hermes/` references remain useful historical/design context when a
+task touches them, but they do not override the current order or live facts above.
 
 If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask the owner before changing direction.
 
@@ -35,8 +25,8 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
 The 2026-06-28 Codex bug-hunt and independent code-review are actioned: see `STATUS.md` → "Post-A4 hardening
 pass" for the merged-PR list. The original reports are kept for historical record (not required reading):
 [BUG-HUNT-CODEX-2026-06-28.md](BUG-HUNT-CODEX-2026-06-28.md), [CODE-REVIEW-CODEX-2026-06-28.md](CODE-REVIEW-CODEX-2026-06-28.md),
-[READONLY-INFRA-AUDIT-2026-06-28.md](READONLY-INFRA-AUDIT-2026-06-28.md). Two pod-rolling PRs (#35, #36) remain
-**owner-gated** — do not merge them yourself; see `STATUS.md`.
+[READONLY-INFRA-AUDIT-2026-06-28.md](READONLY-INFRA-AUDIT-2026-06-28.md). Historical pod-rolling PRs #35/#36 were
+resolved; use `STATUS.md` rather than this handoff for their exact outcome.
 
 ## Current State
 
@@ -47,9 +37,9 @@ pass" for the merged-PR list. The original reports are kept for historical recor
   build-1/Flow is the execution plane. Read `docs/product-operating-contract.md` and ADR-030 before agent-layer work.
 - **Three layers, live (namespace `uap-system`):**
   - **Infra** — k3s 2-node (**NOT HA**: server `uap-home-1` + agent `uap-home-2` = single etcd member), Flux GitOps + SOPS, k3s→R2 DR.
-  - **Model** — `subfleet` (the Claude subscription as an OpenAI **chat** API; drops `tool_calls`) + **LiteLLM** v1.89.0.
-    subfleet is **retained for the owner's OTHER projects** (a Telegram bot + web sessions); redundant for in-repo coding.
-  - **Agent** — bespoke `hermes/hermes.py` ("Hermes-legacy"; prompt-based ReAct/ReWOO; NodePort `:30890`). **PARKED.**
+  - **Model** — Central Hermes uses Codex `gpt-5.6-luna`; build-1 delivery follows ADR-031's automatic OpenAI-only
+    Luna/Sol/Terra policy. `subfleet` + LiteLLM remain installed separate/legacy capacities, not automatic fallbacks.
+  - **Agent** — external NousResearch hermes-agent is live; bespoke `hermes/hermes.py` is parked.
 - **Active direction (2026-06-22/23 pivot):** adopt the **external NousResearch hermes-agent** as the vibe-coding harness.
   Brain = the **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling). ADR-031 makes Luna/Sol/Terra
   the automatic coding/review routes; Claude, local inference and GPU are not fallbacks without a separate owner decision.
@@ -62,9 +52,12 @@ pass" for the merged-PR list. The original reports are kept for historical recor
   `static-checks` CI a **required/strict** check), so direct push to `master` is **BLOCKED**. Deploys are PR-gated
   (branch → PR → green `static-checks` → merge → Flux reconciles `master`). Human code review stays absent by design —
   the agent's self-test + CI is the gate. See `docs/next-steps.md` → Platform hardening.
-- **A7 lifecycle rollout is live (2026-07-17):** PRs #235/#236 are installed in Central Hermes and build-1. The four
-  enabled delivery profiles use schema v3 and the exact current overlay; the next acceptance gate is one clean,
-  uninterrupted Telegram-bound non-toy canary. See `docs/evidence/a7-lifecycle-rollout-2026-07-17.md`.
+- **A7 lifecycle and configured-profile acceptance are live (2026-07-17):** PRs #235/#236 are installed in Central
+  Hermes and build-1, and the schema-v3 `openai-autonomy-v2` runtime passed the Telegram-bound non-toy acceptance
+  canary through recovery, PR/CI/merge, post-verify and cleanup. See
+  `docs/evidence/a7-lifecycle-rollout-2026-07-17.md` and
+  `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`. Generic repository intake and complete cross-channel
+  chat/session history remain outside that proof.
 - Git branch `master`. For exact history run `git log --oneline -8` (this file is not the source of truth for hashes).
   Plan fact-check (2026-06-18, `STATUS.md`): Garage (ADR-019), Restate→S3 (ADR-020), RU egress (ADR-018),
   k3s-over-Tailscale (ADR-021). The ad-hoc egress + Vaultwarden on `uap-ops-1` (2 GB non-cluster VM) remain a
@@ -80,7 +73,7 @@ Use tailnet IPs for SSH and smoke tests.
 | `uap-home-2` | k3s agent | `192.168.0.202` | `100.94.228.67` | worker only |
 | `uap-ops-1` | operator VM | `192.168.0.203` | `100.82.241.121` | not a k3s node; deploy path verified from ops |
 | `desktop-m922ij2` | workstation / **GPU host** | — | `100.114.172.40` | Win 11, 32c/32GB, **RTX 5060 Ti 16GB**; **NOT always-on**; future local-FC-model host + agent-worker |
-| `pavels-mac-mini` | personal / agent-worker | — | `100.116.97.112` | Apple Silicon; SSH off; **NOT always-on** |
+| `pavels-mac-mini` | personal / agent-worker | — | `100.116.97.112` | Apple Silicon; SSH off; **always-on** |
 
 Full fleet + roles: `docs/infrastructure.md`. The only GPU is on the **not-always-on** Windows desktop, so a
 local-model brain on the RTX is only available when it is on (hence Codex-sub is the durable brain).
@@ -197,16 +190,19 @@ Good next tasks that do not require redesign:
    crash. Central retains 100 recent unbound terminal missions and protects the bound mission plus active repair chains;
    completed native tasks are archived, native GC runs only while the board is idle, and private delivery state expires
    after 30 days.
-4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator reached its first successful real delivery on mission
-   `a7-vpnrouter-issue39-20260716-09`: runtime-attested Sol author, separate exact-SHA read-only Terra review, VPNRouter
-   PR #43, required CI, exact-head merge, fresh-main Windows post-verify and cleanup. PRs #218-#221 corrected four live
-   harness defects between durable ticks. The next valid proof must bind the Telegram mission subscription before
-   execution, then complete one clean uninterrupted repeat on the corrected runtime with matching terminal status in
-   Central, Workspace and Telegram. Evidence: `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+4. A7.1/A7.2 and the configured-profile A7.3 acceptance canary are complete. Mission
+   `a7-clean-ledger-list-20260717-a0fc5a` ran on the corrected runtime from the timer without a manual coordinator tick:
+   runtime-attested Sol author, distinct exact-SHA read-only Terra review, hermes-flow-v2-pilot PR #5,
+   Python/Linux/macOS/Windows CI, exact-head merge, fresh-main Rust post-verify and cleanup. The planned durable crash
+   resumed without a duplicate author/candidate; Central and Workspace matched at terminal sequence 22 and the bound
+   Telegram cursor reached 22. This proves the exact configured profile, not generic repository intake or complete
+   cross-channel chat-session history. Evidence: `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md` and the earlier
+   recovery history in `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
-   dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the
-   mission remain gated. `openai-autonomy-v2` and the schema-v3 profile are installed and ran live. The same PR number
+   dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
+   non-disposable state and work outside the mission remain gated. `openai-autonomy-v2` and the schema-v3 profile ran
+   live. The same PR number
    and pushed head are durable identity;
    final failure validates the durable PR number/head/base under a live claim and preserves an open exact PR/branch as
    bounded evidence because GitHub has no conditional close; an already closed PR's unchanged branch is lease-deleted.
@@ -219,16 +215,21 @@ Good next tasks that do not require redesign:
    restore are done. Owner accepted the current R2 credential scope/lifecycle as-is; do not rotate or alter it
    without a new decision. Off-homelab age-key escrow remains open.
 9. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
-10. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
+10. (DONE 2026-07-12) Cross-node restore and exact Secret-decrypt verification passed; see
+    `runbooks/restore-drill.md`.
 
 ## Things That Need Owner Input
 
-- Remote VPS provider and credentials.
-- Remote Git repository URL.
-- S3-compatible object storage endpoint and credentials.
-- Non-RU VLESS+REALITY egress endpoint (VPS abroad) for cloud LLM access from Russia (ADR-018).
-- Claude/OpenRouter/API keys.
-- Any destructive test: VM restore over an existing VM, node shutdown, k3s server reset, etc.
+No owner input is currently required for the accepted A7 fixed-profile path. Ask only when scope actually needs:
+
+- a new provider, credential or external authority not already configured;
+- a destructive test against non-disposable state or an irreversible action, such as overwriting a live VM restore
+  target, node shutdown or production k3s reset; repo-defined hermetic/disposable drills need no per-run approval;
+- a change to a closed topology/security/architecture decision;
+- the separately deferred VPS/HA or off-homelab age-key escrow decisions.
+
+Git, S3/R2, non-RU egress and the current OpenAI route are already configured. Claude/local inference/GPU are not
+automatic fallbacks and require a separate owner decision.
 
 ## Known Warnings
 
