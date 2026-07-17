@@ -383,6 +383,7 @@ def parse_codex_failure(
     item_seen = False
     permanent_signal = False
     terminal_messages: list[tuple[str, str]] = []
+    stderr_messages: list[str] = []
     with open(path, encoding="utf-8") as handle:
         for raw_line in handle:
             try:
@@ -410,10 +411,11 @@ def parse_codex_failure(
                 if isinstance(info, dict):
                     info = info.get("type")
                 normalized_info = info.casefold() if isinstance(info, str) else None
-                status = detail.get(
-                    "httpStatusCode",
-                    event.get("httpStatusCode", info_object.get("httpStatusCode")),
-                )
+                status = detail.get("httpStatusCode")
+                if status is None:
+                    status = event.get("httpStatusCode")
+                if status is None:
+                    status = info_object.get("httpStatusCode")
                 if normalized_info in {
                     "badrequest", "unauthorized", "sandboxerror", "usagelimitexceeded",
                     "contextwindowexceeded",
@@ -423,14 +425,23 @@ def parse_codex_failure(
         line = _ANSI_ESCAPE.sub("", raw_line).strip()
         if line.lower().startswith("error:"):
             line = line.split(":", 1)[1].strip()
-        terminal_messages.append(("stderr", line))
-    capacity_source = next(
-        (source for source, message in terminal_messages if message.strip() == _CAPACITY_MESSAGE),
-        None,
-    )
+        if line:
+            stderr_messages.append(line)
+    capacity_source = None
+    if terminal_messages and all(
+        message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages
+    ):
+        capacity_source = terminal_messages[0][0]
+    elif not terminal_messages and any(
+        message.strip() == _CAPACITY_MESSAGE for message in stderr_messages
+    ):
+        capacity_source = "stderr"
     if permanent_signal:
         capacity_source = None
-    diagnostic = next((message for _source, message in terminal_messages if message.strip()), "")
+    diagnostic = next(
+        (message for _source, message in terminal_messages if message.strip()),
+        next((message for message in stderr_messages if message.strip()), ""),
+    )
     return {
         "schema_version": 1,
         "error_class": "transient_capacity" if capacity_source else "unknown",

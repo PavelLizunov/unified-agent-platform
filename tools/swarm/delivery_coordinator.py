@@ -302,7 +302,28 @@ def _temporary_private_output():
 
 
 def _private_codex_events(path: pathlib.Path, text: str) -> None:
+    def sensitive_field(field: str | None) -> bool:
+        if not isinstance(field, str):
+            return False
+        name = field.casefold().replace("-", "_")
+        exact = {
+            "authorization", "proxy_authorization", "token", "access_token",
+            "refresh_token", "api_key", "access_key", "secret", "password",
+            "passwd", "credential", "credentials",
+        }
+        stems = (
+            "authorization", "token", "api_key", "access_key", "secret",
+            "password", "passwd", "credential",
+        )
+        return (
+            name in exact
+            or any(name.startswith(f"{stem}_") for stem in stems)
+            or any(name.endswith(f"_{stem}") for stem in stems)
+        )
+
     def sanitize(value: Any, field: str | None = None) -> Any:
+        if sensitive_field(field):
+            return "[REDACTED]"
         if isinstance(value, str):
             if field == "thread_id":
                 value = value.replace("\x00", "?")

@@ -341,6 +341,17 @@ class FlowContractTests(unittest.TestCase):
                     "type": "httpConnectionFailed", "httpStatusCode": 400,
                 },
             }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "httpStatusCode": None,
+                "codexErrorInfo": {
+                    "type": "httpConnectionFailed", "httpStatusCode": 400,
+                },
+            }}], "", "unknown"),
+            ([
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"message": "unknown failure"}},
+            ], "", "unknown"),
         )
         for events, stderr, expected in cases:
             with self.subTest(events=events, stderr=stderr), tempfile.NamedTemporaryFile(
