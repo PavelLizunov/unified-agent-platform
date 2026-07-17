@@ -702,6 +702,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             secret = "single-token-credential"
             event = {
                 "type": "item.completed",
+                "error": {
+                    "message": f"nested https://{secret}@host/path",
+                    "details": [{"authorization": f"Authorization: Bearer {secret}"}],
+                },
                 "item": {
                     "type": "command_execution",
                     "command": f"curl https://{secret}@host/path",
@@ -709,20 +713,28 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "status": "failed",
                 },
             }
+            thread_id = "019f8b1b-1234-7abc-8def-1234567890ab"
+            thread_event = {"type": "thread.started", "thread_id": thread_id}
 
             coordinator._private_codex_events(
-                path, json.dumps(event) + "\nraw non-json secret=" + secret
+                path,
+                json.dumps(thread_event) + "\n" + json.dumps(event)
+                + "\nraw non-json secret=" + secret,
             )
 
             persisted = path.read_text(encoding="utf-8")
-            parsed = json.loads(persisted.splitlines()[0])
+            lines = persisted.splitlines()
+            self.assertEqual(thread_id, json.loads(lines[0])["thread_id"])
+            parsed = json.loads(lines[1])
             self.assertIn("[REDACTED]", parsed["item"]["command"])
             self.assertLessEqual(
                 len(parsed["item"]["aggregated_output"]),
                 coordinator._MAX_CHECK_FAILURE_CHARS,
             )
             self.assertNotIn(secret, persisted)
-            self.assertEqual("[REDACTED non-json Codex event]", persisted.splitlines()[1])
+            self.assertIn("[REDACTED]", parsed["error"]["message"])
+            self.assertIn("[REDACTED]", parsed["error"]["details"][0]["authorization"])
+            self.assertEqual("[REDACTED non-json Codex event]", lines[2])
 
     def test_main_redacts_uri_userinfo_from_error_output(self):
         secret = "single-token-credential"
@@ -1201,6 +1213,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 instance._author(state, paths)
             self.assertNotIn("model_capacity", state)
             self.assertEqual(0, instance._quality_failures(state))
+            ambiguous = state["model_ambiguous"]
+            self.assertEqual("reconciling", ambiguous["status"])
+            self.assertEqual("ambiguous_result", ambiguous["error_class"])
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=mock.Mock()
+            )
+            recovered = restarted._load_state("ambiguous-capacity", paths)
+            restarted._ensure_route(recovered, paths)
+            self.assertEqual(ambiguous, restarted._ambiguous_state(recovered))
+            restarted.runner.assert_not_called()
 
     def test_in_progress_v1_route_remains_exactly_recoverable_under_v2(self):
         with tempfile.TemporaryDirectory() as directory:

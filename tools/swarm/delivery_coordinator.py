@@ -83,6 +83,10 @@ _CAPACITY_STATE_FIELDS = {
     "failures_on_route", "round", "status", "not_before", "error_class",
     "last_error_sha256",
 }
+_AMBIGUOUS_STATE_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "status", "error_class", "last_error_sha256",
+}
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
@@ -298,6 +302,20 @@ def _temporary_private_output():
 
 
 def _private_codex_events(path: pathlib.Path, text: str) -> None:
+    def sanitize(value: Any, field: str | None = None) -> Any:
+        if isinstance(value, str):
+            if field == "thread_id":
+                value = value.replace("\x00", "?")
+                for pattern in _DIAGNOSTIC_REDACTIONS[:-1]:
+                    value = pattern.sub("[REDACTED]", value)
+                return value[-_MAX_CHECK_FAILURE_CHARS:]
+            return _bounded_diagnostic(value)
+        if isinstance(value, list):
+            return [sanitize(item, field) for item in value]
+        if isinstance(value, dict):
+            return {key: sanitize(item, key) for key, item in value.items()}
+        return value
+
     lines: list[str] = []
     for raw_line in text.splitlines():
         try:
@@ -308,14 +326,7 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
         if not isinstance(event, dict):
             lines.append("[REDACTED invalid Codex event]")
             continue
-        containers = [event]
-        if isinstance(event.get("item"), dict):
-            containers.append(event["item"])
-        for container in containers:
-            for field in ("aggregated_output", "command", "message", "output", "text"):
-                if isinstance(container.get(field), str):
-                    container[field] = _bounded_diagnostic(container[field])
-        lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+        lines.append(json.dumps(sanitize(event), ensure_ascii=False, separators=(",", ":")))
     _private_text(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
@@ -747,6 +758,29 @@ class DeliveryCoordinator:
             raise DeliveryError("model-capacity checkpoint changed candidate identity")
         return value
 
+    def _ambiguous_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_ambiguous")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _AMBIGUOUS_STATE_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != self._quality_failures(state)
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") != "reconciling"
+            or value.get("error_class") != "ambiguous_result"
+            or not isinstance(value.get("last_error_sha256"), str)
+            or len(value["last_error_sha256"]) != 64
+        ):
+            raise DeliveryError("durable ambiguous-model checkpoint is invalid")
+        expected_candidate = state.get("candidate_sha") if value["role"] == "reviewer" else None
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("ambiguous-model checkpoint changed candidate identity")
+        return value
+
     def _capacity_wait_result(
         self, state: dict[str, Any], mission_id: str
     ) -> dict[str, Any] | None:
@@ -861,6 +895,17 @@ class DeliveryCoordinator:
             and observed_status == checkpoint[1]
         )
         if not failure["safe_before_side_effects"] or not unchanged:
+            state["model_ambiguous"] = {
+                "schema_version": 1,
+                "role": role,
+                "quality_epoch": self._quality_failures(state),
+                "route_decision_id": self._current_route(state)["decision_id"],
+                "candidate_sha": state.get("candidate_sha") if role == "reviewer" else None,
+                "status": "reconciling",
+                "error_class": "ambiguous_result",
+                "last_error_sha256": failure["message_sha256"],
+            }
+            self._save(paths, state)
             raise DeliveryError(
                 "ambiguous Codex capacity failure after execution started or worktree changed"
             )
@@ -3247,6 +3292,10 @@ class DeliveryCoordinator:
                 elif not consumed:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
+            if self._ambiguous_state(state) is not None:
+                return {
+                    "action": "reconciling", "mission_id": mission_id, "state": state,
+                }
             capacity_wait = self._capacity_wait_result(state, mission_id)
             if capacity_wait is not None:
                 return capacity_wait
