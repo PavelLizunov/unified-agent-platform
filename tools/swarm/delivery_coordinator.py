@@ -87,14 +87,19 @@ _AMBIGUOUS_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "status", "error_class", "last_error_sha256",
 }
+_MODEL_INVOCATION_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "status", "attempt_id",
+}
 _DIAGNOSTIC_REDACTIONS = (
-    re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
+    re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*[:=]\s*[^\r\n]+"),
     re.compile(r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+"),
     re.compile(
         r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
         r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
     ),
     re.compile(r"(?i)://[^/\s@]+@"),
+    re.compile(r"(?i)\bbearer\s+[^\s,;]+"),
     re.compile(
         r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
         r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+|"
@@ -812,6 +817,58 @@ class DeliveryCoordinator:
             raise DeliveryError("ambiguous-model checkpoint changed candidate identity")
         return value
 
+    def _model_invocation_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_invocation")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _MODEL_INVOCATION_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != self._quality_failures(state)
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") != "in_flight"
+            or not isinstance(value.get("attempt_id"), str)
+            or len(value["attempt_id"]) != 64
+        ):
+            raise DeliveryError("durable model-invocation checkpoint is invalid")
+        expected_candidate = (
+            state.get("candidate_sha") if value["role"] == "reviewer" else None
+        )
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("model-invocation checkpoint changed candidate identity")
+        return value
+
+    def _prepare_model_invocation(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], *, role: str
+    ) -> None:
+        if role not in {"author", "reviewer"} or self._model_invocation_state(state) is not None:
+            raise DeliveryError("model invocation is already in flight")
+        route = self._current_route(state)
+        candidate = state.get("candidate_sha") if role == "reviewer" else None
+        identity = {
+            "mission_id": state.get("mission_id"),
+            "role": role,
+            "quality_epoch": self._quality_failures(state),
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate,
+            "review_cycle": state.get("review_cycle"),
+        }
+        state["model_invocation"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": identity["quality_epoch"],
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate,
+            "status": "in_flight",
+            "attempt_id": hashlib.sha256(
+                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        }
+        self._save(paths, state)
+
     def _park_capacity_claim(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> None:
@@ -987,6 +1044,7 @@ class DeliveryCoordinator:
             )
         else:
             delay = _CAPACITY_RETRY_DELAYS_SECONDS[failures - 1]
+        state.pop("model_invocation", None)
         state["model_capacity"] = {
             "schema_version": 1,
             "role": role,
@@ -1069,6 +1127,7 @@ class DeliveryCoordinator:
         if role not in {"author", "reviewer"} or len(last_error_sha256) != 64:
             raise DeliveryError("invalid ambiguous-model checkpoint")
         state.pop("model_capacity", None)
+        state.pop("model_invocation", None)
         state["model_ambiguous"] = {
             "schema_version": 1,
             "role": role,
@@ -1916,17 +1975,29 @@ class DeliveryCoordinator:
         )
         if self.profile["schema_version"] == 4:
             state["candidate_files"] = candidate_files
-        rollout = self._rollout(events)
-        telemetry = flow_contract.summarize_codex_events(
-            events,
-            component="author",
-            model=actor["model"],
-            reasoning_effort=actor["reasoning_effort"],
-            rollout=rollout,
-            sandbox="workspace-write",
-            worktree=paths["author"],
-            head=candidate,
-        )
+        try:
+            rollout = self._rollout(events)
+            telemetry = flow_contract.summarize_codex_events(
+                events,
+                component="author",
+                model=actor["model"],
+                reasoning_effort=actor["reasoning_effort"],
+                rollout=rollout,
+                sandbox="workspace-write",
+                worktree=paths["author"],
+                head=candidate,
+            )
+        except (DeliveryError, flow_contract.ContractError, OSError, ValueError) as error:
+            diagnostic = _bounded_diagnostic(str(error), "invalid Codex completion telemetry")
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role="author",
+                last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+            )
+            raise DeliveryError(
+                "invalid Codex completion requires reconciliation before retry"
+            ) from error
         summary = {
             "schema_version": 1,
             "repo": self.profile["repo"],
@@ -1964,6 +2035,7 @@ class DeliveryCoordinator:
         state.pop("pre_review_gate_version", None)
         state.pop("pre_review_ci_checks", None)
         state.pop("review_findings", None)
+        state.pop("model_invocation", None)
         self._save(paths, state)
 
     def _recover_author_commit(
@@ -2055,6 +2127,7 @@ class DeliveryCoordinator:
                 failure_kind="author_checks",
                 failure_error=failure,
             )
+        state.pop("model_invocation", None)
         self._save(paths, state)
 
     def _reject_invalid_candidate(
@@ -2070,6 +2143,7 @@ class DeliveryCoordinator:
         pending = state.get("invalid_candidate_cleanup")
         marker = {"review_cycle": state["review_cycle"], "error": failure}
         if pending is None:
+            state.pop("model_invocation", None)
             state["invalid_candidate_cleanup"] = marker
             self._save(paths, state)
         elif pending != marker:
@@ -2167,6 +2241,7 @@ class DeliveryCoordinator:
                 "--untracked-files=all", "--ignored",
             ),
         )
+        self._prepare_model_invocation(state, paths, role="author")
         with _temporary_private_output() as raw_last:
             try:
                 result = self._run(
@@ -2524,6 +2599,7 @@ class DeliveryCoordinator:
                 "--untracked-files=all", "--ignored",
             ),
         )
+        self._prepare_model_invocation(state, paths, role="reviewer")
         with _temporary_private_output() as raw_last:
             try:
                 result = self._run(
@@ -2571,17 +2647,29 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("reviewer verdict contradicts its actionable findings")
         checks = self._checks("review_checks", paths["review"], state, paths)
-        telemetry = flow_contract.summarize_codex_events(
-            events,
-            component="reviewer",
-            model=actor["model"],
-            reasoning_effort=actor["reasoning_effort"],
-            rollout=self._rollout(events),
-            sandbox="read-only",
-            worktree=paths["review"],
-            head=state["candidate_sha"],
-            source_attestation_path=attestation_path,
-        )
+        try:
+            telemetry = flow_contract.summarize_codex_events(
+                events,
+                component="reviewer",
+                model=actor["model"],
+                reasoning_effort=actor["reasoning_effort"],
+                rollout=self._rollout(events),
+                sandbox="read-only",
+                worktree=paths["review"],
+                head=state["candidate_sha"],
+                source_attestation_path=attestation_path,
+            )
+        except (DeliveryError, flow_contract.ContractError, OSError, ValueError) as error:
+            diagnostic = _bounded_diagnostic(str(error), "invalid Codex completion telemetry")
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role="reviewer",
+                last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+            )
+            raise DeliveryError(
+                "invalid Codex completion requires reconciliation before retry"
+            ) from error
         response = {"verdict": response["verdict"], "findings": findings}
         mission_adapter._write_json(last, response, private_parent=True)
         verification = {
@@ -2601,6 +2689,7 @@ class DeliveryCoordinator:
         mission_adapter._write_json(paths["directory"] / "review-verification.json", verification, private_parent=True)
         mission_adapter._write_json(paths["directory"] / "review-telemetry.json", telemetry, private_parent=True)
         state.update(review_verification=verification, reviewer_telemetry=telemetry)
+        state.pop("model_invocation", None)
         if verification["verdict"] == "accept":
             state["phase"] = "reviewed"
             self._save(paths, state)
@@ -3530,6 +3619,17 @@ class DeliveryCoordinator:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
             if self._ambiguous_state(state) is not None:
+                return {
+                    "action": "reconciling", "mission_id": mission_id, "state": state,
+                }
+            invocation = self._model_invocation_state(state)
+            if invocation is not None:
+                self._mark_model_ambiguous(
+                    state,
+                    paths,
+                    role=invocation["role"],
+                    last_error_sha256=invocation["attempt_id"],
+                )
                 return {
                     "action": "reconciling", "mission_id": mission_id, "state": state,
                 }

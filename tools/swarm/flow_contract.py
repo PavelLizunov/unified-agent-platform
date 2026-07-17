@@ -24,7 +24,7 @@ def _safe_error(value: object) -> str:
     text = str(value).replace("\x00", "?")
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
     text = re.sub(
-        r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+",
+        r"(?i)\b(?:authorization|proxy-authorization)\s*[:=]\s*[^\r\n]+",
         "[REDACTED]",
         text,
     )
@@ -33,6 +33,13 @@ def _safe_error(value: object) -> str:
         "[REDACTED]",
         text,
     )
+    text = re.sub(
+        r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
+        r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        "[REDACTED]",
+        text,
+    )
+    text = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "[REDACTED]", text)
     text = re.sub(
         r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
         r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+)\b",
@@ -413,6 +420,8 @@ def parse_codex_failure(
             elif event_type == "turn.completed":
                 turn_started = True
                 turn_completed = True
+            elif event_type == "turn.failed":
+                turn_started = True
             elif isinstance(event_type, str) and event_type.startswith("item."):
                 item_seen = True
             if event_type in {"error", "turn.failed"}:

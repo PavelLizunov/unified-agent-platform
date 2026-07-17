@@ -358,6 +358,10 @@ class HermesKanbanBackend:
             run for run in runs or []
             if isinstance(run, dict) and str(run.get("id")) == str(run_id)
         ]
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
         claims = [
             event for event in events or []
             if (
@@ -374,6 +378,8 @@ class HermesKanbanBackend:
             or task.get("id") != task_id
             or task.get("status") != "running"
             or len(matching) != 1
+            or len(active) != 1
+            or str(active[0].get("id")) != str(run_id)
             or matching[0].get("status") != "running"
             # Pinned Hermes omits private claim columns from ``kanban show``;
             # the durable public lease proof is the matching claimed event.

@@ -140,6 +140,38 @@ class FlowContractTests(unittest.TestCase):
                 self.assertIn("[REDACTED]", redacted)
                 self.assertNotIn(secret, redacted)
 
+    def test_safe_error_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        for diagnostic in (
+            f"Authorization={secret}",
+            f"Proxy-Authorization={secret}",
+            f"token={secret}",
+            f"Bearer {secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                self.assertNotIn(secret, flow._safe_error(diagnostic))
+
+    def test_main_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                flow,
+                "load_json",
+                side_effect=flow.ContractError(
+                    f"Authorization={secret}; token={secret}"
+                ),
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            status = flow.main(
+                ["delivery-route", "--policy", "policy.json", "--signals", "signals.json"]
+            )
+
+        self.assertEqual(2, status)
+        self.assertIn("[REDACTED]", stderr.getvalue())
+        self.assertNotIn(secret, stderr.getvalue())
+
     @classmethod
     def setUpClass(cls):
         cls.policy = POLICY
@@ -390,6 +422,8 @@ class FlowContractTests(unittest.TestCase):
             try:
                 result = flow.parse_codex_failure(path, stderr)
                 self.assertEqual(expected, result["error_class"])
+                if events == [{"type": "turn.failed", "error": {"message": message}}]:
+                    self.assertFalse(result["safe_before_side_effects"])
             finally:
                 path.unlink()
 

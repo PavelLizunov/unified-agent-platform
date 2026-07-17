@@ -526,6 +526,7 @@ class MissionAdapterTests(unittest.TestCase):
     def test_native_claim_verification_rejects_expired_or_wrong_run(self):
         expires = int(time.time()) + 600
         event_run_id = 9
+        competing_run = False
 
         def runner(command):
             return subprocess.CompletedProcess(
@@ -539,7 +540,7 @@ class MissionAdapterTests(unittest.TestCase):
                     "runs": [{
                         "id": 9,
                         "status": "running",
-                    }],
+                    }] + ([{"id": 10, "status": "running"}] if competing_run else []),
                     "events": [{
                         "kind": "claimed",
                         "payload": {
@@ -567,6 +568,11 @@ class MissionAdapterTests(unittest.TestCase):
 
         event_run_id = 9
         expires = int(time.time()) - 1
+        with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
+            backend.verify_claim("task-1", "9", min_remaining_seconds=60)
+
+        expires = int(time.time()) + 600
+        competing_run = True
         with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
             backend.verify_claim("task-1", "9", min_remaining_seconds=60)
 

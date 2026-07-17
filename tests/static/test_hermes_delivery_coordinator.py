@@ -665,6 +665,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "sha256": coordinator.hashlib.sha256(text.encode()).hexdigest(),
                 }],
             }
+            instance._ensure_route(state, instance._paths("owner-answer-prompt"))
             with (
                 mock.patch.object(
                     instance,
@@ -727,6 +728,20 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("[REDACTED]", message)
         self.assertNotIn(secret, message)
 
+    def test_command_failure_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        result = subprocess.CompletedProcess(
+            ["gate"],
+            1,
+            stdout=f"Authorization={secret}\nProxy-Authorization={secret}",
+            stderr=f"token={secret}\nBearer {secret}",
+        )
+
+        message = coordinator._command_failure(result, result.args)
+
+        self.assertIn("[REDACTED]", message)
+        self.assertNotIn(secret, message)
+
     def test_persisted_codex_events_redact_and_bound_command_output(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "events.jsonl"
@@ -746,6 +761,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "Set-Cookie: session=response-cookie-secret; Secure",
                         "Cookie=session=equals-cookie-secret; Path=/",
                         "Set-Cookie=session=equals-response-secret; Secure",
+                        "Authorization=header-auth-secret",
+                        "Proxy-Authorization=proxy-auth-secret",
+                        "token=header-token-secret",
                     ],
                 },
                 "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},
@@ -784,6 +802,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("[REDACTED]", parsed["error"]["setCookie"])
             self.assertTrue(all("cookie-secret" not in item for item in parsed["error"]["headers"]))
             self.assertTrue(all("equals-response-secret" not in item for item in parsed["error"]["headers"]))
+            self.assertTrue(all("auth-secret" not in item for item in parsed["error"]["headers"]))
+            self.assertTrue(all("token-secret" not in item for item in parsed["error"]["headers"]))
             self.assertEqual(123, parsed["usage"]["input_tokens"])
             self.assertEqual("ordinary-count-label", parsed["usage"]["inputTokens"])
             self.assertEqual("[REDACTED non-json Codex event]", lines[2])
@@ -797,6 +817,25 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "load_profile",
                 side_effect=coordinator.flow_contract.ContractError(
                     f"remote mismatch: https://{secret}@host/repo.git"
+                ),
+            ),
+            mock.patch("sys.stderr", stderr),
+        ):
+            status = coordinator.main(["--profile", "unused.json"])
+
+        self.assertEqual(2, status)
+        self.assertIn("[REDACTED]", stderr.getvalue())
+        self.assertNotIn(secret, stderr.getvalue())
+
+    def test_main_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                coordinator,
+                "load_profile",
+                side_effect=coordinator.flow_contract.ContractError(
+                    f"Proxy-Authorization={secret}; token={secret}"
                 ),
             ),
             mock.patch("sys.stderr", stderr),
@@ -1102,6 +1141,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             })
 
             state = instance._load_state("legacy-diagnostic", paths)
+            instance._ensure_route(state, paths)
             with (
                 mock.patch.object(
                     instance,
@@ -1726,6 +1766,124 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("reconciling", state["model_ambiguous"]["status"])
             self.assertNotIn("model_capacity", state)
             self.assertEqual(0, instance._quality_failures(state))
+
+    def test_inflight_author_and_reviewer_restart_without_second_codex(self):
+        for role in ("author", "reviewer"):
+            with self.subTest(role=role), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                client = FakeClient()
+                first = coordinator.DeliveryCoordinator(
+                    approved, client, FakeBackend(), root / "state"
+                )
+                paths = first._paths(client.mission["mission_id"])
+                state = {
+                    "schema_version": 1,
+                    "mission_id": client.mission["mission_id"],
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": "claimed" if role == "author" else "pre_review_ci_green",
+                    "branch": "codex/a7-3-vpnrouter-inflight",
+                    "review_cycle": 1,
+                    "base_sha": "base-sha",
+                    "prior_review_rejections": 0,
+                    "prior_ci_failures": 0,
+                    "prior_author_failures": 0,
+                    "route_decisions": {},
+                    "effective_route_decisions": {},
+                    "owner_answers": [],
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                }
+                if role == "reviewer":
+                    state["candidate_sha"] = "candidate-sha"
+                first._ensure_route(state, paths)
+                first._prepare_model_invocation(state, paths, role=role)
+                (paths["directory"] / f"{role}-1.jsonl").write_text(
+                    '{"type":"thread.started","thread_id":"interrupted"}\n',
+                    encoding="utf-8",
+                )
+
+                runner = mock.Mock(side_effect=AssertionError("second Codex invocation"))
+                restarted = coordinator.DeliveryCoordinator(
+                    approved, client, FakeBackend(), root / "state", runner=runner
+                )
+                result = restarted.tick()
+
+                self.assertEqual("reconciling", result["action"])
+                self.assertEqual(role, result["state"]["model_ambiguous"]["role"])
+                self.assertNotIn("model_invocation", result["state"])
+                runner.assert_not_called()
+
+    def test_zero_exit_truncated_reviewer_stream_is_quarantined(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            calls = 0
+
+            def runner(command, **_kwargs):
+                nonlocal calls
+                calls += 1
+                raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                raw.write_text(
+                    json.dumps({"verdict": "accept", "findings": []}), encoding="utf-8"
+                )
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout='{"type":"thread.started","thread_id":"truncated-review"}\n',
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("truncated-review")
+            state = {
+                "schema_version": 1,
+                "mission_id": "truncated-review",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pre_review_ci_green",
+                "branch": "codex/a7-3-vpnrouter-truncated",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "candidate_sha": "candidate-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "root_task_id": "task-1",
+                "run_id": "7",
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "candidate-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                mock.patch.object(instance, "_require_draft_pr"),
+                mock.patch.object(instance, "_checks", return_value=[]),
+                mock.patch.object(instance, "_rollout", return_value=root / "rollout.jsonl"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source-sha"},
+                ),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "invalid Codex completion"
+                ),
+            ):
+                instance._review(state, paths)
+
+            self.assertEqual(1, calls)
+            self.assertEqual("reviewer", state["model_ambiguous"]["role"])
+            self.assertEqual("reconciling", state["model_ambiguous"]["status"])
+            self.assertNotIn("model_invocation", state)
 
     def test_in_progress_v1_route_remains_exactly_recoverable_under_v2(self):
         with tempfile.TemporaryDirectory() as directory:
