@@ -1386,7 +1386,7 @@ class DeliveryCoordinator:
         prompt = (
             "Implement the owner-approved mission in this exact repository. "
             "Read and obey all repository instructions. Do not commit, push, open a PR, merge, tag, release, "
-            "deploy, use another agent, or change files outside the allowlist. Preserve the C#/.NET stack and "
+            "deploy, use another agent, or change files outside the allowlist. Preserve the repository's existing stack and "
             "use the smallest native implementation.\n\n"
             f"Goal: {self.profile['goal']}\n"
             f"Owner answers bound to this mission: {json.dumps(owner_answers)}\n"
