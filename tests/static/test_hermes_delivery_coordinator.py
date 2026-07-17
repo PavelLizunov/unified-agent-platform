@@ -846,13 +846,104 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ),
                 mock.patch.object(instance, "_assert_claim"),
                 mock.patch.object(instance, "_git", side_effect=git),
-                self.assertRaisesRegex(coordinator.DeliveryError, "author failed"),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex failure"),
             ):
                 instance._author(state, paths)
 
             self.assertTrue(raw_paths)
             self.assertTrue(all(not path.exists() for path in raw_paths))
             self.assertFalse((paths["directory"] / "author-1-last.txt").exists())
+            self.assertEqual("reconciling", state["model_ambiguous"]["status"])
+
+    def test_author_timeout_is_durably_quarantined_before_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+
+            def runner(command, **_kwargs):
+                raise subprocess.TimeoutExpired(
+                    command,
+                    900,
+                    output=json.dumps({"type": "thread.started", "thread_id": "timeout"}),
+                    stderr="Cookie=timeout-cookie-secret",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("author-timeout")
+            state = {
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex timeout"),
+            ):
+                instance._author(state, paths)
+
+            self.assertEqual("reconciling", state["model_ambiguous"]["status"])
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(state["model_ambiguous"], persisted["model_ambiguous"])
+            self.assertNotIn(
+                "timeout-cookie-secret",
+                (paths["directory"] / "author-1.jsonl").read_text(encoding="utf-8"),
+            )
+            self.assertNotIn(
+                "timeout-cookie-secret", paths["state"].read_text(encoding="utf-8")
+            )
+
+    def test_reviewer_timeout_is_durably_quarantined_before_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+
+            def runner(command, **_kwargs):
+                raise subprocess.TimeoutExpired(command, 900, output="", stderr="review timeout")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("reviewer-timeout")
+            state = {
+                "review_cycle": 1,
+                "candidate_sha": "candidate",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git", return_value="candidate"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source"},
+                ),
+                mock.patch.object(instance, "_bound_pr", return_value={"isDraft": True}),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex timeout"),
+            ):
+                instance._review(state, paths)
+
+            self.assertEqual("reviewer", state["model_ambiguous"]["role"])
+            self.assertEqual("reconciling", state["model_ambiguous"]["status"])
 
     def test_invalid_reviewer_output_removes_raw_last_message(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1415,6 +1506,58 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("running", backend.task["status"])
             self.assertEqual("9", state["run_id"])
             self.assertEqual(3, len({run["id"] for run in backend.runs}))
+
+    def test_capacity_resume_refuses_to_adopt_a_foreign_active_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-foreign-run")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-foreign-run",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state,
+                    paths,
+                    role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "f" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(state, "capacity-foreign-run", paths)
+            backend.unblock("task-1", reason="competing claimant")
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+
+            with (
+                mock.patch.object(coordinator.time, "time", return_value=1006),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "different active Kanban run"
+                ),
+            ):
+                instance._capacity_wait_result(state, "capacity-foreign-run", paths)
+
+            self.assertEqual("7", state["run_id"])
+            self.assertEqual("8", str(backend.runs[-1]["id"]))
 
     def test_exact_pre_turn_author_capacity_becomes_restart_safe_wait(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -909,12 +909,14 @@ class DeliveryCoordinator:
             active = []
         if task.get("status") == "ready" and not active:
             self._ensure_claimed(state)
-        elif task.get("status") == "running" and len(active) == 1:
-            # Lost response after a successful re-claim: recover the exact current run.
-            state["run_id"] = str(active[0]["id"])
+        elif (
+            task.get("status") == "running"
+            and len(active) == 1
+            and str(active[0].get("id")) == str(state.get("run_id"))
+        ):
             self._assert_claim(state)
         else:
-            raise DeliveryError("capacity retry did not recover one exact Kanban run")
+            raise DeliveryError("capacity retry found a different active Kanban run")
         waiting["claim_parked"] = False
         self._save(paths, state)
 
@@ -1022,7 +1024,7 @@ class DeliveryCoordinator:
         result: subprocess.CompletedProcess[str],
         events: pathlib.Path,
         checkpoint: tuple[str, str],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         failure = flow_contract.parse_codex_failure(events, result.stderr)
         expected_head = (
             state.get("candidate_sha") if role == "reviewer"
@@ -1040,24 +1042,70 @@ class DeliveryCoordinator:
             and observed_head == checkpoint[0]
             and observed_status == checkpoint[1]
         )
-        if not failure["safe_before_side_effects"] or not unchanged:
-            state["model_ambiguous"] = {
-                "schema_version": 1,
-                "role": role,
-                "quality_epoch": self._quality_failures(state),
-                "route_decision_id": self._current_route(state)["decision_id"],
-                "candidate_sha": state.get("candidate_sha") if role == "reviewer" else None,
-                "status": "reconciling",
-                "error_class": "ambiguous_result",
-                "last_error_sha256": failure["message_sha256"],
-            }
-            self._save(paths, state)
-            raise DeliveryError(
-                "ambiguous Codex failure after execution started or worktree changed"
+        if (
+            failure["error_class"] != "transient_capacity"
+            or not failure["safe_before_side_effects"]
+            or not unchanged
+        ):
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role=role,
+                last_error_sha256=failure["message_sha256"],
             )
-        if failure["error_class"] != "transient_capacity":
-            return None
+            raise DeliveryError(
+                "ambiguous Codex failure requires reconciliation before retry"
+            )
         return failure
+
+    def _mark_model_ambiguous(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        last_error_sha256: str,
+    ) -> None:
+        if role not in {"author", "reviewer"} or len(last_error_sha256) != 64:
+            raise DeliveryError("invalid ambiguous-model checkpoint")
+        state.pop("model_capacity", None)
+        state["model_ambiguous"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": self._quality_failures(state),
+            "route_decision_id": self._current_route(state)["decision_id"],
+            "candidate_sha": state.get("candidate_sha") if role == "reviewer" else None,
+            "status": "reconciling",
+            "error_class": "ambiguous_result",
+            "last_error_sha256": last_error_sha256,
+        }
+        self._save(paths, state)
+
+    def _mark_model_timeout(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        error: subprocess.TimeoutExpired,
+        events: pathlib.Path,
+    ) -> None:
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        _private_codex_events(events, output)
+        diagnostic = _bounded_diagnostic(
+            error.stderr.decode("utf-8", errors="replace")
+            if isinstance(error.stderr, bytes)
+            else error.stderr or str(error),
+            "Codex execution timed out",
+        )
+        self._mark_model_ambiguous(
+            state,
+            paths,
+            role=role,
+            last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+        )
 
     def _actor(self, state: dict[str, Any], component: str) -> dict[str, str]:
         actor = self._current_route(state).get(component)
@@ -1474,10 +1522,13 @@ class DeliveryCoordinator:
             run for run in runs or []
             if isinstance(run, dict) and run.get("status") == "running"
         ]
+        durable_run_id = state.get("run_id")
+        claimed_here = False
         if task.get("status") == "ready" and not active:
             snapshot = self.backend.claim(
                 state["root_task_id"], ttl_seconds=self.profile["claim_ttl_seconds"]
             )
+            claimed_here = True
             task = snapshot.get("task", {})
             runs = snapshot["runs"]
             if (
@@ -1494,7 +1545,10 @@ class DeliveryCoordinator:
             or len(active) != 1
         ):
             raise DeliveryError("Kanban task did not converge to one claimed run")
-        state["run_id"] = str(active[0]["id"])
+        observed_run_id = str(active[0]["id"])
+        if not claimed_here and str(durable_run_id) != observed_run_id:
+            raise DeliveryError("refusing to adopt an undurable active Kanban run")
+        state["run_id"] = observed_run_id
         self._assert_claim(state)
 
     def _assert_claim(self, state: dict[str, Any], *, min_remaining_seconds: int = 60) -> None:
@@ -2114,25 +2168,31 @@ class DeliveryCoordinator:
             ),
         )
         with _temporary_private_output() as raw_last:
-            result = self._run(
-                [
-                    self.profile["codex_bin"], "exec", "--ignore-user-config",
-                    *self._reasoning_args(state, "author"),
-                    "--model", actor["model"], "--sandbox", "workspace-write",
-                    "--cd", str(paths["author"]), "--json", "--output-last-message", str(raw_last), "-",
-                ],
-                cwd=paths["author"], input_text=prompt,
-                environment=self._model_env(paths),
-                check=False,
-            )
+            try:
+                result = self._run(
+                    [
+                        self.profile["codex_bin"], "exec", "--ignore-user-config",
+                        *self._reasoning_args(state, "author"),
+                        "--model", actor["model"], "--sandbox", "workspace-write",
+                        "--cd", str(paths["author"]), "--json", "--output-last-message", str(raw_last), "-",
+                    ],
+                    cwd=paths["author"], input_text=prompt,
+                    environment=self._model_env(paths),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                self._mark_model_timeout(
+                    state, paths, role="author", error=error, events=events
+                )
+                raise DeliveryError(
+                    "ambiguous Codex timeout requires reconciliation before retry"
+                ) from error
             _private_codex_events(events, result.stdout)
             if result.returncode:
                 failure = self._capacity_failure_is_retryable(
                     state, paths, role="author", result=result, events=events,
                     checkpoint=checkpoint,
                 )
-                if failure is None:
-                    raise DeliveryError(_command_failure(result, result.args))
                 self._record_capacity_failure(
                     state, paths, role="author", failure=failure
                 )
@@ -2465,26 +2525,32 @@ class DeliveryCoordinator:
             ),
         )
         with _temporary_private_output() as raw_last:
-            result = self._run(
-                [
-                    self.profile["codex_bin"], "exec", "--ignore-user-config",
-                    *self._reasoning_args(state, "reviewer"),
-                    "--model", actor["model"], "--sandbox", "read-only",
-                    "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
-                    "--output-last-message", str(raw_last), "-",
-                ],
-                cwd=paths["review"], input_text=prompt,
-                environment=self._model_env(paths),
-                check=False,
-            )
+            try:
+                result = self._run(
+                    [
+                        self.profile["codex_bin"], "exec", "--ignore-user-config",
+                        *self._reasoning_args(state, "reviewer"),
+                        "--model", actor["model"], "--sandbox", "read-only",
+                        "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
+                        "--output-last-message", str(raw_last), "-",
+                    ],
+                    cwd=paths["review"], input_text=prompt,
+                    environment=self._model_env(paths),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                self._mark_model_timeout(
+                    state, paths, role="reviewer", error=error, events=events
+                )
+                raise DeliveryError(
+                    "ambiguous Codex timeout requires reconciliation before retry"
+                ) from error
             _private_codex_events(events, result.stdout)
             if result.returncode:
                 failure = self._capacity_failure_is_retryable(
                     state, paths, role="reviewer", result=result, events=events,
                     checkpoint=checkpoint,
                 )
-                if failure is None:
-                    raise DeliveryError(_command_failure(result, result.args))
                 self._record_capacity_failure(
                     state, paths, role="reviewer", failure=failure
                 )

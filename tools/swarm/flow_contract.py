@@ -29,6 +29,11 @@ def _safe_error(value: object) -> str:
         text,
     )
     text = re.sub(
+        r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+",
+        "[REDACTED]",
+        text,
+    )
+    text = re.sub(
         r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
         r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+)\b",
         "[REDACTED]",

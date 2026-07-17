@@ -127,6 +127,19 @@ def validate_review_with_telemetry(summary, verification, author, reviewer, **kw
 
 
 class FlowContractTests(unittest.TestCase):
+    def test_safe_error_redacts_cookie_header_forms(self):
+        secret = "standalone-cookie-secret"
+        for diagnostic in (
+            f"Cookie: {secret}",
+            f"Cookie={secret}",
+            f"Set-Cookie: session={secret}",
+            f"set-cookie=session={secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                redacted = flow._safe_error(diagnostic)
+                self.assertIn("[REDACTED]", redacted)
+                self.assertNotIn(secret, redacted)
+
     @classmethod
     def setUpClass(cls):
         cls.policy = POLICY
