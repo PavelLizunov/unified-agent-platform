@@ -1222,6 +1222,23 @@ def test_terminal_retention_preserves_parent_until_repair_notification() -> None
             store.restore_parent_after_terminal_notification(child)
             assert store.bound_mission("telegram", "42") == parent
             assert store.projection(parent)["status"] == "cancelled"
+            connection = sqlite3.connect(store.path)
+            try:
+                unbound = connection.execute(
+                    """SELECT COUNT(DISTINCT events.mission_id)
+                       FROM mission_events AS events
+                       LEFT JOIN mission_subscriptions AS subscriptions
+                         ON subscriptions.mission_id = events.mission_id
+                       WHERE subscriptions.mission_id IS NULL"""
+                ).fetchone()[0]
+            finally:
+                connection.close()
+            assert unbound == missions._MAX_RETAINED_TERMINAL_MISSIONS
+            try:
+                store.projection("mission-retention-fill-001")
+                raise AssertionError("binding restoration left excess terminal history")
+            except missions.MissionError as error:
+                assert str(error) == "mission not found"
 
     asyncio.run(scenario())
 
