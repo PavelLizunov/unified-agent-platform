@@ -52,6 +52,22 @@ def profile(root: pathlib.Path) -> dict:
     }
 
 
+def reusable_profile(root: pathlib.Path) -> dict:
+    value = profile(root)
+    value["schema_version"] = 4
+    value.pop("goal")
+    value.pop("required_files")
+    value.pop("crash_after_author_commit_once")
+    value.update(
+        allowed_path_prefixes=["src", "tests"],
+        max_changed_files=8,
+        commit_message="feat: deliver autonomous mission",
+        pull_request_title="feat: deliver autonomous mission",
+        pull_request_body="Autonomous UAP delivery.",
+    )
+    return value
+
+
 def dirty_git_checkout(checkout: pathlib.Path, files: list[str], branch: str) -> str:
     checkout.mkdir(parents=True)
     for command in (
@@ -351,6 +367,8 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
 
     def _author(self, state, paths):
         self.counters["authors"] += 1
+        if self.profile["schema_version"] == 4:
+            state["candidate_files"] = ["src/runtime.py"]
         state.update(
             phase="author_committed",
             candidate_sha="candidate-sha",
@@ -361,6 +379,9 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
 
     def _recover_author_commit(self, state, paths):
         return False
+
+    def _committed_candidate_files(self, state):
+        return list(state["candidate_files"])
 
     def _publish_stage(self, state, stage, progress):
         self.client.stages.append((state["mission_id"], stage, progress))
@@ -1202,6 +1223,259 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
                 instance._reasoning_args(state, "reviewer"),
             )
+
+    def test_reusable_profile_binds_each_mission_goal_and_candidate_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "delivery-reusable.json"
+            value = reusable_profile(root)
+            path.write_text(json.dumps(value), encoding="utf-8")
+
+            loaded = coordinator.load_profile(path)
+            self.assertEqual(4, loaded["schema_version"])
+            self.assertFalse(loaded["crash_after_author_commit_once"])
+            self.assertNotIn("goal", loaded)
+            self.assertNotIn("required_files", loaded)
+            self.assertFalse(
+                installer.migrate_profile(path, unit_state=lambda _unit: "inactive")
+            )
+
+            client = FakeClient()
+            client.mission["goal"] = "Implement a new repository-specific owner goal"
+            instance = coordinator.DeliveryCoordinator(
+                loaded, client, FakeBackend(), root / "state"
+            )
+            mission = instance._mission()
+            self.assertIsNotNone(mission)
+            paths = instance._paths(client.mission["mission_id"])
+            state = instance._load_state(client.mission["mission_id"], paths)
+            instance._bind_mission_goal(state, mission, paths)
+
+            recovered = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(client.mission["goal"], instance._mission_goal(recovered))
+            self.assertEqual(8, instance._route_signals(recovered)["changed_files"])
+            route = instance._ensure_route(recovered, paths)
+            self.assertEqual(
+                ["src/runtime.py", "tests/test_runtime.py"],
+                instance._validate_changed_scope(
+                    {"tests/test_runtime.py", "src/runtime.py"}
+                ),
+            )
+            recovered["candidate_files"] = ["src/runtime.py", "tests/test_runtime.py"]
+            self.assertEqual(8, instance._route_signals(recovered)["changed_files"])
+            self.assertEqual(route, instance._ensure_route(recovered, paths))
+
+            with self.assertRaisesRegex(coordinator.DeliveryError, "path boundary"):
+                instance._validate_changed_scope({"docs/outside.md"})
+            with self.assertRaisesRegex(coordinator.DeliveryError, "file limit"):
+                instance._validate_changed_scope(
+                    {f"src/generated-{index}.py" for index in range(9)}
+                )
+
+            changed = dict(client.mission)
+            changed["goal"] = "A different goal"
+            with self.assertRaisesRegex(coordinator.DeliveryError, "goal changed"):
+                instance._bind_mission_goal(recovered, changed, paths)
+
+            invalid = reusable_profile(root)
+            invalid["goal"] = "A canary-only field"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "schema 4 forbids"):
+                coordinator.load_profile(path)
+
+    def test_reusable_profile_checks_cumulative_and_both_sides_of_rename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            checkout = root / "checkout"
+            (checkout / "src").mkdir(parents=True)
+            (checkout / "docs").mkdir()
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=checkout, check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            for name in ("src/first.py", "src/second.py", "docs/outside.py"):
+                (checkout / name).write_text("base\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "base")
+            base = git("rev-parse", "HEAD")
+
+            value = reusable_profile(root)
+            value.update(allowed_path_prefixes=["src"], max_changed_files=1)
+            path = root / "delivery-reusable.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            instance = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(path), FakeClient(), FakeBackend(), root / "state"
+            )
+            state = {"base_sha": base}
+
+            (checkout / "src/first.py").write_text("first\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-m", "first cycle")
+            (checkout / "src/second.py").write_text("second\n", encoding="utf-8")
+            self.assertEqual({"src/second.py"}, instance._changed_files(checkout))
+            with self.assertRaisesRegex(coordinator.DeliveryError, "file limit"):
+                instance._validate_changed_scope(
+                    instance._worktree_candidate_files(state, checkout)
+                )
+
+            git("reset", "--hard", base)
+            git("mv", "docs/outside.py", "src/moved.py")
+            value["max_changed_files"] = 2
+            path.write_text(json.dumps(value), encoding="utf-8")
+            instance = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(path), FakeClient(), FakeBackend(), root / "state-rename"
+            )
+            self.assertEqual(
+                {"docs/outside.py", "src/moved.py"}, instance._changed_files(checkout)
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "path boundary"):
+                instance._validate_changed_scope(instance._changed_files(checkout))
+
+    def test_invalid_candidate_cleanup_recovers_after_checkpoint_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "source"
+            remote = root / "remote.git"
+            source.mkdir()
+
+            def run(*arguments, cwd=source):
+                return subprocess.run(
+                    list(arguments), cwd=cwd, check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            run("git", "init", "--bare", str(remote), cwd=root)
+            run("git", "init", "-b", "main")
+            run("git", "config", "user.name", "Test")
+            run("git", "config", "user.email", "test@example.invalid")
+            (source / "src").mkdir()
+            (source / "src" / "runtime.py").write_text("base\n", encoding="utf-8")
+            (source / ".gitignore").write_text("scratch/\n", encoding="utf-8")
+            run("git", "add", ".")
+            run("git", "commit", "-m", "base")
+            run("git", "remote", "add", "origin", str(remote))
+            run("git", "push", "-u", "origin", "main")
+
+            value = reusable_profile(root)
+            value.update(
+                remote=str(remote), source_checkout=str(source),
+                allowed_path_prefixes=["src"], max_changed_files=1,
+            )
+            profile_path = root / "delivery-reusable.json"
+            profile_path.write_text(json.dumps(value), encoding="utf-8")
+            loaded = coordinator.load_profile(profile_path)
+
+            class CrashAfterCheckpoint(coordinator.DeliveryCoordinator):
+                def _finish_invalid_candidate_cleanup(self, _state, _paths):
+                    raise coordinator.InjectedCrash("after invalid candidate checkpoint")
+
+            instance = CrashAfterCheckpoint(
+                loaded, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-scope-recovery")
+            state = instance._load_state("mission-scope-recovery", paths)
+            state.update(
+                phase="needs_fix",
+                base_sha=run("git", "rev-parse", "HEAD"),
+                review_cycle=2,
+                prior_author_failures=1,
+            )
+            instance._save(paths, state)
+            run(
+                "git", "worktree", "add", "-b", state["branch"],
+                str(paths["author"]), "HEAD",
+            )
+            (paths["author"] / "docs").mkdir()
+            (paths["author"] / "docs" / "bad.py").write_text("bad\n", encoding="utf-8")
+            (paths["author"] / "scratch").mkdir()
+            (paths["author"] / "scratch" / "secret.txt").write_text(
+                "residue\n", encoding="utf-8"
+            )
+
+            with self.assertRaises(coordinator.InjectedCrash):
+                instance._recover_author_commit(state, paths)
+            checkpoint = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertIn("invalid_candidate_cleanup", checkpoint)
+            self.assertEqual(1, checkpoint["prior_author_failures"])
+
+            restarted = coordinator.DeliveryCoordinator(
+                loaded, FakeClient(), FakeBackend(), root / "state"
+            )
+            recovered = restarted._load_state("mission-scope-recovery", paths)
+            restarted._finish_invalid_candidate_cleanup(recovered, paths)
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("needs_fix", persisted["phase"])
+            self.assertEqual(3, persisted["review_cycle"])
+            self.assertEqual(2, persisted["prior_author_failures"])
+            self.assertEqual(1, persisted["discarded_author_attempts"])
+            self.assertEqual(0, persisted["author_commit_count"])
+            self.assertNotIn("invalid_candidate_cleanup", persisted)
+            self.assertFalse((paths["author"] / "docs" / "bad.py").exists())
+            self.assertFalse((paths["author"] / "scratch").exists())
+            self.assertEqual(
+                "",
+                run(
+                    "git", "status", "--porcelain=v1",
+                    "--untracked-files=all", "--ignored", cwd=paths["author"],
+                ),
+            )
+            restarted._ensure_route(persisted, paths)
+            self.assertIn("2", persisted["route_decisions"])
+            self.assertFalse(restarted._recover_author_commit(persisted, paths))
+
+    def test_reusable_candidate_files_are_bound_to_exact_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source = root / "source"
+            source.mkdir()
+
+            def git(*arguments):
+                return subprocess.run(
+                    ["git", *arguments], cwd=source, check=True,
+                    capture_output=True, text=True,
+                ).stdout.strip()
+
+            git("init", "-b", "main")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            (source / "src").mkdir()
+            for name in ("a.py", "b.py"):
+                (source / "src" / name).write_text("base\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "base")
+            base = git("rev-parse", "HEAD")
+            for name in ("a.py", "b.py"):
+                (source / "src" / name).write_text("candidate\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "candidate")
+            candidate = git("rev-parse", "HEAD")
+
+            value = reusable_profile(root)
+            value.update(
+                source_checkout=str(source), allowed_path_prefixes=["src"],
+                max_changed_files=2,
+            )
+            profile_path = root / "delivery-reusable.json"
+            profile_path.write_text(json.dumps(value), encoding="utf-8")
+            instance = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(profile_path), FakeClient(), FakeBackend(),
+                root / "state",
+            )
+            state = {
+                "base_sha": base,
+                "candidate_sha": candidate,
+                "candidate_files": ["src/a.py", "src/b.py"],
+            }
+            self.assertEqual(state["candidate_files"], instance._candidate_files(state))
+            state["candidate_files"] = ["src/a.py"]
+            with self.assertRaisesRegex(coordinator.DeliveryError, "exact candidate"):
+                instance._candidate_files(state)
 
     def test_legacy_two_cycle_profile_requires_atomic_migration(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3881,6 +4155,45 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
             self.assertTrue(result["state"]["crash_injected"])
 
+    def test_reusable_profile_delivers_unpinned_goal_without_canary_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "delivery-reusable.json"
+            path.write_text(json.dumps(reusable_profile(root)), encoding="utf-8")
+            approved = coordinator.load_profile(path)
+            client = FakeClient()
+            client.mission["goal"] = "Implement a goal that was not embedded in the profile"
+            backend = FakeBackend()
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            handoff = {
+                "root_task_id": "task-1",
+                "mission_id": "mission-a7-3",
+                "action": "dispatched",
+            }
+
+            with mock.patch.object(
+                coordinator.mission_adapter, "coordinator_tick", return_value=handoff
+            ):
+                result = HermeticCoordinator(
+                    approved, client, backend, root / "state", counters=counters
+                ).tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(client.mission["goal"], result["state"]["mission_goal"])
+            self.assertEqual(["src/runtime.py"], result["state"]["candidate_files"])
+            self.assertFalse(result["state"]["crash_injected"])
+            self.assertEqual(1, counters["authors"])
+            self.assertEqual(1, counters["reviews"])
+            self.assertEqual(
+                [{"type": "change.upsert", "payload": {
+                    "path": "src/runtime.py", "status": "modified"
+                }}],
+                [
+                    event for event in backend.runs[0]["metadata"]["mission_events"]
+                    if event["type"] == "change.upsert"
+                ],
+            )
+
     def test_cycle_eight_accepts_or_terminates_without_a_ninth_tick_review(self):
         for verdict in ("accept", "reject"):
             with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as directory:
@@ -4004,6 +4317,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             failure = "compile failed: " + ("x" * 5000)
             with (
                 mock.patch.object(instance, "_changed_files", return_value=set(approved["required_files"])),
+                mock.patch.object(
+                    instance, "_worktree_candidate_files",
+                    return_value=set(approved["required_files"]),
+                ),
                 mock.patch.object(instance, "_candidate_fingerprint", return_value="candidate-v1"),
                 mock.patch.object(
                     instance, "_checks", side_effect=coordinator.DeliveryError(failure)
@@ -4021,6 +4338,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertIn("[REDACTED]", persisted["review_findings"][0])
             with mock.patch.object(
                 instance, "_changed_files", return_value=set(approved["required_files"])
+            ), mock.patch.object(
+                instance, "_worktree_candidate_files",
+                return_value=set(approved["required_files"]),
             ), mock.patch.object(
                 instance, "_candidate_fingerprint", return_value="candidate-v1"
             ):
