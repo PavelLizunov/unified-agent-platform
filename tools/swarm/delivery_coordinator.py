@@ -655,13 +655,24 @@ class DeliveryCoordinator:
                 migrated = True
             if (
                 state.get("pr_number") is not None
-                and state.get("phase") in {"pr_open", "ci_green"}
+                and state.get("phase") in {"reviewed", "pr_open", "ci_green"}
                 and "pr_head_sha" not in state
             ):
                 candidate = state.get("candidate_sha")
                 if not isinstance(candidate, str) or not candidate:
                     raise DeliveryError("legacy PR state has no candidate identity")
                 state["pr_head_sha"] = candidate
+                migrated = True
+            if (
+                state.get("phase") in {"reviewed", "pr_open", "ci_green"}
+                and "candidate_push_sha" not in state
+            ):
+                state["phase"] = "author_committed"
+                for field in (
+                    "pre_review_ci_checks", "review_verification",
+                    "reviewer_telemetry", "ci_checks",
+                ):
+                    state.pop(field, None)
                 migrated = True
             if migrated:
                 self._save(paths, state)

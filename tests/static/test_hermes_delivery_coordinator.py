@@ -931,6 +931,45 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 coordinator.mission_adapter._read_json(paths["state"])["pr_head_sha"],
             )
 
+    def test_legacy_ready_phases_rewind_to_the_pre_review_platform_gate(self):
+        for phase in ("reviewed", "pr_open", "ci_green"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state"
+                )
+                mission_id = f"legacy-{phase}"
+                paths = instance._paths(mission_id)
+                instance._save(paths, {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": phase,
+                    "branch": "codex/legacy-pr",
+                    "candidate_sha": "reviewed-v1-sha",
+                    "pr_number": 39,
+                    "pr_head_sha": "old-pr-sha",
+                    "pr_base_branch": approved["default_branch"],
+                    "pre_review_ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
+                    "review_verification": {"verdict": "accept"},
+                    "reviewer_telemetry": {"session_id": "old-review"},
+                    "ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
+                })
+
+                recovered = instance._load_state(mission_id, paths)
+
+                self.assertEqual("author_committed", recovered["phase"])
+                for field in (
+                    "pre_review_ci_checks", "review_verification",
+                    "reviewer_telemetry", "ci_checks",
+                ):
+                    self.assertNotIn(field, recovered)
+                self.assertEqual(
+                    recovered,
+                    coordinator.mission_adapter._read_json(paths["state"]),
+                )
+
     def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "profile.json"
