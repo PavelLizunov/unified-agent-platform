@@ -933,42 +933,91 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
     def test_legacy_ready_phases_rewind_to_the_pre_review_platform_gate(self):
         for phase in ("reviewed", "pr_open", "ci_green"):
-            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
-                root = pathlib.Path(directory)
-                approved = profile(root)
-                instance = coordinator.DeliveryCoordinator(
-                    approved, FakeClient(), FakeBackend(), root / "state"
-                )
-                mission_id = f"legacy-{phase}"
-                paths = instance._paths(mission_id)
-                instance._save(paths, {
-                    "schema_version": 1,
-                    "mission_id": mission_id,
-                    "dispatch_profile": approved["dispatch_profile"],
-                    "phase": phase,
-                    "branch": "codex/legacy-pr",
-                    "candidate_sha": "reviewed-v1-sha",
-                    "pr_number": 39,
-                    "pr_head_sha": "old-pr-sha",
-                    "pr_base_branch": approved["default_branch"],
-                    "pre_review_ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
-                    "review_verification": {"verdict": "accept"},
-                    "reviewer_telemetry": {"session_id": "old-review"},
-                    "ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
-                })
-
-                recovered = instance._load_state(mission_id, paths)
-
-                self.assertEqual("author_committed", recovered["phase"])
-                for field in (
-                    "pre_review_ci_checks", "review_verification",
-                    "reviewer_telemetry", "ci_checks",
+            for has_push_checkpoint in (False, True):
+                with (
+                    self.subTest(
+                        phase=phase, has_push_checkpoint=has_push_checkpoint
+                    ),
+                    tempfile.TemporaryDirectory() as directory,
                 ):
-                    self.assertNotIn(field, recovered)
-                self.assertEqual(
-                    recovered,
-                    coordinator.mission_adapter._read_json(paths["state"]),
-                )
+                    self._assert_legacy_ready_phase_rewinds(
+                        pathlib.Path(directory), phase, has_push_checkpoint
+                    )
+
+    def _assert_legacy_ready_phase_rewinds(self, root, phase, has_push_checkpoint):
+        approved = profile(root)
+        instance = coordinator.DeliveryCoordinator(
+            approved, FakeClient(), FakeBackend(), root / "state"
+        )
+        mission_id = f"legacy-{phase}"
+        paths = instance._paths(mission_id)
+        legacy = {
+            "schema_version": 1,
+            "mission_id": mission_id,
+            "dispatch_profile": approved["dispatch_profile"],
+            "phase": phase,
+            "branch": "codex/legacy-pr",
+            "candidate_sha": "reviewed-v1-sha",
+            "pr_number": 39,
+            "pr_head_sha": "old-pr-sha",
+            "pr_base_branch": approved["default_branch"],
+            "pre_review_ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
+            "review_verification": {"verdict": "accept"},
+            "reviewer_telemetry": {"session_id": "old-review"},
+            "ci_checks": [{"name": "old", "outcome": "SUCCESS"}],
+        }
+        if has_push_checkpoint:
+            legacy["candidate_push_sha"] = "reviewed-v1-sha"
+        instance._save(paths, legacy)
+
+        recovered = instance._load_state(mission_id, paths)
+
+        self.assertEqual("author_committed", recovered["phase"])
+        for field in (
+            "pre_review_gate_version", "pre_review_ci_checks", "review_verification",
+            "reviewer_telemetry", "ci_checks",
+        ):
+            self.assertNotIn(field, recovered)
+        self.assertEqual(
+            recovered,
+            coordinator.mission_adapter._read_json(paths["state"]),
+        )
+
+    def test_complete_current_platform_gate_survives_state_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("current-gate")
+            saved = {
+                "schema_version": 1,
+                "mission_id": "current-gate",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "reviewed",
+                "branch": "codex/current-gate",
+                "candidate_sha": "reviewed-v2-sha",
+                "candidate_push_sha": "reviewed-v2-sha",
+                "pr_number": 39,
+                "pr_head_sha": "reviewed-v2-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_is_draft": True,
+                "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
+                "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+                "review_verification": {"verdict": "accept"},
+                "reviewer_telemetry": {"session_id": "current-review"},
+            }
+            instance._save(paths, saved)
+
+            recovered = instance._load_state("current-gate", paths)
+
+            self.assertEqual("reviewed", recovered["phase"])
+            self.assertEqual(
+                coordinator._PRE_REVIEW_GATE_VERSION,
+                recovered["pre_review_gate_version"],
+            )
+            self.assertEqual(saved["review_verification"], recovered["review_verification"])
 
     def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1304,6 +1353,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             self.assertEqual("pre_review_ci_green", state["phase"])
             self.assertEqual("candidate-sha", state["candidate_push_sha"])
+            self.assertEqual(
+                coordinator._PRE_REVIEW_GATE_VERSION,
+                state["pre_review_gate_version"],
+            )
             self.assertEqual(39, state["pr_number"])
             self.assertTrue(state["pr_is_draft"])
             self.assertEqual(1, push_calls)

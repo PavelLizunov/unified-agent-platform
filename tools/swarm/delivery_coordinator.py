@@ -65,6 +65,7 @@ _CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _PRE_REVIEW_CI_SUMMARY = (
     "Required pre-review platform checks failed after the approved cycle limit"
 )
+_PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
@@ -650,26 +651,45 @@ class DeliveryCoordinator:
                 if failure != state["failure_error"]:
                     state["failure_error"] = failure
                     migrated = True
-            if state.get("pr_number") is not None and "pr_base_branch" not in state:
+            if (
+                state.get("pr_number") is not None
+                and "pr_base_branch" not in state
+                and state.get("pre_review_gate_version") != _PRE_REVIEW_GATE_VERSION
+            ):
                 state["pr_base_branch"] = self.profile["default_branch"]
                 migrated = True
             if (
                 state.get("pr_number") is not None
                 and state.get("phase") in {"reviewed", "pr_open", "ci_green"}
                 and "pr_head_sha" not in state
+                and state.get("pre_review_gate_version") != _PRE_REVIEW_GATE_VERSION
             ):
                 candidate = state.get("candidate_sha")
                 if not isinstance(candidate, str) or not candidate:
                     raise DeliveryError("legacy PR state has no candidate identity")
                 state["pr_head_sha"] = candidate
                 migrated = True
-            if (
-                state.get("phase") in {"reviewed", "pr_open", "ci_green"}
-                and "candidate_push_sha" not in state
-            ):
+            phase = state.get("phase")
+            candidate = state.get("candidate_sha")
+            checks = state.get("pre_review_ci_checks")
+            expected_draft = phase == "reviewed"
+            current_pre_review_gate = (
+                state.get("pre_review_gate_version") == _PRE_REVIEW_GATE_VERSION
+                and isinstance(candidate, str)
+                and bool(candidate)
+                and state.get("candidate_push_sha") == candidate
+                and isinstance(state.get("pr_number"), int)
+                and not isinstance(state.get("pr_number"), bool)
+                and state.get("pr_head_sha") == candidate
+                and state.get("pr_base_branch") == self.profile["default_branch"]
+                and isinstance(checks, list)
+                and bool(checks)
+                and state.get("pr_is_draft") is expected_draft
+            )
+            if phase in {"reviewed", "pr_open", "ci_green"} and not current_pre_review_gate:
                 state["phase"] = "author_committed"
                 for field in (
-                    "pre_review_ci_checks", "review_verification",
+                    "pre_review_gate_version", "pre_review_ci_checks", "review_verification",
                     "reviewer_telemetry", "ci_checks",
                 ):
                     state.pop(field, None)
@@ -1306,6 +1326,7 @@ class DeliveryCoordinator:
             author_summary=summary,
             author_telemetry=telemetry,
         )
+        state.pop("pre_review_gate_version", None)
         state.pop("pre_review_ci_checks", None)
         state.pop("review_findings", None)
         self._save(paths, state)
@@ -1638,6 +1659,7 @@ class DeliveryCoordinator:
             if decision == "passed":
                 state.update(
                     phase="pre_review_ci_green",
+                    pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
                     pre_review_ci_checks=_ci_summaries(checks),
                 )
                 self._save(paths, state)
