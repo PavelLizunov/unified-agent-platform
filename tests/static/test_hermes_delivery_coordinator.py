@@ -2312,6 +2312,36 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             if os.name == "posix":
                 self.assertEqual(0o700, state_root.stat().st_mode & 0o777)
 
+    def test_legacy_completed_state_enters_the_lifecycle_on_the_next_tick(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            client.hide_terminal = True
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+            })
+            retained_at = time.time() - 60
+            os.utime(paths["state"], (retained_at, retained_at))
+
+            self.assertIsNone(instance.tick())
+
+            state = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertTrue(state["task_archived"])
+            self.assertTrue(state["kanban_gc_ran"])
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+            self.assertEqual(retained_at, paths["state"].stat().st_mtime)
+            self.assertIsNone(instance.tick())
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+
     def test_completed_state_deletion_resumes_after_state_file_is_gone(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

@@ -1000,15 +1000,30 @@ def test_terminal_append_applies_default_retention() -> None:
 
 def test_bind_and_retention_cannot_create_a_dangling_subscription() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        projected = threading.Event()
+        selecting = threading.Event()
         release = threading.Event()
+        pause = threading.Event()
+
+        class PausingConnection(sqlite3.Connection):
+            def execute(self, sql: str, parameters=(), /):
+                normalized = " ".join(sql.split())
+                if pause.is_set() and normalized.startswith(
+                    "SELECT * FROM mission_events WHERE mission_id"
+                ):
+                    pause.clear()
+                    selecting.set()
+                    assert release.wait(2)
+                return super().execute(sql, parameters)
 
         class PausingStore(missions.MissionStore):
-            def projection(self, mission_id: str) -> dict:
-                view = super().projection(mission_id)
-                projected.set()
-                assert release.wait(2)
-                return view
+            def _connect(self) -> sqlite3.Connection:
+                connection = sqlite3.connect(
+                    self.path, timeout=10, factory=PausingConnection
+                )
+                self._harden_permissions()
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA busy_timeout=10000")
+                return connection
 
         store = PausingStore(Path(temp) / "missions.sqlite3")
         mission_id = "mission-bind-prune-race"
@@ -1025,6 +1040,7 @@ def test_bind_and_retention_cannot_create_a_dangling_subscription() -> None:
             },
         )
         errors: list[Exception] = []
+        pruned: list[int] = []
 
         def bind() -> None:
             try:
@@ -1032,21 +1048,23 @@ def test_bind_and_retention_cannot_create_a_dangling_subscription() -> None:
             except Exception as error:  # noqa: BLE001 - asserted below
                 errors.append(error)
 
-        thread = threading.Thread(target=bind)
-        thread.start()
-        if projected.wait(0.5):
-            store.prune_terminal(keep=0)
-            release.set()
-        else:
-            release.set()
-            store.prune_terminal(keep=0)
-        thread.join(2)
-        assert not thread.is_alive()
-        bound = store.bound_mission("telegram", "42")
-        if bound is not None:
-            assert store.projection(bound)["mission_id"] == bound
-        else:
-            assert errors and str(errors[0]) == "mission not found"
+        pause.set()
+        bind_thread = threading.Thread(target=bind)
+        bind_thread.start()
+        assert selecting.wait(2)
+        prune_thread = threading.Thread(
+            target=lambda: pruned.append(store.prune_terminal(keep=0))
+        )
+        prune_thread.start()
+        assert prune_thread.is_alive()
+        release.set()
+        bind_thread.join(2)
+        prune_thread.join(2)
+        assert not bind_thread.is_alive() and not prune_thread.is_alive()
+        assert not errors
+        assert pruned == [0]
+        assert store.bound_mission("telegram", "42") == mission_id
+        assert store.projection(mission_id)["mission_id"] == mission_id
 
 
 def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
@@ -1451,6 +1469,7 @@ def main() -> None:
     test_bind_and_retention_cannot_create_a_dangling_subscription()
     test_explicit_repair_terminal_notifies_before_parent_restore()
     test_terminal_retention_preserves_active_repair_chain()
+    test_terminal_retention_preserves_parent_until_repair_notification()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()

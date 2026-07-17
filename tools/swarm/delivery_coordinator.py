@@ -2098,8 +2098,17 @@ class DeliveryCoordinator:
                 isinstance(state, dict)
                 and state.get("dispatch_profile") == self.profile["dispatch_profile"]
                 and state.get("phase") == "complete"
-                and state.get("task_archived") is True
             ):
+                if state.get("task_archived") is not True:
+                    self.backend.archive(state["root_task_id"])
+                    state["task_archived"] = True
+                    state.setdefault("kanban_gc_ran", False)
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
                 if state.get("kanban_gc_ran") is not True:
                     state["kanban_gc_ran"] = self.backend.gc()
                     if state["kanban_gc_ran"] is not True:
