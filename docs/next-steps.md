@@ -210,7 +210,8 @@ not add an application service, workflow engine or mission database.
    Cross-channel owner answer/resume is deployed. The lifecycle baseline now retains 100 recent unbound terminal
    missions, protects the bound mission and active repair chains, archives completed native tasks, and runs native
    30-day Kanban GC only on an idle board (retrying deferred GC). It keeps private delivery evidence for 30 days and
-   removes disposable worktrees immediately. The clean Telegram-bound repeat remains
+   removes disposable worktrees immediately. PRs #235/#236 are deployed centrally and on build-1; see the exact
+   [lifecycle rollout evidence](evidence/a7-lifecycle-rollout-2026-07-17.md). The clean Telegram-bound repeat remains
    the next product gate. See the [A7.3 contract](a7-real-project-canary.md) and exact
    [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
 

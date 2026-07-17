@@ -62,6 +62,9 @@ pass" for the merged-PR list. The original reports are kept for historical recor
   `static-checks` CI a **required/strict** check), so direct push to `master` is **BLOCKED**. Deploys are PR-gated
   (branch → PR → green `static-checks` → merge → Flux reconciles `master`). Human code review stays absent by design —
   the agent's self-test + CI is the gate. See `docs/next-steps.md` → Platform hardening.
+- **A7 lifecycle rollout is live (2026-07-17):** PRs #235/#236 are installed in Central Hermes and build-1. The four
+  enabled delivery profiles use schema v3 and the exact current overlay; the next acceptance gate is one clean,
+  uninterrupted Telegram-bound non-toy canary. See `docs/evidence/a7-lifecycle-rollout-2026-07-17.md`.
 - Git branch `master`. For exact history run `git log --oneline -8` (this file is not the source of truth for hashes).
   Plan fact-check (2026-06-18, `STATUS.md`): Garage (ADR-019), Restate→S3 (ADR-020), RU egress (ADR-018),
   k3s-over-Tailscale (ADR-021). The ad-hoc egress + Vaultwarden on `uap-ops-1` (2 GB non-cluster VM) remain a
