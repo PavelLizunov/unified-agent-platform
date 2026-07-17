@@ -73,6 +73,16 @@ _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
+_CAPACITY_FAILURES_PER_ROUTE = 3
+_CAPACITY_RETRY_DELAYS_SECONDS = (5, 20)
+_CAPACITY_ROUTE_SWITCH_DELAY_SECONDS = 5
+_CAPACITY_ROUND_DELAY_SECONDS = 120
+_CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
+_CAPACITY_STATE_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "failures_on_route", "round", "status", "not_before", "error_class",
+    "last_error_sha256",
+}
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
@@ -673,17 +683,188 @@ class DeliveryCoordinator:
             )
             if recovered != decision:
                 raise DeliveryError("routing policy changed during a durable mission cycle")
-            return decisions[key]
-        decisions[key] = decision
-        self._save(paths, state)
-        return decision
+        else:
+            decisions[key] = decision
+            self._save(paths, state)
+        effective = state.setdefault("effective_route_decisions", {}).get(key)
+        if effective is not None:
+            try:
+                validated = flow_contract.validate_stored_delivery_route(
+                    self.policy, effective
+                )
+            except flow_contract.ContractError as error:
+                raise DeliveryError("durable capacity route decision is invalid") from error
+            if validated != effective or effective.get("base_decision") != decisions[key]:
+                raise DeliveryError("durable capacity route is detached from its base route")
+            return effective
+        return decisions[key]
 
     def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
         key = str(self._quality_failures(state))
-        decision = state.get("route_decisions", {}).get(key)
+        decision = state.get("effective_route_decisions", {}).get(key)
+        if decision is None:
+            decision = state.get("route_decisions", {}).get(key)
         if not isinstance(decision, dict) or decision.get("status") != "ready":
             raise DeliveryError("durable OpenAI route decision is missing")
+        try:
+            flow_contract.validate_stored_delivery_route(self.policy, decision)
+        except flow_contract.ContractError as error:
+            raise DeliveryError("durable OpenAI route decision is invalid") from error
         return decision
+
+    def _capacity_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_capacity")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        quality_epoch = self._quality_failures(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _CAPACITY_STATE_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != quality_epoch
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") not in {
+                "retry_wait", "route_fallback_wait", "capacity_round_wait",
+            }
+            or value.get("error_class") != "transient_capacity"
+            or not isinstance(value.get("last_error_sha256"), str)
+            or len(value["last_error_sha256"]) != 64
+            or isinstance(value.get("failures_on_route"), bool)
+            or not isinstance(value.get("failures_on_route"), int)
+            or not 0 <= value["failures_on_route"] < _CAPACITY_FAILURES_PER_ROUTE
+            or isinstance(value.get("round"), bool)
+            or not isinstance(value.get("round"), int)
+            or value["round"] < 0
+            or isinstance(value.get("not_before"), bool)
+            or not isinstance(value.get("not_before"), (int, float))
+            or value["not_before"] < 0
+        ):
+            raise DeliveryError("durable model-capacity checkpoint is invalid")
+        expected_candidate = state.get("candidate_sha") if value["role"] == "reviewer" else None
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("model-capacity checkpoint changed candidate identity")
+        return value
+
+    def _capacity_wait_result(
+        self, state: dict[str, Any], mission_id: str
+    ) -> dict[str, Any] | None:
+        waiting = self._capacity_state(state)
+        if waiting is None or waiting["not_before"] <= time.time():
+            return None
+        return {"action": "capacity_wait", "mission_id": mission_id, "state": state}
+
+    def _record_capacity_failure(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        failure: dict[str, Any],
+    ) -> None:
+        if role not in {"author", "reviewer"}:
+            raise DeliveryError("invalid model-capacity role")
+        route = self._current_route(state)
+        quality_epoch = self._quality_failures(state)
+        candidate_sha = state.get("candidate_sha") if role == "reviewer" else None
+        previous = state.get("model_capacity")
+        matching = (
+            isinstance(previous, dict)
+            and previous.get("role") == role
+            and previous.get("quality_epoch") == quality_epoch
+            and previous.get("route_decision_id") == route["decision_id"]
+            and previous.get("candidate_sha") == candidate_sha
+        )
+        failures = previous.get("failures_on_route", 0) + 1 if matching else 1
+        round_index = previous.get("round", 0) if matching else 0
+        status = "retry_wait"
+        if failures >= _CAPACITY_FAILURES_PER_ROUTE:
+            if role == "author" and route["route"] != "escalated":
+                base = state["route_decisions"][str(quality_epoch)]
+                next_index = route.get("capacity_fallback_index", 0) + 1
+                route = flow_contract.resolve_capacity_route(
+                    self.policy, base, next_index
+                )
+                state.setdefault("effective_route_decisions", {})[
+                    str(quality_epoch)
+                ] = route
+                failures = 0
+                status = "route_fallback_wait"
+            if status != "route_fallback_wait":
+                round_index += 1
+                failures = 0
+                status = "capacity_round_wait"
+        if status == "route_fallback_wait":
+            delay = _CAPACITY_ROUTE_SWITCH_DELAY_SECONDS
+        elif status == "capacity_round_wait":
+            delay = min(
+                _CAPACITY_ROUND_DELAY_SECONDS * (2 ** max(round_index - 1, 0)),
+                _CAPACITY_MAX_ROUND_DELAY_SECONDS,
+            )
+        else:
+            delay = _CAPACITY_RETRY_DELAYS_SECONDS[failures - 1]
+        state["model_capacity"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": quality_epoch,
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate_sha,
+            "failures_on_route": failures,
+            "round": round_index,
+            "status": status,
+            "not_before": time.time() + delay,
+            "error_class": "transient_capacity",
+            "last_error_sha256": failure["message_sha256"],
+        }
+        self._save(paths, state)
+
+    def _clear_capacity_failure(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], *, role: str
+    ) -> None:
+        previous = state.get("model_capacity")
+        if previous is None:
+            return
+        self._capacity_state(state)
+        if previous.get("role") != role:
+            raise DeliveryError("model-capacity checkpoint belongs to another role")
+        state.pop("model_capacity")
+        self._save(paths, state)
+
+    def _capacity_failure_is_retryable(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        result: subprocess.CompletedProcess[str],
+        events: pathlib.Path,
+        checkpoint: tuple[str, str],
+    ) -> dict[str, Any] | None:
+        failure = flow_contract.parse_codex_failure(events, result.stderr)
+        if failure["error_class"] != "transient_capacity":
+            return None
+        expected_head = (
+            state.get("candidate_sha") if role == "reviewer"
+            else state.get("candidate_sha") or state.get("base_sha")
+        )
+        checkout = paths["review"] if role == "reviewer" else paths["author"]
+        observed_status = self._git(
+            checkout, "status", "--porcelain=v1", "--untracked-files=all", "--ignored",
+        )
+        observed_head = self._git(checkout, "rev-parse", "HEAD")
+        unchanged = (
+            isinstance(expected_head, str)
+            and expected_head
+            and checkpoint[0] == expected_head
+            and observed_head == checkpoint[0]
+            and observed_status == checkpoint[1]
+        )
+        if not failure["safe_before_side_effects"] or not unchanged:
+            raise DeliveryError(
+                "ambiguous Codex capacity failure after execution started or worktree changed"
+            )
+        return failure
 
     def _actor(self, state: dict[str, Any], component: str) -> dict[str, str]:
         actor = self._current_route(state).get(component)
@@ -792,6 +973,7 @@ class DeliveryCoordinator:
             if self.profile["schema_version"] == 4:
                 state.setdefault("author_commit_count", 0)
             state.setdefault("route_decisions", {})
+            state.setdefault("effective_route_decisions", {})
             state.setdefault("owner_answers", [])
             self._owner_answers(state)
             migrated = False
@@ -869,6 +1051,7 @@ class DeliveryCoordinator:
             "discarded_author_attempts": 0,
             "author_commit_count": 0,
             "route_decisions": {},
+            "effective_route_decisions": {},
             "owner_answers": [],
             "crash_injected": False,
         }
@@ -1676,7 +1859,7 @@ class DeliveryCoordinator:
             state, paths, error,
         )
 
-    def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+    def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool:
         cycle = state["review_cycle"]
         actor = self._actor(state, "author")
         events = paths["directory"] / f"author-{cycle}.jsonl"
@@ -1707,6 +1890,13 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
+        checkpoint = (
+            self._git(paths["author"], "rev-parse", "HEAD"),
+            self._git(
+                paths["author"], "status", "--porcelain=v1",
+                "--untracked-files=all", "--ignored",
+            ),
+        )
         with _temporary_private_output() as raw_last:
             result = self._run(
                 [
@@ -1717,8 +1907,21 @@ class DeliveryCoordinator:
                 ],
                 cwd=paths["author"], input_text=prompt,
                 environment=self._model_env(paths),
+                check=False,
             )
             _private_codex_events(events, result.stdout)
+            if result.returncode:
+                failure = self._capacity_failure_is_retryable(
+                    state, paths, role="author", result=result, events=events,
+                    checkpoint=checkpoint,
+                )
+                if failure is None:
+                    raise DeliveryError(_command_failure(result, result.args))
+                self._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+                return False
+            self._clear_capacity_failure(state, paths, role="author")
             if raw_last.is_file():
                 _private_text(last, _bounded_diagnostic(raw_last.read_text(encoding="utf-8")))
         changed = self._changed_files(paths["author"])
@@ -1732,7 +1935,7 @@ class DeliveryCoordinator:
             if self.profile["schema_version"] == 3:
                 raise
             self._reject_invalid_candidate(state, paths, error)
-            return
+            return True
         fingerprint = self._candidate_fingerprint(paths["author"])
         try:
             checks = self._checks("author_checks", paths["author"], state, paths)
@@ -1741,13 +1944,14 @@ class DeliveryCoordinator:
             if not preserved:
                 error = DeliveryError("author checks mutated the exact candidate")
             self._record_author_check_failure(state, paths, error, retryable=preserved)
-            return
+            return True
         if self._candidate_fingerprint(paths["author"]) != fingerprint:
             raise DeliveryError("author checks changed the exact candidate")
         self._git(paths["author"], "add", "-A", "--")
         self._assert_claim(state)
         self._git(paths["author"], "commit", "-m", self.profile["commit_message"])
         self._record_author(state, paths, checks)
+        return True
 
     def _remove_worktree(self, path: pathlib.Path) -> None:
         if path.exists():
@@ -1994,7 +2198,7 @@ class DeliveryCoordinator:
         if state["phase"] != "pre_review_ci_green":
             raise DeliveryError("pre-review platform gate did not reach green")
 
-    def _review(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool:
+    def _review(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool | None:
         route = self._current_route(state)
         actor = route["reviewer"]
         self._assert_claim(
@@ -2037,6 +2241,13 @@ class DeliveryCoordinator:
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
         self._require_draft_pr(state)
+        checkpoint = (
+            self._git(paths["review"], "rev-parse", "HEAD"),
+            self._git(
+                paths["review"], "status", "--porcelain=v1",
+                "--untracked-files=all", "--ignored",
+            ),
+        )
         with _temporary_private_output() as raw_last:
             result = self._run(
                 [
@@ -2048,8 +2259,21 @@ class DeliveryCoordinator:
                 ],
                 cwd=paths["review"], input_text=prompt,
                 environment=self._model_env(paths),
+                check=False,
             )
             _private_codex_events(events, result.stdout)
+            if result.returncode:
+                failure = self._capacity_failure_is_retryable(
+                    state, paths, role="reviewer", result=result, events=events,
+                    checkpoint=checkpoint,
+                )
+                if failure is None:
+                    raise DeliveryError(_command_failure(result, result.args))
+                self._record_capacity_failure(
+                    state, paths, role="reviewer", failure=failure
+                )
+                return None
+            self._clear_capacity_failure(state, paths, role="reviewer")
             response = mission_adapter._read_json(raw_last)
         if (
             not isinstance(response, dict)
@@ -3023,6 +3247,9 @@ class DeliveryCoordinator:
                 elif not consumed:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
+            capacity_wait = self._capacity_wait_result(state, mission_id)
+            if capacity_wait is not None:
+                return capacity_wait
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)
             if state["phase"] not in {
@@ -3080,7 +3307,12 @@ class DeliveryCoordinator:
             if state["phase"] in {"claimed", "needs_fix"}:
                 self._assert_claim(state)
                 if not self._recover_author_commit(state, paths):
-                    self._author(state, paths)
+                    author = self._author(state, paths)
+                    if author is False:
+                        return {
+                            "action": "capacity_wait", "mission_id": mission_id,
+                            "state": state,
+                        }
 
             if (
                 state["phase"] == "author_committed"
@@ -3113,7 +3345,13 @@ class DeliveryCoordinator:
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
                 self._require_draft_pr(state)
-                if not self._review(state, paths):
+                review = self._review(state, paths)
+                if review is None:
+                    return {
+                        "action": "capacity_wait", "mission_id": mission_id,
+                        "state": state,
+                    }
+                if not review:
                     if state["phase"] == "review_rejected":
                         return self._finish_rejection(state, paths)
                     return {"action": state["phase"], "mission_id": mission_id, "state": state}

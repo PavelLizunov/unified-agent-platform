@@ -98,6 +98,10 @@ _OPENAI_AUTONOMY_ROUTES = {
         "reviewer": {"engine": "codex", "model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
     },
 }
+_CAPACITY_POLICY_ID = "openai-autonomy-capacity-v1"
+_CAPACITY_ROUTE_ORDER = ("standard", "complex", "escalated")
+_CAPACITY_MESSAGE = "Selected model is at capacity. Please try a different model."
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _closed_fields(value: Any, allowed: set[str], where: str) -> dict[str, Any]:
@@ -314,6 +318,127 @@ def choose_delivery_route(
     return _choose_delivery_route(policy, signals, policy_id="openai-autonomy-v2")
 
 
+def resolve_capacity_route(
+    policy: dict[str, Any], base_decision: dict[str, Any], fallback_index: int
+) -> dict[str, Any]:
+    """Resolve a higher, complete ADR-approved route for an operational capacity failure."""
+    if (
+        not isinstance(fallback_index, int)
+        or isinstance(fallback_index, bool)
+        or fallback_index < 1
+    ):
+        raise ContractError("capacity fallback index must be a positive integer")
+    if not isinstance(base_decision, dict) or base_decision.get("policy_id") not in {
+        "openai-autonomy-v1", "openai-autonomy-v2",
+    }:
+        raise ContractError("capacity fallback requires a base quality route")
+    base = validate_stored_delivery_route(policy, base_decision)
+    if base.get("status") != "ready" or base.get("route") not in _CAPACITY_ROUTE_ORDER:
+        raise ContractError("capacity fallback requires a ready base route")
+    target_position = _CAPACITY_ROUTE_ORDER.index(base["route"]) + fallback_index
+    if target_position >= len(_CAPACITY_ROUTE_ORDER):
+        raise ContractError("capacity fallback exhausted the approved route chain")
+    target_name = _CAPACITY_ROUTE_ORDER[target_position]
+    config = policy.get("delivery_model_policy", {})
+    target_signals = {
+        "schema_version": 1,
+        "changed_files": 0,
+        "prior_quality_failures": (
+            config.get("escalated_prior_quality_failures_at", 0)
+            if target_name == "escalated"
+            else config.get("complex_prior_quality_failures_at", 0)
+        ),
+        "flags": [],
+    }
+    target = choose_delivery_route(policy, target_signals)
+    if target.get("route") != target_name or target.get("status") != "ready":
+        raise ContractError("capacity fallback did not resolve an approved complete route")
+    decision = {
+        "status": "ready",
+        "policy_id": _CAPACITY_POLICY_ID,
+        "policy_sha256": target["policy_sha256"],
+        "route": target["route"],
+        "task_class": target["task_class"],
+        "risk": target["risk"],
+        "reasons": [f"capacity_fallback:{base['route']}->{target['route']}"],
+        "signals": base["signals"],
+        "base_decision": base_decision,
+        "capacity_fallback_index": fallback_index,
+        "author": target["author"],
+        "reviewer": target["reviewer"],
+        "review_mode": target["review_mode"],
+    }
+    decision["decision_id"] = hashlib.sha256(
+        json.dumps(decision, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return decision
+
+
+def parse_codex_failure(
+    path: str | pathlib.Path, stderr: str | None = None
+) -> dict[str, Any]:
+    """Classify only trusted terminal Codex failure locations; never inspect tool/model output."""
+    thread_started = False
+    turn_started = False
+    item_seen = False
+    permanent_signal = False
+    terminal_messages: list[tuple[str, str]] = []
+    with open(path, encoding="utf-8") as handle:
+        for raw_line in handle:
+            try:
+                event = json.loads(raw_line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = event.get("type")
+            if event_type == "thread.started":
+                thread_started = True
+            elif event_type == "turn.started":
+                turn_started = True
+            elif isinstance(event_type, str) and event_type.startswith("item."):
+                item_seen = True
+            if event_type in {"error", "turn.failed"}:
+                message = event.get("message")
+                detail = event.get("error") if isinstance(event.get("error"), dict) else event
+                if not isinstance(message, str):
+                    message = detail.get("message")
+                if isinstance(message, str):
+                    terminal_messages.append((str(event_type), message))
+                info = detail.get("codexErrorInfo", event.get("codexErrorInfo"))
+                if isinstance(info, dict):
+                    info = info.get("type")
+                status = detail.get("httpStatusCode", event.get("httpStatusCode"))
+                if info in {
+                    "BadRequest", "Unauthorized", "SandboxError", "UsageLimitExceeded",
+                    "ContextWindowExceeded",
+                } or status in {400, 401, 403, 404}:
+                    permanent_signal = True
+    for raw_line in (stderr or "").splitlines():
+        line = _ANSI_ESCAPE.sub("", raw_line).strip()
+        if line.lower().startswith("error:"):
+            line = line.split(":", 1)[1].strip()
+        terminal_messages.append(("stderr", line))
+    capacity_source = next(
+        (source for source, message in terminal_messages if message.strip() == _CAPACITY_MESSAGE),
+        None,
+    )
+    if permanent_signal:
+        capacity_source = None
+    diagnostic = next((message for _source, message in terminal_messages if message.strip()), "")
+    return {
+        "schema_version": 1,
+        "error_class": "transient_capacity" if capacity_source else "unknown",
+        "terminal_source": capacity_source,
+        "thread_started": thread_started,
+        "turn_started": turn_started,
+        "item_seen": item_seen,
+        "permanent_signal": permanent_signal,
+        "safe_before_side_effects": not (thread_started or turn_started or item_seen),
+        "message_sha256": hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+    }
+
+
 def _legacy_delivery_policy(policy: dict[str, Any]) -> dict[str, Any]:
     legacy = json.loads(json.dumps(policy))
     config = _closed_fields(
@@ -337,6 +462,15 @@ def validate_stored_delivery_route(
     """Validate a durable current or exact compatible v1 route; return its v2 equivalent."""
     if not isinstance(decision, dict) or not isinstance(decision.get("signals"), dict):
         raise ContractError("route decision with canonical signals required")
+    if decision.get("policy_id") == _CAPACITY_POLICY_ID:
+        expected = resolve_capacity_route(
+            policy,
+            decision.get("base_decision"),
+            decision.get("capacity_fallback_index"),
+        )
+        if decision != expected:
+            raise ContractError("capacity route decision does not match the fail-closed policy")
+        return expected
     if decision.get("policy_id") == "openai-autonomy-v2":
         current = choose_delivery_route(policy, decision["signals"])
         if decision != current:

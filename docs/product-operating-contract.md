@@ -125,7 +125,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    evidence because GitHub offers no conditional PR-close mutation.
 5. The Flow contract derives model, effort and sandbox policy from the exact Codex rollout `turn_context`; the
    OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. OS-independent read-only filesystem and
-   credential isolation remain unproven.
+   credential isolation remain unproven. Restart-safe capacity retry/whole-route fallback is covered hermetically,
+   but its exact deployed Codex terminal envelope and no-duplicate recovery still need a controlled live canary.
 6. The terminal endpoint requires both the general API bearer and a direct loopback source. Producer events use a
    closed schema and protect every allowed string before storage; mission DB and adapter state are owner-only on POSIX.
    The A7 success path exercised terminal completion, but least-privilege process isolation remains follow-up work.

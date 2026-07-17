@@ -641,6 +641,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     return_value={"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
                 ),
                 mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", return_value=""),
                 self.assertRaisesRegex(RuntimeError, "prompt captured"),
             ):
                 instance._author(state, instance._paths("owner-answer-prompt"))
@@ -767,6 +768,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     return_value={"model": "gpt-5.6-luna", "reasoning_effort": "medium"},
                 ),
                 mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", return_value=""),
                 self.assertRaisesRegex(coordinator.DeliveryError, "author failed"),
             ):
                 instance._author(state, paths)
@@ -939,6 +941,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     return_value={"model": "gpt-5.6-sol", "reasoning_effort": "xhigh"},
                 ),
                 mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", return_value=""),
                 self.assertRaisesRegex(RuntimeError, "prompt captured"),
             ):
                 instance._author(state, paths)
@@ -974,6 +977,230 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("gpt-5.6-sol", escalated["reviewer"]["model"])
             persisted = coordinator.mission_adapter._read_json(paths["state"])
             self.assertEqual(escalated, persisted["route_decisions"]["2"])
+
+    def test_author_capacity_retries_durably_then_uses_only_approved_higher_routes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("capacity-author")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-author",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            failure = {
+                "error_class": "transient_capacity",
+                "message_sha256": "a" * 64,
+            }
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+            self.assertEqual("standard", instance._current_route(state)["route"])
+            self.assertEqual(1, state["model_capacity"]["failures_on_route"])
+            self.assertEqual(1005, state["model_capacity"]["not_before"])
+            self.assertEqual(0, instance._quality_failures(state))
+
+            with mock.patch.object(coordinator.time, "time", return_value=1010):
+                instance._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+            self.assertEqual(2, state["model_capacity"]["failures_on_route"])
+            self.assertEqual(1030, state["model_capacity"]["not_before"])
+
+            with mock.patch.object(coordinator.time, "time", return_value=1040):
+                instance._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+            self.assertEqual("complex", instance._current_route(state)["route"])
+            self.assertEqual("gpt-5.6-sol", instance._actor(state, "author")["model"])
+            self.assertEqual("gpt-5.6-terra", instance._actor(state, "reviewer")["model"])
+            self.assertEqual("route_fallback_wait", state["model_capacity"]["status"])
+            self.assertEqual(0, state["model_capacity"]["failures_on_route"])
+            self.assertEqual(0, instance._quality_failures(state))
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            recovered = restarted._load_state("capacity-author", paths)
+            self.assertEqual("complex", restarted._ensure_route(recovered, paths)["route"])
+            with mock.patch.object(coordinator.time, "time", return_value=1041):
+                waiting = restarted._capacity_wait_result(recovered, "capacity-author")
+            self.assertEqual("capacity_wait", waiting["action"])
+            self.assertNotIn("question", recovered)
+
+            for now in (1050, 1080, 1120):
+                with mock.patch.object(coordinator.time, "time", return_value=now):
+                    restarted._record_capacity_failure(
+                        recovered, paths, role="author", failure=failure
+                    )
+            self.assertEqual("escalated", restarted._current_route(recovered)["route"])
+            self.assertEqual("gpt-5.6-terra", restarted._actor(recovered, "author")["model"])
+            self.assertEqual("gpt-5.6-sol", restarted._actor(recovered, "reviewer")["model"])
+            for now in (1140, 1180, 1240):
+                with mock.patch.object(coordinator.time, "time", return_value=now):
+                    restarted._record_capacity_failure(
+                        recovered, paths, role="author", failure=failure
+                    )
+            self.assertEqual("capacity_round_wait", recovered["model_capacity"]["status"])
+            self.assertEqual(1, recovered["model_capacity"]["round"])
+            self.assertEqual(1360, recovered["model_capacity"]["not_before"])
+            self.assertEqual(0, restarted._quality_failures(recovered))
+
+    def test_reviewer_capacity_never_synthesizes_a_new_actor_pair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("capacity-reviewer")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-reviewer",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pre_review_ci_green",
+                "candidate_sha": "candidate-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            base = instance._ensure_route(state, paths)
+            failure = {
+                "error_class": "transient_capacity",
+                "message_sha256": "b" * 64,
+            }
+            for now in (1000, 1010, 1040):
+                with mock.patch.object(coordinator.time, "time", return_value=now):
+                    instance._record_capacity_failure(
+                        state, paths, role="reviewer", failure=failure
+                    )
+            self.assertEqual(base, instance._current_route(state))
+            self.assertEqual({}, state["effective_route_decisions"])
+            self.assertEqual("capacity_round_wait", state["model_capacity"]["status"])
+            self.assertEqual("candidate-sha", state["model_capacity"]["candidate_sha"])
+            self.assertEqual(0, instance._quality_failures(state))
+
+    def test_exact_pre_turn_author_capacity_becomes_restart_safe_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                required_files=["Cli.cs"], codex_bin="codex",
+                codex_home=str(root / "codex-home"),
+            )
+            message = "Selected model is at capacity. Please try a different model."
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(
+                    command, 1,
+                    stdout=json.dumps({"type": "error", "message": message}) + "\n",
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("capacity-run")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-run",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                mock.patch.object(coordinator.time, "time", return_value=1000),
+            ):
+                self.assertFalse(instance._author(state, paths))
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("retry_wait", persisted["model_capacity"]["status"])
+            self.assertEqual("transient_capacity", persisted["model_capacity"]["error_class"])
+            self.assertEqual(0, persisted["prior_author_failures"])
+            self.assertFalse((paths["directory"] / "author-1-last.txt").exists())
+
+    def test_capacity_after_thread_start_fails_closed_without_second_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                required_files=["Cli.cs"], codex_bin="codex",
+                codex_home=str(root / "codex-home"),
+            )
+            message = "Selected model is at capacity. Please try a different model."
+
+            def runner(command, **_kwargs):
+                events = [
+                    {"type": "thread.started", "thread_id": "ambiguous-thread"},
+                    {"type": "error", "message": message},
+                ]
+                return subprocess.CompletedProcess(
+                    command, 1,
+                    stdout="".join(json.dumps(event) + "\n" for event in events),
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("ambiguous-capacity")
+            state = {
+                "schema_version": 1,
+                "mission_id": "ambiguous-capacity",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex capacity"),
+            ):
+                instance._author(state, paths)
+            self.assertNotIn("model_capacity", state)
+            self.assertEqual(0, instance._quality_failures(state))
 
     def test_in_progress_v1_route_remains_exactly_recoverable_under_v2(self):
         with tempfile.TemporaryDirectory() as directory:

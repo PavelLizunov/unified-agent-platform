@@ -308,6 +308,9 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   multi-platform CI, merge, post-verify and cleanup. Automatic intake-to-dispatch for arbitrary missions remains a
   separate product gap. It has no inherited approval for local inference/GPU, swarm, Spark, destructive tests or a
   different provider route.
+  The source coordinator also has hermetic restart-safe capacity retry and author whole-route fallback across only
+  the ADR-031 OpenAI tuples. A controlled live canary must still capture the deployed Codex terminal envelope and
+  prove that a capacity incident resumes without an owner question or duplicate writer.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
