@@ -1534,6 +1534,24 @@ class DeliveryCoordinator:
             raise DeliveryError("durable PR changed before candidate delivery")
         return info
 
+    def _require_draft_pr(
+        self, state: dict[str, Any], *, allowed_heads: set[str] | None = None
+    ) -> dict[str, Any]:
+        bound = state.get("pr_number")
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
+        try:
+            info = self._bound_pr(
+                state, allowed_heads=allowed_heads or {state["candidate_sha"]}
+            )
+        except DeliveryError:
+            if isinstance(bound, int) and not isinstance(bound, bool):
+                self._restore_pr_draft(state, bound, fields)
+            raise
+        if info["isDraft"] is not True:
+            self._restore_pr_draft(state, bound, fields)
+            raise DeliveryError("unreviewed candidate requires an exact draft PR")
+        return info
+
     def _push_candidate(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> None:
@@ -1554,7 +1572,7 @@ class DeliveryCoordinator:
                 or (previous is not None and previous != previous_pr_head)
             ):
                 raise DeliveryError("durable repair PR checkpoint is inconsistent")
-            bound_info = self._bound_pr(
+            bound_info = self._require_draft_pr(
                 state, allowed_heads={previous_pr_head, candidate}
             )
             if previous is None:
@@ -1585,19 +1603,6 @@ class DeliveryCoordinator:
                     pr_is_draft=bound_info["isDraft"],
                 )
                 self._save(paths, state)
-            if bound_info["isDraft"] is not True:
-                self._assert_claim(
-                    state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-                )
-                self._run([
-                    self.profile["gh_bin"], "pr", "ready", str(bound), "--undo",
-                    "--repo", self.profile["repo"],
-                ], check=False)
-                bound_info = self._bound_pr(state, allowed_heads={observed})
-                if bound_info["isDraft"] is not True:
-                    raise DeliveryError("repair PR did not become draft before candidate push")
-                state.update(pr_url=bound_info["url"], pr_is_draft=True)
-                self._save(paths, state)
         if observed != candidate:
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -1609,9 +1614,7 @@ class DeliveryCoordinator:
             )
         self._assert_candidate_branch(state)
         if bound is not None:
-            info = self._bound_pr(state, allowed_heads={candidate})
-            if info["isDraft"] is not True:
-                raise DeliveryError("repair candidate reached a non-draft PR before review")
+            info = self._require_draft_pr(state)
             state.update(
                 pr_head_sha=candidate,
                 pr_url=info["url"],
@@ -1651,24 +1654,31 @@ class DeliveryCoordinator:
                 ], check=False)
             if view.returncode:
                 raise DeliveryError("pre-review draft PR could not be created or recovered")
-            info = json.loads(view.stdout)
+            try:
+                info = json.loads(view.stdout)
+            except (json.JSONDecodeError, TypeError):
+                info = {}
             if (
-                not isinstance(info.get("number"), int)
+                not isinstance(info, dict)
+                or not isinstance(info.get("number"), int)
                 or not isinstance(info.get("url"), str)
                 or info.get("state") != "OPEN"
-                or info.get("isDraft") is not True
+                or not isinstance(info.get("isDraft"), bool)
                 or info.get("headRefName") != state["branch"]
                 or info.get("baseRefName") != self.profile["default_branch"]
                 or _pr_head_oid(info) != state["candidate_sha"]
             ):
                 raise DeliveryError("GitHub returned an invalid pre-review draft PR")
+            if info["isDraft"] is not True:
+                self._restore_pr_draft(state, info["number"], fields)
+                raise DeliveryError("unreviewed candidate requires an exact draft PR")
             state.update(
                 pr_number=info["number"], pr_url=info["url"],
                 pr_head_sha=state["candidate_sha"],
                 pr_base_branch=info["baseRefName"], pr_is_draft=True,
             )
         else:
-            info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+            info = self._require_draft_pr(state)
             state.update(pr_url=info["url"], pr_is_draft=info["isDraft"])
         state["phase"] = "candidate_pr_open"
         self._save(paths, state)
@@ -1681,15 +1691,11 @@ class DeliveryCoordinator:
         while time.monotonic() < deadline:
             self._assert_claim(state)
             self._assert_candidate_branch(state)
-            info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
-            if info["isDraft"] is not True:
-                raise DeliveryError("pre-review platform checks require an exact draft PR")
+            self._require_draft_pr(state)
             checks = self._candidate_ci_rollup(state)
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
-                info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
-                if info["isDraft"] is not True:
-                    raise DeliveryError("pre-review platform checks lost the exact draft PR")
+                self._require_draft_pr(state)
                 state.update(
                     phase="pre_review_ci_green",
                     pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
@@ -1758,9 +1764,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
-        if info["isDraft"] is not True:
-            raise DeliveryError("independent review requires an exact draft PR")
+        self._require_draft_pr(state)
         with _temporary_private_output() as raw_last:
             result = self._run(
                 [
@@ -2293,7 +2297,9 @@ class DeliveryCoordinator:
         ):
             return
         if isinstance(bound, int) and not isinstance(bound, bool):
-            if not info or (info.get("state") == "OPEN" and info.get("isDraft") is False):
+            if not isinstance(info, dict) or not info or (
+                info.get("state") == "OPEN" and info.get("isDraft") is False
+            ):
                 self._restore_pr_draft(state, bound, fields)
         raise DeliveryError("PR identity no longer matches the reviewed candidate")
 
@@ -2847,9 +2853,7 @@ class DeliveryCoordinator:
             if state["phase"] == "pre_review_ci_green":
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
-                info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
-                if info["isDraft"] is not True:
-                    raise DeliveryError("independent review requires an exact draft PR")
+                self._require_draft_pr(state)
                 if not self._review(state, paths):
                     if state["phase"] == "review_rejected":
                         return self._finish_rejection(state, paths)

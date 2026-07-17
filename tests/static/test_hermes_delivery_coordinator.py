@@ -821,9 +821,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     return_value={"sha256": "source"},
                 ),
                 mock.patch.object(instance, "_bound_pr", return_value={"isDraft": False}),
+                mock.patch.object(instance, "_restore_pr_draft") as restore,
                 self.assertRaisesRegex(
                     coordinator.DeliveryError,
-                    "independent review requires an exact draft PR",
+                    "unreviewed candidate requires an exact draft PR",
                 ),
             ):
                 instance._review(
@@ -831,6 +832,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance._paths("ready-review-race"),
                 )
             runner.assert_not_called()
+            restore.assert_called_once()
 
     def test_reviewer_verdict_requires_consistent_findings(self):
         for verdict, findings in (
@@ -1513,15 +1515,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "_bound_pr",
                     return_value={"isDraft": False},
                 ),
+                mock.patch.object(instance, "_restore_pr_draft") as restore,
                 mock.patch.object(instance, "_candidate_ci_rollup") as rollup,
                 mock.patch.object(coordinator.time, "monotonic", side_effect=[0, 0]),
             ):
                 with self.assertRaisesRegex(
-                    coordinator.DeliveryError, "require an exact draft PR"
+                    coordinator.DeliveryError, "requires an exact draft PR"
                 ):
                     instance._wait_candidate_ci(state, instance._paths("mission-a7-3"))
 
             rollup.assert_not_called()
+            restore.assert_called_once()
 
     def test_candidate_push_response_loss_converges_without_a_second_push(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1692,6 +1696,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             }
 
             with mock.patch.object(instance, "_assert_claim"):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "requires an exact draft PR"
+                ):
+                    instance._push_candidate(state, paths)
                 instance._push_candidate(state, paths)
 
             self.assertFalse(ready)
@@ -1775,16 +1783,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("new-candidate", state["candidate_push_sha"])
             self.assertEqual("new-candidate", state["pr_head_sha"])
 
-    def test_draft_pr_create_response_loss_recovers_exact_identity(self):
+    def test_draft_pr_create_and_ready_response_loss_recovers_exact_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
             approved.update(gh_bin="gh", codex_home=str(root / "codex"))
             pr_exists = False
+            pr_ready = False
             create_calls = 0
 
             def runner(command, **_kwargs):
-                nonlocal pr_exists, create_calls
+                nonlocal pr_exists, pr_ready, create_calls
                 if command[0] == "git" and "ls-remote" in command:
                     return subprocess.CompletedProcess(
                         command, 0,
@@ -1799,7 +1808,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         "number": 39,
                         "url": "https://example.invalid/pr/39",
                         "state": "OPEN",
-                        "isDraft": True,
+                        "isDraft": not pr_ready,
                         "headRefName": "codex/fix",
                         "headRefOid": "candidate-sha",
                         "baseRefName": approved["default_branch"],
@@ -1811,8 +1820,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     self.assertIn("--draft", command)
                     create_calls += 1
                     pr_exists = True
+                    pr_ready = True
                     return subprocess.CompletedProcess(
                         command, 1, stdout="", stderr="lost create response"
+                    )
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    pr_ready = False
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="lost redraft response"
                     )
                 raise AssertionError(command)
 
@@ -1827,6 +1842,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "branch": "codex/fix",
             }
             with mock.patch.object(instance, "_assert_claim"):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "requires an exact draft PR"
+                ):
+                    instance._ensure_candidate_pr(state, paths)
                 instance._ensure_candidate_pr(state, paths)
 
             self.assertEqual(1, create_calls)
@@ -2278,6 +2297,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         for checkpoint, views in (
             ("mid-pr", [candidate, replacement, replacement_draft]),
             ("resumed", [replacement, replacement_draft]),
+            ("resumed-unverifiable", [[], replacement_draft]),
         ):
             with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
