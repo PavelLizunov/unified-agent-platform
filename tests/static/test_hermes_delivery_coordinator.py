@@ -381,7 +381,7 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
         return None
 
     def _bound_pr(self, _state, *, allowed_heads):
-        return {"headRefOid": next(iter(allowed_heads))}
+        return {"headRefOid": next(iter(allowed_heads)), "isDraft": True}
 
     def _review(self, state, paths):
         self.counters["reviews"] += 1
@@ -1022,6 +1022,36 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     saved["review_verification"], recovered["review_verification"]
                 )
 
+    def test_failed_stored_ci_evidence_rewinds_before_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("failed-gate")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "failed-gate",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pre_review_ci_green",
+                "branch": "codex/failed-gate",
+                "candidate_sha": "candidate-sha",
+                "candidate_push_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_is_draft": True,
+                "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
+                "pre_review_ci_checks": [{"name": "test", "outcome": "FAILURE"}],
+            })
+
+            recovered = instance._load_state("failed-gate", paths)
+
+            self.assertEqual("author_committed", recovered["phase"])
+            self.assertNotIn("pre_review_gate_version", recovered)
+            self.assertNotIn("pre_review_ci_checks", recovered)
+
     def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "profile.json"
@@ -1376,6 +1406,37 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance._candidate_ci_rollup(state), ["test"]
                 ),
             )
+
+    def test_ready_pr_cannot_checkpoint_pre_review_ci(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(ci_timeout_seconds=1)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            state = {
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_base_branch": approved["default_branch"],
+            }
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_candidate_branch"),
+                mock.patch.object(
+                    instance,
+                    "_bound_pr",
+                    return_value={"isDraft": False},
+                ),
+                mock.patch.object(instance, "_candidate_ci_rollup") as rollup,
+                mock.patch.object(coordinator.time, "monotonic", side_effect=[0, 0]),
+            ):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "require an exact draft PR"
+                ):
+                    instance._wait_candidate_ci(state, instance._paths("mission-a7-3"))
+
+            rollup.assert_not_called()
 
     def test_candidate_push_response_loss_converges_without_a_second_push(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1931,6 +1992,70 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertFalse(state["pr_is_draft"])
             self.assertEqual(1, sum(
                 command[0:3] == ["gh", "pr", "ready"] for command in commands
+            ))
+
+    def test_ready_identity_race_restores_the_pr_to_draft_before_stopping(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            draft = True
+            head = "candidate-sha"
+            commands = []
+
+            def runner(command, **_kwargs):
+                nonlocal draft, head
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": draft,
+                            "headRefName": "codex/fix",
+                            "headRefOid": head,
+                            "baseRefName": approved["default_branch"],
+                        }),
+                        stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "ready"]:
+                    if "--undo" in command:
+                        draft = True
+                    else:
+                        draft = False
+                        head = "unreviewed-race"
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            }
+
+            with mock.patch.object(instance, "_validate_review"):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "pre-review PR did not become ready at the exact candidate",
+                ):
+                    instance._pr(state, {"author": root})
+
+            self.assertTrue(draft)
+            self.assertEqual(1, sum(
+                command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
+                for command in commands
             ))
 
     def test_repair_cycle_refuses_pr_identity_replacement(self):

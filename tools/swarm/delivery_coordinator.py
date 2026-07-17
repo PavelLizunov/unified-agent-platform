@@ -352,6 +352,24 @@ def _ci_summaries(checks: Any) -> list[dict[str, str]]:
     return summaries
 
 
+def _stored_ci_passed(checks: Any, required: list[str]) -> bool:
+    if not isinstance(checks, list) or not checks:
+        return False
+    normalized = []
+    for item in checks:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"name", "outcome"}
+            or not isinstance(item.get("name"), str)
+            or not item["name"]
+            or not isinstance(item.get("outcome"), str)
+            or not item["outcome"]
+        ):
+            return False
+        normalized.append({"name": item["name"], "conclusion": item["outcome"]})
+    return _ci_decision(normalized, required) == "passed"
+
+
 @contextlib.contextmanager
 def exclusive_lock(path: pathlib.Path):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -684,8 +702,7 @@ class DeliveryCoordinator:
                 and not isinstance(state.get("pr_number"), bool)
                 and state.get("pr_head_sha") == candidate
                 and state.get("pr_base_branch") == self.profile["default_branch"]
-                and isinstance(checks, list)
-                and bool(checks)
+                and _stored_ci_passed(checks, self.profile["required_ci_checks"])
                 and state.get("pr_is_draft") is expected_draft
             )
             if (
@@ -1659,9 +1676,15 @@ class DeliveryCoordinator:
         while time.monotonic() < deadline:
             self._assert_claim(state)
             self._assert_candidate_branch(state)
+            info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+            if info["isDraft"] is not True:
+                raise DeliveryError("pre-review platform checks require an exact draft PR")
             checks = self._candidate_ci_rollup(state)
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
+                info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+                if info["isDraft"] is not True:
+                    raise DeliveryError("pre-review platform checks lost the exact draft PR")
                 state.update(
                     phase="pre_review_ci_green",
                     pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
@@ -1909,6 +1932,28 @@ class DeliveryCoordinator:
                 or _pr_head_oid(info) != state["candidate_sha"]
                 or info.get("baseRefName") != self.profile["default_branch"]
             ):
+                self._run([
+                    self.profile["gh_bin"], "pr", "ready", str(bound), "--undo",
+                    "--repo", self.profile["repo"],
+                ], check=False)
+                restored = self._run([
+                    self.profile["gh_bin"], "pr", "view", str(bound),
+                    "--repo", self.profile["repo"], "--json", fields,
+                ], check=False)
+                try:
+                    restored_info = json.loads(restored.stdout) if not restored.returncode else {}
+                except json.JSONDecodeError:
+                    restored_info = {}
+                if (
+                    restored_info.get("number") != bound
+                    or restored_info.get("state") != "OPEN"
+                    or restored_info.get("isDraft") is not True
+                    or restored_info.get("headRefName") != state["branch"]
+                    or restored_info.get("baseRefName") != self.profile["default_branch"]
+                ):
+                    raise DeliveryError(
+                        "invalid post-review PR identity could not be restored to draft"
+                    )
                 raise DeliveryError("pre-review PR did not become ready at the exact candidate")
         state.update(
             phase="pr_open", pr_number=info["number"], pr_url=info["url"],
@@ -2746,7 +2791,9 @@ class DeliveryCoordinator:
             if state["phase"] == "pre_review_ci_green":
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
-                self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+                info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+                if info["isDraft"] is not True:
+                    raise DeliveryError("independent review requires an exact draft PR")
                 if not self._review(state, paths):
                     if state["phase"] == "review_rejected":
                         return self._finish_rejection(state, paths)
