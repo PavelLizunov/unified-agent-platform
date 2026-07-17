@@ -21,11 +21,20 @@ FILES = {
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
-    "hermes_cli/kanban.py": "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
-    "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+    "hermes_cli/kanban.py": "d47ed61e1cca8699cdb4c7e6177f6f78b4e174b5b4b0d8915eb4ae95a13709df",
+    "hermes_cli/kanban_db.py": "1c0cb69c696499956e41503f6ca0c1fa09ee9b519f2751b7a9d4b8b2728635d0",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
     "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
+}
+BUILD1_RUNTIME_FILES = (
+    "hermes_cli/kanban.py",
+    "hermes_cli/kanban_db.py",
+    "hermes_cli/main.py",
+)
+LEGACY_BUILD1_PATCHED_FILES = {
+    "hermes_cli/kanban.py": "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
+    "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -122,6 +131,7 @@ def transform(relative: str, text: str) -> str:
     """Remove scratch workspaces of archived tasks, prune old events, and
     delete old worker logs."""
     import shutil
+    import sys
     scratch_root = kb.workspaces_root()
     event_days = getattr(args, "event_retention_days", 30)
     log_days = getattr(args, "log_retention_days", 30)
@@ -134,9 +144,17 @@ def transform(relative: str, text: str) -> str:
                 ).fetchone():
                     print("GC deferred: board is not idle")
                     return 3
-                removed_logs = kb.gc_worker_logs(
-                    older_than_seconds=log_days * 24 * 3600,
-                )
+                try:
+                    removed_logs = kb.gc_worker_logs(
+                        older_than_seconds=log_days * 24 * 3600,
+                        strict=True,
+                    )
+                except OSError as error:
+                    print(
+                        f"GC failed: worker log cleanup: {type(error).__name__}",
+                        file=sys.stderr,
+                    )
+                    return 1
 
     removed_ws = 0
     with kb.connect_closing() as conn:
@@ -157,7 +175,16 @@ def transform(relative: str, text: str) -> str:
             # Safety: never delete outside the scratch root.
             continue
         if path.exists() and path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
+            try:
+                shutil.rmtree(path)
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                print(
+                    f"GC failed: scratch workspace cleanup: {type(error).__name__}",
+                    file=sys.stderr,
+                )
+                return 1
             removed_ws += 1
 
     with kb.connect_closing() as conn:
@@ -165,9 +192,17 @@ def transform(relative: str, text: str) -> str:
             conn, older_than_seconds=event_days * 24 * 3600,
         )
     if removed_logs is None:
-        removed_logs = kb.gc_worker_logs(
-            older_than_seconds=log_days * 24 * 3600,
-        )
+        try:
+            removed_logs = kb.gc_worker_logs(
+                older_than_seconds=log_days * 24 * 3600,
+                strict=True,
+            )
+        except OSError as error:
+            print(
+                f"GC failed: worker log cleanup: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 1
     print(f"GC complete: {removed_ws} workspace(s), "
           f"{removed_events} event row(s), {removed_logs} log file(s) removed")
     return 0''',
@@ -325,7 +360,7 @@ def connect(
     with write_txn(conn):''',
             "atomic unblock audit validation",
         )
-        return replace(
+        text = replace(
             text,
             '''        _append_event(
             conn, task_id, "unblocked",
@@ -336,6 +371,57 @@ def connect(
             payload["reason"] = reason
         _append_event(conn, task_id, "unblocked", payload or None)''',
             "atomic unblock audit event",
+        )
+        return replace(
+            text,
+            '''def gc_worker_logs(
+    *, older_than_seconds: int = 30 * 24 * 3600,
+    board: Optional[str] = None,
+) -> int:
+    """Delete worker log files older than ``older_than_seconds``. Returns
+    the number of files removed. Kept separate from ``gc_events`` because
+    log files live on disk, not in SQLite. Scoped to ``board`` (defaults
+    to the active board) — per-board isolation means deleting logs from
+    board A cannot touch board B's logs."""
+    log_dir = worker_logs_dir(board=board)
+    if not log_dir.exists():
+        return 0
+    cutoff = time.time() - older_than_seconds
+    removed = 0
+    for p in log_dir.iterdir():
+        try:
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError:
+            continue
+    return removed''',
+            '''def gc_worker_logs(
+    *, older_than_seconds: int = 30 * 24 * 3600,
+    board: Optional[str] = None,
+    strict: bool = False,
+) -> int:
+    """Delete worker log files older than ``older_than_seconds``. Returns
+    the number of files removed. Kept separate from ``gc_events`` because
+    log files live on disk, not in SQLite. Scoped to ``board`` (defaults
+    to the active board) — per-board isolation means deleting logs from
+    board A cannot touch board B's logs."""
+    log_dir = worker_logs_dir(board=board)
+    if not log_dir.exists():
+        return 0
+    cutoff = time.time() - older_than_seconds
+    removed = 0
+    for p in log_dir.iterdir():
+        try:
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+                removed += 1
+        except OSError:
+            if strict:
+                raise
+            continue
+    return removed''',
+            "strict worker log GC",
         )
     if relative == "hermes_cli/main.py":
         text = replace(
@@ -664,6 +750,7 @@ def main() -> None:
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--source-commit", help=argparse.SUPPRESS)
     parser.add_argument("--print-patched-hashes", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--build1-runtime", action="store_true")
     args = parser.parse_args()
     root = args.checkout.resolve()
     head = args.source_commit or subprocess.check_output(
@@ -672,8 +759,13 @@ def main() -> None:
     if head != UPSTREAM_COMMIT:
         raise SystemExit("upstream commit fingerprint mismatch")
 
+    selected_files = (
+        {relative: FILES[relative] for relative in BUILD1_RUNTIME_FILES}
+        if args.build1_runtime
+        else FILES
+    )
     if args.print_patched_hashes:
-        for relative, expected in FILES.items():
+        for relative, expected in selected_files.items():
             path = root / relative
             if sha(path) != expected:
                 raise SystemExit(f"upstream fingerprint mismatch: {relative}")
@@ -683,36 +775,51 @@ def main() -> None:
     runtime_hash = sha(RUNTIME_SOURCE)
     target = root / RUNTIME_TARGET
     statuses: list[str] = []
-    source_paths: list[tuple[str, pathlib.Path]] = []
-    for relative, expected in FILES.items():
+    source_paths: list[tuple[str, pathlib.Path, str]] = []
+    for relative, expected in selected_files.items():
         path = root / relative
         actual = sha(path)
         if actual == expected:
             statuses.append(f"{relative}: source-needs-overlay")
-            source_paths.append((relative, path))
+            source_paths.append((relative, path, path.read_text()))
         elif actual == PATCHED_FILES[relative]:
             statuses.append(f"{relative}: exact-patched")
+        elif (
+            args.build1_runtime
+            and actual == LEGACY_BUILD1_PATCHED_FILES.get(relative)
+        ):
+            pristine = subprocess.check_output(
+                ["git", "show", f"{UPSTREAM_COMMIT}:{relative}"],
+                cwd=root,
+                text=True,
+            )
+            if hashlib.sha256(pristine.encode()).hexdigest() != expected:
+                raise SystemExit(f"upstream fingerprint mismatch: {relative}")
+            statuses.append(f"{relative}: legacy-needs-overlay")
+            source_paths.append((relative, path, pristine))
         else:
             raise SystemExit(f"upstream fingerprint mismatch: {relative}")
-    runtime_missing = not target.exists()
-    if runtime_missing:
-        statuses.append(f"{RUNTIME_TARGET}: source-needs-overlay")
-    elif sha(target) == runtime_hash:
-        statuses.append(f"{RUNTIME_TARGET}: exact-patched")
-    else:
-        raise SystemExit(f"upstream fingerprint mismatch: {RUNTIME_TARGET}")
+    runtime_missing = not args.build1_runtime and not target.exists()
+    if not args.build1_runtime:
+        if runtime_missing:
+            statuses.append(f"{RUNTIME_TARGET}: source-needs-overlay")
+        elif sha(target) == runtime_hash:
+            statuses.append(f"{RUNTIME_TARGET}: exact-patched")
+        else:
+            raise SystemExit(f"upstream fingerprint mismatch: {RUNTIME_TARGET}")
 
     if args.check:
         print("\n".join(statuses))
         return
 
-    for relative, path in source_paths:
-        path.write_text(transform(relative, path.read_text()), encoding="utf-8")
+    for relative, path, source_text in source_paths:
+        path.write_text(transform(relative, source_text), encoding="utf-8")
         if sha(path) != PATCHED_FILES[relative]:
             raise SystemExit(f"overlay output fingerprint mismatch: {relative}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if runtime_missing:
-        shutil.copyfile(RUNTIME_SOURCE, target)
+    if not args.build1_runtime:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if runtime_missing:
+            shutil.copyfile(RUNTIME_SOURCE, target)
     print("overlay applied" if source_paths or runtime_missing else "overlay already applied")
 
 

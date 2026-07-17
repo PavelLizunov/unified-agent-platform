@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -13,6 +14,7 @@ import textwrap
 
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
+INSTALLER = TOOL.parents[1] / "swarm" / "install_flow_v2.py"
 COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
 UPSTREAM = "https://github.com/NousResearch/hermes-agent"
 
@@ -45,6 +47,34 @@ def main() -> None:
             check=True,
             stdout=subprocess.DEVNULL,
         )
+
+        if INSTALLER.is_file():
+            installer_spec = importlib.util.spec_from_file_location(
+                "install_flow_v2", INSTALLER
+            )
+            installer = importlib.util.module_from_spec(installer_spec)
+            assert installer_spec.loader
+            installer_spec.loader.exec_module(installer)
+            build1_home = pathlib.Path(temp) / "build1-home"
+            installer.install(INSTALLER.parent, build1_home, clone)
+            installer.check(INSTALLER.parent, build1_home, clone)
+            for installed in installer.FILES.values():
+                assert (build1_home / installed).is_file()
+        else:
+            build1_apply = run(
+                clone, "--source-commit", COMMIT, "--build1-runtime"
+            )
+            assert build1_apply.returncode == 0, build1_apply.stderr
+            build1_check = run(
+                clone,
+                "--source-commit",
+                COMMIT,
+                "--build1-runtime",
+                "--check",
+            )
+            assert build1_check.returncode == 0, build1_check.stderr
+            assert build1_check.stdout.count("exact-patched") == 3
+        assert not (clone / "hermes_cli/uap_missions.py").exists()
 
         before = run(clone, "--check")
         assert before.returncode == 0 and "source-needs-overlay" in before.stdout, before.stderr
@@ -102,6 +132,10 @@ def main() -> None:
         assert "with kb.write_txn(conn):" in kanban_cli
         assert 'return args.func(args)' in hermes_main
         assert 'raise SystemExit(main())' in hermes_main
+        assert "strict: bool = False" in kanban
+        assert "if strict:" in kanban
+        assert "shutil.rmtree(path)" in kanban_cli
+        assert "strict=True" in kanban_cli
 
         subprocess.run(
             [
@@ -123,6 +157,7 @@ def main() -> None:
             """
             import contextlib
             import os
+            import shutil
             import threading
             import time
             from pathlib import Path
@@ -311,12 +346,37 @@ def main() -> None:
 
             with kb.connect_closing(database) as conn:
                 with kb.write_txn(conn):
-                    conn.execute("UPDATE tasks SET status = 'archived'")
+                    scratch = kb.workspaces_root() / concurrent_ids[0]
+                    scratch.mkdir(parents=True, exist_ok=True)
+                    conn.execute(
+                        "UPDATE tasks SET status = 'archived', workspace_kind = 'scratch', "
+                        "workspace_path = ?",
+                        (str(scratch),),
+                    )
+
+            def failed_gc_logs(*args, **kwargs):
+                assert kwargs.get("strict") is True
+                raise PermissionError("simulated worker log cleanup failure")
+
+            kb.gc_worker_logs = failed_gc_logs
+            assert cli._cmd_gc(idle_args) == 1
+            kb.gc_worker_logs = original_gc_logs
+
+            original_rmtree = shutil.rmtree
+
+            def failed_rmtree(_path):
+                raise PermissionError("simulated workspace cleanup failure")
+
+            shutil.rmtree = failed_rmtree
+            assert cli._cmd_gc(idle_args) == 1
+            assert scratch.exists()
+            shutil.rmtree = original_rmtree
 
             gc_entered = threading.Event()
             release_gc = threading.Event()
 
             def paused_gc_logs(*args, **kwargs):
+                assert kwargs.get("strict") is True
                 gc_entered.set()
                 if not release_gc.wait(5):
                     raise AssertionError("concurrent creator did not reach idle GC")

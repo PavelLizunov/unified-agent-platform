@@ -745,6 +745,36 @@ class FlowContractTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 installer.check(ROOT / "tools" / "swarm", home)
 
+    def test_installer_applies_and_verifies_build1_runtime_overlay(self):
+        source = ROOT / "tools" / "swarm"
+        hermes_root = pathlib.Path("/pinned/hermes")
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+            installer, "_build1_overlay"
+        ) as overlay:
+            home = pathlib.Path(directory)
+            installer.install(source, home, hermes_root)
+            overlay.assert_called_once_with(source, hermes_root, check=False)
+            overlay.reset_mock()
+            installer.check(source, home, hermes_root)
+            overlay.assert_called_once_with(source, hermes_root, check=True)
+
+        success = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout="\n".join(f"file-{index}: exact-patched" for index in range(3)),
+            stderr="",
+        )
+        installer._build1_overlay(
+            source, hermes_root, check=True, runner=lambda *args, **kwargs: success
+        )
+        incomplete = subprocess.CompletedProcess(
+            [], 0, stdout="file-1: source-needs-overlay\n", stderr=""
+        )
+        with self.assertRaisesRegex(SystemExit, "overlay is not exact"):
+            installer._build1_overlay(
+                source, hermes_root, check=True, runner=lambda *args, **kwargs: incomplete
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

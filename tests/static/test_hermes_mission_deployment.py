@@ -43,7 +43,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v37-cli-exit-propagation"
+        "v38-lifecycle-strict-gc"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
