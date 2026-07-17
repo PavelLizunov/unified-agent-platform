@@ -1218,6 +1218,42 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(2, backend.claims)
             self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
 
+    def test_capacity_state_rejects_non_finite_retry_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("capacity-nan")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-nan",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "e" * 64,
+                    },
+                )
+            state["model_capacity"]["not_before"] = float("nan")
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "capacity checkpoint is invalid"
+            ):
+                instance._capacity_state(state)
+
     def test_capacity_wait_recovers_after_native_ttl_reclaimed_task_to_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

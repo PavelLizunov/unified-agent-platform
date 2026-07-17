@@ -779,6 +779,7 @@ class DeliveryCoordinator:
             or value["round"] < 0
             or isinstance(value.get("not_before"), bool)
             or not isinstance(value.get("not_before"), (int, float))
+            or not math.isfinite(float(value["not_before"]))
             or value["not_before"] < 0
         ):
             raise DeliveryError("durable model-capacity checkpoint is invalid")
@@ -931,8 +932,14 @@ class DeliveryCoordinator:
         if status == "route_fallback_wait":
             delay = _CAPACITY_ROUTE_SWITCH_DELAY_SECONDS
         elif status == "capacity_round_wait":
+            capped_exponent = min(
+                max(round_index - 1, 0),
+                math.ceil(math.log2(
+                    _CAPACITY_MAX_ROUND_DELAY_SECONDS / _CAPACITY_ROUND_DELAY_SECONDS
+                )),
+            )
             delay = min(
-                _CAPACITY_ROUND_DELAY_SECONDS * (2 ** max(round_index - 1, 0)),
+                _CAPACITY_ROUND_DELAY_SECONDS * (2 ** capped_exponent),
                 _CAPACITY_MAX_ROUND_DELAY_SECONDS,
             )
         else:

@@ -356,6 +356,9 @@ class FlowContractTests(unittest.TestCase):
                 {"type": "error", "message": message},
                 {"type": "turn.failed", "error": {"code": "unknown"}},
             ], "", "unknown"),
+            ([{"type": "turn.failed", "error": {"code": "unknown"}}],
+             f"ERROR: {message}\n", "unknown"),
+            ([], f"warning\nERROR: {message}\n", "unknown"),
         )
         for events, stderr, expected in cases:
             with self.subTest(events=events, stderr=stderr), tempfile.NamedTemporaryFile(
@@ -369,6 +372,17 @@ class FlowContractTests(unittest.TestCase):
                 self.assertEqual(expected, result["error_class"])
             finally:
                 path.unlink()
+
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", delete=False
+        ) as handle:
+            handle.write("not-json\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path, f"ERROR: {message}\n")
+            self.assertEqual("unknown", result["error_class"])
+        finally:
+            path.unlink()
 
     def test_capacity_after_turn_start_is_ambiguous_not_safe_retry(self):
         message = "Selected model is at capacity. Please try a different model."

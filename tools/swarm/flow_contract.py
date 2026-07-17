@@ -383,15 +383,20 @@ def parse_codex_failure(
     item_seen = False
     permanent_signal = False
     terminal_records = 0
+    malformed_records = False
     terminal_messages: list[tuple[str, str]] = []
     stderr_messages: list[str] = []
     with open(path, encoding="utf-8") as handle:
         for raw_line in handle:
+            if not raw_line.strip():
+                continue
             try:
                 event = json.loads(raw_line)
             except json.JSONDecodeError:
+                malformed_records = True
                 continue
             if not isinstance(event, dict):
+                malformed_records = True
                 continue
             event_type = event.get("type")
             if event_type == "thread.started":
@@ -430,12 +435,17 @@ def parse_codex_failure(
         if line:
             stderr_messages.append(line)
     capacity_source = None
-    if terminal_records == len(terminal_messages) and terminal_messages and all(
+    if not malformed_records and terminal_records == len(terminal_messages) and terminal_messages and all(
         message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages
     ):
         capacity_source = terminal_messages[0][0]
-    elif not terminal_messages and any(
+    elif (
+        not malformed_records
+        and terminal_records == 0
+        and stderr_messages
+        and all(
         message.strip() == _CAPACITY_MESSAGE for message in stderr_messages
+        )
     ):
         capacity_source = "stderr"
     if permanent_signal:
