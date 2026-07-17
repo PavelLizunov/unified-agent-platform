@@ -196,24 +196,20 @@ not add an application service, workflow engine or mission database.
    one blocked/unassigned native root and one Central `task.upsert`. The repeated poll returned null; runs and
    worker/model processes stayed empty. See
    [the exact evidence](evidence/a7-2-live-blocked-handoff-2026-07-15.md).
-3. **A7.3 — Automatic activation and delivery — ✅ RECOVERABLE SUCCESS PATH PASS; CLEAN REPEAT OPEN (2026-07-16).**
-   PRs #199-#217 provide the bounded coordinator, durable crash/quality recovery and standing-approved
-   `openai-autonomy-v2` routing. Mission `a7-vpnrouter-issue39-20260716-09` selected runtime-attested Sol author and
-   exact-SHA read-only Terra review at `xhigh`, recovered the approved post-commit crash without another author turn,
-   passed Windows gates, opened VPNRouter PR #43, observed required CI, atomically merged the reviewed head and passed
-   fresh-main Windows verification. Native task/run and Central completed, Central/Workspace projections matched, and
-   branch/worktree cleanup passed. The run exposed four compatibility/runtime defects; #218-#221 fixed compacted
-   rollout parsing, legacy-`gh` PR recovery, exact-head merge and the Windows post-verify artifact root. Each fix resumed
-   the same durable mission. This proves the success/recovery path, but not one uninterrupted run that starts with all
-   corrections already installed. Next: bind the existing Telegram mission subscription before starting the clean
-   repeat, then use that same uninterrupted run to prove the Central, Workspace and Telegram terminal projection.
-   Cross-channel owner answer/resume is deployed. The lifecycle baseline now retains 100 recent unbound terminal
-   missions, protects the bound mission and active repair chains, archives completed native tasks, and runs native
-   30-day Kanban GC only on an idle board (retrying deferred GC). It keeps private delivery evidence for 30 days and
-   removes disposable worktrees immediately. PRs #235/#236 are deployed centrally and on build-1; see the exact
-   [lifecycle rollout evidence](evidence/a7-lifecycle-rollout-2026-07-17.md). The clean Telegram-bound repeat remains
-   the next product gate. See the [A7.3 contract](a7-real-project-canary.md) and exact
-   [canary evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md).
+3. **A7.3 — Automatic activation and delivery — ✅ FIXED-PROFILE ACCEPTANCE CANARY PASS (2026-07-17).**
+   PRs #199-#238 provide the bounded coordinator, durable crash/quality recovery, lifecycle controls and
+   standing-approved `openai-autonomy-v2` routing. The earlier VPNRouter mission proved recoverable delivery while four
+   harness fixes landed between durable ticks. On the fully corrected runtime, Telegram-bound mission
+   `a7-clean-ledger-list-20260717-a0fc5a` then ran from the systemd timer with no manual coordinator tick or mid-run
+   repair. It selected runtime-attested Sol author and distinct exact-SHA read-only Terra reviewer sessions at `xhigh`,
+   recovered the planned post-author-commit crash without another author or candidate, passed Rust repository gates,
+   opened and merged hermes-flow-v2-pilot PR #5 after Python/Linux/macOS/Windows CI, and passed fresh-main verification.
+   The native task/run was archived, disposable branch/worktrees were removed, Central and Workspace returned the same
+   sequence-22 terminal projection, and the bound Telegram cursor reached 22. Cross-channel owner answer/resume and the
+   bounded 30-day lifecycle remain deployed. See the [A7.3 contract](a7-real-project-canary.md), the exact
+   [acceptance evidence](evidence/a7-3-clean-telegram-canary-2026-07-17.md), the earlier
+   [recovery evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md), and the
+   [lifecycle rollout evidence](evidence/a7-lifecycle-rollout-2026-07-17.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back.

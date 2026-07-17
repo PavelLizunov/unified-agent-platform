@@ -197,12 +197,14 @@ Good next tasks that do not require redesign:
    crash. Central retains 100 recent unbound terminal missions and protects the bound mission plus active repair chains;
    completed native tasks are archived, native GC runs only while the board is idle, and private delivery state expires
    after 30 days.
-4. A7.1/A7.2 are complete. The A7.3 profile-bound coordinator reached its first successful real delivery on mission
-   `a7-vpnrouter-issue39-20260716-09`: runtime-attested Sol author, separate exact-SHA read-only Terra review, VPNRouter
-   PR #43, required CI, exact-head merge, fresh-main Windows post-verify and cleanup. PRs #218-#221 corrected four live
-   harness defects between durable ticks. The next valid proof must bind the Telegram mission subscription before
-   execution, then complete one clean uninterrupted repeat on the corrected runtime with matching terminal status in
-   Central, Workspace and Telegram. Evidence: `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+4. A7.1/A7.2 and the configured-profile A7.3 acceptance canary are complete. Mission
+   `a7-clean-ledger-list-20260717-a0fc5a` ran on the corrected runtime from the timer without a manual coordinator tick:
+   runtime-attested Sol author, distinct exact-SHA read-only Terra review, hermes-flow-v2-pilot PR #5,
+   Python/Linux/macOS/Windows CI, exact-head merge, fresh-main Rust post-verify and cleanup. The planned durable crash
+   resumed without a duplicate author/candidate; Central and Workspace matched at terminal sequence 22 and the bound
+   Telegram cursor reached 22. This proves the exact configured profile, not generic repository intake or complete
+   cross-channel chat-session history. Evidence: `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md` and the earlier
+   recovery history in `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests and work outside the

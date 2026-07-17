@@ -8,11 +8,13 @@ Runtime status (2026-07-13): installed on `uap-build-1` from UAP merge
 no-model Kanban lifecycle smoke all passed. Smoke card `t_9ba72c8e` completed with zero worker processes; no gateway
 restart was required.
 
-Repository status (2026-07-16): the A6 adapter, profile-bound A7 coordinator and `openai-autonomy-v2` schema-v3 profile
-are installed on build-1. Attempt 7 reached accepted review, required CI, exact-head merge, fresh-main post-verify and
-cleanup, while #218-#221 repaired four harness defects between durable ticks. This proves recoverable delivery; the
-next gate is one clean uninterrupted repeat on that corrected runtime, with a bound Telegram subscription. Generic
-arbitrary-repository intake remains outside the current fixed-profile boundary.
+Repository status (2026-07-17): the A6 adapter, profile-bound A7 coordinator and `openai-autonomy-v2` schema-v3 profile
+are installed on build-1. The corrected-runtime acceptance mission `a7-clean-ledger-list-20260717-a0fc5a` was bound to
+Telegram before the timer ran, recovered the planned durable crash, passed exact-SHA review, multi-platform CI,
+exact-head merge, fresh-main post-verify, Central/Workspace/Telegram terminal convergence and cleanup without a manual
+coordinator tick or mid-run repair. A7.3 is accepted for exact configured profiles; generic arbitrary-repository intake
+and complete cross-channel chat-session history remain outside that boundary. Exact evidence is in
+`docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`.
 
 Lifecycle is deliberately handled by the existing stores and timer. Central keeps the newest 100 unbound terminal
 missions, skips the current Workspace/Telegram binding and leaves only a payload-free stable-ID tombstone for pruned
