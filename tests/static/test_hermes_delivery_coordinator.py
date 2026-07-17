@@ -739,6 +739,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "api_key": "short-secret",
                     "apiKey": "camel-short-secret",
                     "clientSecret": "client-short-secret",
+                    "Cookie": "session=field-cookie-secret",
+                    "setCookie": "session=camel-cookie-secret",
+                    "headers": [
+                        "Cookie: session=header-cookie-secret; Path=/",
+                        "Set-Cookie: session=response-cookie-secret; Secure",
+                    ],
                 },
                 "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},
                 "item": {
@@ -772,6 +778,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("[REDACTED]", parsed["error"]["api_key"])
             self.assertEqual("[REDACTED]", parsed["error"]["apiKey"])
             self.assertEqual("[REDACTED]", parsed["error"]["clientSecret"])
+            self.assertEqual("[REDACTED]", parsed["error"]["Cookie"])
+            self.assertEqual("[REDACTED]", parsed["error"]["setCookie"])
+            self.assertTrue(all("cookie-secret" not in item for item in parsed["error"]["headers"]))
             self.assertEqual(123, parsed["usage"]["input_tokens"])
             self.assertEqual("ordinary-count-label", parsed["usage"]["inputTokens"])
             self.assertEqual("[REDACTED non-json Codex event]", lines[2])

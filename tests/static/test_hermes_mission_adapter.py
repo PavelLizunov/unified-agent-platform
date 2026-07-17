@@ -499,6 +499,30 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertTrue(any("schedule" in command for command in commands))
         self.assertTrue(any("unblock" in command for command in commands))
 
+    def test_native_capacity_transitions_reject_a_different_task(self):
+        status = "running"
+
+        def runner(command):
+            nonlocal status
+            action = command[command.index("central") + 1]
+            if action == "schedule":
+                status = "scheduled"
+            elif action == "unblock":
+                status = "ready"
+            output = {
+                "task": {"id": "wrong-task", "status": status},
+                "runs": [{"id": 9, "status": "scheduled"}],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps(output) if action == "show" else "", stderr=""
+            )
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        with self.assertRaisesRegex(adapter.AdapterError, "scheduled state"):
+            backend.schedule("task-1", reason="automatic capacity cooldown")
+        with self.assertRaisesRegex(adapter.AdapterError, "ready state"):
+            backend.unblock("task-1", reason="automatic capacity retry")
+
     def test_native_claim_verification_rejects_expired_or_wrong_run(self):
         expires = int(time.time()) + 600
         event_run_id = 9

@@ -318,9 +318,12 @@ class HermesKanbanBackend:
             raise AdapterError("Kanban schedule reason is required")
         self._run("schedule", task_id, reason)
         snapshot = self.show(task_id)
+        task = snapshot.get("task")
         runs = snapshot.get("runs")
         if (
-            snapshot.get("task", {}).get("status") != "scheduled"
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "scheduled"
             or not isinstance(runs, list)
             or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
         ):
@@ -332,9 +335,12 @@ class HermesKanbanBackend:
             raise AdapterError("Kanban unblock reason is required")
         self._run("unblock", task_id, "--reason", reason)
         snapshot = self.show(task_id)
+        task = snapshot.get("task")
         runs = snapshot.get("runs")
         if (
-            snapshot.get("task", {}).get("status") != "ready"
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "ready"
             or not isinstance(runs, list)
             or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
         ):

@@ -89,6 +89,7 @@ _AMBIGUOUS_STATE_FIELDS = {
 }
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
+    re.compile(r"(?i)\b(?:set-cookie|cookie)\s*:\s*[^\r\n]+"),
     re.compile(
         r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
         r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
@@ -310,15 +311,15 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
         exact = {
             "authorization", "proxy_authorization", "token", "access_token",
             "refresh_token", "api_key", "access_key", "secret", "password",
-            "passwd", "credential", "credentials",
+            "passwd", "credential", "credentials", "cookie", "cookies", "set_cookie",
         }
         stems = (
             "authorization", "token", "api_key", "access_key", "secret",
-            "password", "passwd", "credential",
+            "password", "passwd", "credential", "cookie", "set_cookie",
         )
         compact_stems = (
             "authorization", "token", "apikey", "accesskey", "privatekey",
-            "secret", "password", "passwd", "credential",
+            "secret", "password", "passwd", "credential", "cookie", "setcookie",
         )
         return (
             name in exact

@@ -383,6 +383,7 @@ def parse_codex_failure(
     item_seen = False
     permanent_signal = False
     terminal_records = 0
+    terminal_records_with_messages = 0
     malformed_records = False
     terminal_messages: list[tuple[str, str]] = []
     stderr_messages: list[str] = []
@@ -407,12 +408,14 @@ def parse_codex_failure(
                 item_seen = True
             if event_type in {"error", "turn.failed"}:
                 terminal_records += 1
-                message = event.get("message")
                 detail = event.get("error") if isinstance(event.get("error"), dict) else event
-                if not isinstance(message, str):
-                    message = detail.get("message")
-                if isinstance(message, str):
-                    terminal_messages.append((str(event_type), message))
+                messages = []
+                for message in (event.get("message"), detail.get("message")):
+                    if isinstance(message, str) and message not in messages:
+                        messages.append(message)
+                if messages:
+                    terminal_records_with_messages += 1
+                    terminal_messages.extend((str(event_type), message) for message in messages)
                 info = detail.get("codexErrorInfo", event.get("codexErrorInfo"))
                 info_object = info if isinstance(info, dict) else {}
                 if isinstance(info, dict):
@@ -435,8 +438,12 @@ def parse_codex_failure(
         if line:
             stderr_messages.append(line)
     capacity_source = None
-    if not malformed_records and terminal_records == len(terminal_messages) and terminal_messages and all(
-        message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages
+    if (
+        not malformed_records
+        and terminal_records == terminal_records_with_messages
+        and terminal_messages
+        and all(message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages)
+        and all(message.strip() == _CAPACITY_MESSAGE for message in stderr_messages)
     ):
         capacity_source = terminal_messages[0][0]
     elif (
@@ -444,7 +451,7 @@ def parse_codex_failure(
         and terminal_records == 0
         and stderr_messages
         and all(
-        message.strip() == _CAPACITY_MESSAGE for message in stderr_messages
+            message.strip() == _CAPACITY_MESSAGE for message in stderr_messages
         )
     ):
         capacity_source = "stderr"

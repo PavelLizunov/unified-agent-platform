@@ -324,6 +324,13 @@ class FlowContractTests(unittest.TestCase):
             ([{"type": "item.completed", "item": {"type": "agent_message", "text": message}}], "", "unknown"),
             ([{"type": "item.completed", "item": {"type": "command_execution", "aggregated_output": message}}], "", "unknown"),
             ([{"type": "error", "message": message + " later"}], "", "unknown"),
+            ([{"type": "error", "message": message, "error": {
+                "message": "conflicting nested failure",
+            }}], "", "unknown"),
+            ([{"type": "error", "message": message}], "conflicting stderr\n", "unknown"),
+            ([{"type": "error", "message": message, "error": {
+                "message": message,
+            }}], f"ERROR: {message}\n", "transient_capacity"),
             ([{"type": "error", "error": {
                 "message": message, "codexErrorInfo": "BadRequest", "httpStatusCode": 400,
             }}], "", "unknown"),
