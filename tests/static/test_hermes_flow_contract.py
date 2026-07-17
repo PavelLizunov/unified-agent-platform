@@ -352,6 +352,10 @@ class FlowContractTests(unittest.TestCase):
                 {"type": "error", "message": message},
                 {"type": "turn.failed", "error": {"message": "unknown failure"}},
             ], "", "unknown"),
+            ([
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"code": "unknown"}},
+            ], "", "unknown"),
         )
         for events, stderr, expected in cases:
             with self.subTest(events=events, stderr=stderr), tempfile.NamedTemporaryFile(

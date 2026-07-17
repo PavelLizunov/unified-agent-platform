@@ -737,8 +737,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "message": f"nested https://{secret}@host/path",
                     "details": [{"authorization": f"Authorization: Bearer {secret}"}],
                     "api_key": "short-secret",
+                    "apiKey": "camel-short-secret",
+                    "clientSecret": "client-short-secret",
                 },
-                "usage": {"input_tokens": 123},
+                "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},
                 "item": {
                     "type": "command_execution",
                     "command": f"curl https://{secret}@host/path",
@@ -768,7 +770,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertIn("[REDACTED]", parsed["error"]["message"])
             self.assertIn("[REDACTED]", parsed["error"]["details"][0]["authorization"])
             self.assertEqual("[REDACTED]", parsed["error"]["api_key"])
+            self.assertEqual("[REDACTED]", parsed["error"]["apiKey"])
+            self.assertEqual("[REDACTED]", parsed["error"]["clientSecret"])
             self.assertEqual(123, parsed["usage"]["input_tokens"])
+            self.assertEqual("ordinary-count-label", parsed["usage"]["inputTokens"])
             self.assertEqual("[REDACTED non-json Codex event]", lines[2])
 
     def test_main_redacts_uri_userinfo_from_error_output(self):

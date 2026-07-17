@@ -382,6 +382,7 @@ def parse_codex_failure(
     turn_started = False
     item_seen = False
     permanent_signal = False
+    terminal_records = 0
     terminal_messages: list[tuple[str, str]] = []
     stderr_messages: list[str] = []
     with open(path, encoding="utf-8") as handle:
@@ -400,6 +401,7 @@ def parse_codex_failure(
             elif isinstance(event_type, str) and event_type.startswith("item."):
                 item_seen = True
             if event_type in {"error", "turn.failed"}:
+                terminal_records += 1
                 message = event.get("message")
                 detail = event.get("error") if isinstance(event.get("error"), dict) else event
                 if not isinstance(message, str):
@@ -428,7 +430,7 @@ def parse_codex_failure(
         if line:
             stderr_messages.append(line)
     capacity_source = None
-    if terminal_messages and all(
+    if terminal_records == len(terminal_messages) and terminal_messages and all(
         message.strip() == _CAPACITY_MESSAGE for _source, message in terminal_messages
     ):
         capacity_source = terminal_messages[0][0]

@@ -305,7 +305,8 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
     def sensitive_field(field: str | None) -> bool:
         if not isinstance(field, str):
             return False
-        name = field.casefold().replace("-", "_")
+        name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field).casefold().replace("-", "_")
+        compact = re.sub(r"[^a-z0-9]", "", name)
         exact = {
             "authorization", "proxy_authorization", "token", "access_token",
             "refresh_token", "api_key", "access_key", "secret", "password",
@@ -315,10 +316,16 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
             "authorization", "token", "api_key", "access_key", "secret",
             "password", "passwd", "credential",
         )
+        compact_stems = (
+            "authorization", "token", "apikey", "accesskey", "privatekey",
+            "secret", "password", "passwd", "credential",
+        )
         return (
             name in exact
             or any(name.startswith(f"{stem}_") for stem in stems)
             or any(name.endswith(f"_{stem}") for stem in stems)
+            or any(compact.startswith(stem) for stem in compact_stems)
+            or any(compact.endswith(stem) for stem in compact_stems)
         )
 
     def sanitize(value: Any, field: str | None = None) -> Any:
