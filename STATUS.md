@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-16
+Last updated: 2026-07-17
 
 ## Phase
 
@@ -68,9 +68,12 @@ Last updated: 2026-07-16
   task. Hermes' existing 30-day event/log GC runs only while the board has no nonterminal task and is retried when
   deferred, preventing cleanup from truncating a long-running worker log. Removing 30-day delivery state requires a
   separate successful GC checkpoint after that deadline; an earlier completion-time GC is not sufficient. A legacy
-  task first archived during migration keeps its retry state until that new archive event is 30 days old. Delivery evidence remains owner-only for 30 days; deliveries remove
-  disposable worktrees immediately. Central DB/WAL/SHM, adapter state and the common state root are owner-only on POSIX.
-  The remaining acceptance gate is the clean Telegram-bound non-toy canary, not another lifecycle service.
+  task first archived during migration keeps its retry state until that new archive event is 30 days old. Delivery
+  evidence remains owner-only for 30 days; deliveries remove disposable worktrees immediately. Central DB/WAL/SHM,
+  adapter state and the common state root are owner-only on POSIX.
+  PRs #235/#236 are deployed centrally and on build-1; exact rollout evidence is in
+  `docs/evidence/a7-lifecycle-rollout-2026-07-17.md`. The remaining acceptance gate is the clean Telegram-bound
+  non-toy canary, not another lifecycle service.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
