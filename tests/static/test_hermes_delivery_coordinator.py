@@ -932,7 +932,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
 
     def test_legacy_ready_phases_rewind_to_the_pre_review_platform_gate(self):
-        for phase in ("reviewed", "pr_open", "ci_green"):
+        for phase in ("pre_review_ci_green", "reviewed", "pr_open", "ci_green"):
             for has_push_checkpoint in (False, True):
                 with (
                     self.subTest(
@@ -984,40 +984,43 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         )
 
     def test_complete_current_platform_gate_survives_state_load(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            approved = profile(root)
-            instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), FakeBackend(), root / "state"
-            )
-            paths = instance._paths("current-gate")
-            saved = {
-                "schema_version": 1,
-                "mission_id": "current-gate",
-                "dispatch_profile": approved["dispatch_profile"],
-                "phase": "reviewed",
-                "branch": "codex/current-gate",
-                "candidate_sha": "reviewed-v2-sha",
-                "candidate_push_sha": "reviewed-v2-sha",
-                "pr_number": 39,
-                "pr_head_sha": "reviewed-v2-sha",
-                "pr_base_branch": approved["default_branch"],
-                "pr_is_draft": True,
-                "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
-                "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
-                "review_verification": {"verdict": "accept"},
-                "reviewer_telemetry": {"session_id": "current-review"},
-            }
-            instance._save(paths, saved)
+        for phase in ("pre_review_ci_green", "reviewed", "pr_open", "ci_green"):
+            with self.subTest(phase=phase), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state"
+                )
+                paths = instance._paths("current-gate")
+                saved = {
+                    "schema_version": 1,
+                    "mission_id": "current-gate",
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": phase,
+                    "branch": "codex/current-gate",
+                    "candidate_sha": "reviewed-v2-sha",
+                    "candidate_push_sha": "reviewed-v2-sha",
+                    "pr_number": 39,
+                    "pr_head_sha": "reviewed-v2-sha",
+                    "pr_base_branch": approved["default_branch"],
+                    "pr_is_draft": phase in {"pre_review_ci_green", "reviewed"},
+                    "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
+                    "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+                    "review_verification": {"verdict": "accept"},
+                    "reviewer_telemetry": {"session_id": "current-review"},
+                }
+                instance._save(paths, saved)
 
-            recovered = instance._load_state("current-gate", paths)
+                recovered = instance._load_state("current-gate", paths)
 
-            self.assertEqual("reviewed", recovered["phase"])
-            self.assertEqual(
-                coordinator._PRE_REVIEW_GATE_VERSION,
-                recovered["pre_review_gate_version"],
-            )
-            self.assertEqual(saved["review_verification"], recovered["review_verification"])
+                self.assertEqual(phase, recovered["phase"])
+                self.assertEqual(
+                    coordinator._PRE_REVIEW_GATE_VERSION,
+                    recovered["pre_review_gate_version"],
+                )
+                self.assertEqual(
+                    saved["review_verification"], recovered["review_verification"]
+                )
 
     def test_profile_is_closed_and_policy_is_the_only_model_authority(self):
         with tempfile.TemporaryDirectory() as directory:

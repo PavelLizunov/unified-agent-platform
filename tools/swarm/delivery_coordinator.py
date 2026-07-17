@@ -660,7 +660,9 @@ class DeliveryCoordinator:
                 migrated = True
             if (
                 state.get("pr_number") is not None
-                and state.get("phase") in {"reviewed", "pr_open", "ci_green"}
+                and state.get("phase") in {
+                    "pre_review_ci_green", "reviewed", "pr_open", "ci_green",
+                }
                 and "pr_head_sha" not in state
                 and state.get("pre_review_gate_version") != _PRE_REVIEW_GATE_VERSION
             ):
@@ -672,7 +674,7 @@ class DeliveryCoordinator:
             phase = state.get("phase")
             candidate = state.get("candidate_sha")
             checks = state.get("pre_review_ci_checks")
-            expected_draft = phase == "reviewed"
+            expected_draft = phase in {"pre_review_ci_green", "reviewed"}
             current_pre_review_gate = (
                 state.get("pre_review_gate_version") == _PRE_REVIEW_GATE_VERSION
                 and isinstance(candidate, str)
@@ -686,7 +688,10 @@ class DeliveryCoordinator:
                 and bool(checks)
                 and state.get("pr_is_draft") is expected_draft
             )
-            if phase in {"reviewed", "pr_open", "ci_green"} and not current_pre_review_gate:
+            if (
+                phase in {"pre_review_ci_green", "reviewed", "pr_open", "ci_green"}
+                and not current_pre_review_gate
+            ):
                 state["phase"] = "author_committed"
                 for field in (
                     "pre_review_gate_version", "pre_review_ci_checks", "review_verification",
