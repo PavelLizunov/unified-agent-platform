@@ -1153,6 +1153,8 @@ class DeliveryCoordinator:
             if state.get("pr_number") is not None and state.get("failure_kind") != "post_verify":
                 preserve_remote = self._finalize_failed_pr(state)
             self._cleanup(state, paths, preserve_remote=preserve_remote)
+            if preserve_remote:
+                preserve_remote = self._finalize_failed_pr(state)
             state["failed_pr_preserved"] = preserve_remote
             state["phase"] = "rejection_cleaned"
             self._save(paths, state)
@@ -2152,7 +2154,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
-        fields = "state,headRefName,commits,baseRefName"
+        fields = "number,state,isDraft,headRefName,commits,baseRefName"
         expected_head = state.get("pr_head_sha")
         if not isinstance(expected_head, str) or not expected_head:
             raise DeliveryError("failed PR has no durable head identity")
@@ -2170,7 +2172,8 @@ class DeliveryCoordinator:
 
         def require_identity(info: dict[str, Any], *states: str) -> None:
             if (
-                info.get("headRefName") != state["branch"]
+                info.get("number") != state["pr_number"]
+                or info.get("headRefName") != state["branch"]
                 or _pr_head_oid(info) != expected_head
                 or info.get("baseRefName") != expected_base
                 or info.get("state") not in states
@@ -2179,6 +2182,12 @@ class DeliveryCoordinator:
 
         info = inspect()
         require_identity(info, "OPEN", "CLOSED")
+        if info.get("state") == "OPEN" and info.get("isDraft") is not True:
+            self._restore_pr_draft(state, state["pr_number"], fields)
+            info = inspect()
+            require_identity(info, "OPEN")
+        if info.get("state") == "OPEN" and info.get("isDraft") is not True:
+            raise DeliveryError("open failed PR could not be restored to draft")
         source = pathlib.Path(self.profile["source_checkout"])
         remote = self._git(source, "ls-remote", "--heads", "origin", state["branch"])
         if remote:

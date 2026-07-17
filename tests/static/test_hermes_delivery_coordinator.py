@@ -2960,7 +2960,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             with (
                 mock.patch.object(
-                    instance, "_finalize_failed_pr", return_value=True
+                    instance, "_finalize_failed_pr", side_effect=[True, True]
                 ) as finalize,
                 mock.patch.object(instance, "_cleanup") as cleanup,
             ):
@@ -2970,7 +2970,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("ci_failed", result["state"]["outcome"])
             self.assertEqual("failed", client.mission["status"])
             self.assertTrue(result["state"]["failed_pr_preserved"])
-            finalize.assert_called_once()
+            self.assertEqual(2, finalize.call_count)
             cleanup.assert_called_once()
             self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
             self.assertEqual(
@@ -3011,7 +3011,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             with (
                 mock.patch.object(
-                    instance, "_finalize_failed_pr", return_value=True
+                    instance, "_finalize_failed_pr", side_effect=[True, True]
                 ) as finalize,
                 mock.patch.object(instance, "_cleanup") as cleanup,
             ):
@@ -3020,7 +3020,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("complete", result["action"])
             self.assertEqual("review_rejected", result["state"]["outcome"])
             self.assertTrue(result["state"]["failed_pr_preserved"])
-            finalize.assert_called_once()
+            self.assertEqual(2, finalize.call_count)
             cleanup.assert_called_once()
             self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
 
@@ -3034,7 +3034,18 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "state": "OPEN", "headRefName": "codex/fix",
+                    "number": 39, "state": "OPEN", "isDraft": False,
+                    "headRefName": "codex/fix",
+                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+                },
+                {
+                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "headRefName": "codex/fix",
+                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+                },
+                {
+                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
             ]
@@ -3044,6 +3055,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 commands.append(command)
                 if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps(views.pop(0))
+                elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    output = ""
                 elif "ls-remote" in command:
                     output = remote_heads.pop(0)
                 else:
@@ -3063,12 +3076,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             })
             self.assertTrue(preserved)
+            self.assertEqual(1, sum(
+                command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
+                for command in commands
+            ))
             self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
             self.assertFalse(any(command[0] == "git" and "push" in command for command in commands))
 
             commands.clear()
             views.append({
-                "state": "OPEN", "headRefName": "codex/fix", "headRefOid": "different-sha",
+                "number": 39, "state": "OPEN", "isDraft": True,
+                "headRefName": "codex/fix", "headRefOid": "different-sha",
                 "baseRefName": approved["default_branch"],
             })
             with self.assertRaisesRegex(coordinator.DeliveryError, "identity"):
@@ -3094,11 +3112,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "state": "CLOSED", "headRefName": "codex/fix",
+                    "number": 39, "state": "CLOSED", "isDraft": False,
+                    "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
                 {
-                    "state": "CLOSED", "headRefName": "codex/fix",
+                    "number": 39, "state": "CLOSED", "isDraft": False,
+                    "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
             ]
@@ -3151,7 +3171,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "state": "OPEN", "headRefName": "codex/fix",
+                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
             ]
