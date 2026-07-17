@@ -408,10 +408,11 @@ def parse_codex_failure(
                 info = detail.get("codexErrorInfo", event.get("codexErrorInfo"))
                 if isinstance(info, dict):
                     info = info.get("type")
+                normalized_info = info.casefold() if isinstance(info, str) else None
                 status = detail.get("httpStatusCode", event.get("httpStatusCode"))
-                if info in {
-                    "BadRequest", "Unauthorized", "SandboxError", "UsageLimitExceeded",
-                    "ContextWindowExceeded",
+                if normalized_info in {
+                    "badrequest", "unauthorized", "sandboxerror", "usagelimitexceeded",
+                    "contextwindowexceeded",
                 } or status in {400, 401, 403, 404}:
                     permanent_signal = True
     for raw_line in (stderr or "").splitlines():
