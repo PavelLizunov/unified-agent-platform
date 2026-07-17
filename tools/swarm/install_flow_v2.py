@@ -122,19 +122,22 @@ def _require_all_profile_units_inactive(home: pathlib.Path, unit_state=None) -> 
 
 
 def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
-    """Atomically migrate one stopped legacy profile to policy-authoritative schema v3."""
+    """Validate a current profile or atomically migrate stopped schema 1/2 to v3."""
     path = path.expanduser().resolve()
     _require_profile_units_inactive(path, unit_state)
     value = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise SystemExit("flow-v2-install-error: delivery profile must be an object")
-    if value.get("schema_version") == 3:
+    if value.get("schema_version") in {3, 4}:
         from delivery_coordinator import load_profile
 
         load_profile(path)
         return False
     if value.get("schema_version") not in {1, 2}:
-        raise SystemExit("flow-v2-install-error: only profile schema 1/2 can migrate to 3")
+        raise SystemExit(
+            "flow-v2-install-error: only profile schema 1/2 can migrate to 3; "
+            "schema 3/4 are already current"
+        )
     migrated = {key: item for key, item in value.items() if key not in _LEGACY_MODEL_FIELDS}
     migrated.update(schema_version=3, max_review_cycles=3)
     migrated.setdefault("route_flags", [])
