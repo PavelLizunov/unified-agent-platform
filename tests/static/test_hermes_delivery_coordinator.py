@@ -137,12 +137,28 @@ class FakeBackend:
         self.claims += 1
         expires = int(time.time()) + ttl_seconds
         self.task.update(status="running", claim_expires=expires)
-        self.runs = [{
-            "id": 7,
+        self.runs.append({
+            "id": 6 + self.claims,
             "status": "running",
             "profile": "coordinator-codex-luna-a7",
             "claim_expires": expires,
-        }]
+        })
+        return self.show("task-1")
+
+    def schedule(self, _task_id, *, reason):
+        assert reason
+        self.task.update(status="scheduled", claim_expires=None)
+        active = [run for run in self.runs if run.get("status") == "running"]
+        if len(active) != 1:
+            raise coordinator.mission_adapter.AdapterError("invalid active run")
+        active[0].update(status="scheduled", outcome="scheduled", claim_expires=None)
+        return self.show("task-1")
+
+    def unblock(self, _task_id, *, reason):
+        assert reason
+        if self.task.get("status") != "scheduled":
+            raise coordinator.mission_adapter.AdapterError("task is not scheduled")
+        self.task.update(status="ready", claim_expires=None)
         return self.show("task-1")
 
     def verify_claim(self, task_id, run_id, *, min_remaining_seconds=60):
@@ -161,7 +177,10 @@ class FakeBackend:
 
     def complete(self, _task_id, **_kwargs):
         self.task.update(status="done", result=_kwargs["result"])
-        self.runs[0].update(
+        active = [run for run in self.runs if run.get("status") == "running"]
+        if len(active) != 1:
+            raise coordinator.mission_adapter.AdapterError("invalid active run")
+        active[0].update(
             status="done",
             outcome="completed",
             summary=_kwargs["summary"],
@@ -772,7 +791,20 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 approved, FakeClient(), FakeBackend(), root / "state", runner=runner
             )
             paths = instance._paths("failed-author-output")
-            state = {"review_cycle": 1}
+            state = {
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
             with (
                 mock.patch.object(
                     instance,
@@ -780,7 +812,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     return_value={"model": "gpt-5.6-luna", "reasoning_effort": "medium"},
                 ),
                 mock.patch.object(instance, "_assert_claim"),
-                mock.patch.object(instance, "_git", return_value=""),
+                mock.patch.object(instance, "_git", side_effect=git),
                 self.assertRaisesRegex(coordinator.DeliveryError, "author failed"),
             ):
                 instance._author(state, paths)
@@ -1049,7 +1081,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             recovered = restarted._load_state("capacity-author", paths)
             self.assertEqual("complex", restarted._ensure_route(recovered, paths)["route"])
             with mock.patch.object(coordinator.time, "time", return_value=1041):
-                waiting = restarted._capacity_wait_result(recovered, "capacity-author")
+                with mock.patch.object(restarted, "_park_capacity_claim"):
+                    waiting = restarted._capacity_wait_result(
+                        recovered, "capacity-author", paths
+                    )
             self.assertEqual("capacity_wait", waiting["action"])
             self.assertNotIn("question", recovered)
 
@@ -1108,6 +1143,59 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("capacity_round_wait", state["model_capacity"]["status"])
             self.assertEqual("candidate-sha", state["model_capacity"]["candidate_sha"])
             self.assertEqual(0, instance._quality_failures(state))
+
+    def test_capacity_wait_parks_expiring_claim_and_reclaims_when_due(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-lease")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-lease",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            failure = {
+                "error_class": "transient_capacity",
+                "message_sha256": "c" * 64,
+            }
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                waiting = instance._capacity_wait_result(
+                    state, "capacity-lease", paths
+                )
+            self.assertEqual("capacity_wait", waiting["action"])
+            self.assertEqual("scheduled", backend.task["status"])
+            self.assertTrue(state["model_capacity"]["claim_parked"])
+            self.assertEqual("scheduled", backend.runs[0]["status"])
+
+            with mock.patch.object(coordinator.time, "time", return_value=1006):
+                self.assertIsNone(instance._capacity_wait_result(
+                    state, "capacity-lease", paths
+                ))
+            self.assertEqual("running", backend.task["status"])
+            self.assertFalse(state["model_capacity"]["claim_parked"])
+            self.assertEqual("8", state["run_id"])
+            self.assertEqual(2, backend.claims)
+            self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
 
     def test_exact_pre_turn_author_capacity_becomes_restart_safe_wait(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1208,7 +1296,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with (
                 mock.patch.object(instance, "_assert_claim"),
                 mock.patch.object(instance, "_git", side_effect=git),
-                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex capacity"),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex failure"),
             ):
                 instance._author(state, paths)
             self.assertNotIn("model_capacity", state)
@@ -1223,6 +1311,59 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             restarted._ensure_route(recovered, paths)
             self.assertEqual(ambiguous, restarted._ambiguous_state(recovered))
             restarted.runner.assert_not_called()
+
+    def test_unknown_failure_after_thread_start_is_quarantined_before_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                required_files=["Cli.cs"], codex_bin="codex",
+                codex_home=str(root / "codex-home"),
+            )
+
+            def runner(command, **_kwargs):
+                events = [
+                    {"type": "thread.started", "thread_id": "unknown-failure-thread"},
+                    {"type": "turn.failed", "error": {"message": "unknown failure"}},
+                ]
+                return subprocess.CompletedProcess(
+                    command, 1,
+                    stdout="".join(json.dumps(event) + "\n" for event in events),
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("ambiguous-unknown")
+            state = {
+                "schema_version": 1,
+                "mission_id": "ambiguous-unknown",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                self.assertRaisesRegex(coordinator.DeliveryError, "ambiguous Codex failure"),
+            ):
+                instance._author(state, paths)
+            self.assertEqual("reconciling", state["model_ambiguous"]["status"])
+            self.assertNotIn("model_capacity", state)
+            self.assertEqual(0, instance._quality_failures(state))
 
     def test_in_progress_v1_route_remains_exactly_recoverable_under_v2(self):
         with tempfile.TemporaryDirectory() as directory:

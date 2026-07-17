@@ -96,7 +96,9 @@ Last updated: 2026-07-17
   The coordinator source now also treats the exact trusted pre-turn Codex capacity terminal as an operational,
   non-quality condition: two same-model retries precede an author-only whole-route fallback, while reviewer retries
   remain frozen to the exact candidate route. Retry/fallback/round state and `not_before` are durable, capped rounds
-  never create an owner question, and unknown, post-start or worktree-changing failures remain fail-closed. Hermetic
+  never create an owner question; cooldown parks the exact task as `scheduled` and automatically claims a new run
+  when due, so the finite Kanban claim TTL cannot strand a capacity wait. Unknown, post-start or worktree-changing
+  failures remain fail-closed. Hermetic
   tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze; the live
   Codex capacity envelope and recovery still require a controlled canary before any live-proof claim.
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used

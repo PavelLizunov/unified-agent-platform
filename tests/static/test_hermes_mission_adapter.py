@@ -448,7 +448,10 @@ class MissionAdapterTests(unittest.TestCase):
             if action == "show":
                 output = {
                     "task": {"id": "task-1", "status": "done" if any("complete" in item for item in commands) else "running"},
-                    "runs": [{"id": 9, "status": "completed" if any("complete" in item for item in commands) else "running"}],
+                    "runs": [
+                        {"id": 8, "status": "scheduled"},
+                        {"id": 9, "status": "completed" if any("complete" in item for item in commands) else "running"},
+                    ],
                 }
                 return subprocess.CompletedProcess(command, 0, stdout=json.dumps(output), stderr="")
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -463,6 +466,38 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertTrue(all(isinstance(command, list) for command in commands))
         complete_command = next(command for command in commands if "complete" in command)
         self.assertIn("--metadata", complete_command)
+
+    def test_native_capacity_schedule_and_unblock_are_fail_closed(self):
+        commands = []
+        status = "running"
+
+        def runner(command):
+            nonlocal status
+            commands.append(command)
+            action = command[command.index("central") + 1]
+            if action == "schedule":
+                status = "scheduled"
+            elif action == "unblock":
+                status = "ready"
+            output = {
+                "task": {"id": "task-1", "status": status},
+                "runs": [{"id": 9, "status": "running" if status == "running" else "scheduled"}],
+            }
+            return subprocess.CompletedProcess(
+                command, 0, stdout=json.dumps(output) if action == "show" else "", stderr=""
+            )
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        self.assertEqual(
+            "scheduled",
+            backend.schedule("task-1", reason="automatic capacity cooldown")["task"]["status"],
+        )
+        self.assertEqual(
+            "ready",
+            backend.unblock("task-1", reason="automatic capacity retry")["task"]["status"],
+        )
+        self.assertTrue(any("schedule" in command for command in commands))
+        self.assertTrue(any("unblock" in command for command in commands))
 
     def test_native_claim_verification_rejects_expired_or_wrong_run(self):
         expires = int(time.time()) + 600

@@ -335,6 +335,12 @@ class FlowContractTests(unittest.TestCase):
                 "message": message,
                 "codexErrorInfo": {"type": "contextWindowExceeded"},
             }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "codexErrorInfo": {
+                    "type": "httpConnectionFailed", "httpStatusCode": 400,
+                },
+            }}], "", "unknown"),
         )
         for events, stderr, expected in cases:
             with self.subTest(events=events, stderr=stderr), tempfile.NamedTemporaryFile(

@@ -299,16 +299,46 @@ class HermesKanbanBackend:
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
         if (
             not isinstance(task, dict)
             or task.get("id") != task_id
             or task.get("status") != "running"
             or not isinstance(runs, list)
-            or len(runs) != 1
-            or not isinstance(runs[0], dict)
-            or runs[0].get("status") != "running"
+            or len(active) != 1
         ):
             raise AdapterError("Hermes Kanban claim did not create one running task/run")
+        return snapshot
+
+    def schedule(self, task_id: str, *, reason: str) -> dict[str, Any]:
+        if not reason:
+            raise AdapterError("Kanban schedule reason is required")
+        self._run("schedule", task_id, reason)
+        snapshot = self.show(task_id)
+        runs = snapshot.get("runs")
+        if (
+            snapshot.get("task", {}).get("status") != "scheduled"
+            or not isinstance(runs, list)
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+        ):
+            raise AdapterError("Hermes Kanban task did not enter scheduled state")
+        return snapshot
+
+    def unblock(self, task_id: str, *, reason: str) -> dict[str, Any]:
+        if not reason:
+            raise AdapterError("Kanban unblock reason is required")
+        self._run("unblock", task_id, "--reason", reason)
+        snapshot = self.show(task_id)
+        runs = snapshot.get("runs")
+        if (
+            snapshot.get("task", {}).get("status") != "ready"
+            or not isinstance(runs, list)
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+        ):
+            raise AdapterError("Hermes Kanban task did not return to ready state")
         return snapshot
 
     def verify_claim(

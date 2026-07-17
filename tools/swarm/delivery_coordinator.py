@@ -81,7 +81,7 @@ _CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
 _CAPACITY_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "failures_on_route", "round", "status", "not_before", "error_class",
-    "last_error_sha256",
+    "last_error_sha256", "claim_parked",
 }
 _AMBIGUOUS_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
@@ -740,6 +740,7 @@ class DeliveryCoordinator:
                 "retry_wait", "route_fallback_wait", "capacity_round_wait",
             }
             or value.get("error_class") != "transient_capacity"
+            or not isinstance(value.get("claim_parked"), bool)
             or not isinstance(value.get("last_error_sha256"), str)
             or len(value["last_error_sha256"]) != 64
             or isinstance(value.get("failures_on_route"), bool)
@@ -781,11 +782,76 @@ class DeliveryCoordinator:
             raise DeliveryError("ambiguous-model checkpoint changed candidate identity")
         return value
 
+    def _park_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or waiting["claim_parked"]:
+            return
+        snapshot = self.backend.show(state["root_task_id"])
+        task = snapshot.get("task", {})
+        runs = snapshot.get("runs")
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if task.get("status") == "running":
+            if len(active) != 1 or str(active[0].get("id")) != str(state.get("run_id")):
+                raise DeliveryError("capacity wait cannot park a different active Kanban run")
+            snapshot = self.backend.schedule(
+                state["root_task_id"], reason="automatic OpenAI capacity cooldown"
+            )
+            task = snapshot.get("task", {})
+            runs = snapshot.get("runs")
+        if (
+            task.get("status") != "scheduled"
+            or not isinstance(runs, list)
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+        ):
+            raise DeliveryError("capacity wait did not park the exact Kanban task")
+        waiting["claim_parked"] = True
+        self._save(paths, state)
+
+    def _resume_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or not waiting["claim_parked"]:
+            return
+        snapshot = self.backend.show(state["root_task_id"])
+        task = snapshot.get("task", {})
+        runs = snapshot.get("runs")
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if task.get("status") == "scheduled":
+            snapshot = self.backend.unblock(
+                state["root_task_id"], reason="automatic OpenAI capacity retry due"
+            )
+            task = snapshot.get("task", {})
+            runs = snapshot.get("runs")
+            active = []
+        if task.get("status") == "ready" and not active:
+            self._ensure_claimed(state)
+        elif task.get("status") == "running" and len(active) == 1:
+            # Lost response after a successful re-claim: recover the exact current run.
+            state["run_id"] = str(active[0]["id"])
+            self._assert_claim(state)
+        else:
+            raise DeliveryError("capacity retry did not recover one exact Kanban run")
+        waiting["claim_parked"] = False
+        self._save(paths, state)
+
     def _capacity_wait_result(
-        self, state: dict[str, Any], mission_id: str
+        self, state: dict[str, Any], mission_id: str, paths: dict[str, pathlib.Path]
     ) -> dict[str, Any] | None:
         waiting = self._capacity_state(state)
-        if waiting is None or waiting["not_before"] <= time.time():
+        if waiting is None:
+            return None
+        self._park_capacity_claim(state, paths)
+        if waiting["not_before"] <= time.time():
+            self._resume_capacity_claim(state, paths)
             return None
         return {"action": "capacity_wait", "mission_id": mission_id, "state": state}
 
@@ -850,6 +916,7 @@ class DeliveryCoordinator:
             "not_before": time.time() + delay,
             "error_class": "transient_capacity",
             "last_error_sha256": failure["message_sha256"],
+            "claim_parked": False,
         }
         self._save(paths, state)
 
@@ -876,8 +943,6 @@ class DeliveryCoordinator:
         checkpoint: tuple[str, str],
     ) -> dict[str, Any] | None:
         failure = flow_contract.parse_codex_failure(events, result.stderr)
-        if failure["error_class"] != "transient_capacity":
-            return None
         expected_head = (
             state.get("candidate_sha") if role == "reviewer"
             else state.get("candidate_sha") or state.get("base_sha")
@@ -907,8 +972,10 @@ class DeliveryCoordinator:
             }
             self._save(paths, state)
             raise DeliveryError(
-                "ambiguous Codex capacity failure after execution started or worktree changed"
+                "ambiguous Codex failure after execution started or worktree changed"
             )
+        if failure["error_class"] != "transient_capacity":
+            return None
         return failure
 
     def _actor(self, state: dict[str, Any], component: str) -> dict[str, str]:
@@ -1318,19 +1385,26 @@ class DeliveryCoordinator:
         runs = snapshot.get("runs")
         if task.get("assignee") != self.profile["assignee"] or not isinstance(runs, list):
             raise DeliveryError("Kanban task is outside the approved assignee/run contract")
-        if task.get("status") == "ready" and not runs:
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if task.get("status") == "ready" and not active:
             snapshot = self.backend.claim(
                 state["root_task_id"], ttl_seconds=self.profile["claim_ttl_seconds"]
             )
             task = snapshot.get("task", {})
             runs = snapshot["runs"]
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
         if (
             task.get("status") != "running"
-            or len(runs) != 1
-            or runs[0].get("status") != "running"
+            or len(active) != 1
         ):
             raise DeliveryError("Kanban task did not converge to one claimed run")
-        state["run_id"] = str(runs[0]["id"])
+        state["run_id"] = str(active[0]["id"])
         self._assert_claim(state)
 
     def _assert_claim(self, state: dict[str, Any], *, min_remaining_seconds: int = 60) -> None:
@@ -3296,7 +3370,7 @@ class DeliveryCoordinator:
                 return {
                     "action": "reconciling", "mission_id": mission_id, "state": state,
                 }
-            capacity_wait = self._capacity_wait_result(state, mission_id)
+            capacity_wait = self._capacity_wait_result(state, mission_id, paths)
             if capacity_wait is not None:
                 return capacity_wait
             if state["phase"] == "cleaned":

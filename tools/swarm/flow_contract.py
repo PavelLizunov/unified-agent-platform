@@ -406,10 +406,14 @@ def parse_codex_failure(
                 if isinstance(message, str):
                     terminal_messages.append((str(event_type), message))
                 info = detail.get("codexErrorInfo", event.get("codexErrorInfo"))
+                info_object = info if isinstance(info, dict) else {}
                 if isinstance(info, dict):
                     info = info.get("type")
                 normalized_info = info.casefold() if isinstance(info, str) else None
-                status = detail.get("httpStatusCode", event.get("httpStatusCode"))
+                status = detail.get(
+                    "httpStatusCode",
+                    event.get("httpStatusCode", info_object.get("httpStatusCode")),
+                )
                 if normalized_info in {
                     "badrequest", "unauthorized", "sandboxerror", "usagelimitexceeded",
                     "contextwindowexceeded",
