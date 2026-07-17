@@ -42,8 +42,13 @@ data:
         "hermes_cli/main.py",
     )
     LEGACY_BUILD1_PATCHED_FILES = {
-        "hermes_cli/kanban.py": "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
-        "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+        "hermes_cli/kanban.py": (
+            "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
+            "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
+        ),
+        "hermes_cli/kanban_db.py": (
+            "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+        ),
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -857,7 +862,7 @@ data:
                 statuses.append(f"{relative}: exact-patched")
             elif (
                 args.build1_runtime
-                and actual == LEGACY_BUILD1_PATCHED_FILES.get(relative)
+                and actual in LEGACY_BUILD1_PATCHED_FILES.get(relative, ())
             ):
                 pristine = subprocess.check_output(
                     ["git", "show", f"{UPSTREAM_COMMIT}:{relative}"],
