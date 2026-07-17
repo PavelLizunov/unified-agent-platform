@@ -81,21 +81,23 @@ immediately ran the next due invocation. Durable state retained `crash_injected=
 candidate SHA; author-failure, review-rejection and CI-failure counters all remained zero. No second candidate or
 duplicate author session was created.
 
-## PR, CI, merge and post-verify
+## Private target GitHub evidence, merge and post-verify
 
 [Target PR #5](https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/5) was created as a draft at the exact
 candidate, passed pre-review CI, received the accepted Terra review, was marked ready and was merged by the
-coordinator:
+coordinator. The target repository is private; these PR, commit and Actions URLs require repository access and are not
+independently readable by an anonymous auditor. The exact live/private GitHub objects were queried through the
+authenticated read-only `gh` client on build-1:
 
 ```text
 head branch: codex/a7-3l-rust-ledger-list-bb3537feb0bf
 candidate/head: 0389b7b42adbc2f772d56255e9ef7b07116d12d6
-pull_request run: 29579364955, success
+pull_request run: https://github.com/PavelLizunov/hermes-flow-v2-pilot/actions/runs/29579364955, success
   test-python: job 87881115492, success
   test-linux:   job 87881115499, success
   test-macos:   job 87881115515, success
   test-windows: job 87881115516, success
-push run: 29579356190, success
+push run: https://github.com/PavelLizunov/hermes-flow-v2-pilot/actions/runs/29579356190, success
   test-python: job 87881086869, success
   test-linux:   job 87881086740, success
   test-macos:   job 87881086745, success
@@ -124,6 +126,39 @@ pull request=merged
 default branch=verified
 all five gates=passed
 ```
+
+The following is an explicitly labeled live read-only evidence block from the authenticated Central private API. It
+records the complete ordered event envelope without payloads or chat identity:
+
+```text
+seq  type               source           producer_event_id
+1    mission.accepted   central-hermes   -
+2    task.upsert        build1-flow      build1-flow:4ef836e1e1a9f9b2224b233f
+3    mission.stage      build1-flow      build1-flow:77008c2131334f2184dcea22
+4    task.upsert        build1-flow      build1-flow:efa55190f66127aedabfb5ee
+5    worker.upsert      build1-flow      build1-flow:61801ca2c00f901dc09f4084
+6    mission.stage      build1-flow      build1-flow:d461dd1529ce52e0d44e8188
+7    mission.stage      build1-flow      build1-flow:0e021058dcc0133b09960f6c
+8    mission.stage      build1-flow      build1-flow:8b6dacb4a2242ccb54424375
+9    mission.stage      build1-flow      build1-flow:a2c0b5b2d9f280ba5d5f9c2f
+10   task.upsert        build1-flow      build1-flow:87ce7ce683d811091c7016ea
+11   worker.upsert      build1-flow      build1-flow:710f5807ac70c8f000413d83
+12   change.upsert      build1-flow      build1-flow:fee8202234b519d61feb54b8
+13   change.upsert      build1-flow      build1-flow:19c3719625af5933333fffb4
+14   change.upsert      build1-flow      build1-flow:cfaa57f5a5eb7bd7eadbc9e0
+15   gate.upsert        build1-flow      build1-flow:91ddced74960d211fc155582
+16   gate.upsert        build1-flow      build1-flow:108a5f8c750d3a74f9bfb682
+17   gate.upsert        build1-flow      build1-flow:a5145177aab51d343909880b
+18   gate.upsert        build1-flow      build1-flow:4192d30b4abd042e1073c4d0
+19   delivery.upsert    build1-flow      build1-flow:978a95dc068d6b8469261f94
+20   delivery.upsert    build1-flow      build1-flow:445e520b6625c7855bed4f11
+21   gate.upsert        build1-flow      build1-flow:37df5ead53a477234af3da96
+22   mission.completed  central-hermes   central:auto-complete:v1
+```
+
+The same query returned `events=22`, `unique_event_ids=22`, `producer_rows=20`, `unique_producer_ids=20` and
+`terminal_rows=1`. Thus the recovered run stored no duplicate producer row and exactly one terminal event. This is a
+live-state assertion backed by the retained Central database, not a public GitHub object.
 
 An authenticated request through the live Workspace API returned HTTP 200 and the exact same mission object as the
 Central API:
