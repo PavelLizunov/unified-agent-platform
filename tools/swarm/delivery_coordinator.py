@@ -795,9 +795,14 @@ class DeliveryCoordinator:
             run for run in runs or []
             if isinstance(run, dict) and run.get("status") == "running"
         ]
-        if task.get("status") == "running":
-            if len(active) != 1 or str(active[0].get("id")) != str(state.get("run_id")):
+        if task.get("status") in {"running", "ready"}:
+            if task.get("status") == "running" and (
+                len(active) != 1
+                or str(active[0].get("id")) != str(state.get("run_id"))
+            ):
                 raise DeliveryError("capacity wait cannot park a different active Kanban run")
+            if task.get("status") == "ready" and active:
+                raise DeliveryError("capacity wait found an active run on a ready Kanban task")
             snapshot = self.backend.schedule(
                 state["root_task_id"], reason="automatic OpenAI capacity cooldown"
             )

@@ -137,8 +137,9 @@ class FakeBackend:
         self.claims += 1
         expires = int(time.time()) + ttl_seconds
         self.task.update(status="running", claim_expires=expires)
+        run_id = max((int(run["id"]) for run in self.runs), default=6) + 1
         self.runs.append({
-            "id": 6 + self.claims,
+            "id": run_id,
             "status": "running",
             "profile": "coordinator-codex-luna-a7",
             "claim_expires": expires,
@@ -147,11 +148,22 @@ class FakeBackend:
 
     def schedule(self, _task_id, *, reason):
         assert reason
-        self.task.update(status="scheduled", claim_expires=None)
+        previous_status = self.task.get("status")
         active = [run for run in self.runs if run.get("status") == "running"]
-        if len(active) != 1:
+        self.task.update(status="scheduled", claim_expires=None)
+        if previous_status == "running" and len(active) == 1:
+            active[0].update(status="scheduled", outcome="scheduled", claim_expires=None)
+        elif previous_status == "ready" and not active:
+            run_id = max((int(run["id"]) for run in self.runs), default=6) + 1
+            self.runs.append({
+                "id": run_id,
+                "status": "scheduled",
+                "outcome": "scheduled",
+                "profile": "coordinator-codex-luna-a7",
+                "claim_expires": None,
+            })
+        else:
             raise coordinator.mission_adapter.AdapterError("invalid active run")
-        active[0].update(status="scheduled", outcome="scheduled", claim_expires=None)
         return self.show("task-1")
 
     def unblock(self, _task_id, *, reason):
@@ -1196,6 +1208,59 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("8", state["run_id"])
             self.assertEqual(2, backend.claims)
             self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
+
+    def test_capacity_wait_recovers_after_native_ttl_reclaimed_task_to_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="reclaimed", outcome="reclaimed", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-native-reclaim")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-native-reclaim",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "d" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                waiting = instance._capacity_wait_result(
+                    state, "capacity-native-reclaim", paths
+                )
+            self.assertEqual("capacity_wait", waiting["action"])
+            self.assertEqual("scheduled", backend.task["status"])
+            self.assertTrue(state["model_capacity"]["claim_parked"])
+            with mock.patch.object(coordinator.time, "time", return_value=1006):
+                self.assertIsNone(instance._capacity_wait_result(
+                    state, "capacity-native-reclaim", paths
+                ))
+            self.assertEqual("running", backend.task["status"])
+            self.assertEqual("9", state["run_id"])
+            self.assertEqual(3, len({run["id"] for run in backend.runs}))
 
     def test_exact_pre_turn_author_capacity_becomes_restart_safe_wait(self):
         with tempfile.TemporaryDirectory() as directory:
