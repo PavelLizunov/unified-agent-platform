@@ -2124,17 +2124,6 @@ class DeliveryCoordinator:
                         private_parent=True,
                         retained_mtime=retained_at,
                     )
-                if state.get("kanban_gc_ran") is not True:
-                    gc_now = self.backend.gc()
-                    state["kanban_gc_ran"] = gc_now
-                    if not gc_now:
-                        continue
-                    mission_adapter._write_json(
-                        path,
-                        state,
-                        private_parent=True,
-                        retained_mtime=retained_at,
-                    )
                 archived_at = state.get("task_archived_at", retained_at)
                 current_time = time.time()
                 if (
@@ -2147,6 +2136,17 @@ class DeliveryCoordinator:
                     or float(archived_at) > current_time
                 ):
                     raise DeliveryError("completed state has invalid task archive time")
+                if state.get("kanban_gc_ran") is not True:
+                    gc_now = self.backend.gc()
+                    state["kanban_gc_ran"] = gc_now
+                    if not gc_now:
+                        continue
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
                 if (
                     current_time
                     < max(retained_at, float(archived_at))

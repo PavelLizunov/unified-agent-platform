@@ -2396,7 +2396,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "root_task_id": "task-1",
                     "task_archived": True,
                     "task_archived_at": archived_at,
-                    "kanban_gc_ran": True,
+                    "kanban_gc_ran": False,
                 })
                 os.utime(paths["state"], (900, 900))
                 with mock.patch.object(coordinator.time, "time", return_value=2000.0):
@@ -2406,6 +2406,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         instance._prune_completed_states()
                 self.assertTrue(paths["state"].exists())
                 self.assertEqual(0, backend.gcs)
+                self.assertFalse(
+                    coordinator.mission_adapter._read_json(paths["state"])[
+                        "kanban_gc_ran"
+                    ]
+                )
 
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -2422,7 +2427,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "root_task_id": "task-1",
                 "task_archived": True,
                 "task_archived_at": 2000.0,
-                "kanban_gc_ran": True,
+                "kanban_gc_ran": False,
             })
             os.utime(paths["state"], (1900, 1900))
             with mock.patch.object(coordinator.time, "time", return_value=1500.0):
@@ -2433,7 +2438,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with mock.patch.object(coordinator.time, "time", return_value=2001.0):
                 instance._prune_completed_states()
             self.assertTrue(paths["state"].exists())
-            self.assertEqual(0, backend.gcs)
+            self.assertEqual(1, backend.gcs)
 
     def test_completed_state_deletion_resumes_after_state_file_is_gone(self):
         with tempfile.TemporaryDirectory() as directory:
