@@ -104,17 +104,24 @@ known debt.
 The A6.4 controlled canary added one central mission log, fail-closed central-only Workspace views and correlated
 build-1 execution evidence. The remaining gaps are not accepted end-state behaviour:
 
-1. Workspace and Telegram synchronize the new mission projection, not complete chat/session history or a shared
-   answer-and-resume loop for owner questions.
+1. Workspace and Telegram synchronize the mission projection and owner question/answer resume, but not complete
+   cross-channel chat/session history.
 2. The profile-bound A7 coordinator, schema-v3 profile and `openai-autonomy-v2` route are installed. One real mission
    reached PR/required-CI/exact-head merge/fresh-main post-verify and cleanup, recovering durable checkpoints while
    four harness corrections were installed. The next valid gate must bind Telegram before execution, then use one
    clean uninterrupted repeat on the corrected runtime to prove matching Central/Workspace/Telegram terminal status.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
-4. Mission events/subscriptions, terminal output, adapter state, completed Kanban tasks and disposable worktrees have no
-   complete retention/cleanup lifecycle. An open PR that exhausts all autonomous repair cycles is intentionally retained
-   with its exact remote branch as bounded failure evidence because GitHub offers no conditional PR-close mutation.
+4. Central retains the latest 100 unbound terminal mission histories, never prunes the currently bound mission, and
+   keeps a payload-free tombstone so a retired stable `mission_id` cannot be reused.
+   Completed Kanban tasks are archived. Native Kanban GC bounds their events/logs to 30 days only while the board has
+   no nonterminal task, so a long-running worker log is not removed; deferred GC is retried automatically. Deleting
+   the 30-day retry state requires a successful idle-board GC at or after that deadline; a legacy task first archived
+   during migration starts that bounded archive-event retention clock then. Delivery
+   state is private and retained for 30 days, then crash-safely removed through a rediscoverable renamed directory;
+   disposable worktrees are removed immediately after verification. An open PR that
+   exhausts all autonomous repair cycles is intentionally retained with its exact remote branch as bounded failure
+   evidence because GitHub offers no conditional PR-close mutation.
 5. The Flow contract derives model, effort and sandbox policy from the exact Codex rollout `turn_context`; the
    OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. OS-independent read-only filesystem and
    credential isolation remain unproven.

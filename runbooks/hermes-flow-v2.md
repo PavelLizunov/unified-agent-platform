@@ -14,6 +14,18 @@ cleanup, while #218-#221 repaired four harness defects between durable ticks. Th
 next gate is one clean uninterrupted repeat on that corrected runtime, with a bound Telegram subscription. Generic
 arbitrary-repository intake remains outside the current fixed-profile boundary.
 
+Lifecycle is deliberately handled by the existing stores and timer. Central keeps the newest 100 unbound terminal
+missions, skips the current Workspace/Telegram binding and leaves only a payload-free stable-ID tombstone for pruned
+history. Active parent/repair-child chains and a subscribed repair's parent remain retained through terminal-notification
+checkpoint and binding restoration. After Central terminal convergence, the coordinator
+archives the native Kanban task. It runs `hermes kanban gc` (30-day task-event/log defaults) only when the board has no
+nonterminal task, so the board-wide log sweep cannot remove a long-running worker log; the profile timer retries a
+deferred GC. A separate successful idle-board GC at or after the 30-day deadline is required before its retry state
+can be removed; completion-time GC does not satisfy that checkpoint. A legacy task first archived by migration keeps
+the retry state until that new archive event reaches the same bounded deadline. Delivery state remains mode `0600` under a `0700` root for 30 days so evidence can be audited, then the
+owning profile timer removes it through an atomic rename and crash-retried recursive deletion. Verified worktrees and local branches are removed before Central completion; no
+separate GC daemon exists.
+
 ## When to use
 
 - Read-only or docs-only change up to three files: ordinary Hermes session is sufficient.
@@ -163,14 +175,16 @@ allowlist and creates the real commit. Never copy or replace `.git`, and never a
 `mission_adapter.py` is installed beside `flow_contract.py`. It does not replace Kanban or run a second dispatcher.
 It gives central Hermes one idempotent ingress and converts native Kanban state back into mission producer events.
 
-The build-1 Hermes checkout must also receive the exact transformed `hermes_cli/kanban.py` and
-`hermes_cli/kanban_db.py` from a detached checkout of pinned upstream commit
-`7c1a029553d87c43ecff8a3821336bc95872213b`. Stage that detached tree with
-`tools/hermes-mission/apply_overlay.py`, stop the coordinator timer, copy only those two verified files into the
-build-1 Hermes checkout, and restart the timer after their SHA-256 values match `PATCHED_FILES`. Do not install the
-Central gateway/API overlay files on build-1. This pair is indivisible: the CLI passes the owner-answer audit
-reference into the same native SQLite transaction that persists `unblocked`, and adapter recovery rejects any
-different/manual unblock.
+The build-1 Hermes checkout must also receive the exact transformed `hermes_cli/kanban.py`,
+`hermes_cli/kanban_db.py`, and `hermes_cli/main.py` from pinned upstream commit
+`7c1a029553d87c43ecff8a3821336bc95872213b`. Stop every coordinator timer first, then run the standard
+`tools/swarm/install_flow_v2.py` from the exact UAP checkout. It invokes the fail-closed
+`tools/hermes-mission/apply_overlay.py --build1-runtime` against the pinned build-1 checkout and transforms only
+those three files before updating Flow. Restart the timers only after `install_flow_v2.py --check` reports all
+three as exact-patched. Do not install the Central
+gateway/API overlay files on build-1. This trio is indivisible: the CLI passes the owner-answer audit reference into
+the same native SQLite transaction that persists `unblocked`, native GC fails closed on incomplete filesystem
+cleanup, and `main.py` propagates deferred status `3` to the coordinator.
 
 Acceptance is fail-safe by default:
 

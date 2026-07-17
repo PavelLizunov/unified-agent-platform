@@ -930,6 +930,319 @@ def test_mission_database_is_owner_only_on_posix() -> None:
         assert stat.S_IMODE(database.stat().st_mode) == 0o600
 
 
+def test_terminal_retention_preserves_recent_and_bound_missions() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        for number in range(1, 5):
+            mission_id = f"mission-retention-{number}"
+            store.accept("Retain bounded history", mission_id=mission_id)
+            store.append_central(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": f"central:cancel:{number}"},
+                    "payload": {"reason": "test cleanup"},
+                },
+            )
+        store.bind("mission-retention-2", "telegram", "42")
+        store.bind("mission-retention-1", "telegram", "42")
+
+        assert store.prune_terminal(keep=2) == 1
+        assert store.bound_mission("telegram", "42") == "mission-retention-1"
+        assert {item["mission_id"] for item in store.list(10)} == {
+            "mission-retention-1", "mission-retention-3", "mission-retention-4",
+        }
+        assert all(
+            "mission-retention-2" not in {
+                row["previous_mission_id"], row["mission_id"], row["related_mission_id"]
+            }
+            for row in store.binding_history()
+        )
+        try:
+            store.accept("Reuse retired identity", mission_id="mission-retention-2")
+            raise AssertionError("retired mission id was reused")
+        except missions.MissionError as error:
+            assert str(error) == "mission id was already retired"
+
+
+def test_terminal_append_applies_default_retention() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        for number in range(missions._MAX_RETAINED_TERMINAL_MISSIONS + 1):
+            mission_id = f"mission-auto-retention-{number}"
+            store.accept("Retain automatically", mission_id=mission_id)
+            store.append_central(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": f"central:auto-cancel:{number}"},
+                    "payload": {"reason": "test cleanup"},
+                },
+            )
+        assert len(store.list(100)) == missions._MAX_RETAINED_TERMINAL_MISSIONS
+        try:
+            store.projection("mission-auto-retention-0")
+            raise AssertionError("old terminal mission escaped automatic retention")
+        except missions.MissionError as error:
+            assert str(error) == "mission not found"
+        try:
+            store.accept("Reuse retired identity", mission_id="mission-auto-retention-0")
+            raise AssertionError("automatic retention allowed mission id reuse")
+        except missions.MissionError as error:
+            assert str(error) == "mission id was already retired"
+
+
+def test_bind_and_retention_cannot_create_a_dangling_subscription() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        selecting = threading.Event()
+        release = threading.Event()
+        pause = threading.Event()
+
+        class PausingConnection(sqlite3.Connection):
+            def execute(self, sql: str, parameters=(), /):
+                normalized = " ".join(sql.split())
+                if pause.is_set() and normalized.startswith(
+                    "SELECT * FROM mission_events WHERE mission_id"
+                ):
+                    pause.clear()
+                    selecting.set()
+                    assert release.wait(2)
+                return super().execute(sql, parameters)
+
+        class PausingStore(missions.MissionStore):
+            def _connect(self) -> sqlite3.Connection:
+                connection = sqlite3.connect(
+                    self.path, timeout=10, factory=PausingConnection
+                )
+                self._harden_permissions()
+                connection.row_factory = sqlite3.Row
+                connection.execute("PRAGMA busy_timeout=10000")
+                return connection
+
+        store = PausingStore(Path(temp) / "missions.sqlite3")
+        mission_id = "mission-bind-prune-race"
+        store.accept("Retain or reject the bind", mission_id=mission_id)
+        store.append_central(
+            mission_id,
+            {
+                "schema_version": 1,
+                "mission_id": mission_id,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:cancel:bind-race"},
+                "payload": {"reason": "test cleanup"},
+            },
+        )
+        errors: list[Exception] = []
+        pruned: list[int] = []
+
+        def bind() -> None:
+            try:
+                store.bind(mission_id, "telegram", "42")
+            except Exception as error:  # noqa: BLE001 - asserted below
+                errors.append(error)
+
+        pause.set()
+        bind_thread = threading.Thread(target=bind)
+        bind_thread.start()
+        assert selecting.wait(2)
+        prune_thread = threading.Thread(
+            target=lambda: pruned.append(store.prune_terminal(keep=0))
+        )
+        prune_thread.start()
+        assert prune_thread.is_alive()
+        release.set()
+        bind_thread.join(2)
+        prune_thread.join(2)
+        assert not bind_thread.is_alive() and not prune_thread.is_alive()
+        assert not errors
+        assert pruned == [0]
+        assert store.bound_mission("telegram", "42") == mission_id
+        assert store.projection(mission_id)["mission_id"] == mission_id
+
+
+def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            parent = "mission-explicit-parent"
+            child = "mission-explicit-child"
+            store.accept("Deliver", mission_id=parent)
+            store.bind(parent, "telegram", "42")
+            store.accept("Repair", mission_id=child, parent_mission_id=parent)
+            event, created = store.append_central(
+                child,
+                {
+                    "schema_version": 1,
+                    "mission_id": child,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": "central:cancel:explicit"},
+                    "payload": {"reason": "repair cancelled"},
+                },
+            )
+            assert created and store.bound_mission("telegram", "42") == child
+            try:
+                store.restore_parent_after_terminal_notification(child)
+                raise AssertionError("repair binding restored before terminal notification")
+            except missions.MissionError as error:
+                assert str(error) == "repair terminal notification not checkpointed"
+
+            delivered: list[str] = []
+
+            async def send(_subscription: dict, text: str) -> None:
+                delivered.append(text)
+
+            assert await missions.notify_subscribers(store, event, send) == 1
+            assert delivered and "cancelled" in delivered[0].lower()
+            store.restore_parent_after_terminal_notification(child)
+            assert store.bound_mission("telegram", "42") == parent
+            replayed, replay_created = store.append_central(child, {
+                "schema_version": 1,
+                "mission_id": child,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:cancel:explicit"},
+                "payload": {"reason": "repair cancelled"},
+            })
+            assert not replay_created
+            assert await missions.notify_subscribers(store, replayed, send) == 0
+            store.restore_parent_after_terminal_notification(child)
+
+    asyncio.run(scenario())
+
+
+def test_terminal_retention_preserves_active_repair_chain() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        parent = "mission-active-parent"
+        child = "mission-terminal-child"
+        store.accept("Deliver", mission_id=parent)
+        store.bind(parent, "telegram", "42")
+        store.accept("Repair", mission_id=child, parent_mission_id=parent)
+        store.append_central(
+            child,
+            {
+                "schema_version": 1,
+                "mission_id": child,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:cancel:child"},
+                "payload": {"reason": "test cleanup"},
+            },
+        )
+        store.bind(parent, "telegram", "42")
+        assert store.bound_mission("telegram", "42") == parent
+        assert store.prune_terminal(keep=0) == 0
+        assert store.projection(child)["status"] == "cancelled"
+
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        parent = "mission-terminal-parent"
+        child = "mission-active-child"
+        store.accept("Deliver", mission_id=parent)
+        store.bind(parent, "telegram", "42")
+        store.accept("Repair", mission_id=child, parent_mission_id=parent)
+        store.append_central(
+            parent,
+            {
+                "schema_version": 1,
+                "mission_id": parent,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:cancel:parent"},
+                "payload": {"reason": "test cleanup"},
+            },
+        )
+        assert store.prune_terminal(keep=0) == 0
+        assert store.projection(parent)["status"] == "cancelled"
+        assert store.projection(child)["status"] == "active"
+
+
+def test_terminal_retention_preserves_parent_until_repair_notification() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            parent = "mission-terminal-parent"
+            child = "mission-terminal-child"
+            store.accept("Deliver", mission_id=parent)
+            store.bind(parent, "telegram", "42")
+            store.accept("Repair", mission_id=child, parent_mission_id=parent)
+            store.append_central(
+                parent,
+                {
+                    "schema_version": 1,
+                    "mission_id": parent,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": "central:cancel:parent"},
+                    "payload": {"reason": "parent stopped"},
+                },
+            )
+            for number in range(101):
+                mission_id = f"mission-retention-fill-{number:03d}"
+                store.accept("Fill retention", mission_id=mission_id)
+                store.append_central(
+                    mission_id,
+                    {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": "mission.cancelled",
+                        "source": "central-hermes",
+                        "correlation": {
+                            "producer_event_id": f"central:cancel:fill:{number}"
+                        },
+                        "payload": {"reason": "fill retention"},
+                    },
+                )
+            event, created = store.append_central(
+                child,
+                {
+                    "schema_version": 1,
+                    "mission_id": child,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": "central:cancel:child"},
+                    "payload": {"reason": "child stopped"},
+                },
+            )
+            assert created
+            assert store.projection(parent)["status"] == "cancelled"
+
+            async def send(_subscription: dict, _text: str) -> None:
+                return None
+
+            assert await missions.notify_subscribers(store, event, send) == 1
+            store.restore_parent_after_terminal_notification(child)
+            assert store.bound_mission("telegram", "42") == parent
+            assert store.projection(parent)["status"] == "cancelled"
+            connection = sqlite3.connect(store.path)
+            try:
+                unbound = connection.execute(
+                    """SELECT COUNT(DISTINCT events.mission_id)
+                       FROM mission_events AS events
+                       LEFT JOIN mission_subscriptions AS subscriptions
+                         ON subscriptions.mission_id = events.mission_id
+                       WHERE subscriptions.mission_id IS NULL"""
+                ).fetchone()[0]
+            finally:
+                connection.close()
+            assert unbound == missions._MAX_RETAINED_TERMINAL_MISSIONS
+            try:
+                store.projection("mission-retention-fill-001")
+                raise AssertionError("binding restoration left excess terminal history")
+            except missions.MissionError as error:
+                assert str(error) == "mission not found"
+
+    asyncio.run(scenario())
+
+
 def test_existing_subscription_table_gets_notification_lease_columns() -> None:
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "missions.sqlite3"
@@ -1015,18 +1328,64 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
         assert token and store.finish_notification(
             subscription, notification["sequence"], token, delivered=True
         )
-        completed = store.complete_if_ready(child)
+        store.append_central(
+            parent,
+            {
+                "schema_version": 1,
+                "mission_id": parent,
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {
+                    "producer_event_id": "central:cancel:repair-parent"
+                },
+                "payload": {"reason": "parent stopped during repair"},
+            },
+        )
+        for number in range(missions._MAX_RETAINED_TERMINAL_MISSIONS):
+            mission_id = f"mission-auto-repair-fill-{number:03d}"
+            store.accept("Fill repair retention", mission_id=mission_id)
+            store.append_central(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {
+                        "producer_event_id": f"central:cancel:repair-fill:{number}"
+                    },
+                    "payload": {"reason": "fill repair retention"},
+                },
+            )
+
+        def reject_separate_prune(*_args, **_kwargs):
+            raise AssertionError(
+                "automatic completion used a second retention transaction"
+            )
+
+        original_prune = store.prune_terminal
+        store.prune_terminal = reject_separate_prune
+        try:
+            completed = store.complete_if_ready(child)
+        finally:
+            store.prune_terminal = original_prune
         assert completed is not None and completed[0]["type"] == "mission.completed"
         assert store.bound_mission("telegram", "42", "7") == parent
+        connection = sqlite3.connect(store.path)
+        try:
+            unbound = connection.execute(
+                """SELECT COUNT(DISTINCT events.mission_id)
+                   FROM mission_events AS events
+                   LEFT JOIN mission_subscriptions AS subscriptions
+                     ON subscriptions.mission_id = events.mission_id
+                   WHERE subscriptions.mission_id IS NULL"""
+            ).fetchone()[0]
+        finally:
+            connection.close()
+        assert unbound == missions._MAX_RETAINED_TERMINAL_MISSIONS, unbound
         assert [item["reason"] for item in store.binding_history()] == [
             "manual-bind", "repair-inherit", "repair-restore"
         ]
-        assert not store.accept(
-            "Repair post-verify",
-            mission_id=child,
-            dispatch_profile="build1-repair",
-            parent_mission_id=parent,
-        )[1]
         assert store.bound_mission("telegram", "42", "7") == parent
 
 
@@ -1168,6 +1527,12 @@ def main() -> None:
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
     test_owner_answer_is_idempotent_and_resumes_the_same_mission()
     test_mission_database_is_owner_only_on_posix()
+    test_terminal_retention_preserves_recent_and_bound_missions()
+    test_terminal_append_applies_default_retention()
+    test_bind_and_retention_cannot_create_a_dangling_subscription()
+    test_explicit_repair_terminal_notifies_before_parent_restore()
+    test_terminal_retention_preserves_active_repair_chain()
+    test_terminal_retention_preserves_parent_until_repair_notification()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()

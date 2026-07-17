@@ -7,10 +7,12 @@ import argparse
 import contextlib
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -62,6 +64,8 @@ _CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
+_COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
+_FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
@@ -384,6 +388,9 @@ class DeliveryCoordinator:
         self.client = client
         self.backend = backend
         self.state_root = state_root
+        self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix":
+            os.chmod(self.state_root, 0o700)
         self.runner = runner
         self.policy = policy or flow_contract.load_json(
             pathlib.Path(__file__).with_name("flow-policy.json")
@@ -891,7 +898,7 @@ class DeliveryCoordinator:
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         expected_metadata = {"mission_events": self._events(state, cleanup=True)}
         if (
-            task.get("status") != "done"
+            task.get("status") not in {"done", "archived"}
             or task.get("result") != "success"
             or len(matching) != 1
             or matching[0].get("status") not in {"done", "completed"}
@@ -1015,7 +1022,7 @@ class DeliveryCoordinator:
             return False
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         if (
-            task.get("status") != "done"
+            task.get("status") not in {"done", "archived"}
             or task.get("result") != result
             or len(matching) != 1
             or matching[0].get("status") not in {"done", "completed"}
@@ -1099,6 +1106,7 @@ class DeliveryCoordinator:
             self._reconcile_rejected(state)
             if self.client.get_mission(state["mission_id"]).get("status") != "failed":
                 raise DeliveryError("Central did not fail the rejected mission")
+            self._archive_task(state, paths)
             state.update(phase="complete", outcome=result)
             self._save(paths, state)
         return {"action": state["phase"], "mission_id": state["mission_id"], "state": state}
@@ -2065,7 +2073,139 @@ class DeliveryCoordinator:
         elif remote:
             raise DeliveryError("disposable remote branch still exists")
 
+    def _archive_task(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+        retained_at, current_time = self._retention_clock(paths["state"])
+        if state.get("task_archived") is True:
+            self._task_archive_time(state, retained_at, current_time)
+            return
+        if "task_archived_at" in state:
+            raise DeliveryError("completed state has invalid task archive time")
+        self.backend.archive(state["root_task_id"])
+        state["task_archived"] = True
+        archived_at = time.time()
+        if (
+            not math.isfinite(archived_at)
+            or archived_at <= 0
+            or retained_at - archived_at > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
+        ):
+            raise DeliveryError("cannot checkpoint the Kanban task archive clock")
+        archived_at = max(archived_at, retained_at)
+        state["task_archived_at"] = archived_at
+        state["kanban_gc_ran"] = self.backend.gc()
+        self._save(paths, state)
+
+    @staticmethod
+    def _retention_clock(path: pathlib.Path) -> tuple[float, float]:
+        retained_at = path.stat().st_mtime
+        current_time = time.time()
+        if (
+            not math.isfinite(retained_at)
+            or retained_at <= 0
+            or not math.isfinite(current_time)
+            or current_time <= 0
+            or retained_at - current_time > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
+        ):
+            raise DeliveryError("completed state has invalid retention clock")
+        return retained_at, max(current_time, retained_at)
+
+    @staticmethod
+    def _task_archive_time(
+        state: dict[str, Any], retained_at: float, current_time: float
+    ) -> float:
+        archived_at = state.get("task_archived_at", retained_at)
+        if (
+            isinstance(archived_at, bool)
+            or not isinstance(archived_at, (int, float))
+            or not math.isfinite(float(archived_at))
+            or float(archived_at) <= 0
+            or float(archived_at) > current_time
+        ):
+            raise DeliveryError("completed state has invalid task archive time")
+        return float(archived_at)
+
+    def _prune_completed_states(self) -> None:
+        # Rename before recursive deletion so a crash after delivery-state.json
+        # disappears still leaves a directory that the next tick can discover.
+        for pending in self.state_root.glob(".prune-mission-*"):
+            try:
+                shutil.rmtree(pending)
+            except FileNotFoundError:
+                pass
+        for path in self.state_root.glob("mission-*/delivery-state.json"):
+            try:
+                state = mission_adapter._read_json(path)
+            except FileNotFoundError:
+                continue
+            if (
+                isinstance(state, dict)
+                and state.get("dispatch_profile") == self.profile["dispatch_profile"]
+                and state.get("phase") == "complete"
+            ):
+                retained_at, current_time = self._retention_clock(path)
+                if state.get("task_archived") is not True:
+                    if "task_archived_at" in state:
+                        raise DeliveryError("completed state has invalid task archive time")
+                    self.backend.archive(state["root_task_id"])
+                    archived_at = time.time()
+                    if (
+                        not math.isfinite(archived_at)
+                        or archived_at <= 0
+                        or retained_at - archived_at
+                        > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
+                    ):
+                        raise DeliveryError("cannot checkpoint the Kanban task archive clock")
+                    archived_at = max(archived_at, retained_at)
+                    state["task_archived"] = True
+                    state["task_archived_at"] = archived_at
+                    state.setdefault("kanban_gc_ran", False)
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
+                    current_time = archived_at
+                archived_at = self._task_archive_time(
+                    state, retained_at, current_time
+                )
+                if state.get("kanban_gc_ran") is not True:
+                    state["kanban_gc_ran"] = self.backend.gc()
+                    if state["kanban_gc_ran"] is not True:
+                        continue
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
+                if (
+                    current_time
+                    < max(retained_at, float(archived_at))
+                    + _COMPLETED_STATE_RETENTION_SECONDS
+                ):
+                    continue
+                if state.get("kanban_retention_gc_ran") is not True:
+                    if not self.backend.gc():
+                        continue
+                    state["kanban_retention_gc_ran"] = True
+                    mission_adapter._write_json(
+                        path,
+                        state,
+                        private_parent=True,
+                        retained_mtime=retained_at,
+                    )
+                pending = self.state_root / f".prune-{path.parent.name}"
+                try:
+                    path.parent.replace(pending)
+                except FileNotFoundError:
+                    continue
+                try:
+                    shutil.rmtree(pending)
+                except FileNotFoundError:
+                    pass
+
     def tick(self) -> dict[str, Any] | None:
+        self._prune_completed_states()
         mission = self._mission()
         if mission is None:
             return None
@@ -2083,6 +2223,7 @@ class DeliveryCoordinator:
                     self._recover_task_completion(state, paths)
                 if state.get("phase") not in {"task_completed", "complete"}:
                     raise DeliveryError("Central completed before local delivery cleanup")
+                self._archive_task(state, paths)
                 state["phase"] = "complete"
                 self._save(paths, state)
                 return {"action": "complete", "mission_id": mission_id, "state": state}
@@ -2239,6 +2380,7 @@ class DeliveryCoordinator:
                 terminal = self.client.get_mission(mission_id)
                 if terminal.get("status") != "completed":
                     raise DeliveryError("Central did not complete the fully verified mission")
+                self._archive_task(state, paths)
                 state["phase"] = "complete"
                 self._save(paths, state)
             return {"action": state["phase"], "mission_id": mission_id, "state": state}

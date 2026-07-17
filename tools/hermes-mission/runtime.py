@@ -73,6 +73,7 @@ _MAX_EVENT_JSON = 65_536
 _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
 _MAX_OWNER_ANSWER_CHARS = 4_000
+_MAX_RETAINED_TERMINAL_MISSIONS = 100
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -509,6 +510,10 @@ class MissionStore:
                 CREATE UNIQUE INDEX IF NOT EXISTS mission_producer_event
                     ON mission_events(mission_id, producer_event_id)
                     WHERE producer_event_id IS NOT NULL;
+                CREATE TABLE IF NOT EXISTS mission_tombstones (
+                    mission_id TEXT PRIMARY KEY,
+                    pruned_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS mission_subscriptions (
                     platform TEXT NOT NULL,
                     chat_id TEXT NOT NULL,
@@ -606,6 +611,67 @@ class MissionStore:
             ).fetchall()
         return [self.projection(row["mission_id"]) for row in rows]
 
+    def _prune_terminal(self, connection: sqlite3.Connection, keep: int) -> int:
+        grouped: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        last_row: dict[str, int] = {}
+        for row in connection.execute("SELECT rowid, * FROM mission_events ORDER BY rowid"):
+            grouped.setdefault(row["mission_id"], []).append(self._row(row))
+            last_row[row["mission_id"]] = row["rowid"]
+        # ponytail: replaying the bounded single-owner ledger avoids another lifecycle index.
+        views = {mission_id: project(events) for mission_id, events in grouped.items()}
+        active = {
+            mission_id for mission_id, view in views.items()
+            if view["status"] in {"active", "waiting_owner"}
+        }
+        protected = {
+            row["mission_id"]
+            for row in connection.execute("SELECT mission_id FROM mission_subscriptions")
+        }
+        for mission_id, view in views.items():
+            parent = view.get("parent_mission_id")
+            # A terminal repair keeps the Telegram binding until its terminal
+            # notification is checkpointed.  Retain the parent needed by the
+            # subsequent atomic binding restore throughout that handoff.
+            if isinstance(parent, str) and mission_id in protected:
+                protected.add(parent)
+            if mission_id in active and isinstance(parent, str):
+                protected.add(parent)
+            if isinstance(parent, str) and parent in active:
+                protected.add(mission_id)
+        terminal = sorted(
+            (
+                mission_id for mission_id, view in views.items()
+                if view["status"] in {"completed", "failed", "cancelled"}
+                and mission_id not in protected
+            ),
+            key=last_row.__getitem__,
+            reverse=True,
+        )
+        pruned = terminal[keep:]
+        for mission_id in pruned:
+            connection.execute(
+                """INSERT INTO mission_tombstones(mission_id, pruned_at)
+                   VALUES (?, ?) ON CONFLICT(mission_id) DO NOTHING""",
+                (mission_id, _utc_now()),
+            )
+            connection.execute(
+                """DELETE FROM mission_subscription_history
+                   WHERE previous_mission_id = ? OR mission_id = ? OR related_mission_id = ?""",
+                (mission_id, mission_id, mission_id),
+            )
+            connection.execute(
+                "DELETE FROM mission_events WHERE mission_id = ?", (mission_id,)
+            )
+        return len(pruned)
+
+    def prune_terminal(self, keep: int = _MAX_RETAINED_TERMINAL_MISSIONS) -> int:
+        """Remove old unbound terminal missions while keeping recent owner history."""
+        if isinstance(keep, bool) or not isinstance(keep, int) or keep < 0:
+            raise MissionError("invalid terminal mission retention")
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._prune_terminal(connection, keep)
+
     def dispatch_candidates(
         self, dispatch_profile: str, limit: int = 1, *, reconcile: bool = False
     ) -> list[dict[str, Any]]:
@@ -685,6 +751,7 @@ class MissionStore:
                     and self.projection(mission_id).get("status") == "active"
                 ):
                     self._inherit_parent_subscriptions(parent_mission_id, mission_id)
+                self.prune_terminal()
                 return first, False
             raise MissionError("mission already accepted with different parameters")
         payload = {"goal": goal}
@@ -705,6 +772,7 @@ class MissionStore:
         )
         if parent_mission_id is not None:
             self._inherit_parent_subscriptions(parent_mission_id, mission_id)
+        self.prune_terminal()
         return accepted
 
     def _require_repair_parent(self, parent_mission_id: str, child_mission_id: str) -> None:
@@ -880,7 +948,10 @@ class MissionStore:
         normalized = _validate_submission(mission_id, normalized)
         if normalized["type"] == "mission.completed":
             raise MissionError("mission completion requires the automatic delivery contract")
-        return self._append(mission_id, normalized)
+        result = self._append(mission_id, normalized)
+        if normalized["type"] in TERMINAL_TYPES:
+            self.prune_terminal()
+        return result
 
     def append_producer(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         return self._append(mission_id, _producer_submission(mission_id, submission))
@@ -996,6 +1067,7 @@ class MissionStore:
                 self._restore_parent_subscriptions(
                     connection, mission_id, parent_mission_id
                 )
+            self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
         return event, True
 
     def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -1004,6 +1076,10 @@ class MissionStore:
         producer_id = event["correlation"].get("producer_event_id")
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if event["type"] == "mission.accepted" and connection.execute(
+                "SELECT 1 FROM mission_tombstones WHERE mission_id = ?", (mission_id,)
+            ).fetchone():
+                raise MissionError("mission id was already retired")
             if producer_id:
                 duplicate = connection.execute(
                     "SELECT * FROM mission_events WHERE mission_id = ? AND producer_event_id = ?",
@@ -1062,7 +1138,7 @@ class MissionStore:
         return event, True
 
     def bind(self, mission_id: str, platform: str, chat_id: str, thread_id: str | None = None) -> None:
-        self.projection(mission_id)
+        mission_id = _require_id(mission_id, "mission_id")
         platform = _require_id(platform, "platform")
         chat_id = str(chat_id or "").strip()
         thread_id = str(thread_id or "").strip()
@@ -1071,6 +1147,13 @@ class MissionStore:
         now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence",
+                (mission_id,),
+            ).fetchall()
+            if not rows:
+                raise MissionError("mission not found")
+            project([self._row(row) for row in rows])
             current = connection.execute(
                 """SELECT mission_id, notification_lease_until
                    FROM mission_subscriptions
@@ -1103,6 +1186,35 @@ class MissionStore:
                 "manual-bind",
                 mission_id,
             )
+
+    def restore_parent_after_terminal_notification(self, mission_id: str) -> None:
+        """Restore a repair binding only after its committed terminal update was delivered."""
+        mission_id = _require_id(mission_id, "mission_id")
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence",
+                (mission_id,),
+            ).fetchall()
+            if not rows:
+                raise MissionError("mission not found")
+            view = project([self._row(row) for row in rows])
+            if view["status"] not in {"completed", "failed", "cancelled"}:
+                raise MissionError("repair mission is not terminal")
+            parent_mission_id = view.get("parent_mission_id")
+            if not isinstance(parent_mission_id, str):
+                return
+            if connection.execute(
+                """SELECT 1 FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram'
+                     AND last_notified_sequence < ? LIMIT 1""",
+                (mission_id, view["sequence"]),
+            ).fetchone():
+                raise MissionError("repair terminal notification not checkpointed")
+            self._restore_parent_subscriptions(
+                connection, mission_id, parent_mission_id
+            )
+            self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
 
     def binding_history(self) -> list[dict[str, Any]]:
         with self._db() as connection:

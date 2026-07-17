@@ -43,7 +43,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v32-owner-answer-audit"
+        "v38-lifecycle-strict-gc"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -66,6 +66,14 @@ def main() -> None:
         "cp /mission-runtime/root/hermes_cli/kanban_db.py "
         "/mission-runtime/kanban_db.py"
     ) in bootstrap_script
+    assert (
+        "cp /opt/hermes/hermes_cli/main.py "
+        "/mission-runtime/root/hermes_cli/main.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/hermes_cli/main.py "
+        "/mission-runtime/main.py"
+    ) in bootstrap_script
     gateway = next(
         container for container in template["spec"]["containers"]
         if container["name"] == "gateway"
@@ -86,6 +94,12 @@ def main() -> None:
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",
         "subPath": "kanban_db.py",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
+    assert {
+        "name": "mission-runtime",
+        "mountPath": "/opt/hermes/hermes_cli/main.py",
+        "subPath": "main.py",
         "readOnly": True,
     } in gateway["volumeMounts"]
     mission_runtime = next(

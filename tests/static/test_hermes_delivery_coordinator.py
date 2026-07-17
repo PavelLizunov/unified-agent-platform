@@ -110,6 +110,8 @@ class FakeBackend:
         }
         self.runs = []
         self.claims = 0
+        self.archives = 0
+        self.gcs = 0
 
     def show(self, _task_id):
         return {"task": dict(self.task), "runs": [dict(run) for run in self.runs]}
@@ -150,6 +152,15 @@ class FakeBackend:
             metadata=_kwargs["metadata"],
         )
         return self.show("task-1")
+
+    def archive(self, _task_id):
+        self.archives += 1
+        self.task["status"] = "archived"
+        return self.show("task-1")
+
+    def gc(self):
+        self.gcs += 1
+        return True
 
     def edit_metadata(self, _task_id, **_kwargs):
         return self.show("task-1")
@@ -1774,6 +1785,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 instance._failure_contract(result["state"])[2],
                 backend.runs[0]["metadata"]["mission_events"],
             )
+            self.assertTrue(instance._rejection_persisted(result["state"]))
 
     def test_final_review_failure_preserves_the_pr_from_an_earlier_ci_cycle(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2247,20 +2259,377 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 counters={"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0},
             )
             paths = instance._paths("mission-a7-3")
-            instance._save(
-                paths,
-                {
-                    "schema_version": 1,
-                    "mission_id": "mission-a7-3",
-                    "dispatch_profile": approved["dispatch_profile"],
-                    "phase": "task_completed",
-                    "branch": "codex/a7-3-vpnrouter-deadbeef",
-                    "review_cycle": 1,
-                    "crash_injected": True,
-                },
-            )
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "task_completed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": True,
+                "pr_url": "https://example.invalid/pr/39",
+                "default_sha": "default-sha",
+            }
+            instance.backend.task.update(status="done", result="success")
+            instance.backend.runs = [{
+                "id": 7,
+                "status": "done",
+                "outcome": "completed",
+                "summary": "Reviewed change merged, verified, and cleaned",
+                "metadata": {"mission_events": instance._events(state, cleanup=True)},
+            }]
+            instance._save(paths, state)
             result = instance.tick()
             self.assertEqual("complete", result["action"])
+            self.assertTrue(result["state"]["task_archived"])
+            self.assertTrue(result["state"]["kanban_gc_ran"])
+            self.assertEqual((1, 1), (instance.backend.archives, instance.backend.gcs))
+            self.assertTrue(instance._task_completion_persisted(result["state"]))
+
+    def test_fresh_archive_validates_clocks_before_archive_gc_or_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "task_completed",
+                "root_task_id": "task-1",
+            }
+            instance._save(paths, state)
+            os.utime(paths["state"], (2001.0, 2001.0))
+            with mock.patch.object(coordinator.time, "time", return_value=2000.0):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "invalid retention clock"
+                ):
+                    instance._archive_task(state, paths)
+            self.assertEqual((0, 0), (backend.archives, backend.gcs))
+            self.assertNotIn("task_archived", state)
+            self.assertEqual(2001.0, paths["state"].stat().st_mtime)
+
+            with mock.patch.object(coordinator.time, "time", return_value=2002.0):
+                instance._archive_task(state, paths)
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+            self.assertEqual(2002.0, state["task_archived_at"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "task_completed",
+                "root_task_id": "task-1",
+                "task_archived": True,
+                "task_archived_at": 1000.0,
+            }
+            instance._save(paths, state)
+            os.utime(paths["state"], (2001.0, 2001.0))
+            with mock.patch.object(coordinator.time, "time", return_value=2000.0):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "invalid retention clock"
+                ):
+                    instance._archive_task(state, paths)
+            self.assertEqual((0, 0), (backend.archives, backend.gcs))
+            self.assertEqual(2001.0, paths["state"].stat().st_mtime)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "task_completed",
+                "root_task_id": "task-1",
+            }
+            instance._save(paths, state)
+            os.utime(paths["state"], (2000.001, 2000.001))
+            with mock.patch.object(
+                coordinator.time, "time", side_effect=(2000.0, 2000.0)
+            ):
+                instance._archive_task(state, paths)
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+            self.assertAlmostEqual(2000.001, state["task_archived_at"], places=6)
+
+    def test_completed_state_is_private_and_pruned_after_thirty_days(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            state_root = root / "state"
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, state_root
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "task_archived": True,
+                "kanban_gc_ran": True,
+            })
+            old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            os.utime(paths["state"], (old, old))
+            instance._prune_completed_states()
+            self.assertFalse(paths["directory"].exists())
+            self.assertEqual(1, backend.gcs)
+            instance._prune_completed_states()
+            if os.name == "posix":
+                self.assertEqual(0o700, state_root.stat().st_mode & 0o777)
+
+    def test_legacy_completed_state_enters_the_lifecycle_on_the_next_tick(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            client.hide_terminal = True
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+            })
+            retained_at = (
+                time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            )
+            os.utime(paths["state"], (retained_at, retained_at))
+
+            self.assertIsNone(instance.tick())
+
+            state = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertTrue(state["task_archived"])
+            self.assertGreater(state["task_archived_at"], retained_at)
+            self.assertTrue(state["kanban_gc_ran"])
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+            self.assertEqual(retained_at, paths["state"].stat().st_mtime)
+            self.assertIsNone(instance.tick())
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+
+    def test_legacy_archive_clock_is_sampled_after_native_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+            })
+            os.utime(paths["state"], (900, 900))
+            clock = mock.Mock(side_effect=(1500.0, 2000.0))
+            native_archive = backend.archive
+
+            def archive(task_id):
+                self.assertEqual(1, clock.call_count)
+                return native_archive(task_id)
+
+            backend.archive = archive
+            with mock.patch.object(coordinator.time, "time", clock):
+                instance._prune_completed_states()
+
+            state = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(2000.0, state["task_archived_at"])
+            self.assertTrue(paths["state"].exists())
+
+    def test_invalid_or_regressed_archive_clock_fails_closed(self):
+        invalid = (float("nan"), float("inf"), float("-inf"), -1.0, 0.0, 2001.0)
+        for archived_at in invalid:
+            with self.subTest(archived_at=archived_at), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                backend = FakeBackend()
+                instance = coordinator.DeliveryCoordinator(
+                    profile(root), FakeClient(), backend, root / "state"
+                )
+                paths = instance._paths("mission-a7-3")
+                instance._save(paths, {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "dispatch_profile": instance.profile["dispatch_profile"],
+                    "phase": "complete",
+                    "root_task_id": "task-1",
+                    "task_archived": True,
+                    "task_archived_at": archived_at,
+                    "kanban_gc_ran": False,
+                })
+                os.utime(paths["state"], (900, 900))
+                with mock.patch.object(coordinator.time, "time", return_value=2000.0):
+                    with self.assertRaisesRegex(
+                        coordinator.DeliveryError, "invalid task archive time"
+                    ):
+                        instance._prune_completed_states()
+                self.assertTrue(paths["state"].exists())
+                self.assertEqual(0, backend.gcs)
+                self.assertFalse(
+                    coordinator.mission_adapter._read_json(paths["state"])[
+                        "kanban_gc_ran"
+                    ]
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+                "task_archived": True,
+                "task_archived_at": 1000.0,
+                "kanban_gc_ran": False,
+            })
+            os.utime(paths["state"], (1900, 1900))
+            with mock.patch.object(coordinator.time, "time", return_value=1500.0):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "invalid retention clock"
+                ):
+                    instance._prune_completed_states()
+            self.assertEqual(0, backend.gcs)
+            with mock.patch.object(coordinator.time, "time", return_value=2001.0):
+                instance._prune_completed_states()
+            self.assertTrue(paths["state"].exists())
+            self.assertEqual(1, backend.gcs)
+
+    def test_completed_state_deletion_resumes_after_state_file_is_gone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            state_root = root / "state"
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), state_root
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "task_archived": True,
+                "kanban_gc_ran": True,
+            })
+            artifact = paths["directory"] / "author-1.jsonl"
+            artifact.write_text("private evidence", encoding="utf-8")
+            old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            os.utime(paths["state"], (old, old))
+            def remove_state_then_crash(target):
+                target = pathlib.Path(target)
+                (target / "delivery-state.json").unlink()
+                raise OSError("simulated crash during directory deletion")
+
+            with mock.patch.object(
+                coordinator.shutil, "rmtree", side_effect=remove_state_then_crash
+            ):
+                with self.assertRaisesRegex(OSError, "during directory deletion"):
+                    instance._prune_completed_states()
+
+            pending = state_root / f".prune-{paths['directory'].name}"
+            self.assertFalse(paths["directory"].exists())
+            self.assertTrue((pending / artifact.name).exists())
+            self.assertFalse((pending / "delivery-state.json").exists())
+            instance._prune_completed_states()
+            self.assertFalse(pending.exists())
+
+
+    def test_deferred_gc_does_not_extend_completed_state_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory) / "state"
+            instance = HermeticCoordinator(
+                profile(pathlib.Path(directory)), FakeClient(), FakeBackend(), state_root,
+                counters={"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0},
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "task_archived": True,
+                "kanban_gc_ran": False,
+            })
+            old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            os.utime(paths["state"], (old, old))
+            instance.backend.gc = mock.Mock(side_effect=(False, True, True))
+
+            instance._prune_completed_states()
+            self.assertTrue(paths["state"].exists())
+            self.assertEqual(old, paths["state"].stat().st_mtime)
+            real_replace = coordinator.mission_adapter.os.replace
+
+            def replace_then_crash(source, target):
+                real_replace(source, target)
+                raise OSError("simulated crash after atomic state replace")
+
+            with mock.patch.object(
+                coordinator.mission_adapter.os,
+                "replace",
+                side_effect=replace_then_crash,
+            ):
+                with self.assertRaisesRegex(OSError, "after atomic state replace"):
+                    instance._prune_completed_states()
+            self.assertTrue(
+                coordinator.mission_adapter._read_json(paths["state"])["kanban_gc_ran"]
+            )
+            self.assertEqual(old, paths["state"].stat().st_mtime)
+            instance._prune_completed_states()
+            self.assertFalse(paths["directory"].exists())
+            self.assertEqual(3, instance.backend.gc.call_count)
+
+    def test_deferred_gc_requires_a_distinct_deadline_gc_without_a_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_root = pathlib.Path(directory) / "state"
+            instance = HermeticCoordinator(
+                profile(pathlib.Path(directory)), FakeClient(), FakeBackend(), state_root,
+                counters={"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0},
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "task_archived": True,
+                "kanban_gc_ran": False,
+            })
+            old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            os.utime(paths["state"], (old, old))
+            instance.backend.gc = mock.Mock(side_effect=(False, True, True))
+
+            instance._prune_completed_states()
+            self.assertTrue(paths["state"].exists())
+            instance._prune_completed_states()
+
+            self.assertFalse(paths["directory"].exists())
+            self.assertEqual(3, instance.backend.gc.call_count)
 
     def test_restart_reuses_task_run_worktree_and_author_commit(self):
         with tempfile.TemporaryDirectory() as directory:

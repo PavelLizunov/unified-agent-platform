@@ -50,7 +50,13 @@ def _read_json(path: str | pathlib.Path) -> Any:
         return json.load(handle)
 
 
-def _write_json(path: pathlib.Path, value: Any, *, private_parent: bool = False) -> None:
+def _write_json(
+    path: pathlib.Path,
+    value: Any,
+    *,
+    private_parent: bool = False,
+    retained_mtime: float | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700 if private_parent else 0o755)
     if os.name == "posix" and private_parent:
         os.chmod(path.parent, 0o700)
@@ -60,6 +66,8 @@ def _write_json(path: pathlib.Path, value: Any, *, private_parent: bool = False)
         temporary = pathlib.Path(handle.name)
     if os.name == "posix":
         os.chmod(temporary, 0o600)
+    if retained_mtime is not None:
+        os.utime(temporary, (retained_mtime, retained_mtime))
     os.replace(temporary, path)
     if os.name == "posix":
         os.chmod(path, 0o600)
@@ -89,6 +97,9 @@ def _accepted_event(document: Any) -> dict[str, Any]:
 
 
 def _mission_dir(state_root: pathlib.Path, mission_id: str) -> pathlib.Path:
+    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == "posix":
+        os.chmod(state_root, 0o700)
     digest = hashlib.sha256(mission_id.encode()).hexdigest()[:24]
     return state_root / f"mission-{digest}"
 
@@ -352,6 +363,36 @@ class HermesKanbanBackend:
         if snapshot.get("task", {}).get("status") != "done":
             raise AdapterError("Hermes Kanban completion did not persist done status")
         return snapshot
+
+    def archive(self, task_id: str) -> dict[str, Any]:
+        snapshot = self.show(task_id)
+        status = snapshot.get("task", {}).get("status")
+        if status == "archived":
+            return snapshot
+        if status != "done":
+            raise AdapterError("only a completed Kanban task can be archived")
+        self._run("archive", task_id)
+        snapshot = self.show(task_id)
+        if snapshot.get("task", {}).get("status") != "archived":
+            raise AdapterError("Kanban task archive did not persist")
+        return snapshot
+
+    def gc(self) -> bool:
+        result = self.runner(self._command("gc", "--require-idle"))
+        output = result.stdout.strip()
+        if (
+            output == "GC deferred: board is not idle"
+            and result.returncode in (0, 3)
+        ):
+            return False
+        if result.returncode:
+            raise AdapterError(
+                (result.stderr or result.stdout).strip()
+                or "Hermes Kanban command failed"
+            )
+        if not output.startswith("GC complete: "):
+            raise AdapterError("Hermes Kanban returned an invalid GC result")
+        return True
 
     def edit_metadata(
         self, task_id: str, *, result: str, summary: str, metadata: dict[str, Any]

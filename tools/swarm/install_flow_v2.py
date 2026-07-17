@@ -9,6 +9,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
@@ -30,7 +31,36 @@ _LEGACY_MODEL_FIELDS = {
 }
 
 
-def install(source: pathlib.Path, home: pathlib.Path) -> None:
+def _build1_overlay(
+    source: pathlib.Path,
+    hermes_root: pathlib.Path,
+    *,
+    check: bool,
+    runner=subprocess.run,
+) -> None:
+    command = [
+        sys.executable,
+        str(source.parent / "hermes-mission" / "apply_overlay.py"),
+        str(hermes_root),
+        "--build1-runtime",
+    ]
+    if check:
+        command.append("--check")
+    result = runner(command, text=True, capture_output=True, timeout=60)
+    if result.returncode:
+        raise SystemExit(
+            "flow-v2-install-error: build-1 Hermes overlay failed: "
+            + ((result.stderr or result.stdout).strip() or "unknown error")
+        )
+    if check and result.stdout.count("exact-patched") != 3:
+        raise SystemExit("flow-v2-install-error: build-1 Hermes overlay is not exact")
+
+
+def install(
+    source: pathlib.Path, home: pathlib.Path, hermes_root: pathlib.Path | None = None
+) -> None:
+    if hermes_root is not None:
+        _build1_overlay(source, hermes_root, check=False)
     for relative_source, relative_target in FILES.items():
         src = source / relative_source
         dst = home / relative_target
@@ -40,7 +70,9 @@ def install(source: pathlib.Path, home: pathlib.Path) -> None:
         (home / FILES[executable]).chmod(0o755)
 
 
-def check(source: pathlib.Path, home: pathlib.Path) -> None:
+def check(
+    source: pathlib.Path, home: pathlib.Path, hermes_root: pathlib.Path | None = None
+) -> None:
     for relative_source, relative_target in FILES.items():
         src = source / relative_source
         dst = home / relative_target
@@ -50,6 +82,8 @@ def check(source: pathlib.Path, home: pathlib.Path) -> None:
         for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
             if not (home / FILES[executable]).stat().st_mode & 0o111:
                 raise SystemExit(f"flow-v2-install-error: {executable} is not executable")
+    if hermes_root is not None:
+        _build1_overlay(source, hermes_root, check=True)
 
 
 def _systemd_unit_state(unit: str) -> str:
@@ -80,6 +114,11 @@ def _require_profile_units_inactive(path: pathlib.Path, unit_state=None) -> None
         state = inspect(unit)
         if state != "inactive":
             raise SystemExit(f"flow-v2-install-error: {unit} must be inactive (got {state})")
+
+
+def _require_all_profile_units_inactive(home: pathlib.Path, unit_state=None) -> None:
+    for path in sorted((home / ".config/uap").glob("delivery-*.json")):
+        _require_profile_units_inactive(path, unit_state)
 
 
 def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
@@ -125,13 +164,21 @@ def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--home", type=pathlib.Path, default=pathlib.Path.home())
+    parser.add_argument(
+        "--hermes-root",
+        type=pathlib.Path,
+        default=pathlib.Path("/home/uap/hermes-agent"),
+    )
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--migrate-profile", type=pathlib.Path)
     args = parser.parse_args()
     if args.check and args.migrate_profile:
         parser.error("--check cannot mutate --migrate-profile")
     source = pathlib.Path(__file__).resolve().parent
-    (check if args.check else install)(source, args.home.expanduser().resolve())
+    home = args.home.expanduser().resolve()
+    hermes_root = args.hermes_root.expanduser().resolve()
+    _require_all_profile_units_inactive(home)
+    (check if args.check else install)(source, home, hermes_root)
     if args.migrate_profile:
         changed = migrate_profile(args.migrate_profile)
         print("hermes-flow-v2-profile-migrated" if changed else "hermes-flow-v2-profile-current")

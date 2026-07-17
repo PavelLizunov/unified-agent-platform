@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v32-owner-answer-audit"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v38-lifecycle-strict-gc"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -119,6 +119,7 @@ spec:
               cp /opt/hermes/hermes_cli/commands.py /mission-runtime/root/hermes_cli/commands.py
               cp /opt/hermes/hermes_cli/kanban.py /mission-runtime/root/hermes_cli/kanban.py
               cp /opt/hermes/hermes_cli/kanban_db.py /mission-runtime/root/hermes_cli/kanban_db.py
+              cp /opt/hermes/hermes_cli/main.py /mission-runtime/root/hermes_cli/main.py
               cp /opt/hermes/gateway/run.py /mission-runtime/root/gateway/run.py
               cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
               /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
@@ -126,6 +127,7 @@ spec:
               cp /mission-runtime/root/hermes_cli/commands.py /mission-runtime/commands.py
               cp /mission-runtime/root/hermes_cli/kanban.py /mission-runtime/kanban.py
               cp /mission-runtime/root/hermes_cli/kanban_db.py /mission-runtime/kanban_db.py
+              cp /mission-runtime/root/hermes_cli/main.py /mission-runtime/main.py
               cp /mission-runtime/root/hermes_cli/uap_missions.py /mission-runtime/uap_missions.py
               cp /mission-runtime/root/gateway/run.py /mission-runtime/gateway_run.py
               cp /mission-runtime/root/gateway/platforms/api_server.py /mission-runtime/api_server.py
@@ -245,6 +247,7 @@ spec:
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/commands.py, subPath: commands.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban.py, subPath: kanban.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban_db.py, subPath: kanban_db.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/main.py, subPath: main.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_missions.py, subPath: uap_missions.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/platforms/api_server.py, subPath: api_server.py, readOnly: true }

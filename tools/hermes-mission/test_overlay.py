@@ -4,15 +4,18 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import textwrap
+from unittest import mock
 
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
+INSTALLER = TOOL.parents[1] / "swarm" / "install_flow_v2.py"
 COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
 UPSTREAM = "https://github.com/NousResearch/hermes-agent"
 
@@ -31,6 +34,20 @@ def main() -> None:
     args = parser.parse_args()
     source = args.checkout.resolve() if args.checkout else UPSTREAM
     with tempfile.TemporaryDirectory(prefix="hermes-mission-overlay-") as temp:
+        tool_spec = importlib.util.spec_from_file_location("apply_overlay", TOOL)
+        overlay = importlib.util.module_from_spec(tool_spec)
+        assert tool_spec.loader
+        tool_spec.loader.exec_module(overlay)
+        atomic_target = pathlib.Path(temp) / "atomic-target.py"
+        atomic_target.write_text("before\n", encoding="utf-8")
+        with mock.patch.object(overlay.os, "replace", side_effect=OSError("simulated crash")):
+            try:
+                overlay.atomic_write(atomic_target, "after\n")
+                raise AssertionError("interrupted atomic overlay write did not fail")
+            except OSError:
+                pass
+        assert atomic_target.read_text(encoding="utf-8") == "before\n"
+        assert list(atomic_target.parent.glob(f".{atomic_target.name}.*")) == []
         clone = pathlib.Path(temp) / "hermes"
         clone.mkdir()
         subprocess.run(["git", "init", "--quiet"], cwd=clone, check=True)
@@ -46,6 +63,34 @@ def main() -> None:
             stdout=subprocess.DEVNULL,
         )
 
+        if INSTALLER.is_file():
+            installer_spec = importlib.util.spec_from_file_location(
+                "install_flow_v2", INSTALLER
+            )
+            installer = importlib.util.module_from_spec(installer_spec)
+            assert installer_spec.loader
+            installer_spec.loader.exec_module(installer)
+            build1_home = pathlib.Path(temp) / "build1-home"
+            installer.install(INSTALLER.parent, build1_home, clone)
+            installer.check(INSTALLER.parent, build1_home, clone)
+            for installed in installer.FILES.values():
+                assert (build1_home / installed).is_file()
+        else:
+            build1_apply = run(
+                clone, "--source-commit", COMMIT, "--build1-runtime"
+            )
+            assert build1_apply.returncode == 0, build1_apply.stderr
+            build1_check = run(
+                clone,
+                "--source-commit",
+                COMMIT,
+                "--build1-runtime",
+                "--check",
+            )
+            assert build1_check.returncode == 0, build1_check.stderr
+            assert build1_check.stdout.count("exact-patched") == 3
+        assert not (clone / "hermes_cli/uap_missions.py").exists()
+
         before = run(clone, "--check")
         assert before.returncode == 0 and "source-needs-overlay" in before.stdout, before.stderr
         first = run(clone)
@@ -53,13 +98,14 @@ def main() -> None:
         second = run(clone)
         assert second.returncode == 0 and "overlay already applied" in second.stdout, second.stderr
         checked = run(clone, "--check")
-        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 6, checked.stderr
+        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 7, checked.stderr
 
         commands = (clone / "hermes_cli/commands.py").read_text(encoding="utf-8")
         gateway = (clone / "gateway/run.py").read_text(encoding="utf-8")
         api = (clone / "gateway/platforms/api_server.py").read_text(encoding="utf-8")
         kanban_cli = (clone / "hermes_cli/kanban.py").read_text(encoding="utf-8")
         kanban = (clone / "hermes_cli/kanban_db.py").read_text(encoding="utf-8")
+        hermes_main = (clone / "hermes_cli/main.py").read_text(encoding="utf-8")
         assert 'CommandDef("mission"' in commands
         assert 'if canonical == "mission"' in gateway
         assert api.count('self._app.router.add_') >= 4
@@ -82,6 +128,12 @@ def main() -> None:
         assert "complete_if_ready" in api
         assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
+        terminal_handler = api[api.index("    async def _handle_finish_mission"):]
+        assert terminal_handler.index(
+            "await self._notify_mission(store, event, defer=False)"
+        ) < terminal_handler.index(
+            'store.restore_parent_after_terminal_notification(event["mission_id"])'
+        )
         assert 'requested.startswith("answer ")' in gateway
         assert "store.answer(" in gateway
         assert "atomic sticky initial block" not in kanban
@@ -90,6 +142,15 @@ def main() -> None:
         assert "def _harden_db_permissions" in kanban
         assert "kb.unblock_task(conn, tid, reason=reason)" in kanban_cli
         assert 'payload["reason"] = reason' in kanban
+        assert '"--require-idle"' in kanban_cli
+        assert "GC deferred: board is not idle" in kanban_cli
+        assert "with kb.write_txn(conn):" in kanban_cli
+        assert 'return args.func(args)' in hermes_main
+        assert 'raise SystemExit(main())' in hermes_main
+        assert "strict: bool = False" in kanban
+        assert "if strict:" in kanban
+        assert "shutil.rmtree(path)" in kanban_cli
+        assert "strict=True" in kanban_cli
 
         subprocess.run(
             [
@@ -100,6 +161,7 @@ def main() -> None:
                 str(clone / "hermes_cli/commands.py"),
                 str(clone / "hermes_cli/kanban.py"),
                 str(clone / "hermes_cli/kanban_db.py"),
+                str(clone / "hermes_cli/main.py"),
                 str(clone / "gateway/run.py"),
                 str(clone / "gateway/platforms/api_server.py"),
             ],
@@ -110,10 +172,13 @@ def main() -> None:
             """
             import contextlib
             import os
+            import shutil
             import threading
             import time
             from pathlib import Path
+            from types import SimpleNamespace
 
+            from hermes_cli import kanban as cli
             from hermes_cli import kanban_db as kb
             from hermes_cli import profiles
 
@@ -278,6 +343,127 @@ def main() -> None:
                     assert sidecar.exists(), sidecar
                     assert (sidecar.stat().st_mode & 0o777) == 0o600
 
+            idle_args = SimpleNamespace(
+                require_idle=True,
+                event_retention_days=30,
+                log_retention_days=30,
+            )
+            original_gc_logs = kb.gc_worker_logs
+            gc_log_calls = []
+
+            def observed_gc_logs(*args, **kwargs):
+                gc_log_calls.append(True)
+                return original_gc_logs(*args, **kwargs)
+
+            kb.gc_worker_logs = observed_gc_logs
+            assert cli._cmd_gc(idle_args) == 3
+            assert gc_log_calls == []
+
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    scratch = kb.workspaces_root() / concurrent_ids[0]
+                    scratch.mkdir(parents=True, exist_ok=True)
+                    conn.execute(
+                        "UPDATE tasks SET status = 'archived', workspace_kind = 'scratch', "
+                        "workspace_path = ?",
+                        (str(scratch),),
+                    )
+
+            def failed_gc_logs(*args, **kwargs):
+                assert kwargs.get("strict") is True
+                raise PermissionError("simulated worker log cleanup failure")
+
+            kb.gc_worker_logs = failed_gc_logs
+            assert cli._cmd_gc(idle_args) == 1
+            kb.gc_worker_logs = original_gc_logs
+
+            original_rmtree = shutil.rmtree
+
+            def failed_rmtree(_path):
+                raise PermissionError("simulated workspace cleanup failure")
+
+            shutil.rmtree = failed_rmtree
+            assert cli._cmd_gc(idle_args) == 1
+            assert scratch.exists()
+            shutil.rmtree = original_rmtree
+
+            outside = Path(os.environ["HERMES_HOME"]).parent / "outside-scratch"
+            outside.mkdir()
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(outside), concurrent_ids[0]),
+                    )
+            assert cli._cmd_gc(idle_args) == 1
+            assert outside.is_dir()
+            scratch_root = kb.workspaces_root()
+            root_guard_sentinel = scratch_root / "root-guard-sentinel"
+            root_guard_sentinel.mkdir(parents=True, exist_ok=True)
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(scratch_root), concurrent_ids[0]),
+                    )
+            assert cli._cmd_gc(idle_args) == 1
+            assert root_guard_sentinel.is_dir()
+            scratch.mkdir(parents=True, exist_ok=True)
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(scratch), concurrent_ids[0]),
+                    )
+
+            gc_entered = threading.Event()
+            release_gc = threading.Event()
+
+            def paused_gc_logs(*args, **kwargs):
+                assert kwargs.get("strict") is True
+                gc_entered.set()
+                if not release_gc.wait(5):
+                    raise AssertionError("concurrent creator did not reach idle GC")
+                return original_gc_logs(*args, **kwargs)
+
+            kb.gc_worker_logs = paused_gc_logs
+            gc_results = []
+
+            def run_idle_gc():
+                try:
+                    gc_results.append(cli._cmd_gc(idle_args))
+                except BaseException as error:
+                    failures.append(error)
+
+            def create_during_gc():
+                try:
+                    with kb.connect_closing(database) as conn:
+                        kb.create_task(
+                            conn,
+                            title="Created during GC",
+                            tenant="mission-gc-race",
+                            idempotency_key="central-mission:mission-gc-race",
+                            initial_status="blocked",
+                        )
+                except BaseException as error:
+                    failures.append(error)
+
+            gc_thread = threading.Thread(target=run_idle_gc)
+            gc_thread.start()
+            assert gc_entered.wait(5)
+            creator_thread = threading.Thread(target=create_during_gc)
+            creator_thread.start()
+            time.sleep(0.05)
+            assert creator_thread.is_alive(), "creator bypassed the idle GC write lock"
+            release_gc.set()
+            gc_thread.join(5)
+            creator_thread.join(5)
+            kb.gc_worker_logs = original_gc_logs
+            assert not gc_thread.is_alive() and not creator_thread.is_alive()
+            assert not failures, failures
+            assert gc_results == [0]
+            assert cli._cmd_gc(idle_args) == 3
+
             legacy = Path(os.environ["HERMES_HOME"]) / "legacy-duplicates.db"
             with kb.connect_closing(legacy) as conn:
                 original = kb.create_task(
@@ -310,12 +496,41 @@ def main() -> None:
         race_env["HERMES_HOME"] = str(pathlib.Path(temp) / "hermes-home")
         race_env["HERMES_KANBAN_DB"] = str(pathlib.Path(temp) / "atomic-kanban.db")
         subprocess.run([sys.executable, "-c", race], env=race_env, check=True)
+        hermes_executable = (
+            source / ".venv/bin/hermes"
+            if isinstance(source, pathlib.Path)
+            else None
+        )
+        if hermes_executable is not None and hermes_executable.is_file():
+            executable_gc = subprocess.run(
+                [
+                    str(hermes_executable),
+                    "kanban",
+                    "--board",
+                    "default",
+                    "gc",
+                    "--require-idle",
+                ],
+                env=race_env,
+                text=True,
+                capture_output=True,
+            )
+            assert executable_gc.returncode == 3, executable_gc.stderr
+            assert executable_gc.stdout.strip() == "GC deferred: board is not idle"
+            project_list = subprocess.run(
+                [str(hermes_executable), "project", "list"],
+                env=race_env,
+                text=True,
+                capture_output=True,
+            )
+            assert project_list.returncode == 0, project_list.stderr
 
         image_root = pathlib.Path(temp) / "image-root"
         for relative in (
             "hermes_cli/commands.py",
             "hermes_cli/kanban.py",
             "hermes_cli/kanban_db.py",
+            "hermes_cli/main.py",
             "gateway/run.py",
             "gateway/platforms/api_server.py",
         ):
@@ -327,7 +542,7 @@ def main() -> None:
         image_apply = run(image_root, "--source-commit", COMMIT)
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
-        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 6
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 7
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")
