@@ -2081,6 +2081,13 @@ class DeliveryCoordinator:
 
     def _prune_completed_states(self) -> None:
         cutoff = time.time() - _COMPLETED_STATE_RETENTION_SECONDS
+        # Rename before recursive deletion so a crash after delivery-state.json
+        # disappears still leaves a directory that the next tick can discover.
+        for pending in self.state_root.glob(".prune-mission-*"):
+            try:
+                shutil.rmtree(pending)
+            except FileNotFoundError:
+                pass
         for path in self.state_root.glob("mission-*/delivery-state.json"):
             try:
                 state = mission_adapter._read_json(path)
@@ -2105,8 +2112,13 @@ class DeliveryCoordinator:
                     )
                 if retained_at >= cutoff:
                     continue
+                pending = self.state_root / f".prune-{path.parent.name}"
                 try:
-                    shutil.rmtree(path.parent)
+                    path.parent.replace(pending)
+                except FileNotFoundError:
+                    continue
+                try:
+                    shutil.rmtree(pending)
                 except FileNotFoundError:
                     pass
 

@@ -16,11 +16,12 @@ arbitrary-repository intake remains outside the current fixed-profile boundary.
 
 Lifecycle is deliberately handled by the existing stores and timer. Central keeps the newest 100 unbound terminal
 missions, skips the current Workspace/Telegram binding and leaves only a payload-free stable-ID tombstone for pruned
-history. Active parent/repair-child chains are retained together. After Central terminal convergence, the coordinator
+history. Active parent/repair-child chains and a subscribed repair's parent remain retained through terminal-notification
+checkpoint and binding restoration. After Central terminal convergence, the coordinator
 archives the native Kanban task. It runs `hermes kanban gc` (30-day task-event/log defaults) only when the board has no
 nonterminal task, so the board-wide log sweep cannot remove a long-running worker log; the profile timer retries a
 deferred GC. Delivery state remains mode `0600` under a `0700` root for 30 days so evidence can be audited, then the
-owning profile timer removes it. Verified worktrees and local branches are removed before Central completion; no
+owning profile timer removes it through an atomic rename and crash-retried recursive deletion. Verified worktrees and local branches are removed before Central completion; no
 separate GC daemon exists.
 
 ## When to use

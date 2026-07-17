@@ -2312,6 +2312,45 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             if os.name == "posix":
                 self.assertEqual(0o700, state_root.stat().st_mode & 0o777)
 
+    def test_completed_state_deletion_resumes_after_state_file_is_gone(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            state_root = root / "state"
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), state_root
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "task_archived": True,
+                "kanban_gc_ran": True,
+            })
+            artifact = paths["directory"] / "author-1.jsonl"
+            artifact.write_text("private evidence", encoding="utf-8")
+            old = time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            os.utime(paths["state"], (old, old))
+            def remove_state_then_crash(target):
+                target = pathlib.Path(target)
+                (target / "delivery-state.json").unlink()
+                raise OSError("simulated crash during directory deletion")
+
+            with mock.patch.object(
+                coordinator.shutil, "rmtree", side_effect=remove_state_then_crash
+            ):
+                with self.assertRaisesRegex(OSError, "during directory deletion"):
+                    instance._prune_completed_states()
+
+            pending = state_root / f".prune-{paths['directory'].name}"
+            self.assertFalse(paths["directory"].exists())
+            self.assertTrue((pending / artifact.name).exists())
+            self.assertFalse((pending / "delivery-state.json").exists())
+            instance._prune_completed_states()
+            self.assertFalse(pending.exists())
+
+
     def test_deferred_gc_does_not_extend_completed_state_retention(self):
         with tempfile.TemporaryDirectory() as directory:
             state_root = pathlib.Path(directory) / "state"

@@ -116,7 +116,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    keeps a payload-free tombstone so a retired stable `mission_id` cannot be reused.
    Completed Kanban tasks are archived. Native Kanban GC bounds their events/logs to 30 days only while the board has
    no nonterminal task, so a long-running worker log is not removed; deferred GC is retried automatically. Delivery
-   state is private and retained for 30 days, and disposable worktrees are removed immediately after verification. An open PR that
+   state is private and retained for 30 days, then crash-safely removed through a rediscoverable renamed directory;
+   disposable worktrees are removed immediately after verification. An open PR that
    exhausts all autonomous repair cycles is intentionally retained with its exact remote branch as bounded failure
    evidence because GitHub offers no conditional PR-close mutation.
 5. The Flow contract derives model, effort and sandbox policy from the exact Codex rollout `turn_context`; the
