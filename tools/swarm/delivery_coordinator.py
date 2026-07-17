@@ -1485,17 +1485,22 @@ class DeliveryCoordinator:
         if previous is not None and (not isinstance(previous, str) or not previous):
             raise DeliveryError("durable pre-review candidate identity is invalid")
         bound = state.get("pr_number")
+        bound_info: dict[str, Any] | None = None
+        legacy_checkpoint = False
         if bound is not None:
             previous_pr_head = state.get("pr_head_sha")
             if (
                 not isinstance(previous_pr_head, str)
                 or not previous_pr_head
-                or previous != previous_pr_head
+                or (previous is not None and previous != previous_pr_head)
             ):
                 raise DeliveryError("durable repair PR checkpoint is inconsistent")
-            self._bound_pr(
+            bound_info = self._bound_pr(
                 state, allowed_heads={previous_pr_head, candidate}
             )
+            if previous is None:
+                previous = previous_pr_head
+                legacy_checkpoint = True
         remote = self._git(
             paths["author"], "ls-remote", "--heads", "origin", state["branch"]
         )
@@ -1510,6 +1515,30 @@ class DeliveryCoordinator:
                 allowed.add(previous)
             if observed not in allowed:
                 raise DeliveryError("pre-review candidate branch moved unexpectedly")
+        if bound_info is not None:
+            if _pr_head_oid(bound_info) != observed:
+                raise DeliveryError("durable PR and candidate branch heads disagree")
+            if legacy_checkpoint:
+                state.update(
+                    candidate_push_sha=observed,
+                    pr_head_sha=observed,
+                    pr_url=bound_info["url"],
+                    pr_is_draft=bound_info["isDraft"],
+                )
+                self._save(paths, state)
+            if bound_info["isDraft"] is not True:
+                self._assert_claim(
+                    state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+                )
+                self._run([
+                    self.profile["gh_bin"], "pr", "ready", str(bound), "--undo",
+                    "--repo", self.profile["repo"],
+                ], check=False)
+                bound_info = self._bound_pr(state, allowed_heads={observed})
+                if bound_info["isDraft"] is not True:
+                    raise DeliveryError("repair PR did not become draft before candidate push")
+                state.update(pr_url=bound_info["url"], pr_is_draft=True)
+                self._save(paths, state)
         if observed != candidate:
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -1522,6 +1551,8 @@ class DeliveryCoordinator:
         self._assert_candidate_branch(state)
         if bound is not None:
             info = self._bound_pr(state, allowed_heads={candidate})
+            if info["isDraft"] is not True:
+                raise DeliveryError("repair candidate reached a non-draft PR before review")
             state.update(
                 pr_head_sha=candidate,
                 pr_url=info["url"],
@@ -1734,6 +1765,7 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
+        self._validate_review(state)
         fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
         bound = state.get("pr_number")
         if bound is not None and (isinstance(bound, bool) or not isinstance(bound, int)):

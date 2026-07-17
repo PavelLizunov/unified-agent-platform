@@ -1385,6 +1385,155 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("new-candidate", state["pr_head_sha"])
             self.assertTrue(state["pr_is_draft"])
 
+    def test_ready_repair_pr_is_redrafted_before_candidate_push(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            remote_head = "old-candidate"
+            pr_head = "old-candidate"
+            ready = True
+            commands = []
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, pr_head, ready
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": not ready,
+                            "headRefName": "codex/fix",
+                            "headRefOid": pr_head,
+                            "baseRefName": approved["default_branch"],
+                        }),
+                        stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "ready"]:
+                    self.assertIn("--undo", command)
+                    self.assertEqual("old-candidate", remote_head)
+                    ready = False
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="lost redraft response"
+                    )
+                if command[0] == "git" and "ls-remote" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=f"{remote_head}\trefs/heads/codex/fix\n",
+                        stderr="",
+                    )
+                if command[0] == "git" and "push" in command:
+                    self.assertFalse(ready)
+                    remote_head = pr_head = "new-candidate"
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="", stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "phase": "author_committed",
+                "candidate_sha": "new-candidate",
+                "candidate_push_sha": "old-candidate",
+                "branch": "codex/fix",
+                "pr_number": 39,
+                "pr_url": "https://example.invalid/pr/39",
+                "pr_head_sha": "old-candidate",
+                "pr_base_branch": approved["default_branch"],
+            }
+
+            with mock.patch.object(instance, "_assert_claim"):
+                instance._push_candidate(state, paths)
+
+            self.assertFalse(ready)
+            self.assertEqual("new-candidate", state["candidate_push_sha"])
+            self.assertEqual("new-candidate", state["pr_head_sha"])
+            self.assertTrue(state["pr_is_draft"])
+            redraft = next(
+                index for index, command in enumerate(commands)
+                if command[0:3] == ["gh", "pr", "ready"]
+            )
+            push = next(
+                index for index, command in enumerate(commands)
+                if command[0] == "git" and "push" in command
+            )
+            self.assertLess(redraft, push)
+
+    def test_legacy_bound_pr_checkpoint_is_validated_and_recovered(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            remote_head = "old-candidate"
+            pr_head = "old-candidate"
+            push_calls = 0
+            paths = None
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, pr_head, push_calls
+                if command[0:3] == ["gh", "pr", "view"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": True,
+                            "headRefName": "codex/fix",
+                            "headRefOid": pr_head,
+                            "baseRefName": approved["default_branch"],
+                        }),
+                        stderr="",
+                    )
+                if command[0] == "git" and "ls-remote" in command:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=f"{remote_head}\trefs/heads/codex/fix\n",
+                        stderr="",
+                    )
+                if command[0] == "git" and "push" in command:
+                    checkpoint = coordinator.mission_adapter._read_json(paths["state"])
+                    self.assertEqual("old-candidate", checkpoint["candidate_push_sha"])
+                    self.assertEqual("old-candidate", checkpoint["pr_head_sha"])
+                    push_calls += 1
+                    remote_head = pr_head = "new-candidate"
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="", stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("legacy-repair")
+            state = {
+                "phase": "author_committed",
+                "candidate_sha": "new-candidate",
+                "branch": "codex/fix",
+                "pr_number": 39,
+                "pr_url": "https://example.invalid/pr/39",
+                "pr_head_sha": "old-candidate",
+                "pr_base_branch": approved["default_branch"],
+            }
+
+            with mock.patch.object(instance, "_assert_claim"):
+                instance._push_candidate(state, paths)
+
+            self.assertEqual(1, push_calls)
+            self.assertEqual("candidate_pushed", state["phase"])
+            self.assertEqual("new-candidate", state["candidate_push_sha"])
+            self.assertEqual("new-candidate", state["pr_head_sha"])
+
     def test_draft_pr_create_response_loss_recovers_exact_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -1613,7 +1762,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             }
 
-            instance._pr(state, paths)
+            with mock.patch.object(instance, "_validate_review"):
+                instance._pr(state, paths)
 
             self.assertEqual(39, state["pr_number"])
             self.assertEqual("new-candidate", state["pr_head_sha"])
@@ -1631,12 +1781,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend = FakeBackend()
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
             ready = False
+            review_validated = False
             commands = []
 
             def runner(command, **_kwargs):
                 nonlocal ready
                 commands.append(command)
                 if command[0:3] == ["gh", "pr", "ready"]:
+                    self.assertTrue(review_validated)
                     ready = True
                     return subprocess.CompletedProcess(
                         command, 1, stdout="", stderr="lost ready response"
@@ -1670,7 +1822,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             }
 
-            instance._pr(state, paths)
+            def validate_review(_state):
+                nonlocal review_validated
+                review_validated = True
+
+            with mock.patch.object(
+                instance, "_validate_review", side_effect=validate_review
+            ):
+                instance._pr(state, paths)
 
             self.assertTrue(ready)
             self.assertEqual("pr_open", state["phase"])
@@ -1720,7 +1879,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             }
 
-            with self.assertRaisesRegex(coordinator.DeliveryError, "changed before repair push"):
+            with (
+                mock.patch.object(instance, "_validate_review"),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "changed before repair push"
+                ),
+            ):
                 instance._pr(state, paths)
 
             self.assertEqual(39, state["pr_number"])
@@ -1765,8 +1929,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             }
 
-            with self.assertRaisesRegex(
-                coordinator.DeliveryError, "changed before repair push"
+            with (
+                mock.patch.object(instance, "_validate_review"),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "changed before repair push"
+                ),
             ):
                 instance._pr(state, instance._paths("mission-a7-3"))
             self.assertFalse(any(command[0] == "git" for command in commands))
@@ -1810,7 +1977,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "pr_base_branch": approved["default_branch"],
             }
 
-            instance._pr(state, paths)
+            with mock.patch.object(instance, "_validate_review"):
+                instance._pr(state, paths)
 
             self.assertEqual("new-candidate", state["pr_head_sha"])
             self.assertFalse(any(command[0] == "git" for command in commands))
@@ -1876,9 +2044,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             }
             paths = instance._paths("mission-a7-3")
 
-            with self.assertRaisesRegex(coordinator.DeliveryError, "lost initial push"):
+            with mock.patch.object(instance, "_validate_review"):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "lost initial push"):
+                    instance._pr(state, paths)
                 instance._pr(state, paths)
-            instance._pr(state, paths)
 
             self.assertEqual(1, push_calls)
             self.assertEqual(39, state["pr_number"])
@@ -1939,9 +2108,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             }
             paths = instance._paths("mission-a7-3")
 
-            with self.assertRaisesRegex(coordinator.DeliveryError, "lost PR create"):
+            with mock.patch.object(instance, "_validate_review"):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "lost PR create"):
+                    instance._pr(state, paths)
                 instance._pr(state, paths)
-            instance._pr(state, paths)
 
             self.assertEqual(1, create_calls)
             self.assertEqual(39, state["pr_number"])
