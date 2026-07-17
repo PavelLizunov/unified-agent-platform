@@ -36,11 +36,10 @@ NousResearch hermes-agent, ADR-022..031): здесь следуй приняты
 
 ## Порядок работы
 
-1. Прочитай [README.md](README.md) → [ARCHITECTURE.md](ARCHITECTURE.md) → [DECISIONS.md](DECISIONS.md) →
-   [BUILD-PLAN.md](BUILD-PLAN.md) → [RISKS.md](RISKS.md).
-2. Реализуй по [BUILD-PLAN.md](BUILD-PLAN.md) **строго по этапам**. Этап 0 выполняет владелец (VPS + сеть).
-   Твоя работа начинается с Этапа 1.
-3. Этап считается выполненным **только** когда проходит его «веха» (тест на отказоустойчивость).
+1. Следуй каноническому порядку чтения из TL;DR выше; не создавай второй конкурирующий список.
+2. [ARCHITECTURE.md](ARCHITECTURE.md) и [BUILD-PLAN.md](BUILD-PLAN.md) используй как design/history context для
+   затронутых старых этапов. Текущий model/agent план и факты определяют `docs/next-steps.md` и `STATUS.md`.
+3. Активный этап считается выполненным **только** когда проходит его репозиторная «веха».
    Не переходи к следующему этапу, пока веха не зелёная.
 
 ## Правила

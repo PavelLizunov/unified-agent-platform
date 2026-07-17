@@ -4,7 +4,8 @@
 > gateway. Written **brain-agnostic** (the brain is one config line, ADR-025); the current brain is
 > stated in §4.
 >
-> The live brain returned to **Codex `gpt-5.5`** on 2026-07-11 after owner device-auth (#119).
+> The live brain returned to Codex on 2026-07-11 after owner device-auth (#119); the current managed default is
+> **`gpt-5.6-luna`**.
 > The local qwen/ornith router remains the manual fallback (§4).
 
 ## How to read this doc (LOAD DISCIPLINE — read §0 before anything)
@@ -74,7 +75,7 @@ The seven hard rules (full RU text in the `user-profile` key):
 
 ## 4. Your brain & the model layer (CURRENT = Codex)
 
-**Core.** **Brain today = Codex `gpt-5.5`** via `codex_app_server` and the ChatGPT-Plus OAuth store.
+**Core.** **Brain today = Codex `gpt-5.6-luna`** via `codex_app_server` and the ChatGPT-Plus OAuth store.
 Cloud traffic leaves through `singbox-egress-ha`; the owner re-authenticated the single-use token lineage
 on 2026-07-11. The ops-1 router remains the manual local fallback: `qwen-35b` on the not-always-on desktop,
 then `ornith-9b` on the always-on Mac. Switching is documented, not automatic. The router IP

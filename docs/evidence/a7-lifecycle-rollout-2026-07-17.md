@@ -84,9 +84,15 @@ verify-local-ok
 The live smoke checks also observed both k3s nodes Ready, the final Hermes pod Running with zero restarts, Flux
 controllers Ready, scheduling on `uap-home-2`, and SOPS decryption through the node-local age key.
 
-## Remaining product gate
+## Product gate at rollout time
 
 This rollout closes the deployment gap for the A7 lifecycle/observation code. Product Operating Contract completion
 still requires one clean uninterrupted non-toy mission that is Telegram-bound before execution and autonomously
 converges through author, tests, independent exact-SHA review, PR/CI, merge, post-verify, Central terminal state,
 matching Workspace/Telegram projection and disposable cleanup.
+
+## Later result
+
+That subsequent fixed-profile gate passed on 2026-07-17. See
+`docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`. This addendum preserves the rollout-time boundary above
+without presenting it as current pending work.

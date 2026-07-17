@@ -133,6 +133,9 @@ identity. `run_id` was not present in these canonical event correlations; the na
 by the task snapshot above.
 
 ```text
+schema_version=1
+mission_id=a7-clean-ledger-list-20260717-a0fc5a
+
 seq | event_id                                      | occurred_at              | type              | source         | task_id    | run_id | producer_event_id
 1   | a7-clean-ledger-list-20260717-a0fc5a:1       | 2026-07-17T12:05:11.263Z | mission.accepted  | central-hermes | -          | -      | -
 2   | a7-clean-ledger-list-20260717-a0fc5a:2       | 2026-07-17T12:06:57.369Z | task.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:4ef836e1e1a9f9b2224b233f

@@ -316,5 +316,6 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
 ## Owner inputs needed
 
 - Off-homelab age-key escrow location.
-- Approval for destructive tests that are still relevant to the current strategy (restore-over-VM, k3s reset on a
-  disposable target). HA node-shutdown tests resume only after a new owner decision funds a third server.
+- Approval for destructive tests against non-disposable state (restore over an existing VM, production k3s reset).
+  Repo-defined hermetic/disposable drills do not need per-run approval. HA node-shutdown tests resume only after a new
+  owner decision funds a third server.

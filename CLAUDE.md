@@ -25,8 +25,8 @@ If any instruction conflicts, follow `AGENTS.md` and `DECISIONS.md`, then ask th
 The 2026-06-28 Codex bug-hunt and independent code-review are actioned: see `STATUS.md` → "Post-A4 hardening
 pass" for the merged-PR list. The original reports are kept for historical record (not required reading):
 [BUG-HUNT-CODEX-2026-06-28.md](BUG-HUNT-CODEX-2026-06-28.md), [CODE-REVIEW-CODEX-2026-06-28.md](CODE-REVIEW-CODEX-2026-06-28.md),
-[READONLY-INFRA-AUDIT-2026-06-28.md](READONLY-INFRA-AUDIT-2026-06-28.md). Two pod-rolling PRs (#35, #36) remain
-**owner-gated** — do not merge them yourself; see `STATUS.md`.
+[READONLY-INFRA-AUDIT-2026-06-28.md](READONLY-INFRA-AUDIT-2026-06-28.md). Historical pod-rolling PRs #35/#36 were
+resolved; use `STATUS.md` rather than this handoff for their exact outcome.
 
 ## Current State
 
@@ -37,9 +37,9 @@ pass" for the merged-PR list. The original reports are kept for historical recor
   build-1/Flow is the execution plane. Read `docs/product-operating-contract.md` and ADR-030 before agent-layer work.
 - **Three layers, live (namespace `uap-system`):**
   - **Infra** — k3s 2-node (**NOT HA**: server `uap-home-1` + agent `uap-home-2` = single etcd member), Flux GitOps + SOPS, k3s→R2 DR.
-  - **Model** — `subfleet` (the Claude subscription as an OpenAI **chat** API; drops `tool_calls`) + **LiteLLM** v1.89.0.
-    subfleet is **retained for the owner's OTHER projects** (a Telegram bot + web sessions); redundant for in-repo coding.
-  - **Agent** — bespoke `hermes/hermes.py` ("Hermes-legacy"; prompt-based ReAct/ReWOO; NodePort `:30890`). **PARKED.**
+  - **Model** — Central Hermes uses Codex `gpt-5.6-luna`; build-1 delivery follows ADR-031's automatic OpenAI-only
+    Luna/Sol/Terra policy. `subfleet` + LiteLLM remain installed separate/legacy capacities, not automatic fallbacks.
+  - **Agent** — external NousResearch hermes-agent is live; bespoke `hermes/hermes.py` is parked.
 - **Active direction (2026-06-22/23 pivot):** adopt the **external NousResearch hermes-agent** as the vibe-coding harness.
   Brain = the **Codex/ChatGPT subscription** (`codex_app_server`, native function-calling). ADR-031 makes Luna/Sol/Terra
   the automatic coding/review routes; Claude, local inference and GPU are not fallbacks without a separate owner decision.
@@ -214,7 +214,8 @@ Good next tasks that do not require redesign:
    restore are done. Owner accepted the current R2 credential scope/lifecycle as-is; do not rotate or alter it
    without a new decision. Off-homelab age-key escrow remains open.
 9. (DONE 2026-06-19) S3 offsite snapshots configured with a SOPS-encrypted Secret; see STATUS.md -> Offsite Backups.
-10. (DONE 2026-06-19) Restore drill executed; secret-decrypt verification still pending — see `runbooks/restore-drill.md`.
+10. (DONE 2026-07-12) Cross-node restore and exact Secret-decrypt verification passed; see
+    `runbooks/restore-drill.md`.
 
 ## Things That Need Owner Input
 

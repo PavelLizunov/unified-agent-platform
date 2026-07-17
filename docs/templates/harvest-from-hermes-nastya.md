@@ -11,7 +11,7 @@ is **rebuilt from the description here** against UAP infra — never lifted from
 dirs, never pointed at her models, never carrying her corporate coupling or her secrets.
 
 UAP rebind target for every model reference below:
-- **Codex `gpt-5.5`** through the managed `codex_app_server` brain (current since 2026-07-11); OR
+- **Codex `gpt-5.6-luna`** through the managed `codex_app_server` brain (current route since 2026-07-11); OR
 - **local-models-router** `http://100.82.241.121:8090/v1` (`qwen-35b` desktop-RTX or
   `ornith-9b` always-on-mac) as the manual fallback/local coding tier.
 Never rebind to her Codex/Nous/Ollama endpoints.

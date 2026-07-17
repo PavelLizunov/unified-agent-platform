@@ -35,12 +35,17 @@
 
 ## Как читать этот пакет
 
-1. **[AGENTS.md](AGENTS.md)** — инструкция агенту-исполнителю: порядок работы, что можно и нельзя.
-2. **[CLAUDE.md](CLAUDE.md)** — handoff для Claude Code: текущее состояние, команды, безопасные следующие шаги.
-3. **[ARCHITECTURE.md](ARCHITECTURE.md)** — целевая архитектура, схема, стек.
-4. **[DECISIONS.md](DECISIONS.md)** — принятые решения с обоснованием (ADR). **Не переоткрывать без причины.**
-5. **[BUILD-PLAN.md](BUILD-PLAN.md)** — поэтапный план сборки с проверяемыми вехами.
-6. **[RISKS.md](RISKS.md)** — подводные камни и их смягчение.
+1. **[AGENTS.md](AGENTS.md)** → **[README.md](README.md)** → **[DECISIONS.md](DECISIONS.md)** →
+   **[STATUS.md](STATUS.md)** → **[RISKS.md](RISKS.md)**.
+2. **[Product Operating Contract](docs/product-operating-contract.md)** →
+   **[инфраструктура](docs/infrastructure.md)** → **[текущий план](docs/next-steps.md)**.
+3. Исследования Hermes/Codex дают контекст; фактический current brain/runtime всегда сверять с `STATUS.md`.
+4. **[runbooks/README.md](runbooks/README.md)** и **[tools/README.md](tools/README.md)** — индексы процедур и tools.
+5. **[validation-matrix.md](runbooks/validation-matrix.md)** и
+   **[vibe-coding-acceptance.md](runbooks/vibe-coding-acceptance.md)** — обязательные гейты.
+
+`CLAUDE.md`, `ARCHITECTURE.md` и `BUILD-PLAN.md` остаются handoff/design/history context, но не заменяют порядок и
+live-факты выше.
 
 ## Основная проверка
 
