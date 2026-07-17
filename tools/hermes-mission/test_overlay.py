@@ -38,6 +38,10 @@ def main() -> None:
         overlay = importlib.util.module_from_spec(tool_spec)
         assert tool_spec.loader
         tool_spec.loader.exec_module(overlay)
+        assert "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd" in (
+            overlay.LEGACY_BUILD1_PATCHED_FILES["hermes_cli/kanban.py"]
+        )
+        assert "unknown" not in overlay.LEGACY_BUILD1_PATCHED_FILES["hermes_cli/kanban.py"]
         atomic_target = pathlib.Path(temp) / "atomic-target.py"
         atomic_target.write_text("before\n", encoding="utf-8")
         with mock.patch.object(overlay.os, "replace", side_effect=OSError("simulated crash")):
