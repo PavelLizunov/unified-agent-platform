@@ -368,6 +368,18 @@ class HermeticCoordinator(coordinator.DeliveryCoordinator):
     def _reconcile(self, **_kwargs):
         return None
 
+    def _pre_review_ci(self, state, paths):
+        self.counters["platform_gates"] = self.counters.get("platform_gates", 0) + 1
+        state.update(
+            phase="pre_review_ci_green",
+            candidate_push_sha=state["candidate_sha"],
+            pre_review_ci_checks=[{"name": "test", "outcome": "SUCCESS"}],
+        )
+        self._save(paths, state)
+
+    def _assert_candidate_branch(self, _state):
+        return None
+
     def _review(self, state, paths):
         self.counters["reviews"] += 1
         state.update(phase="reviewed", review_verification={}, reviewer_telemetry={})
@@ -1163,6 +1175,222 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance._wait_ci({"pr_number": 39})
 
             self.assertEqual(pending, raised.exception.checks)
+
+    def test_candidate_push_ci_ignores_pr_runs_and_checkpoints_exact_sha(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            approved["required_ci_checks"] = ["test"]
+            remote_head = None
+            push_calls = 0
+            associate_push = False
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, push_calls, associate_push
+                if command[0] == "git" and "ls-remote" in command:
+                    output = (
+                        f"{remote_head}\trefs/heads/codex/fix\n" if remote_head else ""
+                    )
+                elif command[0] == "git" and "push" in command:
+                    push_calls += 1
+                    remote_head = "candidate-sha"
+                    output = ""
+                elif command[0:3] == ["gh", "api", "--method"]:
+                    endpoint = command[4]
+                    if endpoint.endswith("/actions/runs"):
+                        runs = [{
+                            "id": 70, "workflow_id": 9, "name": "CI",
+                            "status": "completed", "conclusion": "success",
+                            "head_sha": "candidate-sha", "event": "push",
+                            "head_branch": "codex/fix",
+                            "pull_requests": ([{
+                                "number": 39,
+                                "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                                "base": {"ref": approved["default_branch"]},
+                            }] if associate_push else []),
+                        }, {
+                            "id": 71, "workflow_id": 9, "name": "CI",
+                            "status": "completed", "conclusion": "failure",
+                            "head_sha": "candidate-sha", "event": "pull_request",
+                            "head_branch": "codex/fix", "pull_requests": [{
+                                "number": 39,
+                                "head": {"ref": "codex/fix", "sha": "candidate-sha"},
+                                "base": {"ref": approved["default_branch"]},
+                            }],
+                        }]
+                        output = json.dumps({
+                            "total_count": len(runs), "workflow_runs": runs,
+                        })
+                    elif endpoint.endswith("/actions/runs/70/jobs"):
+                        output = json.dumps({
+                            "total_count": 1,
+                            "jobs": [{
+                                "name": "test", "status": "completed",
+                                "conclusion": "success", "head_sha": "candidate-sha",
+                            }],
+                        })
+                    else:
+                        raise AssertionError(command)
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "phase": "author_committed", "candidate_sha": "candidate-sha",
+                "branch": "codex/fix",
+            }
+            with mock.patch.object(instance, "_assert_claim"):
+                instance._pre_review_ci(state, paths)
+
+            self.assertEqual("pre_review_ci_green", state["phase"])
+            self.assertEqual("candidate-sha", state["candidate_push_sha"])
+            self.assertEqual(1, push_calls)
+            self.assertEqual(
+                [
+                    {"name": "workflow:CI", "outcome": "SUCCESS"},
+                    {"name": "test", "outcome": "SUCCESS"},
+                ],
+                state["pre_review_ci_checks"],
+            )
+            associate_push = True
+            state["pr_number"] = 39
+            self.assertEqual(
+                "passed",
+                coordinator._ci_decision(
+                    instance._candidate_ci_rollup(state), ["test"]
+                ),
+            )
+
+    def test_candidate_push_response_loss_converges_without_a_second_push(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            remote_head = None
+            push_calls = 0
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, push_calls
+                if command[0] == "git" and "ls-remote" in command:
+                    output = (
+                        f"{remote_head}\trefs/heads/codex/fix\n" if remote_head else ""
+                    )
+                    return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+                if command[0] == "git" and "push" in command:
+                    push_calls += 1
+                    remote_head = "candidate-sha"
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="lost candidate push response"
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "phase": "author_committed", "candidate_sha": "candidate-sha",
+                "branch": "codex/fix",
+            }
+            with mock.patch.object(instance, "_assert_claim"):
+                with self.assertRaisesRegex(coordinator.DeliveryError, "lost candidate push"):
+                    instance._push_candidate(state, paths)
+                instance._push_candidate(state, paths)
+
+            self.assertEqual(1, push_calls)
+            self.assertEqual("candidate_pushed", state["phase"])
+            self.assertEqual("candidate-sha", state["candidate_push_sha"])
+
+    def test_rejected_pre_review_candidate_deletes_only_the_exact_remote_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            remote_head = "candidate-sha"
+            deletes = 0
+
+            def runner(command, **_kwargs):
+                nonlocal remote_head, deletes
+                if command[0] != "git":
+                    raise AssertionError(command)
+                if "ls-remote" in command:
+                    output = (
+                        f"{remote_head}\trefs/heads/codex/fix\n" if remote_head else ""
+                    )
+                elif "--delete" in command:
+                    self.assertIn(
+                        "--force-with-lease=refs/heads/codex/fix:candidate-sha", command
+                    )
+                    deletes += 1
+                    remote_head = None
+                    output = ""
+                elif "branch" in command or "worktree" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {
+                "branch": "codex/fix", "candidate_push_sha": "candidate-sha",
+            }
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+            ):
+                instance._cleanup(state, instance._paths("mission-a7-3"))
+
+            self.assertEqual(1, deletes)
+            self.assertIsNone(remote_head)
+
+    def test_pre_review_ci_failure_persists_bounded_redacted_logs_for_repair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            secret = "ghp_" + ("a" * 36)
+
+            def runner(command, **_kwargs):
+                self.assertEqual(["gh", "run", "view"], command[:3])
+                return subprocess.CompletedProcess(
+                    command, 0,
+                    stdout=f"windows compile failed API_TOKEN={secret}", stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "review_cycle": 1, "prior_ci_failures": 0,
+                "prior_review_rejections": 0, "prior_author_failures": 0,
+            }
+            failure = coordinator.CIFailed(
+                "pre-review platform checks failed",
+                [{
+                    "name": "test-windows", "conclusion": "FAILURE", "run_id": 70,
+                }],
+            )
+
+            instance._record_ci_failure(
+                state, paths, failure, pre_review=True
+            )
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("needs_fix", persisted["phase"])
+            self.assertIn("windows compile failed", persisted["review_findings"][0])
+            self.assertIn("[REDACTED]", persisted["review_findings"][0])
+            self.assertNotIn(secret, persisted["review_findings"][0])
+            self.assertLessEqual(
+                len(persisted["review_findings"][0]), coordinator._MAX_CHECK_FAILURE_CHARS
+            )
 
     def test_repair_cycle_reuses_exact_durable_pr(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2659,6 +2887,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             self.assertEqual("complete", result["action"])
             self.assertEqual(1, counters["authors"])
+            self.assertEqual(1, counters["platform_gates"])
             self.assertEqual(1, counters["reviews"])
             self.assertEqual(1, counters["worktrees"])
             self.assertEqual(1, counters["cleanups"])
