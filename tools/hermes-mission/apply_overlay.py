@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
-import shutil
 import subprocess
+import tempfile
 
 
 UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
@@ -21,8 +22,8 @@ FILES = {
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
-    "hermes_cli/kanban.py": "d47ed61e1cca8699cdb4c7e6177f6f78b4e174b5b4b0d8915eb4ae95a13709df",
-    "hermes_cli/kanban_db.py": "1c0cb69c696499956e41503f6ca0c1fa09ee9b519f2751b7a9d4b8b2728635d0",
+    "hermes_cli/kanban.py": "4c137a14ca8a880a95e2fe58a4c410afbc8e2f2547f63b474bc959aab6415502",
+    "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
     "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
@@ -48,6 +49,26 @@ def replace(text: str, old: str, new: str, name: str) -> str:
     if old not in text:
         raise SystemExit(f"overlay fragment mismatch: {name}")
     return text.replace(old, new, 1)
+
+
+def atomic_write(path: pathlib.Path, text: str) -> None:
+    temporary: pathlib.Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as handle:
+            handle.write(text)
+            temporary = pathlib.Path(handle.name)
+        try:
+            mode = path.stat().st_mode & 0o777
+        except FileNotFoundError:
+            mode = 0o644
+        temporary.chmod(mode)
+        os.replace(temporary, path)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def transform(relative: str, text: str) -> str:
@@ -131,8 +152,16 @@ def transform(relative: str, text: str) -> str:
     """Remove scratch workspaces of archived tasks, prune old events, and
     delete old worker logs."""
     import shutil
+    import stat
     import sys
-    scratch_root = kb.workspaces_root()
+    try:
+        scratch_root = kb.workspaces_root().resolve()
+    except (OSError, RuntimeError) as error:
+        print(
+            f"GC failed: scratch root: {type(error).__name__}",
+            file=sys.stderr,
+        )
+        return 1
     event_days = getattr(args, "event_retention_days", 30)
     log_days = getattr(args, "log_retention_days", 30)
     removed_logs = None
@@ -167,25 +196,41 @@ def transform(relative: str, text: str) -> str:
         path = Path(row["workspace_path"] or (scratch_root / row["id"]))
         try:
             path = path.resolve()
-        except OSError:
-            continue
+        except (OSError, RuntimeError) as error:
+            print(
+                f"GC failed: scratch workspace path: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 1
         try:
-            path.relative_to(scratch_root.resolve())
+            path.relative_to(scratch_root)
         except ValueError:
-            # Safety: never delete outside the scratch root.
+            print("GC failed: scratch workspace is outside the scratch root", file=sys.stderr)
+            return 1
+        try:
+            mode = path.stat().st_mode
+        except FileNotFoundError:
             continue
-        if path.exists() and path.is_dir():
-            try:
-                shutil.rmtree(path)
-            except FileNotFoundError:
-                continue
-            except OSError as error:
-                print(
-                    f"GC failed: scratch workspace cleanup: {type(error).__name__}",
-                    file=sys.stderr,
-                )
-                return 1
-            removed_ws += 1
+        except OSError as error:
+            print(
+                f"GC failed: scratch workspace inspection: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 1
+        if not stat.S_ISDIR(mode):
+            print("GC failed: scratch workspace is not a directory", file=sys.stderr)
+            return 1
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            continue
+        except OSError as error:
+            print(
+                f"GC failed: scratch workspace cleanup: {type(error).__name__}",
+                file=sys.stderr,
+            )
+            return 1
+        removed_ws += 1
 
     with kb.connect_closing() as conn:
         removed_events = kb.gc_events(
@@ -209,6 +254,12 @@ def transform(relative: str, text: str) -> str:
             "atomic idle GC",
         )
     if relative == "hermes_cli/kanban_db.py":
+        text = replace(
+            text,
+            "import sqlite3\nimport subprocess",
+            "import sqlite3\nimport stat\nimport subprocess",
+            "strict worker log file type",
+        )
         text = replace(
             text,
             '''                _append_event(
@@ -407,15 +458,24 @@ def connect(
     to the active board) — per-board isolation means deleting logs from
     board A cannot touch board B's logs."""
     log_dir = worker_logs_dir(board=board)
-    if not log_dir.exists():
+    try:
+        entries = list(log_dir.iterdir())
+    except FileNotFoundError:
+        return 0
+    except OSError:
+        if strict:
+            raise
         return 0
     cutoff = time.time() - older_than_seconds
     removed = 0
-    for p in log_dir.iterdir():
+    for p in entries:
         try:
-            if p.is_file() and p.stat().st_mtime < cutoff:
+            metadata = p.stat()
+            if stat.S_ISREG(metadata.st_mode) and metadata.st_mtime < cutoff:
                 p.unlink()
                 removed += 1
+        except FileNotFoundError:
+            continue
         except OSError:
             if strict:
                 raise
@@ -813,13 +873,13 @@ def main() -> None:
         return
 
     for relative, path, source_text in source_paths:
-        path.write_text(transform(relative, source_text), encoding="utf-8")
+        atomic_write(path, transform(relative, source_text))
         if sha(path) != PATCHED_FILES[relative]:
             raise SystemExit(f"overlay output fingerprint mismatch: {relative}")
     if not args.build1_runtime:
         target.parent.mkdir(parents=True, exist_ok=True)
         if runtime_missing:
-            shutil.copyfile(RUNTIME_SOURCE, target)
+            atomic_write(target, RUNTIME_SOURCE.read_text(encoding="utf-8"))
     print("overlay applied" if source_paths or runtime_missing else "overlay already applied")
 
 

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+from unittest import mock
 
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
@@ -33,6 +34,20 @@ def main() -> None:
     args = parser.parse_args()
     source = args.checkout.resolve() if args.checkout else UPSTREAM
     with tempfile.TemporaryDirectory(prefix="hermes-mission-overlay-") as temp:
+        tool_spec = importlib.util.spec_from_file_location("apply_overlay", TOOL)
+        overlay = importlib.util.module_from_spec(tool_spec)
+        assert tool_spec.loader
+        tool_spec.loader.exec_module(overlay)
+        atomic_target = pathlib.Path(temp) / "atomic-target.py"
+        atomic_target.write_text("before\n", encoding="utf-8")
+        with mock.patch.object(overlay.os, "replace", side_effect=OSError("simulated crash")):
+            try:
+                overlay.atomic_write(atomic_target, "after\n")
+                raise AssertionError("interrupted atomic overlay write did not fail")
+            except OSError:
+                pass
+        assert atomic_target.read_text(encoding="utf-8") == "before\n"
+        assert list(atomic_target.parent.glob(f".{atomic_target.name}.*")) == []
         clone = pathlib.Path(temp) / "hermes"
         clone.mkdir()
         subprocess.run(["git", "init", "--quiet"], cwd=clone, check=True)
@@ -371,6 +386,23 @@ def main() -> None:
             assert cli._cmd_gc(idle_args) == 1
             assert scratch.exists()
             shutil.rmtree = original_rmtree
+
+            outside = Path(os.environ["HERMES_HOME"]).parent / "outside-scratch"
+            outside.mkdir()
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(outside), concurrent_ids[0]),
+                    )
+            assert cli._cmd_gc(idle_args) == 1
+            assert outside.is_dir()
+            with kb.connect_closing(database) as conn:
+                with kb.write_txn(conn):
+                    conn.execute(
+                        "UPDATE tasks SET workspace_path = ? WHERE id = ?",
+                        (str(scratch), concurrent_ids[0]),
+                    )
 
             gc_entered = threading.Event()
             release_gc = threading.Event()
