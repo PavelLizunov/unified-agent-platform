@@ -177,8 +177,9 @@ This phase does **not** replace Hermes and does not create a new control plane.
    Central/Workspace projection and the caught-up Telegram cursor. No human operator step is hidden.
 
 Each numbered item was delivered as a separate small PR or an explicitly recorded live canary. A6 is complete at the
-controlled-canary boundary. The next product milestone is repeatable automatic mission intake/dispatch and does not
-inherit approval for a model/runtime, local inference/GPU, swarm, Spark or destructive-test expansion.
+controlled-canary boundary. Phase A7 subsequently proved repeatable automatic intake/delivery for exact configured
+profiles. Generic arbitrary-mission routing remains outside that boundary and does not inherit approval for local
+inference/GPU, swarm, Spark, destructive-test expansion or a new provider.
 
 ### Phase A7 — Automatic mission intake to build-1
 
@@ -300,9 +301,11 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   always-on Linux node, none of which block on HA work. A4 landed **after** gate enforcement, so
   "self-test passed" is real (north-star demo PASSED, PR #25). **A6 passed its controlled canary:** A6.0 mapped the
   split state plane; A6.1-A6.3 built and tested the contract, adapter and synchronized projections; A6.4 installed the
-  exact pinned runtime and completed one explicitly approved Luna/Sol mission through PR/CI/merge/post-verify. The
-  next Track A product milestone is automatic intake-to-dispatch for arbitrary missions. It has no inherited approval
-  for local inference/GPU, swarm, Spark, destructive tests or a different model route.
+  exact pinned runtime and completed one explicitly approved Luna/Sol mission through PR/CI/merge/post-verify. A7 then
+  passed the Telegram-bound fixed-profile delivery canary through automatic OpenAI routing, recovery,
+  multi-platform CI, merge, post-verify and cleanup. Automatic intake-to-dispatch for arbitrary missions remains a
+  separate product gap. It has no inherited approval for local inference/GPU, swarm, Spark, destructive tests or a
+  different provider route.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.
