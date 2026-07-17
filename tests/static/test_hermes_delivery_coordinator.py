@@ -1898,22 +1898,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(1, deletes)
             self.assertIsNone(remote_head)
 
-    def test_pre_review_ci_failure_persists_bounded_redacted_logs_for_repair(self):
+    def test_pre_review_ci_failure_persists_only_bounded_check_summary(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
             approved.update(gh_bin="gh", codex_home=str(root / "codex"))
-            secret = "ghp_" + ("a" * 36)
-
-            def runner(command, **_kwargs):
-                self.assertEqual(["gh", "run", "view"], command[:3])
-                return subprocess.CompletedProcess(
-                    command, 0,
-                    stdout=f"windows compile failed API_TOKEN={secret}", stderr="",
-                )
-
             instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+                approved, FakeClient(), FakeBackend(), root / "state",
+                runner=lambda *_args, **_kwargs: self.fail("raw CI logs were requested"),
             )
             paths = instance._paths("mission-a7-3")
             state = {
@@ -1927,45 +1919,20 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 }],
             )
 
-            with mock.patch.object(
-                instance,
-                "_run_bounded",
-                return_value=subprocess.CompletedProcess(
-                    ["gh", "run", "view"], 0,
-                    stdout=f"windows compile failed API_TOKEN={secret}", stderr="",
-                ),
-            ):
-                instance._record_ci_failure(
-                    state, paths, failure, pre_review=True
-                )
+            instance._record_ci_failure(state, paths, failure, pre_review=True)
 
             persisted = coordinator.mission_adapter._read_json(paths["state"])
             self.assertEqual("needs_fix", persisted["phase"])
-            self.assertIn("windows compile failed", persisted["review_findings"][0])
-            self.assertIn("[REDACTED]", persisted["review_findings"][0])
-            self.assertNotIn(secret, persisted["review_findings"][0])
+            self.assertEqual(
+                ["pre-review platform checks failed: test-windows=FAILURE"],
+                persisted["review_findings"],
+            )
+            self.assertEqual(
+                [{"name": "test-windows", "outcome": "FAILURE"}],
+                persisted["pre_review_ci_checks"],
+            )
             self.assertLessEqual(
                 len(persisted["review_findings"][0]), coordinator._MAX_CHECK_FAILURE_CHARS
-            )
-
-    def test_failed_log_command_capture_is_bounded_before_redaction(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            approved = profile(root)
-            approved.update(codex_home=str(root / "codex"))
-            instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), FakeBackend(), root / "state"
-            )
-            result = instance._run_bounded([
-                sys.executable, "-c",
-                "import sys; sys.stdout.write('x' * 100000 + 'diagnostic-tail')",
-            ])
-
-            self.assertEqual(0, result.returncode)
-            self.assertIn("diagnostic-tail", result.stdout)
-            self.assertLessEqual(
-                len(result.stdout.encode("utf-8")),
-                coordinator._MAX_SUBPROCESS_CAPTURE_BYTES,
             )
 
     def test_repair_cycle_reuses_exact_durable_pr(self):
@@ -2294,11 +2261,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         }
         replacement = {**candidate, "isDraft": False, "headRefOid": "unreviewed-race"}
         replacement_draft = {**replacement, "isDraft": True}
+        renamed = {**replacement, "headRefName": "renamed-or-replaced"}
+        renamed_draft = {**renamed, "isDraft": True}
         for checkpoint, views in (
             ("mid-pr", [candidate, replacement, replacement_draft]),
             ("resumed", [replacement, replacement_draft]),
             ("resumed-unverifiable", [[], replacement_draft]),
             ("initial-unbound", [replacement, replacement_draft]),
+            ("initial-unbound-renamed", [renamed, renamed_draft]),
         ):
             with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
@@ -2336,7 +2306,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                             mock.patch.object(instance, "_validate_review"),
                         ):
                             instance._pr(state, {"author": root})
-                    elif checkpoint == "initial-unbound":
+                    elif checkpoint.startswith("initial-unbound"):
                         state.pop("pr_number")
                         state.pop("pr_head_sha")
                         state.pop("pr_base_branch")

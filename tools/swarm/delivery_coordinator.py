@@ -16,7 +16,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from typing import Any, Callable
 
@@ -69,7 +68,6 @@ _PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
-_MAX_SUBPROCESS_CAPTURE_BYTES = 16 * 1024
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
 _DIAGNOSTIC_REDACTIONS = (
@@ -452,47 +450,6 @@ class DeliveryCoordinator:
         if check and result.returncode:
             raise DeliveryError(_command_failure(result, command))
         return result
-
-    def _run_bounded(self, command: list[str]) -> subprocess.CompletedProcess[str]:
-        """Drain untrusted command output while retaining only a small tail in memory."""
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            env=self._safe_env(),
-        )
-        if process.stdout is None:
-            raise DeliveryError("bounded command output pipe is unavailable")
-        captured = bytearray()
-
-        def drain() -> None:
-            while chunk := process.stdout.read(8192):
-                captured.extend(chunk)
-                if len(captured) > _MAX_SUBPROCESS_CAPTURE_BYTES:
-                    del captured[:-_MAX_SUBPROCESS_CAPTURE_BYTES]
-
-        reader = threading.Thread(target=drain, daemon=True)
-        reader.start()
-        timed_out = False
-        try:
-            process.wait(timeout=self.profile["command_timeout_seconds"])
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            process.kill()
-            process.wait()
-        reader.join(timeout=5)
-        if reader.is_alive():
-            process.stdout.close()
-            reader.join(timeout=1)
-        else:
-            process.stdout.close()
-        text = captured.decode("utf-8", "replace")
-        if timed_out:
-            text += "\ncommand timed out"
-        return subprocess.CompletedProcess(
-            command, 124 if timed_out else process.returncode, stdout=text, stderr=""
-        )
 
     def _model_env(self, paths: dict[str, pathlib.Path]) -> dict[str, str]:
         home = paths["directory"] / "model-home"
@@ -1673,7 +1630,6 @@ class DeliveryCoordinator:
                     and isinstance(info.get("number"), int)
                     and info.get("state") == "OPEN"
                     and info.get("isDraft") is False
-                    and info.get("headRefName") == state["branch"]
                 ):
                     self._restore_pr_draft(state, info["number"], fields)
                 raise DeliveryError("GitHub returned an invalid pre-review draft PR")
@@ -2164,33 +2120,6 @@ class DeliveryCoordinator:
             raise DeliveryError("required PR CI is not green at the merge boundary")
         state["ci_checks"] = _ci_summaries(checks)
 
-    def _failed_ci_logs(self, checks: Any) -> str:
-        if not isinstance(checks, list):
-            return ""
-        pending = {
-            None, "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "REQUESTED", "WAITING",
-        }
-        passing = {None, "SUCCESS", "NEUTRAL", "SKIPPED"}
-        run_ids = sorted({
-            item.get("run_id")
-            for item in checks
-            if isinstance(item, dict)
-            and (item.get("conclusion") or item.get("state") or item.get("status"))
-            not in pending | passing
-            and isinstance(item.get("run_id"), int)
-        })
-        diagnostics = []
-        for run_id in run_ids:
-            command = [
-                self.profile["gh_bin"], "run", "view", str(run_id),
-                "--repo", self.profile["repo"], "--log-failed",
-            ]
-            result = self._run_bounded(command)
-            raw = _command_failure(result, command) if result.returncode else result.stdout
-            if raw and raw.strip():
-                diagnostics.append(f"workflow run {run_id}:\n{raw.strip()}")
-        return _bounded_diagnostic("\n\n".join(diagnostics), "") if diagnostics else ""
-
     def _record_ci_failure(
         self,
         state: dict[str, Any],
@@ -2201,11 +2130,7 @@ class DeliveryCoordinator:
     ) -> None:
         summaries = _ci_summaries(error.checks)
         details = ", ".join(f"{item['name']}={item['outcome']}" for item in summaries)
-        logs = self._failed_ci_logs(error.checks)
-        finding = _bounded_diagnostic(
-            f"{error}: {details or 'invalid check rollup'}"
-            + (f"\n{logs}" if logs else "")
-        )
+        finding = _bounded_diagnostic(f"{error}: {details or 'invalid check rollup'}")
         self._quality_failures(state)
         state["pre_review_ci_checks" if pre_review else "ci_checks"] = summaries
         state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
