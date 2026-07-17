@@ -1668,6 +1668,14 @@ class DeliveryCoordinator:
                 or info.get("baseRefName") != self.profile["default_branch"]
                 or _pr_head_oid(info) != state["candidate_sha"]
             ):
+                if (
+                    isinstance(info, dict)
+                    and isinstance(info.get("number"), int)
+                    and info.get("state") == "OPEN"
+                    and info.get("isDraft") is False
+                    and info.get("headRefName") == state["branch"]
+                ):
+                    self._restore_pr_draft(state, info["number"], fields)
                 raise DeliveryError("GitHub returned an invalid pre-review draft PR")
             if info["isDraft"] is not True:
                 self._restore_pr_draft(state, info["number"], fields)
@@ -2321,8 +2329,6 @@ class DeliveryCoordinator:
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
         self._assert_pr_head(state)
-        self._wait_ci(state)
-        self._validate_review(state)
         info = json.loads(self._run(
             [
                 self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
@@ -2331,6 +2337,8 @@ class DeliveryCoordinator:
             ]
         ).stdout)
         if info.get("state") != "MERGED":
+            self._wait_ci(state)
+            self._validate_review(state)
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
             )

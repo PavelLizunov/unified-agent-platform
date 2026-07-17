@@ -2298,6 +2298,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             ("mid-pr", [candidate, replacement, replacement_draft]),
             ("resumed", [replacement, replacement_draft]),
             ("resumed-unverifiable", [[], replacement_draft]),
+            ("initial-unbound", [replacement, replacement_draft]),
         ):
             with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
@@ -2326,13 +2327,22 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "pr_head_sha": "candidate-sha",
                     "pr_base_branch": approved["default_branch"],
                 }
-                with self.assertRaisesRegex(coordinator.DeliveryError, "PR identity"):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "PR identity|pre-review draft PR"
+                ):
                     if checkpoint == "mid-pr":
                         with (
                             mock.patch.object(instance, "_assert_claim"),
                             mock.patch.object(instance, "_validate_review"),
                         ):
                             instance._pr(state, {"author": root})
+                    elif checkpoint == "initial-unbound":
+                        state.pop("pr_number")
+                        state.pop("pr_head_sha")
+                        state.pop("pr_base_branch")
+                        state["candidate_push_sha"] = state["candidate_sha"]
+                        with mock.patch.object(instance, "_assert_candidate_branch"):
+                            instance._ensure_candidate_pr(state, {"author": root})
                     else:
                         instance._assert_pr_head(state)
                 self.assertEqual(1, sum(
@@ -2778,6 +2788,53 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(coordinator.DeliveryError, "merged state"):
                     instance._merge(state)
+
+    def test_lost_merge_response_recovers_without_rechecking_ci(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+
+            def runner(command, **_kwargs):
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps({
+                        "number": 39,
+                        "state": "MERGED",
+                        "isDraft": False,
+                        "mergedAt": "2026-07-17T00:00:00Z",
+                        "mergeCommit": {"oid": "merge-sha"},
+                        "url": "https://example.invalid/pr/39",
+                        "headRefName": "codex/fix",
+                        "commits": [{"oid": "candidate-sha"}],
+                        "baseRefName": approved["default_branch"],
+                    })
+                elif command[0] == "git" and "ls-remote" in command:
+                    output = ""
+                elif command[0] == "git":
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {
+                "candidate_sha": "candidate-sha", "pr_number": 39,
+                "branch": "codex/fix", "pr_base_branch": approved["default_branch"],
+            }
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(
+                    instance, "_wait_ci", side_effect=AssertionError("CI rechecked")
+                ),
+                mock.patch.object(
+                    instance, "_validate_review", side_effect=AssertionError("review rechecked")
+                ),
+            ):
+                instance._merge(state)
+
+            self.assertEqual("merge-sha", state["merge_sha"])
 
     def test_merge_uses_exact_head_api_and_deletes_only_that_branch(self):
         with tempfile.TemporaryDirectory() as directory:
