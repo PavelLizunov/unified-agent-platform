@@ -2331,13 +2331,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "phase": "complete",
                 "root_task_id": "task-1",
             })
-            retained_at = time.time() - 60
+            retained_at = (
+                time.time() - coordinator._COMPLETED_STATE_RETENTION_SECONDS - 1
+            )
             os.utime(paths["state"], (retained_at, retained_at))
 
             self.assertIsNone(instance.tick())
 
             state = coordinator.mission_adapter._read_json(paths["state"])
             self.assertTrue(state["task_archived"])
+            self.assertGreater(state["task_archived_at"], retained_at)
             self.assertTrue(state["kanban_gc_ran"])
             self.assertEqual((1, 1), (backend.archives, backend.gcs))
             self.assertEqual(retained_at, paths["state"].stat().st_mtime)

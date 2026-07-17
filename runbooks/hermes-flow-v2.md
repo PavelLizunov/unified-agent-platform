@@ -21,7 +21,8 @@ checkpoint and binding restoration. After Central terminal convergence, the coor
 archives the native Kanban task. It runs `hermes kanban gc` (30-day task-event/log defaults) only when the board has no
 nonterminal task, so the board-wide log sweep cannot remove a long-running worker log; the profile timer retries a
 deferred GC. A separate successful idle-board GC at or after the 30-day deadline is required before its retry state
-can be removed; completion-time GC does not satisfy that checkpoint. Delivery state remains mode `0600` under a `0700` root for 30 days so evidence can be audited, then the
+can be removed; completion-time GC does not satisfy that checkpoint. A legacy task first archived by migration keeps
+the retry state until that new archive event reaches the same bounded deadline. Delivery state remains mode `0600` under a `0700` root for 30 days so evidence can be audited, then the
 owning profile timer removes it through an atomic rename and crash-retried recursive deletion. Verified worktrees and local branches are removed before Central completion; no
 separate GC daemon exists.
 

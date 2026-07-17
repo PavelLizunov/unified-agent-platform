@@ -2076,11 +2076,12 @@ class DeliveryCoordinator:
             return
         self.backend.archive(state["root_task_id"])
         state["task_archived"] = True
+        state["task_archived_at"] = time.time()
         state["kanban_gc_ran"] = self.backend.gc()
         self._save(paths, state)
 
     def _prune_completed_states(self) -> None:
-        cutoff = time.time() - _COMPLETED_STATE_RETENTION_SECONDS
+        now = time.time()
         # Rename before recursive deletion so a crash after delivery-state.json
         # disappears still leaves a directory that the next tick can discover.
         for pending in self.state_root.glob(".prune-mission-*"):
@@ -2103,6 +2104,7 @@ class DeliveryCoordinator:
                 if state.get("task_archived") is not True:
                     self.backend.archive(state["root_task_id"])
                     state["task_archived"] = True
+                    state["task_archived_at"] = now
                     state.setdefault("kanban_gc_ran", False)
                     mission_adapter._write_json(
                         path,
@@ -2121,7 +2123,13 @@ class DeliveryCoordinator:
                         private_parent=True,
                         retained_mtime=retained_at,
                     )
-                if retained_at >= cutoff:
+                archived_at = state.get("task_archived_at", retained_at)
+                if (
+                    isinstance(archived_at, bool)
+                    or not isinstance(archived_at, (int, float))
+                ):
+                    raise DeliveryError("completed state has invalid task archive time")
+                if now < max(retained_at, float(archived_at)) + _COMPLETED_STATE_RETENTION_SECONDS:
                     continue
                 if state.get("kanban_retention_gc_ran") is not True:
                     if gc_now is None:
