@@ -2426,15 +2426,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "phase": "complete",
                 "root_task_id": "task-1",
                 "task_archived": True,
-                "task_archived_at": 2000.0,
+                "task_archived_at": 1000.0,
                 "kanban_gc_ran": False,
             })
             os.utime(paths["state"], (1900, 1900))
             with mock.patch.object(coordinator.time, "time", return_value=1500.0):
                 with self.assertRaisesRegex(
-                    coordinator.DeliveryError, "invalid task archive time"
+                    coordinator.DeliveryError, "invalid retention clock"
                 ):
                     instance._prune_completed_states()
+            self.assertEqual(0, backend.gcs)
             with mock.patch.object(coordinator.time, "time", return_value=2001.0):
                 instance._prune_completed_states()
             self.assertTrue(paths["state"].exists())

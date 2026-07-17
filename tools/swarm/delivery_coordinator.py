@@ -2127,12 +2127,16 @@ class DeliveryCoordinator:
                 archived_at = state.get("task_archived_at", retained_at)
                 current_time = time.time()
                 if (
+                    not math.isfinite(current_time)
+                    or current_time <= 0
+                    or retained_at > current_time
+                ):
+                    raise DeliveryError("completed state has invalid retention clock")
+                if (
                     isinstance(archived_at, bool)
                     or not isinstance(archived_at, (int, float))
                     or not math.isfinite(float(archived_at))
                     or float(archived_at) <= 0
-                    or not math.isfinite(current_time)
-                    or current_time <= 0
                     or float(archived_at) > current_time
                 ):
                     raise DeliveryError("completed state has invalid task archive time")
