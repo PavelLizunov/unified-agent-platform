@@ -274,7 +274,7 @@ def _bounded_diagnostic(value: str, default: str = "") -> str:
 def _sanitize_findings(value: Any) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise DeliveryError("delivery diagnostics must be a string array")
-    return [_bounded_diagnostic(item) for item in value[:16] if item.strip()]
+    return [_bounded_diagnostic(item) for item in value if item.strip()][:16]
 
 
 def _command_failure(result: subprocess.CompletedProcess[str], command: list[str]) -> str:
@@ -1513,12 +1513,17 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("durable PR identity is invalid")
         fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
-        info = json.loads(self._run([
+        result = self._run([
             self.profile["gh_bin"], "pr", "view", str(bound),
             "--repo", self.profile["repo"], "--json", fields,
-        ]).stdout)
+        ], check=False)
+        try:
+            info = json.loads(result.stdout) if not result.returncode else {}
+        except (json.JSONDecodeError, TypeError):
+            info = {}
         if (
-            info.get("number") != bound
+            not isinstance(info, dict)
+            or info.get("number") != bound
             or not isinstance(info.get("url"), str)
             or info.get("state") != "OPEN"
             or not isinstance(info.get("isDraft"), bool)
@@ -1929,6 +1934,7 @@ class DeliveryCoordinator:
         )
         if view.returncode:
             if bound is not None:
+                self._restore_pr_draft(state, bound, fields)
                 raise DeliveryError("durable PR could not be loaded for repair")
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -1947,9 +1953,13 @@ class DeliveryCoordinator:
                     "--repo", self.profile["repo"], "--json", fields,
                 ]
             )
-        info = json.loads(view.stdout)
+        try:
+            info = json.loads(view.stdout)
+        except (json.JSONDecodeError, TypeError):
+            info = {}
         if (
-            not isinstance(info.get("number"), int)
+            not isinstance(info, dict)
+            or not isinstance(info.get("number"), int)
             or not isinstance(info.get("url"), str)
             or info.get("state") != "OPEN"
             or not isinstance(info.get("isDraft"), bool)
@@ -1958,6 +1968,8 @@ class DeliveryCoordinator:
             or info.get("baseRefName") != self.profile["default_branch"]
             or (bound is not None and info.get("number") != bound)
         ):
+            if bound is not None:
+                self._restore_pr_draft(state, bound, fields)
             raise DeliveryError("GitHub returned invalid PR identity")
         if info["isDraft"]:
             ready_number = info["number"]
@@ -2256,19 +2268,34 @@ class DeliveryCoordinator:
         return False
 
     def _assert_pr_head(self, state: dict[str, Any]) -> None:
-        info = json.loads(self._run(
-            [
-                self.profile["gh_bin"], "pr", "view", str(state["pr_number"]),
-                "--repo", self.profile["repo"], "--json", "headRefName,commits,baseRefName",
-            ]
-        ).stdout)
-        if (
-            info.get("headRefName") != state["branch"]
-            or _pr_head_oid(info) != state["candidate_sha"]
-            or info.get("baseRefName") != state.get("pr_base_branch")
-            or info.get("baseRefName") != self.profile["default_branch"]
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
+        bound = state.get("pr_number")
+        result = self._run([
+            self.profile["gh_bin"], "pr", "view", str(bound),
+            "--repo", self.profile["repo"], "--json", fields,
+        ], check=False)
+        try:
+            info = json.loads(result.stdout) if not result.returncode else {}
+        except (json.JSONDecodeError, TypeError):
+            info = {}
+        exact = (
+            isinstance(info, dict)
+            and info.get("number") == bound
+            and isinstance(info.get("url"), str)
+            and info.get("headRefName") == state["branch"]
+            and _pr_head_oid(info) == state["candidate_sha"]
+            and info.get("baseRefName") == state.get("pr_base_branch")
+            and info.get("baseRefName") == self.profile["default_branch"]
+        )
+        if exact and (
+            info.get("state") == "MERGED"
+            or (info.get("state") == "OPEN" and info.get("isDraft") is False)
         ):
-            raise DeliveryError("PR identity no longer matches the reviewed candidate")
+            return
+        if isinstance(bound, int) and not isinstance(bound, bool):
+            if not info or (info.get("state") == "OPEN" and info.get("isDraft") is False):
+                self._restore_pr_draft(state, bound, fields)
+        raise DeliveryError("PR identity no longer matches the reviewed candidate")
 
     def _validate_review(self, state: dict[str, Any]) -> None:
         flow_contract.validate_review(

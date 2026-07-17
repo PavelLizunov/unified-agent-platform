@@ -833,7 +833,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             runner.assert_not_called()
 
     def test_reviewer_verdict_requires_consistent_findings(self):
-        for verdict, findings in (("accept", ["fix this"]), ("reject", [])):
+        for verdict, findings in (
+            ("accept", ["fix this"]),
+            ("accept", [""] * 16 + ["fix beyond the retained prefix"]),
+            ("reject", []),
+        ):
             with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
                 approved = profile(root)
@@ -2259,6 +2263,84 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 instance._pr(state, {"author": root})
             self.assertTrue(draft)
 
+    def test_ready_replacement_is_redrafted_at_every_delivery_checkpoint(self):
+        candidate = {
+            "number": 39,
+            "url": "https://example.invalid/pr/39",
+            "state": "OPEN",
+            "isDraft": True,
+            "headRefName": "codex/fix",
+            "headRefOid": "candidate-sha",
+            "baseRefName": "main",
+        }
+        replacement = {**candidate, "isDraft": False, "headRefOid": "unreviewed-race"}
+        replacement_draft = {**replacement, "isDraft": True}
+        for checkpoint, views in (
+            ("mid-pr", [candidate, replacement, replacement_draft]),
+            ("resumed", [replacement, replacement_draft]),
+        ):
+            with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+                commands = []
+                responses = iter(views)
+
+                def runner(command, **_kwargs):
+                    commands.append(command)
+                    if command[0:3] == ["gh", "pr", "view"]:
+                        return subprocess.CompletedProcess(
+                            command, 0, stdout=json.dumps(next(responses)), stderr=""
+                        )
+                    if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                    raise AssertionError(command)
+
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+                )
+                state = {
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                    "pr_number": 39,
+                    "pr_head_sha": "candidate-sha",
+                    "pr_base_branch": approved["default_branch"],
+                }
+                with self.assertRaisesRegex(coordinator.DeliveryError, "PR identity"):
+                    if checkpoint == "mid-pr":
+                        with (
+                            mock.patch.object(instance, "_assert_claim"),
+                            mock.patch.object(instance, "_validate_review"),
+                        ):
+                            instance._pr(state, {"author": root})
+                    else:
+                        instance._assert_pr_head(state)
+                self.assertEqual(1, sum(
+                    command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
+                    for command in commands
+                ))
+
+        merged = {**candidate, "state": "MERGED", "isDraft": False}
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=json.dumps(merged), stderr=""
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            instance._assert_pr_head({
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_base_branch": approved["default_branch"],
+            })
+
     def test_repair_cycle_refuses_pr_identity_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -2560,8 +2642,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             def runner(command, **_kwargs):
                 commands.append(command)
-                if "headRefName,commits,baseRefName" in command:
+                if "number,url,state,isDraft,headRefName,commits,baseRefName" in command:
                     output = json.dumps({
+                        "number": 39,
+                        "url": "https://example.invalid/pr/39",
+                        "state": "OPEN",
+                        "isDraft": False,
                         "headRefName": "codex/fix",
                         "commits": [{"oid": "candidate-sha"}],
                         "baseRefName": approved["default_branch"],
