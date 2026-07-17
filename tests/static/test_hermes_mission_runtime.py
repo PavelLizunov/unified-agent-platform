@@ -1147,6 +1147,67 @@ def test_terminal_retention_preserves_active_repair_chain() -> None:
         assert store.projection(child)["status"] == "active"
 
 
+def test_terminal_retention_preserves_parent_until_repair_notification() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            parent = "mission-terminal-parent"
+            child = "mission-terminal-child"
+            store.accept("Deliver", mission_id=parent)
+            store.bind(parent, "telegram", "42")
+            store.accept("Repair", mission_id=child, parent_mission_id=parent)
+            store.append_central(
+                parent,
+                {
+                    "schema_version": 1,
+                    "mission_id": parent,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": "central:cancel:parent"},
+                    "payload": {"reason": "parent stopped"},
+                },
+            )
+            for number in range(101):
+                mission_id = f"mission-retention-fill-{number:03d}"
+                store.accept("Fill retention", mission_id=mission_id)
+                store.append_central(
+                    mission_id,
+                    {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": "mission.cancelled",
+                        "source": "central-hermes",
+                        "correlation": {
+                            "producer_event_id": f"central:cancel:fill:{number}"
+                        },
+                        "payload": {"reason": "fill retention"},
+                    },
+                )
+            event, created = store.append_central(
+                child,
+                {
+                    "schema_version": 1,
+                    "mission_id": child,
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {"producer_event_id": "central:cancel:child"},
+                    "payload": {"reason": "child stopped"},
+                },
+            )
+            assert created
+            assert store.projection(parent)["status"] == "cancelled"
+
+            async def send(_subscription: dict, _text: str) -> None:
+                return None
+
+            assert await missions.notify_subscribers(store, event, send) == 1
+            store.restore_parent_after_terminal_notification(child)
+            assert store.bound_mission("telegram", "42") == parent
+            assert store.projection(parent)["status"] == "cancelled"
+
+    asyncio.run(scenario())
+
+
 def test_existing_subscription_table_gets_notification_lease_columns() -> None:
     with tempfile.TemporaryDirectory() as temp:
         database = Path(temp) / "missions.sqlite3"

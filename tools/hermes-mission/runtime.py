@@ -634,6 +634,11 @@ class MissionStore:
             }
             for mission_id, view in views.items():
                 parent = view.get("parent_mission_id")
+                # A terminal repair keeps the Telegram binding until its terminal
+                # notification is checkpointed.  Retain the parent needed by the
+                # subsequent atomic binding restore throughout that handoff.
+                if isinstance(parent, str) and mission_id in protected:
+                    protected.add(parent)
                 if mission_id in active and isinstance(parent, str):
                     protected.add(parent)
                 if isinstance(parent, str) and parent in active:
