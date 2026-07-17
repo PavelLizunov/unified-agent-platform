@@ -24,18 +24,22 @@ def _safe_error(value: object) -> str:
     text = str(value).replace("\x00", "?")
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
     text = re.sub(
-        r"(?i)\b(?:authorization|proxy-authorization)\s*[:=]\s*[^\r\n]+",
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:authorization|proxy-authorization)(?:"|')?'''
+        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)''',
         "[REDACTED]",
         text,
     )
     text = re.sub(
-        r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+",
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:set-cookie|cookie)(?:"|')?'''
+        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)''',
         "[REDACTED]",
         text,
     )
     text = re.sub(
-        r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
-        r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)",
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?[A-Z0-9_.-]*'''
+        r'''(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)'''
+        r'''[A-Z0-9_.-]*(?:"|')?\s*[:=]\s*'''
+        r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)''',
         "[REDACTED]",
         text,
     )

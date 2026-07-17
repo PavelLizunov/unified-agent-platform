@@ -92,11 +92,19 @@ _MODEL_INVOCATION_FIELDS = {
     "status", "attempt_id",
 }
 _DIAGNOSTIC_REDACTIONS = (
-    re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*[:=]\s*[^\r\n]+"),
-    re.compile(r"(?i)\b(?:set-cookie|cookie)\s*[:=]\s*[^\r\n]+"),
     re.compile(
-        r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
-        r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:authorization|proxy-authorization)(?:"|')?'''
+        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)'''
+    ),
+    re.compile(
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:set-cookie|cookie)(?:"|')?'''
+        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)'''
+    ),
+    re.compile(
+        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?[A-Z0-9_.-]*'''
+        r'''(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)'''
+        r'''[A-Z0-9_.-]*(?:"|')?\s*[:=]\s*'''
+        r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)'''
     ),
     re.compile(r"(?i)://[^/\s@]+@"),
     re.compile(r"(?i)\bbearer\s+[^\s,;]+"),
@@ -2271,6 +2279,7 @@ class DeliveryCoordinator:
                 self._record_capacity_failure(
                     state, paths, role="author", failure=failure
                 )
+                self._park_capacity_claim(state, paths)
                 return False
             self._clear_capacity_failure(state, paths, role="author")
             if raw_last.is_file():
@@ -2630,6 +2639,7 @@ class DeliveryCoordinator:
                 self._record_capacity_failure(
                     state, paths, role="reviewer", failure=failure
                 )
+                self._park_capacity_claim(state, paths)
                 return None
             self._clear_capacity_failure(state, paths, role="reviewer")
             response = mission_adapter._read_json(raw_last)
