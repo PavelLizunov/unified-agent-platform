@@ -12,8 +12,8 @@
 
 - **3 always-on Linux VMs** on local Proxmox form the operational core: a k3s server, a k3s agent,
   and an operator VM. **No GPU on any of them.**
-- **2 GPU/personal machines** (Windows desktop with an RTX 5060 Ti, Mac mini) are on the tailnet but
-  are **NOT always-on** and are **NOT** k3s/etcd members — they are future external agent-workers.
+- **2 GPU/personal machines** (Windows desktop with an RTX 5060 Ti, always-on Mac mini) are on the tailnet
+  but are **NOT** k3s/etcd members — they are external agent-worker/fallback hosts, not the current brain.
 - **NOT HA; HA/VPS deferred indefinitely for budget.** One k3s server/control-plane + one agent = a single
   etcd member. The current strategy is one control-plane, R2 backups, and the verified 2026-07-12 restore drill.
   A 3rd independent k3s server remains a future HA prerequisite, not an active owner action. See
@@ -24,8 +24,8 @@
   `codex_app_server`; build-1 delivery uses the automatic OpenAI-only Luna/Sol/Terra policy. subfleet/LiteLLM and the
   bespoke `hermes.py` remain installed separate/legacy capacities, not automatic coding fallbacks.
 - **The harness is now LIVE:** the external **NousResearch hermes-agent** is the vibe-coding harness —
-  phone control via Telegram, coding via `claude -p` + `codex exec` skills. The bespoke Hermes is parked
-  as a fallback.
+  control through Telegram/Workspace and coding through the build-1 Codex Luna/Sol/Terra routes. Claude
+  remains a separately gated legacy capability, not an automatic route. The bespoke Hermes is parked.
 - **Brain today (2026-07-11 onward):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth (#119).
   The `local-models-router` on `uap-ops-1` remains the manual fallback over `qwen-35b` (RTX desktop) and
   `ornith-9b` (always-on Mac). See [runbooks/hermes-agent-codex-brain.md](../runbooks/hermes-agent-codex-brain.md)
@@ -44,15 +44,15 @@ shown intermittent resets (see [CLAUDE.md](../CLAUDE.md)).
 | `uap-home-2` | `100.94.228.67` | Debian 12 | 6 vCPU / 8 GB / no GPU | k3s **agent** (worker only); runs the **hermes-agent** brain pod + subfleet bridge (resized 6c/8G in #86/#87) | **Yes** |
 | `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** fallback endpoint `:8090` | **Yes** |
 | `uap-build-1` | `100.85.56.31` | Ubuntu 22.04 | 8 vCPU / 16 GB / no GPU | always-on build/dev VM — **not** a k3s node, **not** in GitOps; runs the knowledge system, the Hermes Kanban swarm, ai-search, and the hermes-workspace webcenter (`:3000`) — all systemd | **Yes** |
-| `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; serves **`qwen-35b`** (llama.cpp) — the **primary local brain** | **No** |
-| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | serves **`ornith-9b`** (mlx) — the local **coder / fallback brain** | **Yes** |
+| `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; can serve the manual **`qwen-35b`** fallback (llama.cpp) | **No** |
+| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | can serve the manual **`ornith-9b`** fallback (mlx) | **Yes** |
 
 Notes:
 - The k3s nodes (`uap-home-1`, `uap-home-2`) and `uap-ops-1` have **no GPU**. The only **discrete/CUDA**
-  GPU in the fleet is the RTX on the **not-always-on** Windows desktop — so `qwen-35b` (the primary brain)
-  is only available when the desktop is on. The **always-on Mac mini** (Apple GPU) serves `ornith-9b`, the
-  fallback brain / local coder that keeps working when the desktop is off. This brain topology is served
-  through the `local-models-router` on `uap-ops-1` (see §3 and `runbooks/local-models-router.md`).
+  GPU in the fleet is the RTX on the **not-always-on** Windows desktop, so the manual `qwen-35b` fallback
+  is available only while that desktop is on. The **always-on Mac mini** (Apple GPU) serves the manual
+  `ornith-9b` fallback. Neither local route is the current brain; Codex Luna is current, and switching to
+  the `local-models-router` on `uap-ops-1` is explicit (see §3 and `runbooks/local-models-router.md`).
 - `uap-ops-1` runs on the **same physical Proxmox node** as `uap-home-1`, so it shares a failure
   domain with the control plane (see Track B in [next-steps.md](next-steps.md)).
 - Windows-to-`uap-ops-1` tailnet SSH has intermittently timed out after enrollment; workstation→ops
