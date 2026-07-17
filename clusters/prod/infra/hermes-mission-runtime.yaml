@@ -23,6 +23,7 @@ data:
         "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
         "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
         "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
+        "hermes_cli/main.py": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
         "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
         "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
     }
@@ -30,6 +31,7 @@ data:
         "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
         "hermes_cli/kanban.py": "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
         "hermes_cli/kanban_db.py": "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
+        "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
         "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
     }
@@ -342,6 +344,23 @@ data:
                 payload["reason"] = reason
             _append_event(conn, task_id, "unblocked", payload or None)''',
                 "atomic unblock audit event",
+            )
+        if relative == "hermes_cli/main.py":
+            text = replace(
+                text,
+                '''    if hasattr(args, "func"):
+            args.func(args)''',
+                '''    if hasattr(args, "func"):
+            return args.func(args)''',
+                "subcommand exit propagation",
+            )
+            return replace(
+                text,
+                '''if __name__ == "__main__":
+        main()''',
+                '''if __name__ == "__main__":
+        raise SystemExit(main())''',
+                "module exit propagation",
             )
         if relative == "gateway/run.py":
             return replace(

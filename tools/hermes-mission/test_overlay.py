@@ -53,13 +53,14 @@ def main() -> None:
         second = run(clone)
         assert second.returncode == 0 and "overlay already applied" in second.stdout, second.stderr
         checked = run(clone, "--check")
-        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 6, checked.stderr
+        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 7, checked.stderr
 
         commands = (clone / "hermes_cli/commands.py").read_text(encoding="utf-8")
         gateway = (clone / "gateway/run.py").read_text(encoding="utf-8")
         api = (clone / "gateway/platforms/api_server.py").read_text(encoding="utf-8")
         kanban_cli = (clone / "hermes_cli/kanban.py").read_text(encoding="utf-8")
         kanban = (clone / "hermes_cli/kanban_db.py").read_text(encoding="utf-8")
+        hermes_main = (clone / "hermes_cli/main.py").read_text(encoding="utf-8")
         assert 'CommandDef("mission"' in commands
         assert 'if canonical == "mission"' in gateway
         assert api.count('self._app.router.add_') >= 4
@@ -99,6 +100,8 @@ def main() -> None:
         assert '"--require-idle"' in kanban_cli
         assert "GC deferred: board is not idle" in kanban_cli
         assert "with kb.write_txn(conn):" in kanban_cli
+        assert 'return args.func(args)' in hermes_main
+        assert 'raise SystemExit(main())' in hermes_main
 
         subprocess.run(
             [
@@ -109,6 +112,7 @@ def main() -> None:
                 str(clone / "hermes_cli/commands.py"),
                 str(clone / "hermes_cli/kanban.py"),
                 str(clone / "hermes_cli/kanban_db.py"),
+                str(clone / "hermes_cli/main.py"),
                 str(clone / "gateway/run.py"),
                 str(clone / "gateway/platforms/api_server.py"),
             ],
@@ -388,12 +392,36 @@ def main() -> None:
         race_env["HERMES_HOME"] = str(pathlib.Path(temp) / "hermes-home")
         race_env["HERMES_KANBAN_DB"] = str(pathlib.Path(temp) / "atomic-kanban.db")
         subprocess.run([sys.executable, "-c", race], env=race_env, check=True)
+        hermes_python = (
+            source / ".venv/bin/python"
+            if isinstance(source, pathlib.Path)
+            else None
+        )
+        if hermes_python is not None and hermes_python.is_file():
+            executable_gc = subprocess.run(
+                [
+                    str(hermes_python),
+                    "-c",
+                    "from hermes_cli.main import main; raise SystemExit(main())",
+                    "kanban",
+                    "--board",
+                    "default",
+                    "gc",
+                    "--require-idle",
+                ],
+                env=race_env,
+                text=True,
+                capture_output=True,
+            )
+            assert executable_gc.returncode == 3, executable_gc.stderr
+            assert executable_gc.stdout.strip() == "GC deferred: board is not idle"
 
         image_root = pathlib.Path(temp) / "image-root"
         for relative in (
             "hermes_cli/commands.py",
             "hermes_cli/kanban.py",
             "hermes_cli/kanban_db.py",
+            "hermes_cli/main.py",
             "gateway/run.py",
             "gateway/platforms/api_server.py",
         ):
@@ -405,7 +433,7 @@ def main() -> None:
         image_apply = run(image_root, "--source-commit", COMMIT)
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
-        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 6
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 7
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")

@@ -161,7 +161,12 @@ class MissionAdapterTests(unittest.TestCase):
                     stdout=json.dumps({"task": {"id": "task-1", "status": next(statuses)}}),
                     stderr="",
                 )
-            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="GC complete: 0 workspace(s), 0 event row(s), 0 log file(s) removed\n",
+                stderr="",
+            )
 
         backend = adapter.HermesKanbanBackend("hermes", "default", runner)
         self.assertEqual("archived", backend.archive("task-1")["task"]["status"])
@@ -174,13 +179,29 @@ class MissionAdapterTests(unittest.TestCase):
         def active_runner(command):
             calls.append(command)
             return subprocess.CompletedProcess(
-                command, 3, stdout="GC deferred: board is not idle\n", stderr=""
+                command, 0, stdout="GC deferred: board is not idle\n", stderr=""
             )
 
         self.assertFalse(adapter.HermesKanbanBackend(
             "hermes", "default", active_runner
         ).gc())
         self.assertEqual(2, sum("gc" in command for command in calls))
+
+        def invalid_runner(command):
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        with self.assertRaisesRegex(adapter.AdapterError, "invalid GC result"):
+            adapter.HermesKanbanBackend(
+                "hermes", "default", invalid_runner
+            ).gc()
+
+        def failed_runner(command):
+            return subprocess.CompletedProcess(
+                command, 1, stdout="GC deferred: board is not idle\n", stderr="failed"
+            )
+
+        with self.assertRaisesRegex(adapter.AdapterError, "failed"):
+            adapter.HermesKanbanBackend("hermes", "default", failed_runner).gc()
 
     def test_restart_replay_converges_with_correlated_delivery_events(self):
         backend = FakeKanban()

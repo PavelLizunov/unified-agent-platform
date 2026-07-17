@@ -65,6 +65,7 @@ _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
+_FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
@@ -2085,9 +2086,10 @@ class DeliveryCoordinator:
         if (
             not math.isfinite(archived_at)
             or archived_at <= 0
-            or archived_at < retained_at
+            or retained_at - archived_at > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
         ):
             raise DeliveryError("cannot checkpoint the Kanban task archive clock")
+        archived_at = max(archived_at, retained_at)
         state["task_archived_at"] = archived_at
         state["kanban_gc_ran"] = self.backend.gc()
         self._save(paths, state)
@@ -2101,10 +2103,10 @@ class DeliveryCoordinator:
             or retained_at <= 0
             or not math.isfinite(current_time)
             or current_time <= 0
-            or retained_at > current_time
+            or retained_at - current_time > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
         ):
             raise DeliveryError("completed state has invalid retention clock")
-        return retained_at, current_time
+        return retained_at, max(current_time, retained_at)
 
     @staticmethod
     def _task_archive_time(
@@ -2148,9 +2150,11 @@ class DeliveryCoordinator:
                     if (
                         not math.isfinite(archived_at)
                         or archived_at <= 0
-                        or archived_at < retained_at
+                        or retained_at - archived_at
+                        > _FILESYSTEM_CLOCK_TOLERANCE_SECONDS
                     ):
                         raise DeliveryError("cannot checkpoint the Kanban task archive clock")
+                    archived_at = max(archived_at, retained_at)
                     state["task_archived"] = True
                     state["task_archived_at"] = archived_at
                     state.setdefault("kanban_gc_ran", False)

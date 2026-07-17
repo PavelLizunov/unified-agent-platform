@@ -2345,6 +2345,29 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual((0, 0), (backend.archives, backend.gcs))
             self.assertEqual(2001.0, paths["state"].stat().st_mtime)
 
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "task_completed",
+                "root_task_id": "task-1",
+            }
+            instance._save(paths, state)
+            os.utime(paths["state"], (2000.001, 2000.001))
+            with mock.patch.object(
+                coordinator.time, "time", side_effect=(2000.0, 2000.0)
+            ):
+                instance._archive_task(state, paths)
+            self.assertEqual((1, 1), (backend.archives, backend.gcs))
+            self.assertAlmostEqual(2000.001, state["task_archived_at"], places=6)
+
     def test_completed_state_is_private_and_pruned_after_thirty_days(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

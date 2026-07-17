@@ -379,13 +379,19 @@ class HermesKanbanBackend:
 
     def gc(self) -> bool:
         result = self.runner(self._command("gc", "--require-idle"))
-        if result.returncode == 3:
+        output = result.stdout.strip()
+        if (
+            output == "GC deferred: board is not idle"
+            and result.returncode in (0, 3)
+        ):
             return False
         if result.returncode:
             raise AdapterError(
                 (result.stderr or result.stdout).strip()
                 or "Hermes Kanban command failed"
             )
+        if not output.startswith("GC complete: "):
+            raise AdapterError("Hermes Kanban returned an invalid GC result")
         return True
 
     def edit_metadata(
