@@ -2347,6 +2347,94 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertIsNone(instance.tick())
             self.assertEqual((1, 1), (backend.archives, backend.gcs))
 
+    def test_legacy_archive_clock_is_sampled_after_native_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+            })
+            os.utime(paths["state"], (900, 900))
+            clock = mock.Mock(side_effect=(2000.0, 2001.0))
+            native_archive = backend.archive
+
+            def archive(task_id):
+                self.assertEqual(0, clock.call_count)
+                return native_archive(task_id)
+
+            backend.archive = archive
+            with mock.patch.object(coordinator.time, "time", clock):
+                instance._prune_completed_states()
+
+            state = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(2000.0, state["task_archived_at"])
+            self.assertTrue(paths["state"].exists())
+
+    def test_invalid_or_regressed_archive_clock_fails_closed(self):
+        invalid = (float("nan"), float("inf"), float("-inf"), -1.0, 0.0, 2001.0)
+        for archived_at in invalid:
+            with self.subTest(archived_at=archived_at), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                backend = FakeBackend()
+                instance = coordinator.DeliveryCoordinator(
+                    profile(root), FakeClient(), backend, root / "state"
+                )
+                paths = instance._paths("mission-a7-3")
+                instance._save(paths, {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "dispatch_profile": instance.profile["dispatch_profile"],
+                    "phase": "complete",
+                    "root_task_id": "task-1",
+                    "task_archived": True,
+                    "task_archived_at": archived_at,
+                    "kanban_gc_ran": True,
+                })
+                os.utime(paths["state"], (900, 900))
+                with mock.patch.object(coordinator.time, "time", return_value=2000.0):
+                    with self.assertRaisesRegex(
+                        coordinator.DeliveryError, "invalid task archive time"
+                    ):
+                        instance._prune_completed_states()
+                self.assertTrue(paths["state"].exists())
+                self.assertEqual(0, backend.gcs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": instance.profile["dispatch_profile"],
+                "phase": "complete",
+                "root_task_id": "task-1",
+                "task_archived": True,
+                "task_archived_at": 2000.0,
+                "kanban_gc_ran": True,
+            })
+            os.utime(paths["state"], (1900, 1900))
+            with mock.patch.object(coordinator.time, "time", return_value=1500.0):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "invalid task archive time"
+                ):
+                    instance._prune_completed_states()
+            with mock.patch.object(coordinator.time, "time", return_value=2001.0):
+                instance._prune_completed_states()
+            self.assertTrue(paths["state"].exists())
+            self.assertEqual(0, backend.gcs)
+
     def test_completed_state_deletion_resumes_after_state_file_is_gone(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
