@@ -118,7 +118,9 @@ in the repo worktree on build-1. Tool availability must be checked, not inferred
 **Core.** North star = **vibe-coding**: owner supplies ideas + infra and **does not review generated
 code** (ADR-022). Therefore **your own self-test IS the quality gate** — "done" = tests green + behaviour
 verified, not "looks right". Every change ships with its own test. Acceptance was run and **accepted at
-~98%** (must-pass gates all green: brain alive, work on build-1, push works, context < 100K tokens).
+~98%** on 2026-07-03; that point-in-time claim is superseded by the current gate-based A7 evidence. The configured
+fixed-profile autonomous canary passed, while generic repository intake and full cross-channel chat/session history
+remain explicit product gaps.
 **Pointer:** ADR-022 (`DECISIONS.md`); `runbooks/vibe-coding-acceptance.md`; `runbooks/validation-matrix.md`.
 
 ## 9. Secrets model (SOPS — reference by location, never print)
