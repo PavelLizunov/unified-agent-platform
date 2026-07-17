@@ -8,7 +8,7 @@
 > Context: [docs/infrastructure.md](infrastructure.md). Decisions: [DECISIONS.md](../DECISIONS.md).
 > This doc **references** [BUILD-PLAN.md](../BUILD-PLAN.md) and [REVIEW-CODEX.md](../REVIEW-CODEX.md)
 > rather than restating their detail. Product contract: [product-operating-contract.md](product-operating-contract.md).
-> Last reviewed: 2026-07-14.
+> Last reviewed: 2026-07-17.
 
 ---
 
@@ -213,7 +213,9 @@ not add an application service, workflow engine or mission database.
    [lifecycle rollout evidence](evidence/a7-lifecycle-rollout-2026-07-17.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
-mission without an exact configured profile remains unclaimed and visible rather than falling back.
+mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
+Telegram now share authoritative mission status and owner question/resume, but complete cross-channel chat/session
+history remains a separate Product Operating Contract gap.
 
 ---
 

@@ -296,8 +296,9 @@ LiteLLM/Hermes and the hermes-agent stack are now *running + verified* **and** *
 Phase A1 of the hermes-agent pilot: a **local, native-function-calling** brain on the RTX, no cloud egress.
 
 - **Host:** `desktop-m922ij2` (RTX 5060 Ti 16 GB, Blackwell sm_120, driver 610.62 / CUDA 13.3); **not always-on**, so
-  this brain is **opportunistic** (the live durable brain is now the ops-1 local-models-router — `qwen-35b`/`ornith-9b`;
-  see "Brain reality" in Phase).
+  this historical A1 brain is **opportunistic**. It is not the current durable brain: since 2026-07-11 Central Hermes
+  uses Codex Luna, while the ops-1 `qwen-35b`/`ornith-9b` router is only a manual fallback (see "Brain reality" in
+  Phase).
 - **Stack:** **Ollama 0.16.1** (native Windows) serving **`gpt-oss:20b`** — already on disk, so **no model download
   over the RU network**. Chosen over a fresh Hermes/Qwen pull for that reason; `--tool-call-parser hermes` (vLLM) /
   `--jinja` (llama.cpp) are the equivalents if a Hermes/Qwen GGUF is swapped in. **WSL2/Docker are NOT installed**, so

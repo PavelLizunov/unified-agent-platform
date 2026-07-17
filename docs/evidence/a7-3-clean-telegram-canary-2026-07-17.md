@@ -128,32 +128,34 @@ all five gates=passed
 ```
 
 The following is an explicitly labeled live read-only evidence block from the authenticated Central private API. It
-records the complete ordered event envelope without payloads or chat identity:
+records every canonical envelope field except payload and unused optional session/worker correlation, without chat
+identity. `run_id` was not present in these canonical event correlations; the native run `38` is evidenced separately
+by the task snapshot above.
 
 ```text
-seq  type               source           producer_event_id
-1    mission.accepted   central-hermes   -
-2    task.upsert        build1-flow      build1-flow:4ef836e1e1a9f9b2224b233f
-3    mission.stage      build1-flow      build1-flow:77008c2131334f2184dcea22
-4    task.upsert        build1-flow      build1-flow:efa55190f66127aedabfb5ee
-5    worker.upsert      build1-flow      build1-flow:61801ca2c00f901dc09f4084
-6    mission.stage      build1-flow      build1-flow:d461dd1529ce52e0d44e8188
-7    mission.stage      build1-flow      build1-flow:0e021058dcc0133b09960f6c
-8    mission.stage      build1-flow      build1-flow:8b6dacb4a2242ccb54424375
-9    mission.stage      build1-flow      build1-flow:a2c0b5b2d9f280ba5d5f9c2f
-10   task.upsert        build1-flow      build1-flow:87ce7ce683d811091c7016ea
-11   worker.upsert      build1-flow      build1-flow:710f5807ac70c8f000413d83
-12   change.upsert      build1-flow      build1-flow:fee8202234b519d61feb54b8
-13   change.upsert      build1-flow      build1-flow:19c3719625af5933333fffb4
-14   change.upsert      build1-flow      build1-flow:cfaa57f5a5eb7bd7eadbc9e0
-15   gate.upsert        build1-flow      build1-flow:91ddced74960d211fc155582
-16   gate.upsert        build1-flow      build1-flow:108a5f8c750d3a74f9bfb682
-17   gate.upsert        build1-flow      build1-flow:a5145177aab51d343909880b
-18   gate.upsert        build1-flow      build1-flow:4192d30b4abd042e1073c4d0
-19   delivery.upsert    build1-flow      build1-flow:978a95dc068d6b8469261f94
-20   delivery.upsert    build1-flow      build1-flow:445e520b6625c7855bed4f11
-21   gate.upsert        build1-flow      build1-flow:37df5ead53a477234af3da96
-22   mission.completed  central-hermes   central:auto-complete:v1
+seq | event_id                                      | occurred_at              | type              | source         | task_id    | run_id | producer_event_id
+1   | a7-clean-ledger-list-20260717-a0fc5a:1       | 2026-07-17T12:05:11.263Z | mission.accepted  | central-hermes | -          | -      | -
+2   | a7-clean-ledger-list-20260717-a0fc5a:2       | 2026-07-17T12:06:57.369Z | task.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:4ef836e1e1a9f9b2224b233f
+3   | a7-clean-ledger-list-20260717-a0fc5a:3       | 2026-07-17T12:06:58.391Z | mission.stage     | build1-flow    | t_1d60193c | -      | build1-flow:77008c2131334f2184dcea22
+4   | a7-clean-ledger-list-20260717-a0fc5a:4       | 2026-07-17T12:07:00.119Z | task.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:efa55190f66127aedabfb5ee
+5   | a7-clean-ledger-list-20260717-a0fc5a:5       | 2026-07-17T12:07:00.336Z | worker.upsert     | build1-flow    | t_1d60193c | -      | build1-flow:61801ca2c00f901dc09f4084
+6   | a7-clean-ledger-list-20260717-a0fc5a:6       | 2026-07-17T12:11:09.125Z | mission.stage     | build1-flow    | t_1d60193c | -      | build1-flow:d461dd1529ce52e0d44e8188
+7   | a7-clean-ledger-list-20260717-a0fc5a:7       | 2026-07-17T12:13:58.673Z | mission.stage     | build1-flow    | t_1d60193c | -      | build1-flow:0e021058dcc0133b09960f6c
+8   | a7-clean-ledger-list-20260717-a0fc5a:8       | 2026-07-17T12:14:03.417Z | mission.stage     | build1-flow    | t_1d60193c | -      | build1-flow:8b6dacb4a2242ccb54424375
+9   | a7-clean-ledger-list-20260717-a0fc5a:9       | 2026-07-17T12:14:22.321Z | mission.stage     | build1-flow    | t_1d60193c | -      | build1-flow:a2c0b5b2d9f280ba5d5f9c2f
+10  | a7-clean-ledger-list-20260717-a0fc5a:10      | 2026-07-17T12:14:28.359Z | task.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:87ce7ce683d811091c7016ea
+11  | a7-clean-ledger-list-20260717-a0fc5a:11      | 2026-07-17T12:14:28.572Z | worker.upsert     | build1-flow    | t_1d60193c | -      | build1-flow:710f5807ac70c8f000413d83
+12  | a7-clean-ledger-list-20260717-a0fc5a:12      | 2026-07-17T12:14:28.799Z | change.upsert     | build1-flow    | t_1d60193c | -      | build1-flow:fee8202234b519d61feb54b8
+13  | a7-clean-ledger-list-20260717-a0fc5a:13      | 2026-07-17T12:14:29.016Z | change.upsert     | build1-flow    | t_1d60193c | -      | build1-flow:19c3719625af5933333fffb4
+14  | a7-clean-ledger-list-20260717-a0fc5a:14      | 2026-07-17T12:14:29.252Z | change.upsert     | build1-flow    | t_1d60193c | -      | build1-flow:cfaa57f5a5eb7bd7eadbc9e0
+15  | a7-clean-ledger-list-20260717-a0fc5a:15      | 2026-07-17T12:14:29.465Z | gate.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:91ddced74960d211fc155582
+16  | a7-clean-ledger-list-20260717-a0fc5a:16      | 2026-07-17T12:14:29.686Z | gate.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:108a5f8c750d3a74f9bfb682
+17  | a7-clean-ledger-list-20260717-a0fc5a:17      | 2026-07-17T12:14:29.898Z | gate.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:a5145177aab51d343909880b
+18  | a7-clean-ledger-list-20260717-a0fc5a:18      | 2026-07-17T12:14:30.114Z | gate.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:4192d30b4abd042e1073c4d0
+19  | a7-clean-ledger-list-20260717-a0fc5a:19      | 2026-07-17T12:14:30.335Z | delivery.upsert   | build1-flow    | t_1d60193c | -      | build1-flow:978a95dc068d6b8469261f94
+20  | a7-clean-ledger-list-20260717-a0fc5a:20      | 2026-07-17T12:14:30.546Z | delivery.upsert   | build1-flow    | t_1d60193c | -      | build1-flow:445e520b6625c7855bed4f11
+21  | a7-clean-ledger-list-20260717-a0fc5a:21      | 2026-07-17T12:14:30.767Z | gate.upsert       | build1-flow    | t_1d60193c | -      | build1-flow:37df5ead53a477234af3da96
+22  | a7-clean-ledger-list-20260717-a0fc5a:22      | 2026-07-17T12:14:31.320Z | mission.completed | central-hermes | -          | -      | central:auto-complete:v1
 ```
 
 The same query returned `events=22`, `unique_event_ids=22`, `producer_rows=20`, `unique_producer_ids=20` and
