@@ -164,6 +164,19 @@ class FlowContractTests(unittest.TestCase):
                 summary, verification, expected_repo=summary["repo"], current_head="aaa", ci_green=True,
             )
 
+    def test_accepted_review_cannot_retain_actionable_findings(self):
+        summary = artifact("openai", "gpt-5.6-luna", "aaa")
+        verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)
+        verification["findings"] = ["fix this before merge"]
+        with self.assertRaisesRegex(flow.ContractError, "actionable findings"):
+            validate_review(
+                summary,
+                verification,
+                expected_repo=summary["repo"],
+                current_head="aaa",
+                ci_green=True,
+            )
+
     def test_exact_v1_review_artifacts_remain_valid_during_v2_recovery(self):
         summary = artifact("openai", "gpt-5.6-luna", "aaa")
         verification = artifact("openai", "gpt-5.6-sol", "aaa", reviewer=True)

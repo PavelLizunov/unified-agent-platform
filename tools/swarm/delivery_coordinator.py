@@ -1753,6 +1753,9 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
+        info = self._bound_pr(state, allowed_heads={state["candidate_sha"]})
+        if info["isDraft"] is not True:
+            raise DeliveryError("independent review requires an exact draft PR")
         with _temporary_private_output() as raw_last:
             result = self._run(
                 [
@@ -1774,6 +1777,12 @@ class DeliveryCoordinator:
             or not all(isinstance(item, str) for item in response["findings"])
         ):
             raise DeliveryError("reviewer returned an invalid verdict")
+        findings = _sanitize_findings(response["findings"])
+        if (
+            response["verdict"] == "accept" and findings
+            or response["verdict"] == "reject" and not findings
+        ):
+            raise DeliveryError("reviewer verdict contradicts its actionable findings")
         checks = self._checks("review_checks", paths["review"], state, paths)
         telemetry = flow_contract.summarize_codex_events(
             events,
@@ -1786,7 +1795,6 @@ class DeliveryCoordinator:
             head=state["candidate_sha"],
             source_attestation_path=attestation_path,
         )
-        findings = _sanitize_findings(response["findings"])
         response = {"verdict": response["verdict"], "findings": findings}
         mission_adapter._write_json(last, response, private_parent=True)
         verification = {
@@ -1822,6 +1830,31 @@ class DeliveryCoordinator:
         self._save(paths, state)
         return False
 
+    def _restore_pr_draft(
+        self, state: dict[str, Any], pr_number: int, fields: str
+    ) -> None:
+        self._run([
+            self.profile["gh_bin"], "pr", "ready", str(pr_number), "--undo",
+            "--repo", self.profile["repo"],
+        ], check=False)
+        restored = self._run([
+            self.profile["gh_bin"], "pr", "view", str(pr_number),
+            "--repo", self.profile["repo"], "--json", fields,
+        ], check=False)
+        try:
+            info = json.loads(restored.stdout) if not restored.returncode else {}
+        except (json.JSONDecodeError, TypeError):
+            info = {}
+        if (
+            not isinstance(info, dict)
+            or info.get("number") != pr_number
+            or info.get("state") != "OPEN"
+            or info.get("isDraft") is not True
+            or info.get("headRefName") != state["branch"]
+            or info.get("baseRefName") != self.profile["default_branch"]
+        ):
+            raise DeliveryError("invalid post-review PR identity could not be restored to draft")
+
     def _pr(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -1838,20 +1871,31 @@ class DeliveryCoordinator:
             previous_base = state.get("pr_base_branch")
             if previous_base != self.profile["default_branch"]:
                 raise DeliveryError("durable PR base identity is invalid")
-            previous = json.loads(self._run([
+            previous_result = self._run([
                 self.profile["gh_bin"], "pr", "view", str(bound),
                 "--repo", self.profile["repo"], "--json", fields,
-            ]).stdout)
+            ], check=False)
+            try:
+                previous = (
+                    json.loads(previous_result.stdout)
+                    if not previous_result.returncode else {}
+                )
+            except (json.JSONDecodeError, TypeError):
+                previous = {}
             if (
-                previous.get("number") != bound
+                not isinstance(previous, dict)
+                or previous.get("number") != bound
                 or previous.get("state") != "OPEN"
                 or not isinstance(previous.get("isDraft"), bool)
                 or previous.get("headRefName") != state["branch"]
                 or previous.get("baseRefName") != previous_base
             ):
+                self._restore_pr_draft(state, bound, fields)
                 raise DeliveryError("durable PR changed before repair push")
             observed_head = _pr_head_oid(previous)
             if observed_head not in {previous_head, state["candidate_sha"]}:
+                if previous["isDraft"] is not True:
+                    self._restore_pr_draft(state, bound, fields)
                 raise DeliveryError("durable PR changed before repair push")
         else:
             remote = self._git(
@@ -1916,44 +1960,29 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("GitHub returned invalid PR identity")
         if info["isDraft"]:
+            ready_number = info["number"]
             self._run([
-                self.profile["gh_bin"], "pr", "ready", str(info["number"]),
+                self.profile["gh_bin"], "pr", "ready", str(ready_number),
                 "--repo", self.profile["repo"],
             ], check=False)
-            info = json.loads(self._run([
-                self.profile["gh_bin"], "pr", "view", str(info["number"]),
+            ready_view = self._run([
+                self.profile["gh_bin"], "pr", "view", str(ready_number),
                 "--repo", self.profile["repo"], "--json", fields,
-            ]).stdout)
+            ], check=False)
+            try:
+                info = json.loads(ready_view.stdout) if not ready_view.returncode else {}
+            except (json.JSONDecodeError, TypeError):
+                info = {}
             if (
-                info.get("number") != bound
+                not isinstance(info, dict)
+                or info.get("number") != ready_number
                 or info.get("state") != "OPEN"
                 or info.get("isDraft") is not False
                 or info.get("headRefName") != state["branch"]
                 or _pr_head_oid(info) != state["candidate_sha"]
                 or info.get("baseRefName") != self.profile["default_branch"]
             ):
-                self._run([
-                    self.profile["gh_bin"], "pr", "ready", str(bound), "--undo",
-                    "--repo", self.profile["repo"],
-                ], check=False)
-                restored = self._run([
-                    self.profile["gh_bin"], "pr", "view", str(bound),
-                    "--repo", self.profile["repo"], "--json", fields,
-                ], check=False)
-                try:
-                    restored_info = json.loads(restored.stdout) if not restored.returncode else {}
-                except json.JSONDecodeError:
-                    restored_info = {}
-                if (
-                    restored_info.get("number") != bound
-                    or restored_info.get("state") != "OPEN"
-                    or restored_info.get("isDraft") is not True
-                    or restored_info.get("headRefName") != state["branch"]
-                    or restored_info.get("baseRefName") != self.profile["default_branch"]
-                ):
-                    raise DeliveryError(
-                        "invalid post-review PR identity could not be restored to draft"
-                    )
+                self._restore_pr_draft(state, ready_number, fields)
                 raise DeliveryError("pre-review PR did not become ready at the exact candidate")
         state.update(
             phase="pr_open", pr_number=info["number"], pr_url=info["url"],

@@ -787,6 +787,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "source_attestation",
                     return_value={"sha256": "source"},
                 ),
+                mock.patch.object(instance, "_bound_pr", return_value={"isDraft": True}),
                 self.assertRaises(ValueError),
             ):
                 instance._review(state, paths)
@@ -794,6 +795,86 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertTrue(raw_paths)
             self.assertTrue(all(not path.exists() for path in raw_paths))
             self.assertFalse((paths["directory"] / "review-1-last.json").exists())
+
+    def test_review_rechecks_the_exact_draft_immediately_before_codex(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            runner = mock.Mock(side_effect=AssertionError("reviewer must not start"))
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            route = {
+                "reviewer": {"model": "gpt-5.6-sol", "reasoning_effort": "low"},
+                "review_mode": "same_provider_independent",
+                "decision_id": "decision",
+            }
+            with (
+                mock.patch.object(instance, "_current_route", return_value=route),
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source"},
+                ),
+                mock.patch.object(instance, "_bound_pr", return_value={"isDraft": False}),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "independent review requires an exact draft PR",
+                ),
+            ):
+                instance._review(
+                    {"review_cycle": 1, "candidate_sha": "candidate"},
+                    instance._paths("ready-review-race"),
+                )
+            runner.assert_not_called()
+
+    def test_reviewer_verdict_requires_consistent_findings(self):
+        for verdict, findings in (("accept", ["fix this"]), ("reject", [])):
+            with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+
+                def runner(command, **_kwargs):
+                    raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                    raw.write_text(
+                        json.dumps({"verdict": verdict, "findings": findings}),
+                        encoding="utf-8",
+                    )
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+                )
+                route = {
+                    "reviewer": {"model": "gpt-5.6-sol", "reasoning_effort": "low"},
+                    "review_mode": "same_provider_independent",
+                    "decision_id": "decision",
+                }
+                with (
+                    mock.patch.object(instance, "_current_route", return_value=route),
+                    mock.patch.object(instance, "_assert_claim"),
+                    mock.patch.object(instance, "_remove_worktree"),
+                    mock.patch.object(instance, "_git"),
+                    mock.patch.object(
+                        coordinator.flow_contract,
+                        "source_attestation",
+                        return_value={"sha256": "source"},
+                    ),
+                    mock.patch.object(instance, "_bound_pr", return_value={"isDraft": True}),
+                    self.assertRaisesRegex(
+                        coordinator.DeliveryError,
+                        "reviewer verdict contradicts its actionable findings",
+                    ),
+                ):
+                    instance._review(
+                        {"review_cycle": 1, "candidate_sha": "candidate"},
+                        instance._paths(f"contradictory-{verdict}"),
+                    )
 
     def test_legacy_findings_are_sanitized_before_the_next_author_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2058,6 +2139,126 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 for command in commands
             ))
 
+    def test_ambiguous_ready_response_restores_the_pr_to_draft(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            draft = True
+            lose_next_view = False
+            commands = []
+
+            def runner(command, **_kwargs):
+                nonlocal draft, lose_next_view
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "ready"]:
+                    if "--undo" in command:
+                        draft = True
+                    else:
+                        draft = False
+                        lose_next_view = True
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                if command[0:3] == ["gh", "pr", "view"]:
+                    if lose_next_view:
+                        lose_next_view = False
+                        return subprocess.CompletedProcess(
+                            command, 1, stdout="", stderr="lost view response"
+                        )
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": draft,
+                            "headRefName": "codex/fix",
+                            "headRefOid": "candidate-sha",
+                            "baseRefName": approved["default_branch"],
+                        }),
+                        stderr="",
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            }
+            with (
+                mock.patch.object(instance, "_validate_review"),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "pre-review PR did not become ready at the exact candidate",
+                ),
+            ):
+                instance._pr(state, {"author": root})
+
+            self.assertTrue(draft)
+            self.assertEqual(1, sum(
+                command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
+                for command in commands
+            ))
+
+    def test_restart_redrafts_an_unreviewed_replacement_head(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            draft = False
+
+            def runner(command, **_kwargs):
+                nonlocal draft
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    draft = True
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                if command[0:3] == ["gh", "pr", "view"]:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": draft,
+                            "headRefName": "codex/fix",
+                            "headRefOid": "unreviewed-race",
+                            "baseRefName": approved["default_branch"],
+                        }),
+                        stderr="",
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            }
+            with (
+                mock.patch.object(instance, "_validate_review"),
+                self.assertRaisesRegex(coordinator.DeliveryError, "changed before repair push"),
+            ):
+                instance._pr(state, {"author": root})
+            self.assertTrue(draft)
+
     def test_repair_cycle_refuses_pr_identity_replacement(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -2066,17 +2267,22 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend = FakeBackend()
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
             commands = []
+            draft = False
 
             def runner(command, **_kwargs):
+                nonlocal draft
                 commands.append(command)
                 if command[0] == "git":
+                    output = ""
+                elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    draft = True
                     output = ""
                 elif command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps({
                         "number": 40,
                         "url": "https://example.invalid/pr/40",
                         "state": "OPEN",
-                        "isDraft": False,
+                        "isDraft": draft,
                         "headRefName": "codex/fix",
                         "headRefOid": "new-candidate",
                         "baseRefName": approved["default_branch"],
@@ -2102,7 +2308,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with (
                 mock.patch.object(instance, "_validate_review"),
                 self.assertRaisesRegex(
-                    coordinator.DeliveryError, "changed before repair push"
+                    coordinator.DeliveryError, "could not be restored to draft"
                 ),
             ):
                 instance._pr(state, paths)
@@ -2118,15 +2324,20 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend = FakeBackend()
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
             commands = []
+            draft = False
 
             def runner(command, **_kwargs):
+                nonlocal draft
                 commands.append(command)
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    draft = True
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
                 if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps({
                         "number": 39,
                         "url": "https://example.invalid/pr/39",
                         "state": "OPEN",
-                        "isDraft": False,
+                        "isDraft": draft,
                         "headRefName": "codex/fix",
                         "headRefOid": "old-candidate",
                         "baseRefName": "release",
@@ -2152,7 +2363,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with (
                 mock.patch.object(instance, "_validate_review"),
                 self.assertRaisesRegex(
-                    coordinator.DeliveryError, "changed before repair push"
+                    coordinator.DeliveryError, "could not be restored to draft"
                 ),
             ):
                 instance._pr(state, instance._paths("mission-a7-3"))
