@@ -140,8 +140,10 @@ Kanban projection. A committed prefix is therefore deduplicated and a partially 
 retried. This primitive does not install a timer, activate a task, run a worker or complete a mission.
 
 The `tick` command is the smallest coordinator: reconcile one existing active mission first, otherwise poll and hand
-off one new mission. It preserves a single execution lane per configured invocation and remains non-spawning unless
-the separately owner-approved caller passes both `--activate` and an exact assignee.
+off one new mission. Central withholds later accepted candidates while any nonterminal mission with the same exact
+`dispatch_profile` already has a projected task, so accepted missions use one durable FIFO execution lane across
+restarts rather than relying on one caller process to remain alive. It remains non-spawning unless the separately
+owner-approved caller passes both `--activate` and an exact assignee.
 
 The safe default creates an unassigned root with `--initial-status blocked`. The exact pinned Hermes overlay records
 the sticky native `needs_input` block in the same SQLite transaction as the task, so a concurrent dispatcher sees

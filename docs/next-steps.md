@@ -312,6 +312,9 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   the ADR-031 OpenAI tuples; capacity cooldown parks the Kanban task without a ticking claim lease and automatically
   claims a new run when due. A controlled live canary must still capture the deployed Codex terminal envelope and
   prove that a capacity incident resumes without an owner question or duplicate writer.
+  Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
+  blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
+  the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.

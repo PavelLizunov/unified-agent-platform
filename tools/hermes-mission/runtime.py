@@ -691,6 +691,12 @@ class MissionStore:
             if payload.get("dispatch_profile") != dispatch_profile:
                 continue
             view = self.projection(row["mission_id"])
+            if (
+                not reconcile
+                and view["status"] in {"active", "waiting_owner"}
+                and bool(view["tasks"])
+            ):
+                return []
             eligible = (
                 reconcile
                 and view["status"] in {"active", "waiting_owner"}
@@ -701,9 +707,9 @@ class MissionStore:
                 and view["stage"] == "accepted"
                 and not view["tasks"]
             )
-            if eligible:
+            if eligible and len(candidates) < limit:
                 candidates.append(view)
-                if len(candidates) == limit:
+                if reconcile and len(candidates) == limit:
                     break
         return candidates
 
