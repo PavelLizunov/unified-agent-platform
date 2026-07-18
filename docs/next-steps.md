@@ -211,13 +211,16 @@ not add an application service, workflow engine or mission database.
    [acceptance evidence](evidence/a7-3-clean-telegram-canary-2026-07-17.md), the earlier
    [recovery evidence](evidence/a7-3-activation-delivery-canary-2026-07-15.md), and the
    [lifecycle rollout evidence](evidence/a7-lifecycle-rollout-2026-07-17.md).
-4. **Registered reusable profile — ✅ STANDING IDLE CONSUMER INSTALLED (2026-07-18).** PR #245 added one repo-owned
-   schema-v4 profile for `hermes-flow-v2-pilot`; exact merge `c19d4bd...` was installed on build-1 and its standing
-   timer completed the first automatic idle tick with status 0. The profile binds each Central goal durably, applies
-   cumulative path/file limits and requires Python/Linux/macOS/Windows CI. The next repository change wires the
-   server-owned Central registry and stable ordinary-message identities from Workspace and Telegram; it still needs
-   live rollout and one non-toy owner-message canary. See the
-   [installed-consumer evidence](evidence/registered-flow-profile-v4-rollout-2026-07-18.md).
+4. **Registered reusable profile — ✅ ORDINARY WORKSPACE DELIVERY PASS (2026-07-18).** The standing schema-v4
+   `hermes-flow-v2-pilot` consumer now accepts a normal Workspace message through a server-owned exact route. The first
+   non-toy mission delivered the requested Rust API/CLI/tests through runtime-attested Sol/Terra sessions,
+   multi-platform CI, exact merge, fresh-main verification and cleanup, but truthfully missed requested README work
+   because the profile excluded that path. PR #254 narrowed the correction to adding `README.md`; a second ordinary
+   Workspace mission then exercised a real review rejection, automatic correction, re-review, PR #7 merge, terminal
+   convergence and cleanup without manual delivery commands. The next gates are live ordinary Telegram intake and
+   cross-channel question/replay, not another Workspace fixed-profile canary. See the
+   [installation evidence](evidence/registered-flow-profile-v4-rollout-2026-07-18.md) and
+   [live campaign evidence](evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
