@@ -248,6 +248,11 @@ Good next tasks that do not require redesign:
    and installed with the guarded reviewer-only convergence transition; the same mission then completed a real
    runtime-attested Terra review of the exact candidate inside the corrected transient unit. Author ambiguity remains
    fail-closed. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
+   PR #279 applies the same installed namespace to author turns with only the disposable author worktree writable in
+   addition to model/Codex homes. Exact source/installed hashes, installed adversarial preflight and all five timers are
+   green. A controlled real Sol `xhigh` author changed only its allowed file and passed rollout-derived runtime
+   attestation inside the boundary. A complete ordinary mission on this exact combined revision remains pending.
+   Evidence: `docs/evidence/author-os-isolation-rollout-2026-07-19.md`.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

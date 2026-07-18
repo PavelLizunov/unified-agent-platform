@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Phase
 
@@ -138,11 +138,14 @@ Last updated: 2026-07-18
   followed by green CI and exact-head merge. Exact evidence:
   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
-  Current source now applies the same parent-bound namespace to author Codex turns. The author receives one additional
-  writable path—its deterministic disposable worktree—while source checkout, sibling worktrees and mission state
+  The installed coordinator now applies the same parent-bound namespace to author Codex turns. The author receives one
+  additional writable path—its deterministic disposable worktree—while source checkout, sibling worktrees and mission state
   remain read-only; common credentials, control-plane environment, unrelated `/proc` and the user runtime remain
-  hidden. Coordinator tests cover the exact author/reviewer command boundaries. Linux installed-wrapper and one real
-  author execution through this new boundary remain rollout gates before it can be called deployed proof.
+  hidden. PR #279 passed required CI, exact merge `fd5199d...` is installed, source/installed coordinator hashes match,
+  the installed adversarial wrapper probe passed and all five timers resumed. A controlled real Sol `xhigh` author
+  changed only its allowed disposable file and passed rollout-derived OpenAI/workspace-write attestation inside the
+  boundary. A complete ordinary mission on this exact revision remains the stronger end-to-end gate. Exact evidence:
+  `docs/evidence/author-os-isolation-rollout-2026-07-19.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
