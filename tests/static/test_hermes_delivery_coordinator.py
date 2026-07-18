@@ -5325,6 +5325,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertIn(
                 "-p\nBindsTo=hermes-delivery-coordinator@test.service", rendered
             )
+            # The coordinator is a Type=oneshot unit and remains activating while
+            # it waits for review. Ordering the child After= that parent deadlocks.
+            self.assertNotIn("After=hermes-delivery-coordinator@test.service", rendered)
             self.assertIn(str(pathlib.Path(approved["source_checkout"]).resolve()), rendered)
             self.assertIn(str(pathlib.Path(approved["worktree_root"]).resolve()), rendered)
             self.assertIn(str(paths["directory"].resolve()), rendered)

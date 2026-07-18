@@ -731,8 +731,9 @@ class DeliveryCoordinator:
             f"--unit=uap-review-{attempt_id[:24]}",
             f"--working-directory={paths['review'].resolve()}",
             "-p", "Type=exec",
+            # BindsTo stops the reviewer with its parent.  After would deadlock
+            # because the Type=oneshot parent stays activating while it waits here.
             "-p", f"BindsTo={parent}",
-            "-p", f"After={parent}",
             "-p", f"RuntimeMaxSec={self.profile['command_timeout_seconds']}",
             "-p", "NoNewPrivileges=true",
             "-p", "RestrictSUIDSGID=true",
