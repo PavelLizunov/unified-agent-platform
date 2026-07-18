@@ -226,6 +226,13 @@ not add an application service, workflow engine or mission database.
    same 20-event mission history and cursor 20 after full reload. The next gates are live ordinary Telegram intake and
    cross-channel question/answer, not another Workspace fixed-profile canary. See the
    [reconnect evidence](evidence/workspace-mission-cursor-replay-2026-07-18.md).
+6. **Capacity observation — ✅ DEPLOYED; LIVE FAILURE/RECOVERY CANARY PENDING (2026-07-18).** PR #259 added a closed
+   `mission.notice` projection for capacity wait/recovery, stable coordinator event identities and the same explicit
+   no-owner-action state in Workspace and Telegram. The first Flux reconciliation retained the stale ConfigMap
+   `subPath` mount; PR #260 bumped only the existing pod-template revision and rolled the exact runtime. Central,
+   build-1 and Workspace source/install hashes and health checks then matched. This proves deployment readiness, not a
+   real capacity failure: the Telegram-origin controlled canary is armed but no live capacity notice/recovery has yet
+   occurred. See the [rollout evidence](evidence/automatic-capacity-observation-rollout-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

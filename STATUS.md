@@ -109,7 +109,13 @@ Last updated: 2026-07-18
   when due, so the finite Kanban claim TTL cannot strand a capacity wait. Unknown, post-start or worktree-changing
   failures remain fail-closed. Hermetic
   tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze; the live
-  Codex capacity envelope and recovery still require a controlled canary before any live-proof claim.
+  Codex capacity envelope and recovery still require a controlled canary before any live-proof claim. PRs #259/#260
+  deployed one bounded `mission.notice` projection for capacity wait/recovery to Central, Workspace and Telegram,
+  including the explicit `owner_action_required=false` state. The first Flux attempt truthfully exposed a stale
+  ConfigMap `subPath` mount; the revision-only follow-up rolled the exact runtime and the final Central, build-1 and
+  Workspace hashes/health checks passed. No live capacity event had occurred at that checkpoint, so this is observation
+  readiness rather than live failover proof. Exact rollout evidence:
+  `docs/evidence/automatic-capacity-observation-rollout-2026-07-18.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
