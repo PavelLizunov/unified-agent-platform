@@ -240,12 +240,14 @@ not add an application service, workflow engine or mission database.
    implemented, so fresh-main verification is no longer allowed to imply deployment for the registered target.
    Exact rollout evidence:
    [registered delivery applicability](evidence/registered-delivery-applicability-rollout-2026-07-18.md).
-8. **Ordinary bound Telegram answer — ✅ HERMETIC; LIVE QUESTION/ANSWER CANARY PENDING (2026-07-18).** A normal
+8. **Ordinary bound Telegram answer — ✅ DEPLOYED COMPONENT PASS; LIVE QUESTION/ANSWER CANARY PENDING (2026-07-18).** A normal
    Telegram message on the chat/topic bound to a `waiting_owner` mission now answers that mission's exact open
    question instead of accepting another goal. The Telegram message ID is persisted in `mission.answer`; restart and
    lost-response replay converge on the same event, while changed text under the same ID fails closed. This reuses
-   `MissionStore`, the existing binding and the existing answer state machine. It does not claim ordinary Workspace
-   chat answers or complete cross-channel transcript synchronization.
+   `MissionStore`, the existing binding and the existing answer state machine. PR #264 passed CI, Flux rolled the
+   exact runtime and a temporary-store scenario passed inside the Ready pod. It does not claim a real owner-channel
+   question/answer canary, ordinary Workspace chat answers or complete cross-channel transcript synchronization. See
+   the [rollout evidence](evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
