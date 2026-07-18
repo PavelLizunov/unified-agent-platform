@@ -48,6 +48,9 @@ LEGACY_FILES = {
 "src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
 "src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
 }
+PREVIOUS_PATCHED_FILES = {
+"src/routes/api/send-stream.ts": "d61df1f062067cf9991ce33cf6d754c041e44148355423af28dc68d343c85f37",  # gitleaks:allow -- pinned previous patched SHA-256
+}
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
     "src/screens/dashboard/components/mission-overview-card.tsx": "src/screens/dashboard/components/mission-overview-card.tsx",
@@ -472,6 +475,28 @@ def upgrade_legacy(rel, text):
     normalized === 'default'""", "legacy profiles central-only read")
     raise SystemExit(f"no legacy upgrade for {rel}")
 
+def upgrade_previous(rel, text):
+    if rel == "src/routes/api/send-stream.ts":
+        text = replace(text, """        const message = String(body.message ?? '')
+        const thinking =""", """        const message = String(body.message ?? '')
+        const sourceMessageId =
+          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+        if (CENTRAL_ONLY && !sourceMessageId) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'message identity required' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        const thinking =""", "ordinary goal identity upgrade")
+        text = replace(text, """                  message: scopedMessage,
+                  model:""", """                  message: CENTRAL_ONLY ? message : scopedMessage,
+                  model:""", "ordinary goal text upgrade")
+        return replace(text, """                  attachments: attachments || undefined,
+                },""", """                  attachments: attachments || undefined,
+                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
+                },""", "ordinary goal forwarding upgrade")
+    raise SystemExit(f"no previous patched upgrade for {rel}")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("workspace", type=pathlib.Path)
@@ -495,6 +520,9 @@ def main():
         elif actual == LEGACY_FILES.get(rel):
             statuses.append(f"{rel}: legacy-needs-overlay")
             source_paths.append((rel, path, True))
+        elif actual == PREVIOUS_PATCHED_FILES.get(rel):
+            statuses.append(f"{rel}: previous-needs-overlay")
+            source_paths.append((rel, path, "previous"))
         else:
             raise SystemExit(f"upstream fingerprint mismatch: {rel}")
     added_paths = []
@@ -515,7 +543,11 @@ def main():
         print("\n".join(statuses))
     else:
         for rel, path, legacy in source_paths:
-            transform_file = upgrade_legacy if legacy else transform
+            transform_file = (
+                upgrade_previous if legacy == "previous"
+                else upgrade_legacy if legacy
+                else transform
+            )
             path.write_text(transform_file(rel, path.read_text()), encoding="utf-8")
             if sha(path) != PATCHED_FILES[rel]:
                 raise SystemExit(f"overlay output fingerprint mismatch: {rel}")

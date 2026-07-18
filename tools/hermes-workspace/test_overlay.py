@@ -150,6 +150,35 @@ def main() -> None:
         claude_api = (clone / "src/server/claude-api.ts").read_text()
         assert "source_message_id?: string" in claude_api
 
+        send_stream_path = clone / "src/routes/api/send-stream.ts"
+        previous_send_stream = send_stream.replace("""        const sourceMessageId =
+          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+        if (CENTRAL_ONLY && !sourceMessageId) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'message identity required' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+""", "", 1).replace(
+            "message: CENTRAL_ONLY ? message : scopedMessage", "message: scopedMessage", 1
+        ).replace(
+            "                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,\n",
+            "",
+            1,
+        )
+        send_stream_path.write_text(previous_send_stream, encoding="utf-8")
+        assert hashlib.sha256(send_stream_path.read_bytes()).hexdigest() == (
+            "d61df1f062067cf9991ce33cf6d754c041e44148355423af28dc68d343c85f37"
+        )
+        previous = run(clone, "--check")
+        assert previous.returncode == 0 and "previous-needs-overlay" in previous.stdout
+        previous_upgrade = run(clone)
+        assert previous_upgrade.returncode == 0, previous_upgrade.stderr
+        previous_checked = run(clone, "--check")
+        assert previous_checked.returncode == 0
+        assert "previous-needs-overlay" not in previous_checked.stdout
+        assert "src/routes/api/send-stream.ts: exact-patched" in previous_checked.stdout
+
         kanban = (clone / "src/server/kanban-backend.ts").read_text()
         central_selection = kanban.index("if (CENTRAL_ONLY)", kanban.index("export function resolveKanbanBackend"))
         local_selection = kanban.index("if (preference === 'local')")
