@@ -86,6 +86,8 @@ _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
 _MAX_OWNER_ANSWER_CHARS = 4_000
 _MAX_COMPLETION_RESULT_CHARS = 3_000
+_OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
+_OWNER_GATE_APPROVAL = "APPROVE"
 _MAX_RETAINED_TERMINAL_MISSIONS = 100
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
@@ -1424,6 +1426,11 @@ class MissionStore:
         text = str(text or "").strip()
         if not text or len(text) > _MAX_OWNER_ANSWER_CHARS:
             raise MissionError("owner answer must contain 1..4000 characters")
+        if (
+            question_id.startswith(_OWNER_GATE_QUESTION_PREFIX)
+            and text != _OWNER_GATE_APPROVAL
+        ):
+            raise MissionError("owner gate answer must be exactly APPROVE")
         fingerprint = hashlib.sha256(question_id.encode("utf-8")).hexdigest()[:32]
         payload = {"question_id": question_id, "text": text}
         if source_message_id is not None:

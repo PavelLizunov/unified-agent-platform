@@ -293,13 +293,17 @@ not add an application service, workflow engine or mission database.
     required CI, exact Flux rollout, mounted-runtime hash and an in-pod byte-for-byte Central/Telegram assertion passed.
     A later real terminal message remains the evidence gate. See the
     [rollout evidence](evidence/concrete-terminal-result-rollout-2026-07-19.md).
-12. **Author OS isolation — SOURCE GATE PASS; BUILD-1 PROOF PENDING.** Reuse the reviewer transient user-systemd
-    boundary for author Codex turns. The author may write only its deterministic disposable worktree and the existing
-    mission-local model/Codex homes; source checkout, sibling worktrees and mission state stay read-only, while common
-    credentials, control-plane environment, unrelated processes and the user runtime stay inaccessible. The existing
-    route, prompt, capacity/retry and exact runtime-attestation contracts do not change. Coordinator tests cover both
-    actor variants. Required next evidence is an installed exact-wrapper write/credential/process probe followed by
-    one real runtime-attested author turn through the boundary.
+12. **Author OS isolation — ✅ DEPLOYED REAL-ACTOR PASS (2026-07-19).** PR #279 reused the reviewer transient
+    user-systemd boundary for author Codex turns while adding only the deterministic disposable author worktree to the
+    writable set. Exact source/installed hashes, installed adversarial probe, all timers and a controlled real Sol
+    `xhigh`/workspace-write turn passed. A complete ordinary mission on the exact combined revision remains the stronger
+    end-to-end gate. See the [rollout evidence](evidence/author-os-isolation-rollout-2026-07-19.md).
+13. **Automatic owner-question producer — SOURCE GATE PASS; ROLLOUT PENDING (2026-07-19).** The existing
+    `owner_approval_required` decision now drives a narrow pre-execution state machine for `architecture_change`:
+    one inert sticky-blocked root, one mission/goal/policy-bound question, exact `APPROVE`, durable answer and resume of
+    that same root before any model turn. Commit-before-response loss and restart replay the same producer identity.
+    Unsupported privileged flags still fail closed. Required next gate: merge/deploy, then one ordinary Telegram goal
+    on an already armed architecture-change profile and an owner answer through Workspace; no manual poll/tick/bind.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

@@ -228,8 +228,11 @@ service:
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open
   question on that binding. Workspace posts the same closed answer shape through its authenticated mission route, and
   owner-relevant stage/question/answer/terminal events render from the same projection and `projection_id`;
-- a pre-execution owner question is accepted only after the handoff has created one inert sticky-blocked root. The coordinator stores the redacted
-  answer in its owner-only durable state before changing Kanban, assigns and unblocks only that exact root with a
+- an approved-profile `architecture_change` deterministically creates one owner question only after the handoff has
+  created one inert sticky-blocked root. The question identity is bound to mission, goal and routing-policy hashes;
+  producer response loss replays the same event. Central accepts only exact `APPROVE`, so invalid text leaves the
+  question open. Other owner-gated capabilities remain fail-closed. The coordinator stores the accepted answer in its
+  owner-only durable state before changing Kanban, assigns and unblocks only that exact root with a
   question/answer-hash audit reference, and binds the answer into the next author prompt. The pinned Hermes CLI passes
   that reference into the same SQLite transaction as the `unblocked` event; recovery requires the latest sticky
   transition to contain the exact reference and rejects a generic/manual unblock. Retry before or after the

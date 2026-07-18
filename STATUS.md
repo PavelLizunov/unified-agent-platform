@@ -210,6 +210,13 @@ Last updated: 2026-07-19
   `5d95eada...`, the mounted runtime/overlay hashes matched and an in-pod temporary-store scenario returned
   `live-workspace-answer-component-ok`. A real cross-channel owner question/answer canary is still required. Exact
   evidence: `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
+- **Automatic pre-execution owner-question production is implemented in source (2026-07-19).** An approved-profile
+  `architecture_change` now creates/reconciles one inert sticky-blocked root before publishing a deterministic
+  `mission.question` bound to mission/goal/policy identity. Central accepts only exact `APPROVE`; response loss and
+  restart converge on the same question/root, then the durable answer resumes that root and the approved flag is
+  removed only from the exact route calculation. Local/GPU, new provider, credentials and destructive flags remain
+  fail-closed. Coordinator and MissionStore regressions pass; merge, rollout and a real Telegram-origin/Workspace-answer
+  canary remain pending.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

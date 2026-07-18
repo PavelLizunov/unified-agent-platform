@@ -229,6 +229,10 @@ Good next tasks that do not require redesign:
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
    The answer rollout records are `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
    `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
+   Current source closes the missing producer for the narrow executable owner gate: an approved-profile
+   `architecture_change` first creates one inert sticky-blocked root, publishes a mission/goal/policy-bound question,
+   accepts only exact `APPROVE`, and resumes that same root restart-safely before any model turn. Other privileged
+   flags remain fail-closed. Merge/deploy and the real Telegram-origin/Workspace-answer canary are next.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
