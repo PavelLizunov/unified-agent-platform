@@ -126,8 +126,11 @@ def main() -> None:
         assert "X-Hermes-Mission-Owner-Key" in api
         assert "owner_key_valid" in api
         assert 'if not isinstance(body, dict)' in api
-        assert 'body.get("parent_mission_id") is not None' in api
+        assert 'producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")' in api
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
+        assert "store.ingest_owner_goal(" in api
+        assert '"goal", "platform", "source_message_id", "session_id"' in api
+        assert "unknown owner intake fields" in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
         assert "_handle_answer_mission" in api

@@ -103,6 +103,39 @@ def _require_id(value: Any, name: str) -> str:
     return text
 
 
+def _require_source_value(value: Any, name: str, *, optional: bool = False) -> str:
+    text = str(value or "").strip()
+    if not text and optional:
+        return ""
+    if not text or len(text) > 256 or re.search(r"[\x00-\x1f\x7f]", text):
+        raise MissionError(f"invalid {name}")
+    return text
+
+
+def registered_intake_route(platform: str) -> str:
+    """Resolve one owner channel to an exact server-owned delivery profile."""
+    platform = _require_id(platform, "intake platform")
+    raw = os.environ.get("HERMES_MISSION_INTAKE_ROUTES", "").strip()
+    if not raw or len(raw.encode("utf-8")) > 16_384:
+        raise MissionError("mission intake is not configured")
+    try:
+        routes = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise MissionError("invalid mission intake routes") from error
+    if not isinstance(routes, dict) or not routes or len(routes) > 16:
+        raise MissionError("invalid mission intake routes")
+    normalized: dict[str, str] = {}
+    for route_platform, dispatch_profile in routes.items():
+        route_platform = _require_id(route_platform, "intake platform")
+        normalized[route_platform] = _require_id(
+            dispatch_profile, "dispatch_profile"
+        )
+    try:
+        return normalized[platform]
+    except KeyError as error:
+        raise MissionError("owner channel has no registered delivery route") from error
+
+
 def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
     if (
         not isinstance(submission, dict)
@@ -715,6 +748,60 @@ class MissionStore:
     def latest(self) -> str | None:
         missions = self.list(1)
         return missions[0]["mission_id"] if missions else None
+
+    def ingest_owner_goal(
+        self,
+        goal: str,
+        *,
+        platform: str,
+        source_message_id: str,
+        session_id: str | None = None,
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Accept one ordinary owner turn exactly once on its registered route."""
+        platform = _require_id(platform, "intake platform")
+        route = registered_intake_route(platform)
+        source_message_id = _require_source_value(
+            source_message_id, "source_message_id"
+        )
+        session_id = _require_source_value(
+            session_id, "session_id", optional=True
+        )
+        chat_id = _require_source_value(chat_id, "chat_id", optional=True)
+        thread_id = _require_source_value(
+            thread_id, "thread_id", optional=True
+        )
+        if not session_id and not chat_id:
+            raise MissionError("mission intake requires a channel identity")
+        source_key = _json(
+            {
+                "platform": platform,
+                "session_id": session_id,
+                "chat_id": chat_id,
+                "thread_id": thread_id,
+                "source_message_id": source_message_id,
+            }
+        )
+        # ponytail: deterministic acceptance identity is the durable receipt;
+        # a second table would duplicate the same uniqueness invariant.
+        mission_id = "mission-intake-" + hashlib.sha256(
+            source_key.encode("utf-8")
+        ).hexdigest()[:32]
+        arguments = {
+            "mission_id": mission_id,
+            "session_id": session_id or None,
+            "dispatch_profile": route,
+        }
+        try:
+            return self.accept(goal, **arguments)
+        except MissionError as error:
+            # Two processes can both pass accept()'s optimistic read.  The
+            # SQLite writer serializes them; re-read only this exact race so
+            # changed goal/profile payloads still fail closed as collisions.
+            if str(error) != "mission already accepted":
+                raise
+            return self.accept(goal, **arguments)
 
     def accept(
         self,

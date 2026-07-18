@@ -35,12 +35,13 @@ async def smoke(checkout: pathlib.Path) -> None:
     client = TestClient(TestServer(app))
     await client.start_server()
     try:
+        headers = {"X-Hermes-Mission-Producer-Key": "test-producer-key"}
         created = await client.post(
             "/api/missions", json={
                 "mission_id": "mission-smoke",
                 "goal": "Ship smoke",
                 "dispatch_profile": "build1-smoke",
-            }
+            }, headers=headers,
         )
         assert created.status == 201, await created.text()
         eligible = await client.get(
@@ -65,7 +66,6 @@ async def smoke(checkout: pathlib.Path) -> None:
             "correlation": {"producer_event_id": "flow:smoke:testing"},
             "payload": {"stage": "testing", "progress_percent": 60},
         }
-        headers = {"X-Hermes-Mission-Producer-Key": "test-producer-key"}
         first = await client.post(
             "/api/missions/mission-smoke/events", json=event, headers=headers
         )
@@ -181,6 +181,25 @@ async def smoke(checkout: pathlib.Path) -> None:
         assert cancelled_replay.status == 200 and replay_body["created"] is False
         assert replay_body["mission"]["status"] == "cancelled"
         assert replay_body["mission"]["error"] == "Smoke cleanup"
+
+        owner_body = {
+            "goal": "Ordinary owner goal",
+            "platform": "workspace",
+            "source_message_id": "owner-message-smoke",
+            "session_id": "owner-session-smoke",
+        }
+        owner = await client.post("/api/missions", json=owner_body)
+        owner_payload = await owner.json()
+        assert owner.status == 201, owner_payload
+        assert owner_payload["mission"]["dispatch_profile"] == "build1-owner-smoke"
+        owner_replay = await client.post("/api/missions", json=owner_body)
+        replay_payload = await owner_replay.json()
+        assert owner_replay.status == 200 and replay_payload["created"] is False
+        assert replay_payload["mission"]["mission_id"] == owner_payload["mission"]["mission_id"]
+        forbidden_profile = await client.post(
+            "/api/missions", json={**owner_body, "dispatch_profile": "build1-forged"}
+        )
+        assert forbidden_profile.status == 400, await forbidden_profile.text()
     finally:
         await client.close()
 
@@ -193,6 +212,9 @@ def main() -> None:
         os.environ["HERMES_HOME"] = home
         os.environ["HERMES_MISSION_PRODUCER_KEY"] = "test-producer-key"
         os.environ["HERMES_MISSION_OWNER_KEY"] = "test-owner-key"
+        os.environ["HERMES_MISSION_INTAKE_ROUTES"] = (
+            '{"workspace":"build1-owner-smoke"}'
+        )
         asyncio.run(smoke(args.checkout.resolve()))
     print("hermes mission API smoke passed")
 

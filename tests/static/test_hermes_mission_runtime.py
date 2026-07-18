@@ -11,6 +11,7 @@ import stat
 import tempfile
 import threading
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -317,6 +318,109 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             raise AssertionError("dispatch profile changed after acceptance")
         except missions.MissionError as error:
             assert "different parameters" in str(error)
+
+
+def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
+    routes = json.dumps({
+        "workspace": "build1-registered",
+        "telegram": "build1-registered",
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        accepted, created = store.ingest_owner_goal(
+            "Deliver the registered change",
+            platform="workspace",
+            source_message_id="4f1d8ea8-2d27-4b50-a351-f04272f5ea70",
+            session_id="session-owner",
+        )
+        assert created
+        assert accepted["mission_id"].startswith("mission-intake-")
+        assert accepted["payload"]["dispatch_profile"] == "build1-registered"
+
+        restarted = missions.MissionStore(database)
+        replayed, replay_created = restarted.ingest_owner_goal(
+            "Deliver the registered change",
+            platform="workspace",
+            source_message_id="4f1d8ea8-2d27-4b50-a351-f04272f5ea70",
+            session_id="session-owner",
+        )
+        assert not replay_created and replayed == accepted
+        assert len(restarted.events(accepted["mission_id"])) == 1
+
+        try:
+            restarted.ingest_owner_goal(
+                "Changed payload for the same owner turn",
+                platform="workspace",
+                source_message_id="4f1d8ea8-2d27-4b50-a351-f04272f5ea70",
+                session_id="session-owner",
+            )
+            raise AssertionError("owner intake idempotency collision was accepted")
+        except missions.MissionError as error:
+            assert "different parameters" in str(error)
+
+        before = len(restarted.list(100))
+        try:
+            restarted.ingest_owner_goal(
+                "Unknown channel",
+                platform="signal",
+                source_message_id="message-unknown",
+                chat_id="owner-chat",
+            )
+            raise AssertionError("unknown owner channel was accepted")
+        except missions.MissionError as error:
+            assert "no registered delivery route" in str(error)
+        assert len(restarted.list(100)) == before
+
+
+def test_concurrent_owner_intake_converges_on_one_acceptance() -> None:
+    routes = json.dumps({"workspace": "build1-registered"})
+    barrier = threading.Barrier(2)
+    local = threading.local()
+
+    class RacingStore(missions.MissionStore):
+        def events(self, mission_id: str, after: int = 0) -> list[dict]:
+            rows = super().events(mission_id, after)
+            if (
+                threading.current_thread() is not threading.main_thread()
+                and mission_id.startswith("mission-intake-")
+                and not getattr(local, "read", False)
+            ):
+                local.read = True
+                barrier.wait(timeout=5)
+            return rows
+
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        stores = [RacingStore(database), RacingStore(database)]
+        results: list[tuple[dict, bool]] = []
+        failures: list[Exception] = []
+
+        def ingest(store: RacingStore) -> None:
+            try:
+                results.append(store.ingest_owner_goal(
+                    "Concurrent delivery",
+                    platform="workspace",
+                    source_message_id="message-concurrent",
+                    session_id="session-owner",
+                ))
+            except Exception as error:
+                failures.append(error)
+
+        threads = [threading.Thread(target=ingest, args=(store,)) for store in stores]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert not failures and len(results) == 2
+        assert len({result[0]["mission_id"] for result in results}) == 1
+        assert sorted(result[1] for result in results) == [False, True]
+        assert len(stores[0].list(100)) == 1
 
 
 def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
@@ -1611,6 +1715,8 @@ def main() -> None:
     test_notification_checkpoint_cannot_cross_a_mission_rebind()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
+    test_registered_owner_intake_is_deterministic_and_fail_closed()
+    test_concurrent_owner_intake_converges_on_one_acceptance()
     test_dispatch_candidates_do_not_starve_behind_newer_missions()
     test_producer_schema_is_closed_and_all_strings_are_redacted()
     test_terminal_authority_is_loopback_only()
