@@ -483,7 +483,7 @@ class MissionAdapterTests(unittest.TestCase):
             "token": secret,
             "Cookie": f"session={secret}",
             "response_set_cookie_value": f"session={secret}",
-        }).replace('"', r'\"')
+        }).replace('"', r'\u005cu0022')
 
         def runner(command):
             return subprocess.CompletedProcess(command, 1, stdout="", stderr=diagnostic)

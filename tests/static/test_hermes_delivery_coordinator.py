@@ -750,7 +750,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "Proxy-Authorization": f"Basic {secret}",
                 "Cookie": f"session={secret}",
                 "response_set_cookie_value": f"session={secret}",
-            }).replace('"', r'\"'),
+            }).replace('"', r'\u005cu0022'),
             stderr=json.dumps({"token": secret, "message": f"Bearer {secret}"}),
         )
 
@@ -794,7 +794,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                             "token": "escaped-token-secret",
                             "Cookie": "session=escaped-cookie-secret",
                             "response_set_cookie_value": "escaped-nested-cookie-secret",
-                        }).replace('"', r'\"'),
+                        }).replace('"', r'\u005cu0022'),
                     ],
                 },
                 "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},

@@ -159,6 +159,10 @@ class FlowContractTests(unittest.TestCase):
                 "Cookie": f"session={secret}",
                 "response_set_cookie_value": f"session={secret}",
             }).replace('"', r'\"'),
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "response_set_cookie_value": f"session={secret}",
+            }).replace('"', r'\u005cu0022'),
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertNotIn(secret, flow._safe_error(diagnostic))

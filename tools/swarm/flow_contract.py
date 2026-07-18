@@ -21,7 +21,21 @@ class ContractError(ValueError):
 
 
 def redact_diagnostic(value: object, *, limit: int | None = None) -> str:
-    text = str(value).replace("\x00", "?")
+    text = str(value)
+    while True:
+        decoded = re.sub(
+            r"(?i)\\u([0-9a-f]{4})",
+            lambda match: (
+                chr(int(match.group(1), 16))
+                if int(match.group(1), 16) < 128
+                else match.group(0)
+            ),
+            text,
+        )
+        if decoded == text:
+            break
+        text = decoded
+    text = text.replace("\x00", "?")
     text = re.sub(r'''\\+(?=["'])''', "", text)
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
     text = re.sub(
