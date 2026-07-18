@@ -420,6 +420,11 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   the exact candidate inside the corrected boundary before green CI/merge. Evidence:
   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+  PR #279 then applied the same installed namespace to author turns with only the disposable author worktree added to
+  the writable set. Source/installed hashes matched, the installed adversarial probe passed, all five timers resumed,
+  and a controlled real Sol `xhigh` author completed with rollout-derived OpenAI/workspace-write attestation after
+  changing only its allowed file. This closes the installed real-actor gate, but not a complete ordinary mission on the
+  exact combined revision. Evidence: `docs/evidence/author-os-isolation-rollout-2026-07-19.md`.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
   the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.
