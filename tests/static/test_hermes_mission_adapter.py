@@ -17,11 +17,18 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "swarm" / "mission_adapter.py"
+RUNTIME_PATH = ROOT / "tools" / "hermes-mission" / "runtime.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("mission_adapter", MODULE_PATH)
 adapter = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
 SPEC.loader.exec_module(adapter)
+RUNTIME_SPEC = importlib.util.spec_from_file_location(
+    "uap_missions_serial_queue", RUNTIME_PATH
+)
+mission_runtime = importlib.util.module_from_spec(RUNTIME_SPEC)
+assert RUNTIME_SPEC.loader
+RUNTIME_SPEC.loader.exec_module(mission_runtime)
 FIXTURE = ROOT / "tests" / "fixtures" / "hermes-mission-events-v1.json"
 
 
@@ -61,10 +68,16 @@ class FakeKanban:
         return copy.deepcopy(self.tasks[self.store["by_key"][key]]["task"])
 
     def list_task_ids(self, mission_id):
-        return sorted(self.tasks)
+        return sorted(
+            task_id for task_id, snapshot in self.tasks.items()
+            if snapshot["task"].get("tenant") == mission_id
+        )
 
     def list_tasks(self, mission_id):
-        return [copy.deepcopy(self.tasks[task_id]["task"]) for task_id in sorted(self.tasks)]
+        return [
+            copy.deepcopy(self.tasks[task_id]["task"])
+            for task_id in self.list_task_ids(mission_id)
+        ]
 
     def show(self, task_id):
         return copy.deepcopy(self.tasks[task_id])
@@ -875,6 +888,78 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual("reconciled", second["action"])
             self.assertEqual(1, backend.create_calls)
             self.assertEqual(1, len(central.events))
+
+    def test_coordinator_tick_processes_same_profile_missions_serially_after_restart(self):
+        class StoreClient:
+            def __init__(self, store):
+                self.store = store
+
+            def list_missions(self, dispatch_profile, *, reconcile=False):
+                return self.store.dispatch_candidates(
+                    dispatch_profile, 1, reconcile=reconcile
+                )
+
+            def publish(self, mission_id, event):
+                self.store.append_producer(mission_id, event)
+
+        backend = FakeKanban()
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            database = root / "missions.sqlite3"
+            state_root = root / "adapter-state"
+            store = mission_runtime.MissionStore(database)
+            store.accept(
+                "First serial mission", mission_id="mission-first",
+                dispatch_profile="build1-uap",
+            )
+            store.accept(
+                "Second serial mission", mission_id="mission-second",
+                dispatch_profile="build1-uap",
+            )
+            client = StoreClient(store)
+
+            first = adapter.coordinator_tick(
+                client, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/first",
+            )
+            second_tick = adapter.coordinator_tick(
+                client, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/second",
+            )
+
+            self.assertEqual("mission-first", first["mission_id"])
+            self.assertEqual("reconciled", second_tick["action"])
+            self.assertEqual(1, backend.create_calls)
+            self.assertEqual([], store.projection("mission-second")["tasks"])
+            self.assertEqual([], store.dispatch_candidates("build1-uap", 1))
+
+            store.append_central(
+                "mission-first",
+                {
+                    "schema_version": 1,
+                    "mission_id": "mission-first",
+                    "type": "mission.cancelled",
+                    "source": "central-hermes",
+                    "correlation": {
+                        "producer_event_id": "central:cancel:mission-first"
+                    },
+                    "payload": {"reason": "serial queue test cleanup"},
+                },
+            )
+            restarted = StoreClient(mission_runtime.MissionStore(database))
+            successor = adapter.coordinator_tick(
+                restarted, state_root, backend,
+                dispatch_profile="build1-uap", workspace="worktree:/tmp/second",
+            )
+
+            self.assertEqual("dispatched", successor["action"])
+            self.assertEqual("mission-second", successor["mission_id"])
+            self.assertNotEqual(first["root_task_id"], successor["root_task_id"])
+            self.assertEqual(2, backend.create_calls)
+            self.assertEqual(
+                {"mission-first", "mission-second"},
+                {snapshot["task"]["tenant"] for snapshot in backend.tasks.values()},
+            )
 
     def test_central_client_keeps_credentials_in_headers(self):
         listing = mock.MagicMock()

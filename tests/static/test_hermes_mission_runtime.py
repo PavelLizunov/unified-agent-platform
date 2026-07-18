@@ -331,6 +331,9 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
             )
 
         assert all(item["mission_id"] != "mission-old" for item in store.list(100))
+        assert [item["mission_id"] for item in store.dispatch_candidates(
+            "build1-uap", 2
+        )] == ["mission-old"]
         candidates = store.dispatch_candidates("build1-uap", 1)
         assert [item["mission_id"] for item in candidates] == ["mission-old"]
 
@@ -363,9 +366,21 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
         assert [item["mission_id"] for item in store.dispatch_candidates(
             "build1-uap", 1, reconcile=True
         )] == ["mission-old"]
-        assert [item["mission_id"] for item in store.dispatch_candidates("build1-uap", 1)] == [
-            "mission-second"
-        ]
+        assert store.dispatch_candidates("build1-uap", 1) == []
+        store.append_central(
+            "mission-old",
+            {
+                "schema_version": 1,
+                "mission_id": "mission-old",
+                "type": "mission.cancelled",
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": "central:cancel:mission-old"},
+                "payload": {"reason": "serial queue test cleanup"},
+            },
+        )
+        assert [item["mission_id"] for item in store.dispatch_candidates(
+            "build1-uap", 2
+        )] == ["mission-second"]
 
 
 def test_producer_schema_is_closed_and_all_strings_are_redacted() -> None:

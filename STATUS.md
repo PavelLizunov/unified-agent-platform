@@ -101,6 +101,10 @@ Last updated: 2026-07-17
   failures remain fail-closed. Hermetic
   tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze; the live
   Codex capacity envelope and recovery still require a controlled canary before any live-proof claim.
+  Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
+  a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
+  MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
+  terminal; live multi-mission evidence remains pending.
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
   `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound acceptance canary passed on the
   corrected runtime; channel/session work beyond the authoritative mission projection remains a separate product gap.

@@ -677,6 +677,8 @@ class MissionStore:
     ) -> list[dict[str, Any]]:
         dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
         limit = max(1, min(int(limit), 100))
+        if not reconcile:
+            limit = 1
         with self._db() as connection:
             rows = connection.execute(
                 """SELECT mission_id, payload_json FROM mission_events
@@ -691,6 +693,12 @@ class MissionStore:
             if payload.get("dispatch_profile") != dispatch_profile:
                 continue
             view = self.projection(row["mission_id"])
+            if (
+                not reconcile
+                and view["status"] in {"active", "waiting_owner"}
+                and bool(view["tasks"])
+            ):
+                return []
             eligible = (
                 reconcile
                 and view["status"] in {"active", "waiting_owner"}
@@ -701,9 +709,9 @@ class MissionStore:
                 and view["stage"] == "accepted"
                 and not view["tasks"]
             )
-            if eligible:
+            if eligible and len(candidates) < limit:
                 candidates.append(view)
-                if len(candidates) == limit:
+                if reconcile and len(candidates) == limit:
                     break
         return candidates
 
