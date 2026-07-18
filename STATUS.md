@@ -102,20 +102,25 @@ Last updated: 2026-07-18
   if the PR is already closed, only its unchanged branch/head is lease-deleted. Compatible in-progress v1 route
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
   repair push.
-  The coordinator source now also treats the exact trusted pre-turn Codex capacity terminal as an operational,
-  non-quality condition: two same-model retries precede an author-only whole-route fallback, while reviewer retries
-  remain frozen to the exact candidate route. Retry/fallback/round state and `not_before` are durable, capped rounds
-  never create an owner question; cooldown parks the exact task as `scheduled` and automatically claims a new run
-  when due, so the finite Kanban claim TTL cannot strand a capacity wait. Unknown, post-start or worktree-changing
-  failures remain fail-closed. Hermetic
-  tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze; the live
-  Codex capacity envelope and recovery still require a controlled canary before any live-proof claim. PRs #259/#260
-  deployed one bounded `mission.notice` projection for capacity wait/recovery to Central, Workspace and Telegram,
-  including the explicit `owner_action_required=false` state. The first Flux attempt truthfully exposed a stale
-  ConfigMap `subPath` mount; the revision-only follow-up rolled the exact runtime and the final Central, build-1 and
-  Workspace hashes/health checks passed. No live capacity event had occurred at that checkpoint, so this is observation
-  readiness rather than live failover proof. Exact rollout evidence:
-  `docs/evidence/automatic-capacity-observation-rollout-2026-07-18.md`.
+  The coordinator treats the exact trusted pre-turn Codex capacity terminal as an operational, non-quality condition:
+  two same-model retries precede an author-only whole-route fallback, while reviewer retries remain frozen to the exact
+  candidate route. Retry/fallback/round state and `not_before` are durable, capped rounds never create an owner
+  question; cooldown parks the exact task as `scheduled` and automatically claims a new run when due, so the finite
+  Kanban claim TTL cannot strand a capacity wait. Unknown, post-start or worktree-changing failures remain fail-closed.
+  Hermetic tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze.
+  PRs #259/#260 deployed the bounded `mission.notice` projection to Central, Workspace and Telegram. A later ordinary
+  Telegram mission fired a controlled wrapper with the exact pre-turn CLI capacity phrase, recovered on the first
+  same-model Sol retry with `owner_action_required=false`, then completed author/review/PR/CI/merge/post-verify/cleanup
+  and terminal sequence 27 without an owner question or quality-failure increment. This proves the deployed controlled
+  recovery path, not a naturally occurring provider-capacity envelope, `capacity_wait`, burst exhaustion or
+  whole-route fallback. Exact evidence:
+  `docs/evidence/automatic-capacity-observation-rollout-2026-07-18.md` and
+  `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+  The campaign also proved that capacity retries legitimately leave historical `scheduled` worker projections. PR
+  #273 changed Central completion from “exactly one worker total” to “zero or more ordered scheduled workers followed
+  by exactly one successful terminal worker”; running, failed, malformed and multiple-terminal histories still block.
+  Flux applied exact merge `9cb7546...`; the rolled pod was Ready with zero restarts and mounted runtime hash
+  `7198fe7c...`. The next natural tick appended the single sequence-27 `mission.completed` event.
   The deployed coordinator now places every reviewer Codex process in a transient user-systemd unit
   bound to its parent coordinator. The Linux mount namespace is read-only except for the mission-local model home
   and Codex runtime home; the candidate/source/state paths are explicitly read-only, common credential stores and
@@ -124,13 +129,15 @@ Last updated: 2026-07-18
   coordinator and systemd-unit hashes match, all five timers resumed, and the installed exact-wrapper probe denied
   writes outside the two approved homes while hiding the actual delivery credential file, unrelated `/proc` and
   user-runtime IPC. The first real reviewer attempt exposed an ordering deadlock: `After=` made the transient child
-  wait for its still-activating Type=oneshot parent while the parent waited for review. The source fix retains
-  `BindsTo=` but removes that ordering edge; PR #271 is merged and installed. Recovery then correctly quarantined the
-  interrupted in-flight reviewer, exposing that the durable `reconciling` state had no convergence transition. The
-  current source adds reviewer-only retry after proving the old transient unit is unloaded, the read-only checkout is
-  clean at the exact candidate and the draft PR is unchanged. Author ambiguity remains fail-closed. Rollout and a
-  completed real Codex reviewer run through this corrected recovery boundary are still pending. Exact rollout evidence:
-  `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
+  wait for its still-activating Type=oneshot parent while the parent waited for review. PR #271 retained `BindsTo=` but
+  removed that ordering edge. Recovery then correctly quarantined the interrupted reviewer, exposing that the durable
+  `reconciling` state had no convergence transition. PR #272 added reviewer-only retry after proving the old transient
+  unit was unloaded, the read-only checkout was clean at the exact candidate and the draft PR was unchanged. Author
+  ambiguity remains fail-closed. Exact merge `ea597a9...` is installed on build-1, and the same mission then completed
+  a real runtime-attested Terra `xhigh` read-only review of candidate `255d4e46...` inside the corrected transient unit,
+  followed by green CI and exact-head merge. Exact evidence:
+  `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md` and
+  `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
@@ -146,17 +153,21 @@ Last updated: 2026-07-18
   gates are implemented; this closes applicability for the no-deploy pilot, not generic deployment automation.
   Exact PR/CI/Flux/build-1 rollout evidence:
   `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md`.
-- **Canonical completion evidence is deployed; first live bundle is pending (2026-07-18).** The registered
+- **Canonical completion evidence is deployed and the first live bundle passed (2026-07-18).** The registered
   schema-v4 profile opts into one owner-only `completion-evidence.json` written only after Central terminal, cleanup
   and Kanban archive. Its closed schema binds the mission and immutable goal digest to canonical profile/policy/runtime
   hashes, a restart-safe systemd invocation hash-chain, exact candidate/review/PR/CI/merge/default identities,
   runtime-attested distinct author/reviewer sessions, post-verify, cleanup and the terminal Central projection. A
   deterministic CLI rejects changed bytes and recomputed semantic violations; restart verifies rather than rewrites a
   completed bundle. PR #268 passed required CI and exact merge `83f193ae...` is installed on build-1. Source/installed
-  hashes match, the armed capacity wrapper remains selected, all five timers are active and one natural registered
-  tick exited `0/success` without invoking Codex. This is not yet a live bundle claim: one naturally completed
-  mission, channel origin/cursors and signed artifact attestation remain pending. Exact rollout evidence:
-  `docs/evidence/canonical-completion-evidence-rollout-2026-07-18.md`.
+  hashes match and all five timers are active. Ordinary Telegram mission
+  `mission-intake-0c72cde02b5ef62972a30bc998f316b9` later reached terminal sequence 27 and produced a private bundle
+  with semantic digest `d05c16b7...`; the installed independent verifier returned
+  `hermes-flow-completion-evidence-ok`. It binds the exact Sol/Terra sessions, candidate, target PR #8, CI run
+  `29659412330`, merge/default, post-verify, cleanup and terminal projection. Input channel/source-message identity,
+  channel cursors, timer-origin journal proof and signed artifact attestation remain absent from the bundle schema.
+  Exact evidence: `docs/evidence/canonical-completion-evidence-rollout-2026-07-18.md` and
+  `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message
@@ -166,12 +177,14 @@ Last updated: 2026-07-18
   A real owner-channel question/answer canary is still required. Ordinary Workspace chat answers and complete
   cross-channel transcript synchronization are not claimed. Exact evidence:
   `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.
-- **Ordinary Workspace owner answers are source-complete; rollout pending (2026-07-18).** A later ordinary message in
+- **Ordinary Workspace owner answers are deployed with a live component pass (2026-07-18).** A later ordinary message in
   the exact Central session that accepted a mission now answers its single open question through
   `MissionStore.ingest_owner_turn()` instead of creating a second goal. The stable source message ID survives restart
   and delayed replay, changed text collides fail-closed, and multiple open questions are rejected rather than guessed.
-  The existing structured answer action remains compatible. Static/runtime regressions and the production revision
-  bump are in this change; Flux rollout and a real owner-channel canary are not yet claimed.
+  The existing structured answer action remains compatible. PR #270 passed CI, Flux applied exact merge
+  `5d95eada...`, the mounted runtime/overlay hashes matched and an in-pod temporary-store scenario returned
+  `live-workspace-answer-component-ok`. A real cross-channel owner question/answer canary is still required. Exact
+  evidence: `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -499,7 +512,7 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   the bounded lifecycle baseline are installed. Rejected projections still expose only a generic error/stage, and
   complete Workspace/Telegram chat-session history is not unified. No generic arbitrary-repository timer is enabled;
   only exact owner-approved profiles run.
-- **Registered Workspace intake and delivery accepted (2026-07-18):** PRs #248-#253 installed ordinary-message
+- **Registered Workspace and Telegram intake/delivery accepted (2026-07-18):** PRs #248-#253 installed ordinary-message
   intake and serialized exact Central session creation; a normal Workspace goal then created
   `mission-intake-9c00cff752112583d629c1f144abadb9` and the standing timer delivered non-toy Rust code through Sol
   author, exact-SHA Terra review, multi-platform CI, PR #6, exact merge, fresh-main verification and cleanup without
@@ -507,17 +520,21 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   by the profile and the platform still declared completion. PR #254 added only the missing approved path. A second
   normal Workspace goal created `mission-intake-f53871c022ce187501a0e9d9021b8823`; its first README candidate was
   rejected by the independent reviewer, automatically corrected, re-reviewed, merged as target PR #7 and completed
-  with one terminal event and cleanup. This accepts ordinary Workspace intake for the exact registered profile, not
-  arbitrary repositories, live ordinary Telegram intake, full cross-channel history or a self-diagnosing single-mission
-  repair of the first goal. Exact evidence:
-  `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
+  with one terminal event and cleanup. A later normal Telegram goal created
+  `mission-intake-0c72cde02b5ef62972a30bc998f316b9`, recovered from a controlled exact pre-turn capacity failure,
+  completed target PR #8 and produced terminal sequence 27 plus a verified canonical bundle. That campaign installed
+  three corrections while preserving the same mission, so it is strong recovery evidence rather than a clean
+  frozen-runtime canary. This accepts both ordinary input channels only for the exact registered profile, not arbitrary
+  repositories, full cross-channel history or a self-diagnosing single-mission repair of the first goal. Exact
+  evidence: `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md` and
+  `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
 - **Workspace durable mission replay accepted live (2026-07-18).** PR #256 replaced selected-mission snapshot-only
   observation with authenticated Central cursor replay and a sequence-validated timeline. Its first live rollout
   exposed a null first-render race; the failure is preserved, PR #257 fixed it and added an exact vulnerable-asset
   upgrade regression. After the exact hotfix merge was built and restarted on build-1, mission
   `mission-intake-f53871c022ce187501a0e9d9021b8823` rendered the same ordered 20 events, cursor 20 and single terminal
-  event before and after a browser reload. This closes Workspace mission-event reconnect, not ordinary Telegram intake
-  or complete cross-channel chat/session history. Exact evidence:
+  event before and after a browser reload. This closes Workspace mission-event reconnect, not a live cross-channel
+  owner question/answer leg or complete cross-channel chat/session history. Exact evidence:
   `docs/evidence/workspace-mission-cursor-replay-2026-07-18.md`.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one

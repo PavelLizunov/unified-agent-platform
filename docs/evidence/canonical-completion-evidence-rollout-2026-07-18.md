@@ -3,8 +3,8 @@
 ## Scope and verdict
 
 The registered schema-v4 delivery profile now has the canonical completion-evidence writer and verifier installed on
-build-1. A natural timer tick loaded the installed runtime and exited successfully without a queued mission. This is
-a deployment/readiness pass, not a live completion-bundle canary: no new mission completed during this rollout.
+build-1. At rollout time, a natural timer tick loaded the installed runtime and exited successfully without a queued
+mission. The controlled live follow-up below now records the first completed bundle.
 
 ## Repository gate
 
@@ -66,8 +66,39 @@ consume the armed fault. No Flux manifest changed in this rollout.
 This rollout proves that exact merged source is installed, the registered profile opts in, the capacity wrapper was
 preserved, systemd activation remains healthy and the verifier is covered by deterministic Linux/Windows gates.
 
-It does not yet prove that a real delivery creates a valid `completion-evidence.json`. The next natural registered
-mission must produce the file and pass the installed verifier against the digest checkpoint. The initial schema also
+At rollout time this did not yet prove that a real delivery created a valid `completion-evidence.json`; the follow-up
+below records that later gate. The initial schema also
 does not include channel-origin/source-event identity, Workspace/Telegram cursors, deploy revision or a signed GitHub
 artifact attestation. A systemd `InvocationID` proves the service boundary but is not, by itself, cryptographic proof
 that every invocation originated from the timer.
+
+## First live bundle follow-up
+
+Ordinary Telegram mission `mission-intake-0c72cde02b5ef62972a30bc998f316b9` completed on the registered profile after
+the adversarial corrections recorded in
+[`ordinary-telegram-capacity-recovery-2026-07-18.md`](ordinary-telegram-capacity-recovery-2026-07-18.md). Build-1 wrote
+`completion-evidence.json` and the state digest checkpoint with mode `0600`.
+
+```text
+file SHA-256:       bef78e627ba69b32ab191874dcb31185ff037f82a2f037a071a3011f78a226f2
+semantic SHA-256:   d05c16b75ade9800d9976b3416e5771b13650529dbe42c3306a22029f67601b6
+mission sequence:   27 / completed
+target PR:          PavelLizunov/hermes-flow-v2-pilot#8
+candidate:          255d4e464864f316fc739bf72aa49a750e3e1c5c
+merge/default:      53eca7e419781679d730575f60848b902a8b7de6
+CI run:             29659412330
+```
+
+The bundle bound distinct runtime-attested Sol author and Terra reviewer sessions on the same candidate/tree, the
+reviewer's read-only sandbox and source attestation, exact PR/CI/merge/default ancestry, fresh-main post-verify,
+explicit `delivery_mode: none`, cleanup, task archive and the terminal Central projection. It also recorded 21 service
+invocation IDs in chain SHA-256 `b7138627e0ee82fb65c159dcc27990eef941c6766ae8f831b6dbc7a9a8c71780`.
+
+The installed verifier returned:
+
+```text
+hermes-flow-completion-evidence-ok d05c16b75ade9800d9976b3416e5771b13650529dbe42c3306a22029f67601b6
+```
+
+This accepts the first live canonical bundle for the registered no-deploy profile. The schema omissions listed above
+remain: the bundle is not yet the final signed Product Operating Contract completion certificate.
