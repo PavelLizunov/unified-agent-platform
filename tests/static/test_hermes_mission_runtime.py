@@ -120,6 +120,64 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
     asyncio.run(scenario())
 
 
+def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            store.accept("Deliver the change", mission_id="mission-capacity")
+            store.bind("mission-capacity", "telegram", "42", "7")
+            notice = {
+                "schema_version": 1,
+                "mission_id": "mission-capacity",
+                "type": "mission.notice",
+                "source": "build1-flow",
+                "correlation": {
+                    "task_id": "task-1",
+                    "producer_event_id": "flow:mission-capacity:wait-1",
+                },
+                "payload": {
+                    "code": "capacity_wait",
+                    "message": "OpenAI capacity: automatic author retry scheduled.",
+                    "owner_action_required": False,
+                    "next_attempt_at": "2026-07-18T18:00:00Z",
+                },
+            }
+            stored, created = store.append_producer("mission-capacity", notice)
+            assert created
+            view = store.projection("mission-capacity")
+            assert view["status"] == "active"
+            assert view["progress_percent"] == 0
+            assert view["question"] is None
+            assert view["notice"] == notice["payload"]
+            rendered = missions.telegram_text(view)
+            assert "Next automatic attempt: 2026-07-18T18:00:00Z" in rendered
+            assert "Owner action required: no" in rendered
+
+            deliveries: list[str] = []
+
+            async def sender(_target: dict, text: str) -> None:
+                deliveries.append(text)
+
+            assert await missions.notify_subscribers(store, stored, sender) == 1
+            assert deliveries == [rendered]
+
+            invalid = {
+                **notice,
+                "correlation": {
+                    **notice["correlation"],
+                    "producer_event_id": "flow:mission-capacity:invalid",
+                },
+                "payload": {**notice["payload"], "owner_action_required": "no"},
+            }
+            try:
+                store.append_producer("mission-capacity", invalid)
+                raise AssertionError("string owner action flag was accepted")
+            except missions.MissionError as error:
+                assert "owner_action_required" in str(error)
+
+    asyncio.run(scenario())
+
+
 def test_notification_can_repeat_after_delivery_before_checkpoint() -> None:
     async def scenario() -> None:
         with tempfile.TemporaryDirectory() as temp:

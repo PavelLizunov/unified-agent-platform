@@ -70,6 +70,7 @@ PREVIOUS_ADDED_FILES = {
     "src/screens/dashboard/components/mission-overview-card.tsx": (
         "990eb901032d2f2784eece487bc462b02b0672c1feb9f0c1bef403e1019e6b5b",
         "8fc9a10f19a40df929f57695e3efaf44c2ae1f8fdd19df80212f7161d195be89",
+        "486df3f1451ce7cbc4e80dbce70dd3105d39b78b64b5c61d2a2a6e91fd0b532d",
     ),
 }
 ASSET_ROOT = pathlib.Path(__file__).with_name("files")

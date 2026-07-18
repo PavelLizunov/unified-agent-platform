@@ -10,6 +10,12 @@ export type MissionView = {
   status: string
   stage: string
   progress_percent: number
+  notice?: {
+    code: string
+    message: string
+    owner_action_required: boolean
+    next_attempt_at?: string
+  } | null
   goal?: string | null
   question?: { question_id: string; text: string } | null
   answer?: { question_id: string; text: string } | null
@@ -288,6 +294,19 @@ export function MissionOverviewCard() {
             </button>
           </form>
           {answerError ? <p className="mt-1 text-xs text-red-400">{answerError}</p> : null}
+        </div>
+      ) : null}
+      {mission.notice ? (
+        <div className="mt-3 rounded-md bg-sky-500/10 px-3 py-2 text-sm">
+          <p>{mission.notice.message}</p>
+          {mission.notice.next_attempt_at ? (
+            <p className="mt-1 text-xs opacity-70">
+              Next automatic attempt: {mission.notice.next_attempt_at}
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs opacity-70">
+            Owner action required: {mission.notice.owner_action_required ? 'yes' : 'no'}
+          </p>
         </div>
       ) : null}
       {mission.result ? <p className="mt-3 text-sm">Result: {mission.result}</p> : null}

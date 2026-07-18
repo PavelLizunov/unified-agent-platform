@@ -1259,6 +1259,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "mission_id": "capacity-author",
                 "dispatch_profile": approved["dispatch_profile"],
                 "phase": "claimed",
+                "root_task_id": "task-1",
                 "prior_review_rejections": 0,
                 "prior_ci_failures": 0,
                 "prior_author_failures": 0,
@@ -1374,8 +1375,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             approved["required_files"] = ["Cli.cs"]
             backend = FakeBackend()
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            client = FakeClient()
             instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), backend, root / "state"
+                approved, client, backend, root / "state"
             )
             paths = instance._paths("capacity-lease")
             state = {
@@ -1413,6 +1415,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("scheduled", backend.task["status"])
             self.assertTrue(state["model_capacity"]["claim_parked"])
             self.assertEqual("scheduled", backend.runs[0]["status"])
+            waiting_notice = client.stages[-1]
+            self.assertEqual("mission.notice", waiting_notice["type"])
+            self.assertEqual("capacity_wait", waiting_notice["payload"]["code"])
+            self.assertFalse(waiting_notice["payload"]["owner_action_required"])
+            self.assertEqual(
+                "1970-01-01T00:16:45Z",
+                waiting_notice["payload"]["next_attempt_at"],
+            )
 
             with mock.patch.object(coordinator.time, "time", return_value=1006):
                 self.assertIsNone(instance._capacity_wait_result(
@@ -1423,6 +1433,57 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("8", state["run_id"])
             self.assertEqual(2, backend.claims)
             self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
+            recovered_notice = client.stages[-1]
+            self.assertEqual("mission.notice", recovered_notice["type"])
+            self.assertEqual("capacity_recovered", recovered_notice["payload"]["code"])
+            self.assertFalse(recovered_notice["payload"]["owner_action_required"])
+            self.assertNotIn("next_attempt_at", recovered_notice["payload"])
+
+    def test_capacity_notice_retry_reuses_the_same_producer_event_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            client = FakeClient()
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("capacity-notice-retry")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-notice-retry",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state,
+                    paths,
+                    role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "d" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(state, "capacity-notice-retry", paths)
+                instance._capacity_wait_result(state, "capacity-notice-retry", paths)
+            self.assertEqual(2, len(client.stages))
+            self.assertEqual(
+                client.stages[0]["correlation"]["producer_event_id"],
+                client.stages[1]["correlation"]["producer_event_id"],
+            )
 
     def test_capacity_reclaim_adopts_the_same_run_after_claim_response_crash(self):
         class CrashAfterClaimBackend(FakeBackend):

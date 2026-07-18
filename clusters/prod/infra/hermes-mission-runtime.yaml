@@ -1158,10 +1158,14 @@ data:
         "complete",
     )
     TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
-    NOTIFY_TYPES = {"mission.stage", "mission.question", "mission.answer", *TERMINAL_TYPES}
+    NOTIFY_TYPES = {
+        "mission.stage", "mission.notice", "mission.question", "mission.answer",
+        *TERMINAL_TYPES,
+    }
     REQUIRED_PAYLOAD = {
         "mission.accepted": {"goal"},
         "mission.stage": {"stage", "progress_percent"},
+        "mission.notice": {"code", "message", "owner_action_required"},
         "mission.question": {"question_id", "text"},
         "mission.answer": {"question_id", "text"},
         "task.upsert": {"task_id", "title", "status"},
@@ -1177,6 +1181,9 @@ data:
     PAYLOAD_FIELDS = {
         **REQUIRED_PAYLOAD,
         "mission.accepted": {"goal", "dispatch_profile", "parent_mission_id"},
+        "mission.notice": {
+            "code", "message", "owner_action_required", "next_attempt_at",
+        },
         "task.upsert": {"task_id", "title", "status", "assignee"},
         "worker.upsert": {"worker_id", "status", "run_id", "profile"},
         "terminal.append": {"stream", "text", "offset"},
@@ -1188,7 +1195,7 @@ data:
     _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
     _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
     _ID_PAYLOAD_FIELDS = {
-        "assignee", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
+        "assignee", "code", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
         "run_id", "status", "stream", "task_id", "worker_id",
     }
     _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -1310,6 +1317,10 @@ data:
         for name, value in payload.items():
             if value is None and (event_type, name) in _NULLABLE_PAYLOAD:
                 continue
+            if name == "owner_action_required":
+                if not isinstance(value, bool):
+                    raise MissionError("invalid payload.owner_action_required")
+                continue
             if name == "progress_percent":
                 continue
             if name == "offset":
@@ -1326,6 +1337,17 @@ data:
             progress = payload.get("progress_percent")
             if not isinstance(progress, int) or isinstance(progress, bool) or not 0 <= progress <= 100:
                 raise MissionError("invalid mission progress")
+        if event_type == "mission.notice":
+            if payload.get("code") not in {"capacity_wait", "capacity_recovered"}:
+                raise MissionError("invalid mission notice code")
+            next_attempt = payload.get("next_attempt_at")
+            if next_attempt is not None:
+                try:
+                    parsed = datetime.fromisoformat(next_attempt.replace("Z", "+00:00"))
+                except (AttributeError, ValueError) as error:
+                    raise MissionError("invalid mission notice timestamp") from error
+                if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
+                    raise MissionError("invalid mission notice timestamp")
         if event_type == "mission.accepted" and "dispatch_profile" in payload:
             _require_id(payload.get("dispatch_profile"), "dispatch_profile")
         normalized = {
@@ -1378,6 +1400,7 @@ data:
             "status": None,
             "stage": None,
             "progress_percent": 0,
+            "notice": None,
             "goal": None,
             "dispatch_profile": None,
             "parent_mission_id": None,
@@ -1427,7 +1450,11 @@ data:
                 progress = payload["progress_percent"]
                 if progress < view["progress_percent"]:
                     raise MissionError("mission progress decreased")
-                view.update(stage=payload["stage"], progress_percent=progress)
+                view.update(stage=payload["stage"], progress_percent=progress, notice=None)
+                if view.get("question") is None:
+                    view["status"] = "active"
+            elif kind == "mission.notice":
+                view["notice"] = dict(payload)
                 if view.get("question") is None:
                     view["status"] = "active"
             elif kind == "mission.question":
@@ -1435,6 +1462,7 @@ data:
                     status="waiting_owner",
                     question={"question_id": payload["question_id"], "text": payload["text"]},
                     answer=None,
+                    notice=None,
                 )
             elif kind == "mission.answer":
                 question = view.get("question")
@@ -1463,11 +1491,14 @@ data:
             elif kind == "delivery.upsert":
                 deliveries[str(payload["kind"])] = dict(payload)
             elif kind == "mission.completed":
-                view.update(status="completed", stage="complete", progress_percent=100, result=payload["result"])
+                view.update(
+                    status="completed", stage="complete", progress_percent=100,
+                    result=payload["result"], notice=None,
+                )
             elif kind == "mission.failed":
-                view.update(status="failed", error=payload["error"])
+                view.update(status="failed", error=payload["error"], notice=None)
             elif kind == "mission.cancelled":
-                view.update(status="cancelled", error=payload["reason"])
+                view.update(status="cancelled", error=payload["reason"], notice=None)
 
         view.update(
             tasks=list(tasks.values()),
@@ -1494,6 +1525,15 @@ data:
             lines.append(f"Question: {view['question']['text']}")
         if view.get("answer"):
             lines.append(f"Answer received: {view['answer']['text']}")
+        if view.get("notice"):
+            notice = view["notice"]
+            lines.append(f"Update: {notice['message']}")
+            if notice.get("next_attempt_at"):
+                lines.append(f"Next automatic attempt: {notice['next_attempt_at']}")
+            lines.append(
+                "Owner action required: "
+                + ("yes" if notice["owner_action_required"] else "no")
+            )
         if view.get("result"):
             lines.append(f"Result: {view['result']}")
         if view.get("error"):
