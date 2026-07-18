@@ -170,8 +170,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    Contract completion certificate.
 10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant
     at Central's terminal-authority boundary with a bounded deterministic summary of the accepted goal, changed paths,
-    PR, verified revision, required gates and delivery applicability. Exact rollout and a later live terminal message
-    are not yet evidence.
+    PR, verified revision, required gates and delivery applicability. PR #277 passed required CI, exact Flux rollout,
+    mounted-runtime verification and an in-pod Central/Telegram component assertion. A later live terminal message is
+    not yet evidence.
 
 These gaps drive the post-A6 milestones in `docs/next-steps.md`. Spark Runner remains parked until the UAP mission
 plane is coherent and the owner explicitly resumes it.
