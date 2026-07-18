@@ -161,10 +161,11 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
    registered no-deploy profile and installed on build-1. The ordinary Telegram campaign produced the first live
    artifact; the installed verifier accepted semantic digest `d05c16b7...`. The initial schema binds delivery
-   runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. Current source adds a compatible
-   closed v2 schema that binds the server-owned ordinary input platform and hashed source key/message to the
-   deterministic mission identity without persisting raw channel identifiers; rollout and a new v2 live artifact are
-   pending. Workspace/Telegram delivery cursors, a deployed revision, a journal proof of timer origin and a
+   runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. PR #275 deploys a compatible closed
+   v2 schema that binds the server-owned ordinary input platform and hashed source key/message to the deterministic
+   mission identity without persisting raw channel identifiers; exact Central/build-1 component rollout passed, but a
+   new live v2 delivery artifact remains pending. Workspace/Telegram delivery cursors, a deployed revision, a journal
+   proof of timer origin and a
    signed/GitHub-attested artifact remain absent. Those omissions prevent treating it as the final Product Operating
    Contract completion certificate.
 

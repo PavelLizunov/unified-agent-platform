@@ -164,15 +164,23 @@ Last updated: 2026-07-18
   `mission-intake-0c72cde02b5ef62972a30bc998f316b9` later reached terminal sequence 27 and produced a private bundle
   with semantic digest `d05c16b7...`; the installed independent verifier returned
   `hermes-flow-completion-evidence-ok`. It binds the exact Sol/Terra sessions, candidate, target PR #8, CI run
-  `29659412330`, merge/default, post-verify, cleanup and terminal projection. Input channel/source-message identity,
-  channel cursors, timer-origin journal proof and signed artifact attestation remain absent from the bundle schema.
+  `29659412330`, merge/default, post-verify, cleanup and terminal projection. That already emitted live bundle remains
+  schema v1 and therefore does not contain input lineage.
   Exact evidence: `docs/evidence/canonical-completion-evidence-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
-  Current source adds closed bundle schema v2 for future registered ordinary intake: Central persists only the
+  PR #275 now deploys closed bundle schema v2 for future registered ordinary intake: Central persists only the
   server-owned `workspace`/`telegram` platform plus full source-key and source-message SHA-256 values, the verifier
-  requires the source-key prefix to match deterministic `mission-intake-*`, and existing v1 bundles remain valid. This
-  source revision still requires rollout and a new live bundle; channel delivery cursors, timer-origin proof and
-  signing remain separate gaps.
+  requires the source-key prefix to match deterministic `mission-intake-*`, and existing v1 bundles remain valid.
+  Flux exact-SHA rollout, in-pod deterministic/replay proof, build-1 exact installation, natural timer success and
+  installed v1/v2 verifier checks passed. A new live v2 bundle is still required; channel delivery cursors,
+  timer-origin proof and signing remain separate gaps. Exact rollout evidence:
+  `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
+- **Owner terminal result is authoritative but still too generic (2026-07-18).** The successful ordinary Telegram
+  campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
+  rendered to the owner: the implemented `summary` behavior, changed API/CLI/tests/README, target PR #8, green
+  multi-platform CI and merged revision. The next result-projection patch must derive one bounded redacted summary
+  from canonical delivery evidence and show the same PR/merge/check facts in Workspace and Telegram. This is a UX and
+  completion-reporting gap, not a failure of that delivery.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message
