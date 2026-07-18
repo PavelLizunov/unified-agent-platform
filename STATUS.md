@@ -175,12 +175,14 @@ Last updated: 2026-07-18
   installed v1/v2 verifier checks passed. A new live v2 bundle is still required; channel delivery cursors,
   timer-origin proof and signing remain separate gaps. Exact rollout evidence:
   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
-- **Owner terminal result is authoritative but still too generic (2026-07-18).** The successful ordinary Telegram
+- **Owner terminal result has a concrete shared formatter in current source (2026-07-19; rollout pending).** The successful ordinary Telegram
   campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
   rendered to the owner: the implemented `summary` behavior, changed API/CLI/tests/README, target PR #8, green
-  multi-platform CI and merged revision. The next result-projection patch must derive one bounded redacted summary
-  from canonical delivery evidence and show the same PR/merge/check facts in Workspace and Telegram. This is a UX and
-  completion-reporting gap, not a failure of that delivery.
+  multi-platform CI and merged revision. Current source replaces the constant at Central's single terminal-authority
+  boundary with one bounded deterministic result built from the accepted goal plus projected changed paths, PR,
+  verified default revision, required gates and delivery applicability. Workspace and Telegram already render that
+  same projection; no new model call or channel-specific state is added. Merge/Flux component proof and a later live
+  terminal message remain the evidence gates.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message

@@ -168,6 +168,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    proof of timer origin and a
    signed/GitHub-attested artifact remain absent. Those omissions prevent treating it as the final Product Operating
    Contract completion certificate.
+10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant
+    at Central's terminal-authority boundary with a bounded deterministic summary of the accepted goal, changed paths,
+    PR, verified revision, required gates and delivery applicability. Exact rollout and a later live terminal message
+    are not yet evidence.
 
 These gaps drive the post-A6 milestones in `docs/next-steps.md`. Spark Runner remains parked until the UAP mission
 plane is coherent and the owner explicitly resumes it.

@@ -285,11 +285,12 @@ not add an application service, workflow engine or mission database.
     implementation asymmetry with Telegram without a new service; one real cross-channel question/answer canary remains
     required. See the
     [rollout evidence](evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md).
-11. **Concrete owner terminal result — IMPLEMENTATION GAP.** The first ordinary Telegram delivery completed correctly,
+11. **Concrete owner terminal result — SOURCE IMPLEMENTED; ROLLOUT/LIVE PROOF PENDING.** The first ordinary Telegram delivery completed correctly,
     but its terminal notification only said `Delivery completed, merged, and verified`. Build a bounded redacted result
-    from the canonical evidence already held by the coordinator: what changed, target PR, merge revision, required-CI
-    outcome, post-verify outcome and delivery applicability. Central remains authoritative and Workspace/Telegram must
-    render the same facts; do not generate the summary with another model or trust free-form worker output.
+    from already projected canonical facts. Current source does this at Central's existing `complete_if_ready()`
+    boundary: accepted goal, changed paths, PR, verified revision, passed gates and delivery applicability become the
+    one terminal result consumed by both Workspace and Telegram. It adds no schema, service or model call. Required CI,
+    exact Flux rollout and a later real terminal message remain the evidence gates.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

@@ -1144,7 +1144,9 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             {"worker_id": "task-1:run:2", "run_id": "2", "profile": "codex-luna", "status": "success"},
             3,
         )
-        number = 4
+        publish("change.upsert", {"path": "src/lib.rs", "status": "modified"}, 4)
+        publish("change.upsert", {"path": "README.md", "status": "modified"}, 5)
+        number = 6
         for gate_id in ("tests", "review", "ci", "post-verify"):
             publish("gate.upsert", {"gate_id": gate_id, "status": "passed"}, number)
             number += 1
@@ -1173,6 +1175,23 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert completed is not None and completed[1]
         assert completed[0]["source"] == "central-hermes"
         assert completed[0]["type"] == "mission.completed"
+        assert completed[0]["payload"]["result"] == (
+            "Completed: Deliver safely\n"
+            "PR: https://example.invalid/pr/1\n"
+            "Merge: https://example.invalid/commit/1\n"
+            "Checks: tests, review, CI, post-verify, cleanup passed\n"
+            "Delivery: not applicable\n"
+            "Changed files (2): README.md, src/lib.rs"
+        )
+        verbose = store.projection(mission_id)
+        verbose["goal"] = "x" * 8_192
+        verbose["changes"] = [
+            {"path": f"src/{number}-" + "y" * 240, "status": "modified"}
+            for number in range(20)
+        ]
+        assert len(missions._completion_result(verbose)) <= (
+            missions._MAX_COMPLETION_RESULT_CHARS
+        )
         assert store.projection(mission_id)["status"] == "completed"
         assert store.completion_notification(mission_id) is None
         assert store.pending_terminal_notification("build1-target") is None

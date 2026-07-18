@@ -212,9 +212,10 @@ Good next tasks that do not require redesign:
    exact rollout and component verification passed; one new live artifact remains the evidence gate. Channel cursors
    and signing remain later fields. Evidence:
    `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
-   The live terminal message exposed the next UX gap: it only rendered `Delivery completed, merged, and verified` even
-   though PR/check/merge/change facts were durable. The next small implementation should build a bounded redacted
-   owner result from canonical evidence and render it identically in Workspace/Telegram; no extra model call.
+   The live terminal message exposed a UX gap: it only rendered `Delivery completed, merged, and verified` even though
+   PR/check/merge/change facts were durable. Current source fixes the shared Central authority boundary with one
+   bounded deterministic result derived from the accepted goal and existing projected delivery facts; Workspace and
+   Telegram require no separate formatter and no extra model call. Merge/Flux/live terminal proof remains pending.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
    PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
    through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the

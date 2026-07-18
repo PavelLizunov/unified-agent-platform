@@ -64,6 +64,10 @@ and message identifiers are not copied into the bundle. The verifier still accep
 missions and in-flight missions accepted before the v2 runtime. Channel delivery cursors and signed artifact
 attestation remain separate unfinished evidence.
 
+Successful Central completion renders one bounded owner result from the already validated mission projection: accepted
+goal, changed paths, merged PR, verified default revision, passed gates and delivery applicability. Workspace and
+Telegram consume that same result. Do not replace it with free-form worker output or another model-generated summary.
+
 ## When to use
 
 - Read-only or docs-only change up to three files: ordinary Hermes session is sufficient.
