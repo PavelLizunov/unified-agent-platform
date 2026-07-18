@@ -2932,6 +2932,28 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertEqual(["durable_state", "multi_platform"], loaded["route_flags"])
         self.assertFalse(loaded["crash_after_author_commit_once"])
 
+        owner_gate = ROOT / "tools/swarm/profiles/delivery-flow-pilot-owner-gate-v4.json"
+        owner_gate_value = json.loads(owner_gate.read_text(encoding="utf-8"))
+        self.assertEqual(4, owner_gate_value["schema_version"])
+        self.assertEqual(
+            "build1-flow-pilot-owner-gate-v4",
+            owner_gate_value["dispatch_profile"],
+        )
+        self.assertEqual("none", owner_gate_value["delivery_mode"])
+        self.assertEqual(
+            ["architecture_change", "durable_state", "multi_platform"],
+            owner_gate_value["route_flags"],
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            owner_gate_value.update(
+                source_checkout=str(root / "source"),
+                worktree_root=str(root / "worktrees"),
+            )
+            path = root / "delivery-flow-pilot-owner-gate-v4.json"
+            path.write_text(json.dumps(owner_gate_value), encoding="utf-8")
+            coordinator.load_profile(path)
+
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             path = root / "delivery-invalid.json"

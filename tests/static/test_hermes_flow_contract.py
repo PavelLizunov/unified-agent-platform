@@ -1201,10 +1201,13 @@ class FlowContractTests(unittest.TestCase):
             installer.install(ROOT / "tools" / "swarm", home)
             installer.check(ROOT / "tools" / "swarm", home)
             registered = home / ".config/uap/delivery-flow-pilot-registered-v4.json"
+            owner_gate = home / ".config/uap/delivery-flow-pilot-owner-gate-v4.json"
             self.assertTrue(registered.is_file())
+            self.assertTrue(owner_gate.is_file())
             if os.name != "nt":
                 self.assertEqual(0o700, registered.parent.stat().st_mode & 0o777)
                 self.assertEqual(0o600, registered.stat().st_mode & 0o777)
+                self.assertEqual(0o600, owner_gate.stat().st_mode & 0o777)
             installer.install(ROOT / "tools" / "swarm", home)
             installer.check(ROOT / "tools" / "swarm", home)
             (home / "swarm-bin" / "flow-policy.json").write_text("{}")

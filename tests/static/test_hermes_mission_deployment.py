@@ -43,7 +43,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v51-automatic-owner-question"
+        "v52-owner-gate-canary-route"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -82,7 +82,7 @@ def main() -> None:
     assert gateway_env["HERMES_MISSION_INTAKE_ROUTES"]["value"] == (
         '{"workspace":{"dispatch_profile":"build1-flow-pilot-registered-v4",'
         '"delivery_mode":"none"},"telegram":{"dispatch_profile":'
-        '"build1-flow-pilot-registered-v4","delivery_mode":"none"}}'
+        '"build1-flow-pilot-owner-gate-v4","delivery_mode":"none"}}'
     )
     assert {
         "name": "HERMES_MISSION_OWNER_KEY",
