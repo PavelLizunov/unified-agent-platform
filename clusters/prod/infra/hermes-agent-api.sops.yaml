@@ -5,7 +5,7 @@ metadata:
     namespace: uap-system
 type: Opaque
 stringData:
-    api-key: ENC[AES256_GCM,data:Sufn66DyVpPYMHHJBj5EneJ/he9ZNOLWEbd5qs7LCp0BFOOVTe7Pqm6A8/E3x6KgdrXQJ/CEiyEScTpRhKNDQg==,iv:/w2nncgnF4+GCQVnkqLI6bC02YNudGbxtAFYwHb25CY=,tag:pvtzG+GPuM9qGIRCqub7tw==,type:str]
+    api-key: ENC[AES256_GCM,data:VZaJ5PwKSESGoZcgK12MFUglkQa+lMcoT4TDVn7hwbHZF1WpsPyxVAAW7Na1vFeLdKAc6wg2enP4jAHgr0E9yA==,iv:mq95d0ZVFQCm6eM565fzV+EpkfBK5pFT8K5vn5lhjgI=,tag:TDtG73nmghO8joDkpEO8Tw==,type:str]
 sops:
     age:
         - enc: |
@@ -18,6 +18,6 @@ sops:
             -----END AGE ENCRYPTED FILE-----
           recipient: age1ellxh9rynjv2n2sau9mekpt3qmt7r9w7t7zqjj6plx3nd2d0cg9sys9s85
     encrypted_regex: ^(data|stringData)$
-    lastmodified: "2026-07-14T07:33:38Z"
-    mac: ENC[AES256_GCM,data:cMfsn3D/mayEwnUQqQNmhW1bYOT5/xxiKyeZ3rHWwdsskutsl4ss9f6FnNsz1Q1iYmBuw7XR0bzYkyYY0cQ/nUfrWfDTkafhHl7sL5n+bImhB/e14fzf1L4BBC+pfStDi+2M7smvNlPT1/8HwsGiibdM8naan0gRbXmjlX6lzR4=,iv:BzZ1sbYTqU8rw4/h9HEBn1txThN5Rip9ayzPlnLEAxo=,tag:wOIKDq3ATGR3VroE2WfFmw==,type:str]
+    lastmodified: "2026-07-18T14:24:25Z"
+    mac: ENC[AES256_GCM,data:lCvNevZWPBpM6sZtvepiHFgsY76O9/oeiJWaXCG/HD0TySL2EKYLHGIX8A+yvFLwLhWXorK6BpMUKdN6FxRiBkE0iC0z2h6jpZTDjztYB9nJcjNNHC3jwjjM/MSJd11eInOvnFQWpKnD9+v6e/2msuZpQ6W1I1QHH8WOcWDuMM0=,iv:qRLVyFFWnk8oKjIQ1Jc4a5dG4D3YwwyIaZLM/GicTDY=,tag:oPZnJib29knfJI2aOb6GMA==,type:str]
     version: 3.13.1
