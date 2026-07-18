@@ -488,6 +488,9 @@ class MissionAdapterTests(unittest.TestCase):
             rf"Authorization\uD800: {secret}",
             rf"Authorization\u00e9: {secret}",
             rf"Authorization\u00G0: {secret}",
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
         )
 
         for diagnostic in diagnostics:
@@ -502,11 +505,11 @@ class MissionAdapterTests(unittest.TestCase):
                 )
                 with self.assertRaises(adapter.AdapterError) as raised:
                     backend.show("task-1")
-                self.assertIn("[REDACTED]", str(raised.exception))
+                self.assertIn("[REDACTED", str(raised.exception))
                 self.assertNotIn(secret, str(raised.exception))
                 with self.assertRaises(adapter.AdapterError) as raised:
                     backend.gc()
-                self.assertIn("[REDACTED]", str(raised.exception))
+                self.assertIn("[REDACTED", str(raised.exception))
                 self.assertNotIn(secret, str(raised.exception))
 
                 stderr = io.StringIO()
@@ -518,7 +521,7 @@ class MissionAdapterTests(unittest.TestCase):
                 ):
                     status = adapter.main(["accept", "--event", "unused.json"])
                 self.assertEqual(2, status)
-                self.assertIn("[REDACTED]", stderr.getvalue())
+                self.assertIn("[REDACTED", stderr.getvalue())
                 self.assertNotIn(secret, stderr.getvalue())
 
     def test_native_capacity_schedule_and_unblock_are_fail_closed(self):

@@ -23,25 +23,43 @@ class ContractError(ValueError):
 _MAX_DIAGNOSTIC_INPUT_CHARS = 65_536
 
 
+def _decode_diagnostic_escapes(text: str) -> str | None:
+    decoded: list[str] = []
+    index = 0
+    while index < len(text):
+        if not text.startswith(r"\u", index):
+            decoded.append(text[index])
+            index += 1
+            continue
+
+        index += 2
+        while True:
+            if index + 4 > len(text):
+                return None
+            payload = text[index:index + 4]
+            if any(character not in "0123456789abcdefABCDEF" for character in payload):
+                return None
+            codepoint = int(payload, 16)
+            if not 32 <= codepoint < 127:
+                return None
+            index += 4
+            character = chr(codepoint)
+            if character == "\\" and index < len(text) and text[index] == "u":
+                index += 1
+                continue
+            decoded.append(character)
+            break
+    return "".join(decoded)
+
+
 def redact_diagnostic(value: object, *, limit: int | None = None) -> str:
     text = str(value)
     if len(text) > _MAX_DIAGNOSTIC_INPUT_CHARS:
         return "[REDACTED: oversized diagnostic]"
-
-    def decode_ascii_escape(match: re.Match[str]) -> str:
-        try:
-            codepoint = int(match.group(1), 16)
-        except ValueError:
-            return ""
-        return chr(codepoint) if codepoint < 128 else ""
-
-    # Collapse arbitrarily nested escaped backslashes in one linear pass. Any
-    # malformed or non-ASCII escape is removed fail-closed so it cannot split a
-    # protected field name such as ``Authorization`` before redaction.
-    text = re.sub(
-        r"(?i)\\u005c(?:u005c)*u([0-9a-z]{4})", decode_ascii_escape, text
-    )
-    text = re.sub(r"(?i)\\u([0-9a-z]{4})", decode_ascii_escape, text)
+    decoded = _decode_diagnostic_escapes(text)
+    if decoded is None:
+        return "[REDACTED: malformed diagnostic]"
+    text = decoded
     text = text.replace("\x00", "?")
     text = re.sub(r'''\\+(?=["'])''', "", text)
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)

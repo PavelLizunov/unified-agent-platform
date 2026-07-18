@@ -763,6 +763,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             rf"Authorization\uD800: {secret}",
             rf"Authorization\u00e9: {secret}",
             rf"Authorization\u00G0: {secret}",
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 result = subprocess.CompletedProcess(
@@ -873,24 +876,29 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
     def test_main_redacts_assignment_credentials(self):
         secret = "short-secret"
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(
-                coordinator,
-                "load_profile",
-                side_effect=coordinator.flow_contract.ContractError(
-                    json.dumps({
-                        "Proxy-Authorization": f"Basic {secret}", "token": secret,
-                    }).replace('"', r'\"')
-                ),
-            ),
-            mock.patch("sys.stderr", stderr),
+        for diagnostic in (
+            json.dumps({
+                "Proxy-Authorization": f"Basic {secret}", "token": secret,
+            }).replace('"', r'\"'),
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
         ):
-            status = coordinator.main(["--profile", "unused.json"])
+            with self.subTest(diagnostic=diagnostic):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        coordinator,
+                        "load_profile",
+                        side_effect=coordinator.flow_contract.ContractError(diagnostic),
+                    ),
+                    mock.patch("sys.stderr", stderr),
+                ):
+                    status = coordinator.main(["--profile", "unused.json"])
 
-        self.assertEqual(2, status)
-        self.assertIn("[REDACTED]", stderr.getvalue())
-        self.assertNotIn(secret, stderr.getvalue())
+                self.assertEqual(2, status)
+                self.assertIn("[REDACTED", stderr.getvalue())
+                self.assertNotIn(secret, stderr.getvalue())
 
     def test_failed_author_run_removes_raw_last_message(self):
         with tempfile.TemporaryDirectory() as directory:

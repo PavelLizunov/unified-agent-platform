@@ -167,6 +167,10 @@ class FlowContractTests(unittest.TestCase):
             rf"Authorization\u00e9: {secret}",
             rf"Authorization\u00G0: {secret}",
             rf"\uD800Authorization: {secret}",
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
+            rf"Author\u@@ization: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertNotIn(secret, flow._safe_error(diagnostic))
@@ -180,26 +184,30 @@ class FlowContractTests(unittest.TestCase):
 
     def test_main_redacts_assignment_credentials(self):
         secret = "short-secret"
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(
-                flow,
-                "load_json",
-                side_effect=flow.ContractError(
-                    json.dumps({
-                        "Authorization": f"Basic {secret}", "token": secret,
-                    }).replace('"', r'\"')
-                ),
-            ),
-            mock.patch("sys.stderr", stderr),
+        for diagnostic in (
+            json.dumps({
+                "Authorization": f"Basic {secret}", "token": secret,
+            }).replace('"', r'\"'),
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
         ):
-            status = flow.main(
-                ["delivery-route", "--policy", "policy.json", "--signals", "signals.json"]
-            )
+            with self.subTest(diagnostic=diagnostic):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        flow, "load_json", side_effect=flow.ContractError(diagnostic)
+                    ),
+                    mock.patch("sys.stderr", stderr),
+                ):
+                    status = flow.main([
+                        "delivery-route", "--policy", "policy.json",
+                        "--signals", "signals.json",
+                    ])
 
-        self.assertEqual(2, status)
-        self.assertIn("[REDACTED]", stderr.getvalue())
-        self.assertNotIn(secret, stderr.getvalue())
+                self.assertEqual(2, status)
+                self.assertIn("[REDACTED", stderr.getvalue())
+                self.assertNotIn(secret, stderr.getvalue())
 
     @classmethod
     def setUpClass(cls):
