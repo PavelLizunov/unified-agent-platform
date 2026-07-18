@@ -137,9 +137,46 @@ def main() -> None:
 
         sessions = (clone / "src/routes/api/sessions.ts").read_text()
         assert "const localSessions = CENTRAL_ONLY ? [] : listLocalSessions()" in sessions
-        assert sessions.count("SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503") == 2
+        assert sessions.count("SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503") == 1
+        assert (
+            "if (!CENTRAL_ONLY && capabilities.dashboard.available && "
+            "!capabilities.enhancedChat)"
+        ) in sessions
         assert "if (!CENTRAL_ONLY && localSession)" in sessions
         assert "if (!CENTRAL_ONLY && getLocalSession(sessionKey))" in sessions
+
+        chat_screen = (clone / "src/screens/chat/chat-screen.tsx").read_text()
+        new_chat = chat_screen[chat_screen.index("if (isNewChat) {") :]
+        create_first = new_chat.index("createSessionForMessage(threadId)")
+        send_first = new_chat.index("sendMessage(", create_first)
+        assert create_first < send_first
+        assert ".then(({ sessionKey, friendlyId }) => {" in new_chat[create_first:send_first]
+        assert "Central session identity mismatch" in new_chat
+        assert "setPendingGeneration(false)" in new_chat
+
+        sessions_path = clone / "src/routes/api/sessions.ts"
+        previous_sessions = sessions.replace(
+            """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
+            return json({""",
+            """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+            if (CENTRAL_ONLY) {
+              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
+            }
+            return json({""",
+            1,
+        )
+        sessions_path.write_text(previous_sessions, encoding="utf-8")
+        assert hashlib.sha256(sessions_path.read_bytes()).hexdigest() == (
+            "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577"
+        )
+        previous_sessions_check = run(clone, "--check")
+        assert previous_sessions_check.returncode == 0
+        assert "src/routes/api/sessions.ts: previous-needs-overlay" in previous_sessions_check.stdout
+        previous_sessions_upgrade = run(clone)
+        assert previous_sessions_upgrade.returncode == 0, previous_sessions_upgrade.stderr
+        previous_sessions_checked = run(clone, "--check")
+        assert previous_sessions_checked.returncode == 0
+        assert "src/routes/api/sessions.ts: exact-patched" in previous_sessions_checked.stdout
 
         send_stream = (clone / "src/routes/api/send-stream.ts").read_text()
         central_stream = send_stream.index("if (CENTRAL_ONLY) {\n          chatMode = 'enhanced-claude'")
