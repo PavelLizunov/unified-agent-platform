@@ -5483,6 +5483,60 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("1", model_environment["GIT_CONFIG_NOSYSTEM"])
             self.assertNotIn("GH_TOKEN", model_environment)
 
+    def test_author_command_is_worktree_writable_and_credential_isolated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_home=str(root / "codex"))
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                runner=lambda *_args, **_kwargs: None,
+            )
+            paths = instance._paths("mission-author-isolation")
+            state = {"model_invocation": {"attempt_id": "c" * 64}}
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GH_TOKEN": "github-secret-value",
+                    "HERMES_MISSION_PRODUCER_KEY": "producer-secret-value",
+                    "XDG_RUNTIME_DIR": "/run/user/1000",
+                },
+                clear=False,
+            ):
+                environment = instance._model_env(paths)
+                command = instance._isolated_model_command(
+                    state, paths, ["codex", "exec", "-"], environment,
+                    role="author",
+                )
+            rendered = "\n".join(command)
+            self.assertIn("--unit=uap-author-" + "c" * 24, command)
+            self.assertIn(
+                "--working-directory=" + str(paths["author"].resolve()), command
+            )
+            self.assertIn(
+                "ReadOnlyPaths="
+                + " ".join((
+                    str(pathlib.Path(approved["source_checkout"]).resolve()),
+                    str(pathlib.Path(approved["worktree_root"]).resolve()),
+                    str(paths["directory"].resolve()),
+                )),
+                command,
+            )
+            self.assertIn(
+                "ReadWritePaths="
+                + " ".join((
+                    str(paths["author"].resolve()),
+                    str(pathlib.Path(environment["HOME"]).resolve()),
+                    str(pathlib.Path(environment["CODEX_HOME"]).resolve()),
+                )),
+                command,
+            )
+            self.assertNotIn("github-secret-value", rendered)
+            self.assertNotIn("producer-secret-value", rendered)
+            self.assertIn("GH_TOKEN", rendered)
+            self.assertIn("HERMES_MISSION_PRODUCER_KEY", rendered)
+            self.assertEqual(["codex", "exec", "-"], command[-3:])
+
     def test_reviewer_command_is_os_readonly_and_credential_isolated(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -5505,8 +5559,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 clear=False,
             ):
                 environment = instance._model_env(paths)
-                command = instance._isolated_reviewer_command(
-                    state, paths, ["codex", "exec", "-"], environment
+                command = instance._isolated_model_command(
+                    state, paths, ["codex", "exec", "-"], environment,
+                    role="reviewer",
                 )
             rendered = "\n".join(command)
             self.assertEqual(str(pathlib.Path("/usr/bin/systemd-run")), command[0])
@@ -5530,7 +5585,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=true",
             ):
                 self.assertIn(property_value, command)
-            for relative in coordinator._REVIEWER_CREDENTIAL_PATHS:
+            for relative in coordinator._MODEL_CREDENTIAL_PATHS:
                 self.assertIn(str((pathlib.Path.home() / relative).resolve()), rendered)
             self.assertIn(str(pathlib.Path("/run/user/1000").resolve()), rendered)
             for name in (
@@ -5561,8 +5616,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     coordinator.DeliveryError,
                     "requires the systemd coordinator unit",
                 ):
-                    instance._isolated_reviewer_command(
-                        state, paths, ["codex", "exec", "-"], environment
+                    instance._isolated_model_command(
+                        state, paths, ["codex", "exec", "-"], environment,
+                        role="reviewer",
                     )
 
     def test_systemd_timer_retries_the_expected_crash_without_a_daemon(self):
@@ -6302,15 +6358,21 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             def runner(command, **kwargs):
                 nonlocal author_calls
-                if command[0] == "codex":
+                inner = (
+                    command[command.index("--") + 1:]
+                    if command[0] == str(pathlib.Path("/usr/bin/systemd-run"))
+                    else command
+                )
+                if inner[0] == "codex":
                     author_calls += 1
-                    self.assertIn("--strict-config", command)
-                    self.assertIn('model_reasoning_effort="xhigh"', command)
-                    checkout = pathlib.Path(kwargs["cwd"])
+                    self.assertIn("--unit=uap-author-", "\n".join(command))
+                    self.assertIn("--strict-config", inner)
+                    self.assertIn('model_reasoning_effort="xhigh"', inner)
+                    checkout = pathlib.Path(inner[inner.index("--cd") + 1])
                     for name in approved["required_files"]:
                         path = checkout / name
                         path.write_text(path.read_text(encoding="utf-8") + "retry\n", encoding="utf-8")
-                    last = pathlib.Path(command[command.index("--output-last-message") + 1])
+                    last = pathlib.Path(inner[inner.index("--output-last-message") + 1])
                     last.write_text("retry complete", encoding="utf-8")
                     return subprocess.CompletedProcess(
                         command,

@@ -153,9 +153,11 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    envelope, `capacity_wait`, exhausted burst or whole-route fallback.
 6. The terminal endpoint requires both the general API bearer and a direct loopback source. Producer events use a
    closed schema and protect every allowed string before storage; mission DB and adapter state are owner-only on POSIX.
-   The A7 success path exercised terminal completion. The new reviewer boundary narrows filesystem writes and
-   credential reach on build-1; author isolation and secrets stored outside the enumerated host stores remain
-   follow-up work.
+   The A7 success path exercised terminal completion. The source coordinator now applies the same parent-bound Linux
+   namespace to both model actors: author may additionally write its disposable worktree, while reviewer remains
+   exact-SHA read-only. Common credential stores and control-plane environment are hidden from both. Reviewer has live
+   proof; author has hermetic command-boundary coverage but still requires installed-wrapper and real-turn evidence.
+   Secrets stored outside the enumerated host stores remain follow-up work.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
