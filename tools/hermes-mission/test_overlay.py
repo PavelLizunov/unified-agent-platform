@@ -128,7 +128,7 @@ def main() -> None:
         assert 'if not isinstance(body, dict)' in api
         assert 'producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")' in api
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
-        assert "store.ingest_owner_goal(" in api
+        assert "store.ingest_owner_turn(" in api
         assert "if not owner_key_valid(owner_key)" in api
         assert "Ambiguous mission capability" in api
         assert '"goal", "platform", "source_message_id", "session_id"' in api
@@ -169,6 +169,7 @@ def main() -> None:
         assert 'event._uap_owner_goal = True' in gateway
         assert 'platform="telegram"' in gateway
         assert 'source_message_id = str(event.message_id or "").strip()' in gateway
+        assert "store.ingest_owner_turn(" in gateway
         assert 'reason="owner-intake"' in (clone / "hermes_cli/uap_missions.py").read_text(
             encoding="utf-8"
         )
@@ -184,7 +185,7 @@ def main() -> None:
         assert 'source_message_id = body.get("source_message_id")' in stream_handler
         assert 'platform="workspace"' in stream_handler
         assert 'code="mission_intake_failed"' in stream_handler
-        assert stream_handler.index("store.ingest_owner_goal(") < stream_handler.index(
+        assert stream_handler.index("store.ingest_owner_turn(") < stream_handler.index(
             "system_prompt = body.get"
         )
         assert "atomic sticky initial block" not in kanban

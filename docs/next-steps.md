@@ -240,11 +240,18 @@ not add an application service, workflow engine or mission database.
    implemented, so fresh-main verification is no longer allowed to imply deployment for the registered target.
    Exact rollout evidence:
    [registered delivery applicability](evidence/registered-delivery-applicability-rollout-2026-07-18.md).
+8. **Ordinary bound Telegram answer — ✅ HERMETIC; LIVE QUESTION/ANSWER CANARY PENDING (2026-07-18).** A normal
+   Telegram message on the chat/topic bound to a `waiting_owner` mission now answers that mission's exact open
+   question instead of accepting another goal. The Telegram message ID is persisted in `mission.answer`; restart and
+   lost-response replay converge on the same event, while changed text under the same ID fails closed. This reuses
+   `MissionStore`, the existing binding and the existing answer state machine. It does not claim ordinary Workspace
+   chat answers or complete cross-channel transcript synchronization.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
-Telegram now share authoritative mission status and owner question/resume, but complete cross-channel chat/session
-history remains a separate Product Operating Contract gap.
+Telegram now share authoritative mission status and owner question/resume. A bound Telegram chat can also answer the
+open question with an ordinary message; complete cross-channel chat/session history remains a separate Product
+Operating Contract gap.
 
 ---
 
