@@ -30,6 +30,10 @@ ALLOWED_WORKER_EVENTS = {"change.upsert", "gate.upsert", "delivery.upsert"}
 REQUIRED_PAYLOAD = {
     "change.upsert": {"path", "status"},
     "gate.upsert": {"gate_id", "status"},
+    "delivery.upsert": {"kind", "status"},
+}
+PAYLOAD_FIELDS = {
+    **REQUIRED_PAYLOAD,
     "delivery.upsert": {"kind", "status", "url"},
 }
 MAX_LOG_BYTES = 1024 * 1024
@@ -684,10 +688,21 @@ def _worker_metadata_events(
         event_type = item["type"]
         if (
             not isinstance(payload, dict)
-            or set(payload) != REQUIRED_PAYLOAD[event_type]
+            or not REQUIRED_PAYLOAD[event_type] <= set(payload) <= PAYLOAD_FIELDS[event_type]
             or any(not isinstance(payload[key], str) or not payload[key] for key in REQUIRED_PAYLOAD[event_type])
         ):
             raise AdapterError("worker mission event payload is invalid")
+        if event_type == "delivery.upsert":
+            not_applicable = (
+                payload.get("kind") == "delivery"
+                and payload.get("status") == "not_applicable"
+            )
+            if (
+                (not_applicable and "url" in payload)
+                or (not not_applicable and not isinstance(payload.get("url"), str))
+                or (isinstance(payload.get("url"), str) and not payload["url"])
+            ):
+                raise AdapterError("worker mission event payload is invalid")
         events.append(_producer_event(
             mission_id, event_type, payload, {"task_id": task_id, "worker_id": worker_id}
         ))

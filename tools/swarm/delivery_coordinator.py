@@ -52,11 +52,12 @@ _PROFILE_FIELDS = {
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
     "post_verify_repair",
+    "delivery_mode",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "goal", "required_files", "allowed_path_prefixes", "max_changed_files",
     "crash_after_author_commit_once", "route_flags", "codex_bin", "gh_bin",
-    "codex_home", "post_verify_repair",
+    "codex_home", "post_verify_repair", "delivery_mode",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -134,7 +135,7 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     if missing := conditional - profile.keys():
         raise DeliveryError(f"missing profile fields: {', '.join(sorted(missing))}")
     forbidden = (
-        {"allowed_path_prefixes", "max_changed_files"}
+        {"allowed_path_prefixes", "max_changed_files", "delivery_mode"}
         if version == 3
         else {"goal", "required_files"}
     )
@@ -150,6 +151,8 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         profile[name] = _required_text(profile.get(name), name)
     if version == 3:
         profile["goal"] = _required_text(profile.get("goal"), "goal")
+    elif "delivery_mode" in profile and profile["delivery_mode"] != "none":
+        raise DeliveryError("profile.delivery_mode only supports explicit none")
     route_flags = profile.get("route_flags", [])
     if (
         not isinstance(route_flags, list)
@@ -598,6 +601,14 @@ class DeliveryCoordinator:
             if goal != self.profile["goal"]:
                 raise DeliveryError("mission goal does not match the owner-approved profile")
             return
+        expected_mode = self.profile.get("delivery_mode")
+        if mission.get("delivery_mode") != expected_mode:
+            raise DeliveryError("mission delivery mode does not match the approved profile")
+        stored_mode = state.get("delivery_mode")
+        if stored_mode is None and expected_mode is not None:
+            state["delivery_mode"] = expected_mode
+        elif stored_mode != expected_mode:
+            raise DeliveryError("mission delivery mode changed after the durable checkpoint")
         digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()
         stored_goal = state.get("mission_goal")
         stored_digest = state.get("mission_goal_sha256")
@@ -3517,6 +3528,11 @@ class DeliveryCoordinator:
                 "url": f"https://github.com/{self.profile['repo']}/commit/{state['default_sha']}",
             }},
         ]
+        if self.profile.get("delivery_mode") == "none":
+            events.append({
+                "type": "delivery.upsert",
+                "payload": {"kind": "delivery", "status": "not_applicable"},
+            })
         if cleanup:
             events.append({"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}})
         return events

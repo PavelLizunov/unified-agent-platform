@@ -357,14 +357,18 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             "Safe mission",
             mission_id="mission-dispatch",
             dispatch_profile="build1-uap",
+            delivery_mode="none",
         )
         assert created
         assert accepted["payload"]["dispatch_profile"] == "build1-uap"
+        assert accepted["payload"]["delivery_mode"] == "none"
         assert store.projection("mission-dispatch")["dispatch_profile"] == "build1-uap"
+        assert store.projection("mission-dispatch")["delivery_mode"] == "none"
         replayed, replay_created = store.accept(
             "Safe mission",
             mission_id="mission-dispatch",
             dispatch_profile="build1-uap",
+            delivery_mode="none",
         )
         assert not replay_created and replayed == accepted
         try:
@@ -376,12 +380,27 @@ def test_dispatch_profile_is_projected_and_immutable() -> None:
             raise AssertionError("dispatch profile changed after acceptance")
         except missions.MissionError as error:
             assert "different parameters" in str(error)
+        try:
+            store.accept(
+                "Safe mission",
+                mission_id="mission-dispatch",
+                dispatch_profile="build1-uap",
+            )
+            raise AssertionError("delivery mode changed after acceptance")
+        except missions.MissionError as error:
+            assert "different parameters" in str(error)
 
 
 def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
     routes = json.dumps({
-        "workspace": "build1-registered",
-        "telegram": "build1-registered",
+        "workspace": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+        "telegram": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
     })
     with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
         os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
@@ -397,6 +416,7 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
         assert created
         assert accepted["mission_id"].startswith("mission-intake-")
         assert accepted["payload"]["dispatch_profile"] == "build1-registered"
+        assert accepted["payload"]["delivery_mode"] == "none"
 
         restarted = missions.MissionStore(database)
         replayed, replay_created = restarted.ingest_owner_goal(
@@ -486,6 +506,9 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             "[]",
             "{}",
             '{"workspace":true}',
+            '{"workspace":{"dispatch_profile":"first"}}',
+            '{"workspace":{"dispatch_profile":"first","delivery_mode":"deploy"}}',
+            '{"workspace":{"dispatch_profile":"first","delivery_mode":"none","model":"sol"}}',
             '{"workspace":"first","workspace":"second"}',
             '{"workspace":"first"," workspace ":"second"}',
         ):
@@ -768,7 +791,12 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
         mission_id = "mission-auto-complete"
-        store.accept("Deliver safely", mission_id=mission_id, dispatch_profile="build1-target")
+        store.accept(
+            "Deliver safely",
+            mission_id=mission_id,
+            dispatch_profile="build1-target",
+            delivery_mode="none",
+        )
 
         def publish(event_type: str, payload: dict, number: int) -> None:
             store.append_producer(
@@ -811,6 +839,12 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert store.complete_if_ready(mission_id) is None
 
         publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, number + 1)
+        assert store.complete_if_ready(mission_id) is None
+        publish(
+            "delivery.upsert",
+            {"kind": "delivery", "status": "not_applicable"},
+            number + 2,
+        )
         assert store.completion_notification(mission_id) is None
         completed = store.complete_if_ready(mission_id)
         assert completed is not None and completed[1]

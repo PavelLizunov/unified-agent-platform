@@ -256,6 +256,9 @@ class MissionAdapterTests(unittest.TestCase):
                                 "kind": "deploy", "status": "verified",
                                 "url": "https://example.invalid/deploy/1",
                             }},
+                            {"type": "delivery.upsert", "payload": {
+                                "kind": "delivery", "status": "not_applicable",
+                            }},
                         ]
                     },
                 }],
@@ -288,10 +291,71 @@ class MissionAdapterTests(unittest.TestCase):
             self.assertEqual(2, event_types.count("terminal.append"))
             self.assertEqual(1, event_types.count("change.upsert"))
             self.assertEqual(2, event_types.count("gate.upsert"))
-            self.assertEqual(2, event_types.count("delivery.upsert"))
+            self.assertEqual(3, event_types.count("delivery.upsert"))
+            self.assertIn(
+                {"kind": "delivery", "status": "not_applicable"},
+                [
+                    event["payload"] for event in sink.events.values()
+                    if event["type"] == "delivery.upsert"
+                ],
+            )
             self.assertTrue(all(
                 event["correlation"].get("task_id") == task_id for event in sink.events.values()
             ))
+
+    def test_explicit_none_delivery_converges_through_adapter_and_central(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = mission_runtime.MissionStore(root / "missions.sqlite3")
+            accepted, _ = store.accept(
+                "Deliver without deployment",
+                mission_id="mission-delivery-none",
+                dispatch_profile="build1-registered",
+                delivery_mode="none",
+            )
+            backend = FakeKanban()
+            state = adapter.accept_mission(accepted, root / "adapter", backend)
+            task_id = state["root_task_id"]
+            metadata = [
+                *(
+                    {"type": "gate.upsert", "payload": {
+                        "gate_id": gate, "status": "passed",
+                    }}
+                    for gate in ("tests", "review", "ci", "post-verify", "cleanup")
+                ),
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "pull_request", "status": "merged",
+                    "url": "https://example.invalid/pr/1",
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "default_branch", "status": "verified",
+                    "url": "https://example.invalid/commit/1",
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "delivery", "status": "not_applicable",
+                }},
+            ]
+            backend.tasks[task_id] = {
+                "task": {
+                    "id": task_id, "title": "Mission mission-delivery-none",
+                    "status": "done", "assignee": "coordinator",
+                    "created_by": "central-hermes", "tenant": "mission-delivery-none",
+                },
+                "runs": [{
+                    "id": 1, "profile": "coordinator", "status": "done",
+                    "outcome": "success", "metadata": {"mission_events": metadata},
+                }],
+            }
+            for event in adapter.sync_mission(
+                "mission-delivery-none", root / "adapter", backend
+            ):
+                store.append_producer("mission-delivery-none", event)
+
+            completed = store.complete_if_ready("mission-delivery-none")
+            self.assertIsNotNone(completed)
+            self.assertEqual(
+                "completed", store.projection("mission-delivery-none")["status"]
+            )
 
     def test_real_backend_is_shell_free_idempotent_and_dispatch_gated(self):
         commands = []
@@ -713,6 +777,21 @@ class MissionAdapterTests(unittest.TestCase):
                     },
                 }]},
             )
+
+        for payload in (
+            {"kind": "pull_request", "status": "merged"},
+            {
+                "kind": "delivery", "status": "not_applicable",
+                "url": "https://example.invalid/not-applicable",
+            },
+        ):
+            with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
+                adapter._worker_metadata_events(
+                    "mission-1", "task-1", "worker-1",
+                    {"mission_events": [{
+                        "type": "delivery.upsert", "payload": payload,
+                    }]},
+                )
 
     @unittest.skipUnless(os.name == "posix", "POSIX mode invariant")
     def test_adapter_state_is_owner_only(self):

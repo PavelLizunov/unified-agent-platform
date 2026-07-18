@@ -113,6 +113,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    terminal convergence and cleanup. The follow-up included a real review rejection and autonomous correction. This
    proves ordinary Workspace intake only for one exact registered profile; ordinary Telegram intake, generic
    arbitrary-repository intake and route-profile creation from an unconstrained owner goal remain outside that proof.
+   The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
+   `delivery: not_applicable` evidence instead of treating fresh-main verification as a deploy. Actual `deploy` and
+   `release` modes remain fail-closed until their artifact, environment and deployed-revision gates are implemented
+   and proven live.
 3. Workspace now uses the Central cursor contract for the selected mission and passed a live 20-event reconnect
    canary. Its Central timeline remains intentionally bounded; direct logs may still be needed for full raw tool detail.
 4. Central retains the latest 100 unbound terminal mission histories, never prunes the currently bound mission, and
