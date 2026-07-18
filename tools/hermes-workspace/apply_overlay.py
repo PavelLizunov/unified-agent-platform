@@ -22,6 +22,7 @@ FILES = {
 "src/routes/api/hermes-tasks.ts": "c20eb57f7d87fc444168032d78f87a0e3ceca54664463f573f9c188b3311e904",
 "src/routes/api/claude-jobs.ts": "cd47fd163f669070210d0bcb1f181ae08454665ca1806704b0211bdfcfdaa803",
 "src/routes/api/conductor-spawn.ts": "cac908c034a5dc21a88330838eb7d84f8ce77033012fe4df0606abb87acc2271",
+"src/screens/chat/chat-screen.tsx": "ba1175ef3d637f2114b1f8ad19e5f299a848d60f607ec3b3166d73f4391d18e5",
 "src/screens/dashboard/dashboard-screen.tsx": "3e562694308922351aee07bc5bbb7908e752d3c9a6211e896e90dec284bcc7c4",
 }
 PATCHED_FILES = {
@@ -35,13 +36,14 @@ PATCHED_FILES = {
 "src/routes/api/playground-admin.ts": "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
 "src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
-"src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
+"src/routes/api/sessions.ts": "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
 "src/routes/api/send-stream.ts": "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
 "src/server/claude-api.ts": "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
+"src/screens/chat/chat-screen.tsx": "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da",
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 }
 LEGACY_FILES = {
@@ -49,6 +51,7 @@ LEGACY_FILES = {
 "src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
 }
 PREVIOUS_PATCHED_FILES = {
+"src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
 "src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
 "src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
 }
@@ -294,13 +297,99 @@ export const Route""", "sessions central-only flag")
           }
           const friendlyId = randomUUID()""", "sessions unavailable")
         text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
-            return json({""", """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
-            if (CENTRAL_ONLY) {
-              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
-            }
+            return json({""", """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
             return json({""", "sessions unpersisted")
         text = replace(text, "          if (localSession) {", "          if (!CENTRAL_ONLY && localSession) {", "sessions local update")
         text = replace(text, "        if (getLocalSession(sessionKey)) {", "        if (!CENTRAL_ONLY && getLocalSession(sessionKey)) {", "sessions local delete")
+    elif rel == "src/screens/chat/chat-screen.tsx":
+        text = replace(text, """        if (!isPortableMode) {
+          void createSessionForMessage(threadId).catch((err: unknown) => {
+            if (import.meta.env.DEV) {
+              console.warn('[chat] failed to register new thread', err)
+            }
+            void queryClient.invalidateQueries({
+              queryKey: chatQueryKeys.sessions,
+            })
+          })
+        }
+
+        sendMessage(
+          threadId,
+          threadId,
+          trimmedBody,
+          attachmentPayload,
+          fastMode,
+          true,
+          typeof optimisticMessage.clientId === 'string'
+            ? optimisticMessage.clientId
+            : '',
+        )
+        // In portable mode, navigate to /chat/main instead of UUID
+        if (!embedded) {
+          navigate({
+            to: '/chat/$sessionKey',
+            params: { sessionKey: threadId },
+            replace: true,
+          })
+        }
+        return""", """        const optimisticClientId =
+          typeof optimisticMessage.clientId === 'string'
+            ? optimisticMessage.clientId
+            : ''
+
+        if (!isPortableMode) {
+          void createSessionForMessage(threadId)
+            .then(({ sessionKey, friendlyId }) => {
+              if (sessionKey !== threadId || friendlyId !== threadId) {
+                throw new Error('Central session identity mismatch')
+              }
+              sendMessage(
+                sessionKey,
+                friendlyId,
+                trimmedBody,
+                attachmentPayload,
+                fastMode,
+                true,
+                optimisticClientId,
+              )
+              if (!embedded) {
+                navigate({
+                  to: '/chat/$sessionKey',
+                  params: { sessionKey: friendlyId },
+                  replace: true,
+                })
+              }
+            })
+            .catch((err: unknown) => {
+              const messageText = err instanceof Error ? err.message : String(err)
+              setError(messageText)
+              setPendingGeneration(false)
+              setSending(false)
+              setWaitingForResponse(false)
+              void queryClient.invalidateQueries({
+                queryKey: chatQueryKeys.sessions,
+              })
+            })
+          return
+        }
+
+        sendMessage(
+          threadId,
+          threadId,
+          trimmedBody,
+          attachmentPayload,
+          fastMode,
+          true,
+          optimisticClientId,
+        )
+        if (!embedded) {
+          navigate({
+            to: '/chat/$sessionKey',
+            params: { sessionKey: threadId },
+            replace: true,
+          })
+        }
+        return""", "central session before first message")
     elif rel == "src/routes/api/send-stream.ts":
         text = replace(text, """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
 
@@ -485,6 +574,13 @@ def upgrade_legacy(rel, text):
     raise SystemExit(f"no legacy upgrade for {rel}")
 
 def upgrade_previous(rel, text):
+    if rel == "src/routes/api/sessions.ts":
+        return replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+            if (CENTRAL_ONLY) {
+              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
+            }
+            return json({""", """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
+            return json({""", "central session creation upgrade")
     if rel == "src/routes/api/send-stream.ts":
         return replace(text, """        if (CENTRAL_ONLY && chatMode === 'portable') {
           return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
