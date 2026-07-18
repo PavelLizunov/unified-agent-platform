@@ -352,7 +352,27 @@ Use the reviewer model/effort from the resolved route plus `--sandbox read-only 
 <reviewer-source.json>`. The source digest is present in
 the persisted user input, was created no more than five minutes before the session, and must still match the clean
 worktree HEAD/tree when summarized. This binds the review turn to the candidate under the single-owner coordinator
-threat model; it still does not prove an OS-independent filesystem or credential boundary.
+threat model. The coordinator additionally runs the reviewer as a transient user-systemd service bound to the active
+coordinator unit. `PrivateUsers=true`, `ProtectSystem=strict`, `ProtectHome=read-only`, `ProtectProc=invisible`,
+`ProcSubset=pid` and `PrivateTmp=true` enforce the Linux process/filesystem boundary. `PrivateUsers` is mandatory for
+the per-user systemd manager to apply its mount namespace rather than accepting ineffective path properties. Only
+the mission-local model home and configured Codex runtime home are writable; source checkout, all delivery worktrees
+and mission state are explicitly read-only.
+Common host credential stores are inaccessible and control-plane/credential environment names are removed. The
+entire per-user runtime directory is also inaccessible, so the child cannot query the user-systemd manager environment
+or reuse its IPC sockets. The reviewer still receives the existing OpenAI Codex credential through its dedicated
+runtime home; this is not a claim that arbitrary secrets stored outside the enumerated credential locations are
+unreadable.
+
+The systemd service must supply the exact parent identity:
+
+```text
+Environment=UAP_COORDINATOR_UNIT=hermes-delivery-coordinator@%i.service
+```
+
+Missing/invalid parent identity, missing `/usr/bin/systemd-run`, an invalid durable attempt identity or any transient
+unit setup failure stops the review fail-closed. `BindsTo` plus the existing durable invocation checkpoint prevents an
+orphaned reviewer from becoming a concurrent second reviewer after coordinator restart.
 
 ## Pilot gate before production integration
 

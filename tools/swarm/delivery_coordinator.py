@@ -72,6 +72,22 @@ _PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
+_REVIEWER_PARENT_UNIT = re.compile(
+    r"^hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service$"
+)
+_REVIEWER_CREDENTIAL_PATHS = (
+    ".aws", ".azure", ".cargo/credentials", ".cargo/credentials.toml", ".claude",
+    ".config/gcloud", ".config/gh", ".config/git", ".config/hermes-agent",
+    ".config/sops", ".config/uap", ".docker", ".git-credentials", ".gitconfig",
+    ".gnupg", ".hermes", ".kube", ".local/share/keyrings", ".netrc", ".npmrc",
+    ".pypirc", ".ssh",
+)
+_REVIEWER_SECRET_ENV = {
+    "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+    "HERMES_API_TOKEN", "HERMES_DASHBOARD_PASSWORD",
+    "HERMES_MISSION_OWNER_KEY", "HERMES_MISSION_PRODUCER_KEY",
+}
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
 _CAPACITY_FAILURES_PER_ROUTE = 3
@@ -290,8 +306,14 @@ def _private_text(path: pathlib.Path, text: str) -> None:
 
 
 @contextlib.contextmanager
-def _temporary_private_output():
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+def _temporary_private_output(directory: pathlib.Path | None = None):
+    if directory is not None:
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if os.name == "posix":
+            os.chmod(directory, 0o700)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=directory, delete=False
+    ) as handle:
         path = pathlib.Path(handle.name)
     if os.name == "posix":
         os.chmod(path, 0o600)
@@ -572,6 +594,86 @@ class DeliveryCoordinator:
             GIT_TERMINAL_PROMPT="0",
         )
         return environment
+
+    def _isolated_reviewer_command(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        command: list[str],
+        environment: dict[str, str],
+    ) -> list[str]:
+        """Run the reviewer in a systemd mount namespace without delivery credentials."""
+        invocation = state.get("model_invocation")
+        attempt_id = invocation.get("attempt_id") if isinstance(invocation, dict) else None
+        if not isinstance(attempt_id, str) or not re.fullmatch(r"[0-9a-f]{64}", attempt_id):
+            raise DeliveryError("reviewer isolation requires a durable attempt identity")
+        parent = os.environ.get("UAP_COORDINATOR_UNIT", "")
+        if not _REVIEWER_PARENT_UNIT.fullmatch(parent):
+            if self.runner is subprocess.run:
+                raise DeliveryError("reviewer isolation requires the systemd coordinator unit")
+            parent = "hermes-delivery-coordinator@test.service"
+        systemd_run = pathlib.Path("/usr/bin/systemd-run")
+        if self.runner is subprocess.run and not systemd_run.is_file():
+            raise DeliveryError("reviewer isolation requires /usr/bin/systemd-run")
+
+        home = pathlib.Path.home().resolve()
+        read_only = [
+            pathlib.Path(self.profile["source_checkout"]).resolve(),
+            pathlib.Path(self.profile["worktree_root"]).resolve(),
+            paths["directory"].resolve(),
+        ]
+        model_home = pathlib.Path(environment["HOME"]).resolve()
+        codex_home = pathlib.Path(environment["CODEX_HOME"]).resolve()
+        hidden = [(home / relative).resolve() for relative in _REVIEWER_CREDENTIAL_PATHS]
+        runtime_value = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime_value:
+            runtime_directory = pathlib.Path(runtime_value).resolve()
+            if (
+                os.name == "posix"
+                and self.runner is subprocess.run
+                and runtime_directory != pathlib.Path(f"/run/user/{os.getuid()}")
+            ):
+                raise DeliveryError("reviewer isolation requires the exact user runtime directory")
+            hidden.append(runtime_directory)
+        elif self.runner is subprocess.run:
+            raise DeliveryError("reviewer isolation requires the user runtime directory")
+        property_paths = [*read_only, model_home, codex_home, *hidden]
+        if any(any(character.isspace() for character in str(path)) for path in property_paths):
+            raise DeliveryError("reviewer isolation paths cannot contain whitespace")
+
+        allowed_environment = set(environment)
+        unset = sorted((set(os.environ) - allowed_environment) | _REVIEWER_SECRET_ENV)
+        reviewer_environment = dict(environment)
+        reviewer_environment["GIT_OPTIONAL_LOCKS"] = "0"
+        reviewer_environment["TMPDIR"] = "/tmp"
+        overrides = (
+            "HOME", "CODEX_HOME", "XDG_CONFIG_HOME", "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM", "GIT_TERMINAL_PROMPT", "GIT_OPTIONAL_LOCKS", "TMPDIR",
+        )
+        return [
+            str(systemd_run), "--user", "--wait", "--pipe", "--collect", "--quiet",
+            f"--unit=uap-review-{attempt_id[:24]}",
+            f"--working-directory={paths['review'].resolve()}",
+            "-p", "Type=exec",
+            "-p", f"BindsTo={parent}",
+            "-p", f"After={parent}",
+            "-p", f"RuntimeMaxSec={self.profile['command_timeout_seconds']}",
+            "-p", "NoNewPrivileges=true",
+            "-p", "RestrictSUIDSGID=true",
+            "-p", "LockPersonality=true",
+            "-p", "PrivateUsers=true",
+            "-p", "ProtectProc=invisible",
+            "-p", "ProcSubset=pid",
+            "-p", "ProtectSystem=strict",
+            "-p", "ProtectHome=read-only",
+            "-p", "PrivateTmp=true",
+            "-p", "ReadOnlyPaths=" + " ".join(map(str, read_only)),
+            "-p", "ReadWritePaths=" + " ".join(map(str, (model_home, codex_home))),
+            "-p", "InaccessiblePaths=" + " ".join(f"-{path}" for path in hidden),
+            "-p", "UnsetEnvironment=" + " ".join(unset),
+            *(f"--setenv={name}={reviewer_environment[name]}" for name in overrides),
+            "--", *command,
+        ]
 
     def _mission_goal(self, state: dict[str, Any]) -> str:
         if self.profile["schema_version"] == 3:
@@ -2726,18 +2828,28 @@ class DeliveryCoordinator:
             ),
         )
         self._prepare_model_invocation(state, paths, role="reviewer")
-        with _temporary_private_output() as raw_last:
+        model_environment = self._model_env(paths)
+        launcher_environment = dict(model_environment)
+        for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR"):
+            if name in os.environ:
+                launcher_environment[name] = os.environ[name]
+        with _temporary_private_output(
+            pathlib.Path(model_environment["HOME"])
+        ) as raw_last:
+            codex_command = [
+                self.profile["codex_bin"], "exec", "--ignore-user-config",
+                *self._reasoning_args(state, "reviewer"),
+                "--model", actor["model"], "--sandbox", "read-only",
+                "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
+                "--output-last-message", str(raw_last), "-",
+            ]
             try:
                 result = self._run(
-                    [
-                        self.profile["codex_bin"], "exec", "--ignore-user-config",
-                        *self._reasoning_args(state, "reviewer"),
-                        "--model", actor["model"], "--sandbox", "read-only",
-                        "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
-                        "--output-last-message", str(raw_last), "-",
-                    ],
+                    self._isolated_reviewer_command(
+                        state, paths, codex_command, model_environment
+                    ),
                     cwd=paths["review"], input_text=prompt,
-                    environment=self._model_env(paths),
+                    environment=launcher_environment,
                     check=False,
                 )
             except subprocess.TimeoutExpired as error:

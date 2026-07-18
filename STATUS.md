@@ -116,6 +116,12 @@ Last updated: 2026-07-18
   Workspace hashes/health checks passed. No live capacity event had occurred at that checkpoint, so this is observation
   readiness rather than live failover proof. Exact rollout evidence:
   `docs/evidence/automatic-capacity-observation-rollout-2026-07-18.md`.
+  The next coordinator source revision also places every reviewer Codex process in a transient user-systemd unit
+  bound to its parent coordinator. The Linux mount namespace is read-only except for the mission-local model home
+  and Codex runtime home; the candidate/source/state paths are explicitly read-only, common credential stores and
+  control-plane environment names are inaccessible, `/proc` hides unrelated processes, and `PrivateTmp` separates
+  scratch data. Hermetic command-policy tests and a disposable build-1 exact-wrapper probe passed; exact installed
+  hashes and a real reviewer run remain pending until the source PR is merged and rolled out.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
