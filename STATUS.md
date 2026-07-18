@@ -456,6 +456,14 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   arbitrary repositories, ordinary Telegram intake, full cross-channel history or a self-diagnosing single-mission
   repair of the first goal. Exact evidence:
   `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
+- **Workspace durable mission replay accepted live (2026-07-18).** PR #256 replaced selected-mission snapshot-only
+  observation with authenticated Central cursor replay and a sequence-validated timeline. Its first live rollout
+  exposed a null first-render race; the failure is preserved, PR #257 fixed it and added an exact vulnerable-asset
+  upgrade regression. After the exact hotfix merge was built and restarted on build-1, mission
+  `mission-intake-f53871c022ce187501a0e9d9021b8823` rendered the same ordered 20 events, cursor 20 and single terminal
+  event before and after a browser reload. This closes Workspace mission-event reconnect, not ordinary Telegram intake
+  or complete cross-channel chat/session history. Exact evidence:
+  `docs/evidence/workspace-mission-cursor-replay-2026-07-18.md`.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

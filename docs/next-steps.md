@@ -217,10 +217,15 @@ not add an application service, workflow engine or mission database.
    multi-platform CI, exact merge, fresh-main verification and cleanup, but truthfully missed requested README work
    because the profile excluded that path. PR #254 narrowed the correction to adding `README.md`; a second ordinary
    Workspace mission then exercised a real review rejection, automatic correction, re-review, PR #7 merge, terminal
-   convergence and cleanup without manual delivery commands. The next gates are live ordinary Telegram intake and
-   cross-channel question/replay, not another Workspace fixed-profile canary. See the
+   convergence and cleanup without manual delivery commands. See the
    [installation evidence](evidence/registered-flow-profile-v4-rollout-2026-07-18.md) and
    [live campaign evidence](evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md).
+5. **Workspace cursor replay — ✅ LIVE RECONNECT PASS (2026-07-18).** PR #256 added selected-mission cursor replay,
+   strict sequence/cursor validation and a compact ordered timeline. Its first live render found a null race; PR #257
+   fixed it and added an exact vulnerable-asset upgrade regression. The corrected live Dashboard reconstructed the
+   same 20-event mission history and cursor 20 after full reload. The next gates are live ordinary Telegram intake and
+   cross-channel question/answer, not another Workspace fixed-profile canary. See the
+   [reconnect evidence](evidence/workspace-mission-cursor-replay-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

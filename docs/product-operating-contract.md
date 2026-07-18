@@ -113,8 +113,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    terminal convergence and cleanup. The follow-up included a real review rejection and autonomous correction. This
    proves ordinary Workspace intake only for one exact registered profile; ordinary Telegram intake, generic
    arbitrary-repository intake and route-profile creation from an unconstrained owner goal remain outside that proof.
-3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
-   update, and direct logs/tmux may still be needed for full live detail.
+3. Workspace now uses the Central cursor contract for the selected mission and passed a live 20-event reconnect
+   canary. Its Central timeline remains intentionally bounded; direct logs may still be needed for full raw tool detail.
 4. Central retains the latest 100 unbound terminal mission histories, never prunes the currently bound mission, and
    keeps a payload-free tombstone so a retired stable `mission_id` cannot be reused.
    Completed Kanban tasks are archived. Native Kanban GC bounds their events/logs to 30 days only while the board has
