@@ -175,14 +175,16 @@ Last updated: 2026-07-18
   installed v1/v2 verifier checks passed. A new live v2 bundle is still required; channel delivery cursors,
   timer-origin proof and signing remain separate gaps. Exact rollout evidence:
   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
-- **Owner terminal result has a concrete shared formatter in current source (2026-07-19; rollout pending).** The successful ordinary Telegram
+- **Owner terminal result has a deployed concrete shared formatter (2026-07-19; component PASS).** The successful ordinary Telegram
   campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
   rendered to the owner: the implemented `summary` behavior, changed API/CLI/tests/README, target PR #8, green
   multi-platform CI and merged revision. Current source replaces the constant at Central's single terminal-authority
   boundary with one bounded deterministic result built from the accepted goal plus projected changed paths, PR,
   verified default revision, required gates and delivery applicability. Workspace and Telegram already render that
-  same projection; no new model call or channel-specific state is added. Merge/Flux component proof and a later live
-  terminal message remain the evidence gates.
+  same projection; no new model call or channel-specific state is added. PR #277 passed required CI, Flux applied exact
+  merge `40255f04...`, mounted runtime bytes matched and an in-pod temporary-store assertion proved the full Central and
+  Telegram text. A later live terminal message remains the evidence gate. Exact rollout evidence:
+  `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md`.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message

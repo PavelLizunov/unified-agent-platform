@@ -215,7 +215,9 @@ Good next tasks that do not require redesign:
    The live terminal message exposed a UX gap: it only rendered `Delivery completed, merged, and verified` even though
    PR/check/merge/change facts were durable. Current source fixes the shared Central authority boundary with one
    bounded deterministic result derived from the accepted goal and existing projected delivery facts; Workspace and
-   Telegram require no separate formatter and no extra model call. Merge/Flux/live terminal proof remains pending.
+   Telegram require no separate formatter and no extra model call. PR #277 passed CI, exact Flux/mounted-runtime and
+   in-pod Central/Telegram component proof; a real terminal message remains pending. Evidence:
+   `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md`.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
    PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
    through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the
