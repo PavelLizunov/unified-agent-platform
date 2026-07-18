@@ -34,7 +34,7 @@ data:
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-        "gateway/platforms/api_server.py": "e3dee0dce9555a3431885fa6d7708b2d8f3f2af1153dd98e0280a9ecbd8ccd24",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "b0e0b3b8d87a7ef10b9fe034e62e92e65c95280f8a20fe48e3548a96142f4fdd",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -682,8 +682,9 @@ data:
                         raise MissionError(
                             "unknown owner intake fields: " + ", ".join(sorted(unknown))
                         )
-                    if not isinstance(body.get("goal"), str):
-                        raise MissionError("invalid mission goal")
+                    for name in allowed & body.keys():
+                        if not isinstance(body[name], str):
+                            raise MissionError(f"invalid {name}")
                     event, created = store.ingest_owner_goal(
                         redact_sensitive_text(body.get("goal"), force=True),
                         platform=body.get("platform"),
@@ -1101,6 +1102,8 @@ data:
             if not isinstance(dispatch_profile, str):
                 raise MissionError("invalid mission intake routes")
             route_platform = _require_id(route_platform, "intake platform")
+            if route_platform in normalized:
+                raise MissionError("invalid mission intake routes")
             normalized[route_platform] = _require_id(
                 dispatch_profile, "dispatch_profile"
             )

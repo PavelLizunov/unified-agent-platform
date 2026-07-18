@@ -380,6 +380,7 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             "{}",
             '{"workspace":true}',
             '{"workspace":"first","workspace":"second"}',
+            '{"workspace":"first"," workspace ":"second"}',
         ):
             environment = (
                 {} if malformed is None

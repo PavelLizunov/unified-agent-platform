@@ -195,6 +195,10 @@ async def smoke(checkout: pathlib.Path) -> None:
             "/api/missions", json=owner_body, headers={**headers, **owner_headers}
         )
         assert ambiguous.status == 401, await ambiguous.text()
+        explicit_null = await client.post(
+            "/api/missions", json={**owner_body, "thread_id": None}, headers=owner_headers
+        )
+        assert explicit_null.status == 400, await explicit_null.text()
         owner = await client.post(
             "/api/missions", json=owner_body, headers=owner_headers
         )

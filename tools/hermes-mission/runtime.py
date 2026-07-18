@@ -143,6 +143,8 @@ def registered_intake_route(platform: str) -> str:
         if not isinstance(dispatch_profile, str):
             raise MissionError("invalid mission intake routes")
         route_platform = _require_id(route_platform, "intake platform")
+        if route_platform in normalized:
+            raise MissionError("invalid mission intake routes")
         normalized[route_platform] = _require_id(
             dispatch_profile, "dispatch_profile"
         )
