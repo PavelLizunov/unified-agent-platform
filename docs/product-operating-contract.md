@@ -138,7 +138,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    control-plane environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the
    installed exact-wrapper probe proved the intended write/credential/proc/user-runtime boundary. A real
    attempt then found a Type=oneshot ordering deadlock in the transient unit. The correction removes `After=` while
-   retaining the parent `BindsTo=` lifetime boundary; a completed runtime-attested review remains pending.
+   retaining the parent `BindsTo=` lifetime boundary. The first corrected restart safely quarantined the interrupted
+   reviewer but exposed a permanent `reconciling` state; the follow-up source permits only a clean exact-SHA,
+   unchanged-draft-PR reviewer retry after the old unit is unloaded. Rollout and a completed runtime-attested review
+   remain pending; author ambiguity still fails closed.
    Restart-safe capacity retry/whole-route fallback is covered hermetically,
    including scheduled cooldown outside the finite Kanban claim TTL, but its exact deployed Codex terminal envelope
    and no-duplicate recovery still need a controlled live canary.

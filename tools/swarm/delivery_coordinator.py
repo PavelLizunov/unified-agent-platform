@@ -1031,6 +1031,22 @@ class DeliveryCoordinator:
             raise DeliveryError("model-invocation checkpoint changed candidate identity")
         return value
 
+    def _model_attempt_id(self, state: dict[str, Any], *, role: str) -> str:
+        if role not in {"author", "reviewer"}:
+            raise DeliveryError("invalid model invocation role")
+        route = self._current_route(state)
+        identity = {
+            "mission_id": state.get("mission_id"),
+            "role": role,
+            "quality_epoch": self._quality_failures(state),
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": state.get("candidate_sha") if role == "reviewer" else None,
+            "review_cycle": state.get("review_cycle"),
+        }
+        return hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
     def _prepare_model_invocation(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path], *, role: str
     ) -> None:
@@ -1038,24 +1054,14 @@ class DeliveryCoordinator:
             raise DeliveryError("model invocation is already in flight")
         route = self._current_route(state)
         candidate = state.get("candidate_sha") if role == "reviewer" else None
-        identity = {
-            "mission_id": state.get("mission_id"),
+        state["model_invocation"] = {
+            "schema_version": 1,
             "role": role,
             "quality_epoch": self._quality_failures(state),
             "route_decision_id": route["decision_id"],
             "candidate_sha": candidate,
-            "review_cycle": state.get("review_cycle"),
-        }
-        state["model_invocation"] = {
-            "schema_version": 1,
-            "role": role,
-            "quality_epoch": identity["quality_epoch"],
-            "route_decision_id": route["decision_id"],
-            "candidate_sha": candidate,
             "status": "in_flight",
-            "attempt_id": hashlib.sha256(
-                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
+            "attempt_id": self._model_attempt_id(state, role=role),
         }
         self._save(paths, state)
 
@@ -1436,6 +1442,68 @@ class DeliveryCoordinator:
             "last_error_sha256": last_error_sha256,
         }
         self._save(paths, state)
+
+    def _reviewer_unit_is_gone(self, state: dict[str, Any]) -> bool:
+        if self.runner is not subprocess.run or os.name != "posix":
+            return True
+        unit = f"uap-review-{self._model_attempt_id(state, role='reviewer')[:24]}.service"
+        environment = {
+            name: os.environ[name]
+            for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+            if name in os.environ
+        }
+        result = self.runner(
+            [
+                "/usr/bin/systemctl", "--user", "show", unit,
+                "--property=LoadState", "--property=ActiveState",
+            ],
+            cwd=None,
+            input=None,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            env=environment,
+        )
+        properties = {}
+        for line in result.stdout.splitlines():
+            if "=" in line:
+                name, value = line.split("=", 1)
+                properties[name] = value
+        return (
+            result.returncode == 0
+            and properties.get("LoadState") == "not-found"
+            and properties.get("ActiveState") == "inactive"
+        )
+
+    def _reconcile_ambiguous_reviewer(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        ambiguous: dict[str, Any],
+    ) -> bool:
+        if ambiguous["role"] != "reviewer" or state.get("phase") != "pre_review_ci_green":
+            return False
+        candidate = state.get("candidate_sha")
+        if (
+            not isinstance(candidate, str)
+            or not candidate
+            or not paths["review"].is_dir()
+            or not self._reviewer_unit_is_gone(state)
+        ):
+            return False
+        if self._git(paths["review"], "rev-parse", "HEAD") != candidate:
+            return False
+        if self._git(
+            paths["review"], "status", "--porcelain=v1",
+            "--untracked-files=all", "--ignored",
+        ):
+            return False
+        self._assert_candidate_branch(state)
+        self._require_draft_pr(state)
+        state.pop("model_ambiguous", None)
+        self._save(paths, state)
+        return True
 
     def _mark_model_timeout(
         self,
@@ -4125,7 +4193,10 @@ class DeliveryCoordinator:
                 elif not consumed:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
-            if self._ambiguous_state(state) is not None:
+            ambiguous = self._ambiguous_state(state)
+            if ambiguous is not None and not self._reconcile_ambiguous_reviewer(
+                state, paths, ambiguous
+            ):
                 return {
                     "action": "reconciling", "mission_id": mission_id, "state": state,
                 }

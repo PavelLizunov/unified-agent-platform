@@ -2178,6 +2178,179 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 self.assertNotIn("model_invocation", result["state"])
                 runner.assert_not_called()
 
+    def test_clean_ambiguous_reviewer_retries_without_a_second_author(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = FakeClient()
+            client.mission["tasks"] = [{"task_id": "task-1"}]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            instance = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths(client.mission["mission_id"])
+            paths["review"].mkdir(parents=True)
+            state = {
+                "schema_version": 1,
+                "mission_id": client.mission["mission_id"],
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pre_review_ci_green",
+                "branch": "codex/a7-3-vpnrouter-inflight",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "candidate_sha": "candidate-sha",
+                "candidate_push_sha": "candidate-sha",
+                "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
+                "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_is_draft": True,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "author_summary": {},
+                "author_telemetry": {},
+            }
+            route = instance._ensure_route(state, paths)
+            state["model_ambiguous"] = {
+                "schema_version": 1,
+                "role": "reviewer",
+                "quality_epoch": 0,
+                "route_decision_id": route["decision_id"],
+                "candidate_sha": "candidate-sha",
+                "status": "reconciling",
+                "error_class": "ambiguous_result",
+                "last_error_sha256": "a" * 64,
+            }
+            instance._save(paths, state)
+
+            with mock.patch.object(instance, "_reviewer_unit_is_gone", return_value=True):
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual(1, counters["reviews"])
+            self.assertEqual("candidate-sha", result["state"]["candidate_sha"])
+            self.assertEqual(39, result["state"]["pr_number"])
+            self.assertEqual(0, instance._quality_failures(result["state"]))
+            self.assertNotIn("model_ambiguous", result["state"])
+
+    def test_ambiguous_reviewer_requires_a_gone_unit_and_clean_exact_checkout(self):
+        for observation in ("active-unit", "wrong-head", "dirty"):
+            with self.subTest(observation=observation), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state"
+                )
+                paths = instance._paths("ambiguous-reviewer")
+                paths["review"].mkdir(parents=True)
+                state = {
+                    "mission_id": "ambiguous-reviewer",
+                    "phase": "pre_review_ci_green",
+                    "review_cycle": 1,
+                    "candidate_sha": "candidate-sha",
+                    "prior_review_rejections": 0,
+                    "prior_ci_failures": 0,
+                    "prior_author_failures": 0,
+                    "route_decisions": {},
+                    "effective_route_decisions": {},
+                }
+                route = instance._ensure_route(state, paths)
+                ambiguous = {
+                    "role": "reviewer",
+                    "route_decision_id": route["decision_id"],
+                }
+
+                def git(_checkout, *arguments, **_kwargs):
+                    if arguments[:2] == ("rev-parse", "HEAD"):
+                        return "other-sha" if observation == "wrong-head" else "candidate-sha"
+                    return "?? residue" if observation == "dirty" else ""
+
+                with (
+                    mock.patch.object(
+                        instance, "_reviewer_unit_is_gone",
+                        return_value=observation != "active-unit",
+                    ),
+                    mock.patch.object(instance, "_git", side_effect=git),
+                    mock.patch.object(instance, "_assert_candidate_branch") as branch,
+                    mock.patch.object(instance, "_require_draft_pr") as draft,
+                ):
+                    recovered = instance._reconcile_ambiguous_reviewer(
+                        state, paths, ambiguous
+                    )
+
+                self.assertFalse(recovered)
+                branch.assert_not_called()
+                draft.assert_not_called()
+
+    def test_ambiguous_author_remains_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("ambiguous-author")
+            with mock.patch.object(instance, "_reviewer_unit_is_gone") as unit:
+                recovered = instance._reconcile_ambiguous_reviewer(
+                    {"phase": "claimed"}, paths, {"role": "author"}
+                )
+            self.assertFalse(recovered)
+            unit.assert_not_called()
+
+    def test_ambiguous_reviewer_waits_until_the_old_unit_is_unloaded(self):
+        for load_state, active_state, expected in (
+            ("loaded", "active", False),
+            ("loaded", "deactivating", False),
+            ("not-found", "inactive", True),
+        ):
+            with self.subTest(load_state=load_state, active_state=active_state):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    approved = profile(root)
+                    state = {
+                        "mission_id": "reviewer-unit",
+                        "review_cycle": 1,
+                        "candidate_sha": "candidate-sha",
+                        "prior_review_rejections": 0,
+                        "prior_ci_failures": 0,
+                        "prior_author_failures": 0,
+                        "route_decisions": {},
+                        "effective_route_decisions": {},
+                    }
+                    fake_run = mock.Mock(return_value=subprocess.CompletedProcess(
+                        [], 0,
+                        stdout=(
+                            f"LoadState={load_state}\n"
+                            f"ActiveState={active_state}\n"
+                        ),
+                        stderr="",
+                    ))
+                    instance = coordinator.DeliveryCoordinator(
+                        approved, FakeClient(), FakeBackend(), root / "state",
+                        runner=fake_run,
+                    )
+                    instance._ensure_route(state, instance._paths("reviewer-unit"))
+                    with (
+                        mock.patch.object(coordinator.subprocess, "run", fake_run),
+                        mock.patch.object(coordinator.os, "name", "posix"),
+                    ):
+                        gone = instance._reviewer_unit_is_gone(state)
+
+                    self.assertEqual(expected, gone)
+                    command = fake_run.call_args.args[0]
+                    self.assertEqual("/usr/bin/systemctl", command[0])
+                    self.assertEqual(["--user", "show"], command[1:3])
+                    self.assertRegex(command[3], r"^uap-review-[0-9a-f]{24}\.service$")
+
     def test_zero_exit_truncated_reviewer_stream_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

@@ -389,8 +389,10 @@ Environment=UAP_COORDINATOR_UNIT=hermes-delivery-coordinator@%i.service
 ```
 
 Missing/invalid parent identity, missing `/usr/bin/systemd-run`, an invalid durable attempt identity or any transient
-unit setup failure stops the review fail-closed. `BindsTo` plus the existing durable invocation checkpoint prevents an
-orphaned reviewer from becoming a concurrent second reviewer after coordinator restart.
+unit setup failure stops the review fail-closed. `BindsTo` stops the child with its parent; `After=` is intentionally
+absent because the Type=oneshot parent remains activating while it waits for the review. After an interrupted reviewer,
+the next tick retries only after systemd reports the old transient unit unloaded, the read-only review worktree is
+clean at the exact candidate SHA, and the same draft PR still has that head. Author ambiguity remains fail-closed.
 
 ## Pilot gate before production integration
 
