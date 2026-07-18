@@ -25,8 +25,8 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "7b83f8adaf44d9b85e492329060a61cfedda328346b69a11a1c2e3451484e5c8",
-    "gateway/platforms/api_server.py": "e7ab1798573e78dbe26234ac625be82fa103cb429b71dabfc0a1b6186cf1c731",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
+    "gateway/platforms/api_server.py": "866b570a1f63bf10612f67f2e120e2a0694adc6663be7beb4c9d43fcf6cff179",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -612,7 +612,7 @@ def connect(
                 if not source_message_id:
                     raise MissionError("mission intake requires a stable source message")
                 store = MissionStore.default()
-                accepted, _ = store.ingest_owner_goal(
+                accepted, _ = store.ingest_owner_turn(
                     redact_sensitive_text(event.text, force=True),
                     platform="telegram",
                     source_message_id=source_message_id,
@@ -687,7 +687,7 @@ def connect(
                 if not isinstance(user_message, str):
                     raise MissionError("mission intake requires a text goal")
                 store = self._missions()
-                accepted, _ = store.ingest_owner_goal(
+                accepted, _ = store.ingest_owner_turn(
                     redact_sensitive_text(user_message, force=True),
                     platform="workspace",
                     source_message_id=source_message_id,
@@ -841,7 +841,7 @@ def connect(
                 for name in allowed & body.keys():
                     if not isinstance(body[name], str):
                         raise MissionError(f"invalid {name}")
-                event, created = store.ingest_owner_goal(
+                event, created = store.ingest_owner_turn(
                     redact_sensitive_text(body.get("goal"), force=True),
                     platform=body.get("platform"),
                     source_message_id=body.get("source_message_id"),

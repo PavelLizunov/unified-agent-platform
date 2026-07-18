@@ -131,6 +131,12 @@ Last updated: 2026-07-18
   gates are implemented; this closes applicability for the no-deploy pilot, not generic deployment automation.
   Exact PR/CI/Flux/build-1 rollout evidence:
   `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md`.
+- **Ordinary bound Telegram owner answers are implemented hermetically (2026-07-18).** The ordinary Telegram ingress
+  now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
+  stable platform message becomes the answer to the open question rather than a second mission. The source message
+  ID is persisted in `mission.answer`, so restart/lost-response replay returns the same event and a changed replay
+  fails closed. The runtime/component tests pass; live rollout and a real question/answer canary are still required.
+  Ordinary Workspace chat answers and complete cross-channel transcript synchronization are not claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -467,7 +473,7 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   normal Workspace goal created `mission-intake-f53871c022ce187501a0e9d9021b8823`; its first README candidate was
   rejected by the independent reviewer, automatically corrected, re-reviewed, merged as target PR #7 and completed
   with one terminal event and cleanup. This accepts ordinary Workspace intake for the exact registered profile, not
-  arbitrary repositories, ordinary Telegram intake, full cross-channel history or a self-diagnosing single-mission
+  arbitrary repositories, live ordinary Telegram intake, full cross-channel history or a self-diagnosing single-mission
   repair of the first goal. Exact evidence:
   `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
 - **Workspace durable mission replay accepted live (2026-07-18).** PR #256 replaced selected-mission snapshot-only

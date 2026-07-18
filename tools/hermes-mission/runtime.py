@@ -61,6 +61,7 @@ PAYLOAD_FIELDS = {
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
     },
+    "mission.answer": {"question_id", "text", "source_message_id"},
     "task.upsert": {"task_id", "title", "status", "assignee"},
     "worker.upsert": {"worker_id", "status", "run_id", "profile"},
     "terminal.append": {"stream", "text", "offset"},
@@ -245,6 +246,8 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 raise MissionError("invalid mission notice timestamp") from error
             if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
                 raise MissionError("invalid mission notice timestamp")
+    if event_type == "mission.answer" and "source_message_id" in payload:
+        _require_source_value(payload.get("source_message_id"), "source_message_id")
     if event_type == "mission.accepted" and "dispatch_profile" in payload:
         _require_id(payload.get("dispatch_profile"), "dispatch_profile")
     if event_type == "mission.accepted" and "delivery_mode" in payload:
@@ -847,6 +850,94 @@ class MissionStore:
         missions = self.list(1)
         return missions[0]["mission_id"] if missions else None
 
+    def _bound_answer_receipt(
+        self,
+        platform: str,
+        chat_id: str,
+        thread_id: str,
+        source_message_id: str,
+    ) -> dict[str, Any] | None:
+        """Find a prior answer even after the owner chat moved to a later mission."""
+        with self._db() as connection:
+            related = {
+                row["mission_id"]
+                for row in connection.execute(
+                    """SELECT mission_id FROM mission_subscriptions
+                       WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
+                    (platform, chat_id, thread_id),
+                )
+            }
+            for row in connection.execute(
+                """SELECT previous_mission_id, mission_id, related_mission_id
+                   FROM mission_subscription_history
+                   WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
+                (platform, chat_id, thread_id),
+            ):
+                related.update(value for value in row if value)
+            matches = [
+                self._row(row)
+                for row in connection.execute(
+                    """SELECT * FROM mission_events
+                       WHERE type = 'mission.answer' ORDER BY rowid DESC"""
+                )
+                if row["mission_id"] in related
+                and json.loads(row["payload_json"]).get("source_message_id")
+                == source_message_id
+            ]
+        if len(matches) > 1:
+            raise MissionError("owner turn source identity collision")
+        return matches[0] if matches else None
+
+    def ingest_owner_turn(
+        self,
+        text: str,
+        *,
+        platform: str,
+        source_message_id: str,
+        session_id: str | None = None,
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Answer the bound question, otherwise accept one new registered goal."""
+        if not isinstance(text, str):
+            raise MissionError("invalid owner turn")
+        platform = _require_id(platform, "intake platform")
+        registered_intake_target(platform)
+        source_message_id = _require_source_value(
+            source_message_id, "source_message_id"
+        )
+        chat_id = _require_source_value(chat_id, "chat_id", optional=True)
+        thread_id = _require_source_value(
+            thread_id, "thread_id", optional=True
+        )
+        if chat_id:
+            receipt = self._bound_answer_receipt(
+                platform, chat_id, thread_id, source_message_id
+            )
+            if receipt:
+                if receipt["payload"].get("text") != text.strip():
+                    raise MissionError("owner turn idempotency collision")
+                return receipt, False
+            mission_id = self.bound_mission(platform, chat_id, thread_id)
+            if mission_id:
+                view = self.projection(mission_id)
+                question = view.get("question")
+                if view.get("status") == "waiting_owner" and isinstance(question, dict):
+                    return self.answer(
+                        mission_id,
+                        question.get("question_id"),
+                        text,
+                        source_message_id=source_message_id,
+                    )
+        return self.ingest_owner_goal(
+            text,
+            platform=platform,
+            source_message_id=source_message_id,
+            session_id=session_id,
+            chat_id=chat_id or None,
+            thread_id=thread_id or None,
+        )
+
     def ingest_owner_goal(
         self,
         goal: str,
@@ -1127,7 +1218,12 @@ class MissionStore:
             )
 
     def answer(
-        self, mission_id: str, question_id: str, text: str
+        self,
+        mission_id: str,
+        question_id: str,
+        text: str,
+        *,
+        source_message_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Record one idempotent owner answer to the currently open question."""
         question_id = _require_id(question_id, "question_id")
@@ -1135,6 +1231,11 @@ class MissionStore:
         if not text or len(text) > _MAX_OWNER_ANSWER_CHARS:
             raise MissionError("owner answer must contain 1..4000 characters")
         fingerprint = hashlib.sha256(question_id.encode("utf-8")).hexdigest()[:32]
+        payload = {"question_id": question_id, "text": text}
+        if source_message_id is not None:
+            payload["source_message_id"] = _require_source_value(
+                source_message_id, "source_message_id"
+            )
         return self.append_central(
             mission_id,
             {
@@ -1145,7 +1246,7 @@ class MissionStore:
                 "correlation": {
                     "producer_event_id": f"central:answer:{fingerprint}"
                 },
-                "payload": {"question_id": question_id, "text": text},
+                "payload": payload,
             },
         )
 

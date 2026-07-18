@@ -200,8 +200,9 @@ Good next tasks that do not require redesign:
    recovery history in `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
    A separate repo-owned schema-v4 `build1-flow-pilot-registered-v4` consumer is now installed with a standing timer
    and explicit `delivery_mode: none`; Central requires `delivery: not_applicable` before completing that target;
-   its exact Workspace/Telegram intake registry and timer are enabled. Ordinary Workspace delivery passed live;
-   ordinary Telegram intake remains the next controlled canary. See
+   its exact Workspace/Telegram intake registry and timer are enabled. Ordinary Workspace delivery passed live.
+   A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
+   ordinary Telegram intake and that question/resume path remain the next controlled live canary. See
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a

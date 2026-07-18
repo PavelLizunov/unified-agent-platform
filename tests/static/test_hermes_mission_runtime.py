@@ -577,6 +577,112 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             assert len(restarted.list(100)) == before
 
 
+def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
+    routes = json.dumps({
+        "telegram": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        accepted, created = store.ingest_owner_turn(
+            "Deliver from Telegram",
+            platform="telegram",
+            source_message_id="telegram-goal-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert created
+        mission_id = accepted["mission_id"]
+        store.append_producer(
+            mission_id,
+            {
+                "schema_version": 1,
+                "mission_id": mission_id,
+                "type": "mission.question",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:question:1"},
+                "payload": {
+                    "question_id": "question-1",
+                    "text": "Preserve the current behavior?",
+                },
+            },
+        )
+
+        answer, answer_created = store.ingest_owner_turn(
+            "Yes, preserve it",
+            platform="telegram",
+            source_message_id="telegram-answer-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert answer_created and answer["type"] == "mission.answer"
+        assert answer["mission_id"] == mission_id
+        assert answer["payload"] == {
+            "question_id": "question-1",
+            "source_message_id": "telegram-answer-1",
+            "text": "Yes, preserve it",
+        }
+        assert store.projection(mission_id)["status"] == "active"
+        assert len(store.list(100)) == 1
+
+        restarted = missions.MissionStore(database)
+        replay, replay_created = restarted.ingest_owner_turn(
+            "Yes, preserve it",
+            platform="telegram",
+            source_message_id="telegram-answer-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert not replay_created and replay == answer
+        assert len(restarted.list(100)) == 1
+        try:
+            restarted.ingest_owner_turn(
+                "No, change it",
+                platform="telegram",
+                source_message_id="telegram-answer-1",
+                session_id="session-telegram",
+                chat_id="owner-chat",
+                thread_id="owner-thread",
+            )
+            raise AssertionError("changed replayed owner answer was accepted")
+        except missions.MissionError as error:
+            assert "owner turn idempotency collision" in str(error)
+
+        next_goal, next_created = restarted.ingest_owner_turn(
+            "Deliver the next Telegram goal",
+            platform="telegram",
+            source_message_id="telegram-goal-2",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert next_created and next_goal["mission_id"] != mission_id
+        assert restarted.bound_mission(
+            "telegram", "owner-chat", "owner-thread"
+        ) == next_goal["mission_id"]
+        delayed_replay, delayed_created = restarted.ingest_owner_turn(
+            "Yes, preserve it",
+            platform="telegram",
+            source_message_id="telegram-answer-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert not delayed_created and delayed_replay == answer
+        assert len(restarted.list(100)) == 2
+        assert restarted.bound_mission(
+            "telegram", "owner-chat", "owner-thread"
+        ) == next_goal["mission_id"]
+
+
 def test_concurrent_owner_intake_converges_on_one_acceptance() -> None:
     routes = json.dumps({"workspace": "build1-registered"})
     barrier = threading.Barrier(2)
@@ -1929,6 +2035,7 @@ def main() -> None:
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
     test_registered_owner_intake_is_deterministic_and_fail_closed()
+    test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
     test_concurrent_owner_intake_converges_on_one_acceptance()
     test_dispatch_candidates_do_not_starve_behind_newer_missions()
     test_producer_schema_is_closed_and_all_strings_are_redacted()

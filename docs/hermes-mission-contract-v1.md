@@ -97,7 +97,7 @@ The production manifest maps `workspace` and `telegram` only to the repo-owned
 `build1-flow-pilot-registered-v4` profile and explicitly marks that target `delivery_mode: none`. Workspace forwards
 its existing stable optimistic message identity to the
 Central session stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery.
-Both handlers call the same `ingest_owner_goal()` primitive and return a deterministic acknowledgement without
+Both handlers call the same `ingest_owner_turn()` primitive and return a deterministic acknowledgement without
 running the generic Hermes chat model. The profile, repository, paths, checks, OpenAI route and commands remain
 server-owned. Removing or corrupting the registry therefore disables new ordinary intake before mission state or a
 worker is created.
@@ -115,9 +115,13 @@ is rejected. SQLite still serializes concurrent creators, and the loser re-reads
 receipt table or intake service is introduced. Telegram intake also binds the source chat/topic to the new mission;
 a delayed replay of an older accepted turn cannot replace the binding of a later accepted mission.
 
-This checkpoint treats a plain message on an enabled owner route as a new goal. Ordinary cross-channel answers to an
-open owner question and full Workspace/Telegram transcript convergence remain separate lifecycle work; the existing
-structured Workspace answer action and `/mission answer` continue to use the same authoritative question event.
+When an ordinary Telegram message comes from the chat/topic currently bound to a `waiting_owner` mission,
+`ingest_owner_turn()` records it as the answer to that mission's exact open question instead of accepting another
+mission. The platform message ID is stored with the answer: replay after commit or restart returns the same event,
+while reuse of that ID with different text fails closed. A distinct ordinary turn after the answer is again a new
+goal and rebinds the chat to its new mission. The existing structured Workspace answer action and `/mission answer`
+remain compatible. Ordinary Workspace chat-to-question routing and full Workspace/Telegram transcript convergence
+remain separate lifecycle work.
 
 ## Hermetic gate
 
