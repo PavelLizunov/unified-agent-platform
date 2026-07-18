@@ -63,6 +63,10 @@ LEGACY_ADDED_FILES = {
     "src/routes/api/missions.ts": "e92e59ee7556741adac03a0850b1166234e582ba7cdaaa16379a4347797c84ac",
     "src/screens/dashboard/components/mission-overview-card.tsx": "7ab5ceff84f8b8a6eefd8acf694dfd27047b57ac25d73956707fbf2ea9088c45",
 }
+PREVIOUS_ADDED_FILES = {
+    "src/routes/api/missions.ts": "082ffe7f4d100d8a5a64fbde40893cfba1f98a1774c914acb2495ce1a857a243",
+    "src/screens/dashboard/components/mission-overview-card.tsx": "990eb901032d2f2784eece487bc462b02b0672c1feb9f0c1bef403e1019e6b5b",
+}
 ASSET_ROOT = pathlib.Path(__file__).with_name("files")
 def sha(p): return hashlib.sha256(p.read_bytes()).hexdigest()
 def replace(text, old, new, name):
@@ -641,6 +645,9 @@ def main():
             added_paths.append((path, asset))
         elif sha(path) == sha(asset):
             statuses.append(f"{rel}: exact-patched")
+        elif sha(path) == PREVIOUS_ADDED_FILES.get(rel):
+            statuses.append(f"{rel}: previous-needs-overlay")
+            added_paths.append((path, asset))
         elif sha(path) == LEGACY_ADDED_FILES.get(rel):
             statuses.append(f"{rel}: legacy-needs-overlay")
             added_paths.append((path, asset))

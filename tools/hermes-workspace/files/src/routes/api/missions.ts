@@ -10,8 +10,31 @@ export const Route = createFileRoute('/api/missions')({
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
         const url = new URL(request.url)
+        const missionId = url.searchParams.get('mission_id')
         const limit = url.searchParams.get('limit') || '20'
         try {
+          if (missionId !== null) {
+            const after = Number(url.searchParams.get('after') || '0')
+            if (
+              !missionId.trim() ||
+              missionId.length > 128 ||
+              !Number.isSafeInteger(after) ||
+              after < 0
+            ) {
+              return Response.json(
+                { error: 'Invalid mission replay request' },
+                { status: 400 },
+              )
+            }
+            const response = await gatewayFetch(
+              `/api/missions/${encodeURIComponent(missionId)}?after=${after}`,
+              { signal: AbortSignal.timeout(5_000) },
+            )
+            return new Response(await response.text(), {
+              status: response.status,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          }
           const response = await gatewayFetch(
             `/api/missions?limit=${encodeURIComponent(limit)}`,
             { signal: AbortSignal.timeout(5_000) },
