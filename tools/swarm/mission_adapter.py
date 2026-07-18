@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable
+
+import flow_contract
 
 
 class AdapterError(ValueError):
@@ -124,7 +127,9 @@ class HermesKanbanBackend:
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         result = self.runner(self._command(*args))
         if result.returncode:
-            raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban command failed")
+            raise AdapterError(flow_contract._safe_error(
+                (result.stderr or result.stdout).strip() or "Hermes Kanban command failed"
+            ))
         return result
 
     def _json(self, *args: str) -> Any:
@@ -289,31 +294,83 @@ class HermesKanbanBackend:
         if result.returncode:
             if "no log" in (result.stderr or "").lower():
                 return ""
-            raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban log failed")
+            raise AdapterError(flow_contract._safe_error(
+                (result.stderr or result.stdout).strip() or "Hermes Kanban log failed"
+            ))
         return result.stdout
 
-    def claim(self, task_id: str, *, ttl_seconds: int) -> dict[str, Any]:
+    def claim(
+        self, task_id: str, *, ttl_seconds: int, provenance: str | None = None
+    ) -> dict[str, Any]:
         if ttl_seconds <= 0:
             raise AdapterError("Kanban claim TTL must be positive")
-        self._run("claim", task_id, "--ttl", str(ttl_seconds))
+        if provenance is not None and re.fullmatch(r"[0-9a-f]{64}", provenance) is None:
+            raise AdapterError("Kanban claim provenance is invalid")
+        command = ["claim", task_id, "--ttl", str(ttl_seconds)]
+        if provenance is not None:
+            command.extend(("--claimer", provenance))
+        self._run(*command)
+        snapshot = self.show(task_id)
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "running"
+            or not isinstance(runs, list)
+            or len(active) != 1
+        ):
+            raise AdapterError("Hermes Kanban claim did not create one running task/run")
+        return snapshot
+
+    def schedule(self, task_id: str, *, reason: str) -> dict[str, Any]:
+        if not reason:
+            raise AdapterError("Kanban schedule reason is required")
+        self._run("schedule", task_id, reason)
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
         if (
             not isinstance(task, dict)
             or task.get("id") != task_id
-            or task.get("status") != "running"
+            or task.get("status") != "scheduled"
             or not isinstance(runs, list)
-            or len(runs) != 1
-            or not isinstance(runs[0], dict)
-            or runs[0].get("status") != "running"
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
         ):
-            raise AdapterError("Hermes Kanban claim did not create one running task/run")
+            raise AdapterError("Hermes Kanban task did not enter scheduled state")
+        return snapshot
+
+    def unblock(self, task_id: str, *, reason: str) -> dict[str, Any]:
+        if not reason:
+            raise AdapterError("Kanban unblock reason is required")
+        self._run("unblock", task_id, "--reason", reason)
+        snapshot = self.show(task_id)
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("status") != "ready"
+            or not isinstance(runs, list)
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+        ):
+            raise AdapterError("Hermes Kanban task did not return to ready state")
         return snapshot
 
     def verify_claim(
-        self, task_id: str, run_id: str, *, min_remaining_seconds: int = 60
+        self,
+        task_id: str,
+        run_id: str,
+        *,
+        min_remaining_seconds: int = 60,
+        provenance: str | None = None,
     ) -> dict[str, Any]:
+        if provenance is not None and re.fullmatch(r"[0-9a-f]{64}", provenance) is None:
+            raise AdapterError("Kanban claim provenance is invalid")
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
@@ -321,6 +378,10 @@ class HermesKanbanBackend:
         matching = [
             run for run in runs or []
             if isinstance(run, dict) and str(run.get("id")) == str(run_id)
+        ]
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
         ]
         claims = [
             event for event in events or []
@@ -338,12 +399,18 @@ class HermesKanbanBackend:
             or task.get("id") != task_id
             or task.get("status") != "running"
             or len(matching) != 1
+            or len(active) != 1
+            or str(active[0].get("id")) != str(run_id)
             or matching[0].get("status") != "running"
             # Pinned Hermes omits private claim columns from ``kanban show``;
             # the durable public lease proof is the matching claimed event.
             or len(claims) != 1
             or not isinstance(claims[0]["payload"].get("lock"), str)
             or not claims[0]["payload"]["lock"]
+            or (
+                provenance is not None
+                and claims[0]["payload"]["lock"] != provenance
+            )
             or not isinstance(claims[0]["payload"].get("expires"), int)
             or claims[0]["payload"]["expires"] <= minimum
         ):
@@ -387,8 +454,10 @@ class HermesKanbanBackend:
             return False
         if result.returncode:
             raise AdapterError(
-                (result.stderr or result.stdout).strip()
-                or "Hermes Kanban command failed"
+                flow_contract._safe_error(
+                    (result.stderr or result.stdout).strip()
+                    or "Hermes Kanban command failed"
+                )
             )
         if not output.startswith("GC complete: "):
             raise AdapterError("Hermes Kanban returned an invalid GC result")
@@ -920,7 +989,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     except (AdapterError, OSError, json.JSONDecodeError, subprocess.SubprocessError) as error:
-        print(f"hermes-mission-adapter-error: {error}", file=sys.stderr)
+        print(
+            f"hermes-mission-adapter-error: {flow_contract._safe_error(error)}",
+            file=sys.stderr,
+        )
         return 2
 
 

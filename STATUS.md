@@ -93,6 +93,14 @@ Last updated: 2026-07-17
   if the PR is already closed, only its unchanged branch/head is lease-deleted. Compatible in-progress v1 route
   and PR identity remain recoverable, including lost responses after the initial push, PR create or a successful
   repair push.
+  The coordinator source now also treats the exact trusted pre-turn Codex capacity terminal as an operational,
+  non-quality condition: two same-model retries precede an author-only whole-route fallback, while reviewer retries
+  remain frozen to the exact candidate route. Retry/fallback/round state and `not_before` are durable, capped rounds
+  never create an owner question; cooldown parks the exact task as `scheduled` and automatically claims a new run
+  when due, so the finite Kanban claim TTL cannot strand a capacity wait. Unknown, post-start or worktree-changing
+  failures remain fail-closed. Hermetic
+  tests cover exact-source classification, restart persistence, approved route pairing and reviewer freeze; the live
+  Codex capacity envelope and recovery still require a controlled canary before any live-proof claim.
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
   `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound acceptance canary passed on the
   corrected runtime; channel/session work beyond the authoritative mission projection remains a separate product gap.

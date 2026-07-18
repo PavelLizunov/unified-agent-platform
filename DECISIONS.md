@@ -529,6 +529,16 @@
   открытый failed PR вместе с exact remote branch как bounded evidence, не пытаясь закрыть его после локального
   read/check. Если PR уже закрыт внешне, совпадающая branch/SHA удаляется exact lease. Локальный disposable state
   удаляется, delivery публикуется как failed, mission завершается честным failure.
+  Capacity — operational failure, а не quality signal. Точная известная capacity-ошибка из terminal Codex envelope
+  или stderr допускает два bounded same-model retry; до появления candidate author затем переключает только весь
+  следующий уже разрешённый tuple (`standard` → `complex` → `escalated`). После candidate SHA reviewer route
+  заморожен и повторяется в новой read-only session на том же exact SHA. Исчерпание текущего burst сохраняет
+  restart-safe `not_before` и автоматически начинает следующий bounded round с capped backoff; owner question не
+  создаётся и quality counters не меняются. На время cooldown coordinator переводит exact Kanban task в `scheduled`,
+  освобождая конечный claim TTL, а при наступлении `not_before` автоматически создаёт новый exact run той же task.
+  Текст из prompt, agent/tool output, неточное сообщение, начавшийся turn
+  или изменившийся worktree не разрешают fallback: такой результат остаётся fail-closed/ambiguous, чтобы не запустить
+  второго writer. Claude, local/GPU и произвольная actor pair не являются capacity fallback.
 - **Граница полномочий:** расход подписки или денег, выбор Luna/Sol/Terra, штатные workers/tests/VM, PR/CI/merge и
   предусмотренный repo-contract deploy/release не требуют подтверждения. Owner gate остаётся только для реальной
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой

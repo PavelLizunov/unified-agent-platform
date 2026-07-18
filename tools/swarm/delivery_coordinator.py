@@ -73,17 +73,28 @@ _POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
 _MAX_CHECK_FAILURE_CHARS = 4000
 _COMPLETED_STATE_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _FILESYSTEM_CLOCK_TOLERANCE_SECONDS = 0.01
+_CAPACITY_FAILURES_PER_ROUTE = 3
+_CAPACITY_RETRY_DELAYS_SECONDS = (5, 20)
+_CAPACITY_ROUTE_SWITCH_DELAY_SECONDS = 5
+_CAPACITY_ROUND_DELAY_SECONDS = 120
+_CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
+_CAPACITY_STATE_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "failures_on_route", "round", "status", "not_before", "error_class",
+    "last_error_sha256", "claim_parked", "reclaim_pending", "reclaim_token",
+}
+_AMBIGUOUS_STATE_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "status", "error_class", "last_error_sha256",
+}
+_MODEL_INVOCATION_FIELDS = {
+    "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
+    "status", "attempt_id",
+}
 _DIAGNOSTIC_REDACTIONS = (
-    re.compile(r"(?i)\b(?:authorization|proxy-authorization)\s*:\s*[^\r\n]+"),
     re.compile(
-        r"(?i)\b[A-Z0-9_.-]*(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)"
-        r"[A-Z0-9_.-]*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)"
-    ),
-    re.compile(r"(?i)://[^/\s@]+@"),
-    re.compile(
-        r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
-        r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+|"
-        r"AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|[0-9]{8,10}:[A-Za-z0-9_-]{35})\b"
+        r"\b(?:AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|"
+        r"[0-9]{8,10}:[A-Za-z0-9_-]{35})\b"
     ),
     re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])"),
 )
@@ -288,6 +299,53 @@ def _temporary_private_output():
 
 
 def _private_codex_events(path: pathlib.Path, text: str) -> None:
+    def sensitive_field(field: str | None) -> bool:
+        if not isinstance(field, str):
+            return False
+        name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", field).casefold().replace("-", "_")
+        compact = re.sub(r"[^a-z0-9]", "", name)
+        exact = {
+            "authorization", "proxy_authorization", "token", "access_token",
+            "refresh_token", "api_key", "access_key", "secret", "password",
+            "passwd", "credential", "credentials", "cookie", "cookies", "set_cookie",
+        }
+        stems = (
+            "authorization", "token", "api_key", "access_key", "secret",
+            "password", "passwd", "credential", "cookie", "set_cookie",
+        )
+        compact_stems = (
+            "authorization", "token", "apikey", "accesskey", "privatekey",
+            "secret", "password", "passwd", "credential", "cookie", "setcookie",
+        )
+        components = set(name.split("_"))
+        return (
+            name in exact
+            or bool(components & {
+                "authorization", "token", "secret", "password", "passwd",
+                "credential", "credentials", "cookie",
+            })
+            or any(name.startswith(f"{stem}_") for stem in stems)
+            or any(name.endswith(f"_{stem}") for stem in stems)
+            or any(compact.startswith(stem) for stem in compact_stems)
+            or any(compact.endswith(stem) for stem in compact_stems)
+        )
+
+    def sanitize(value: Any, field: str | None = None) -> Any:
+        if sensitive_field(field):
+            return "[REDACTED]"
+        if isinstance(value, str):
+            if field == "thread_id":
+                value = flow_contract.redact_diagnostic(value)
+                for pattern in _DIAGNOSTIC_REDACTIONS[:-1]:
+                    value = pattern.sub("[REDACTED]", value)
+                return value[-_MAX_CHECK_FAILURE_CHARS:]
+            return _bounded_diagnostic(value)
+        if isinstance(value, list):
+            return [sanitize(item, field) for item in value]
+        if isinstance(value, dict):
+            return {key: sanitize(item, key) for key, item in value.items()}
+        return value
+
     lines: list[str] = []
     for raw_line in text.splitlines():
         try:
@@ -298,19 +356,13 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
         if not isinstance(event, dict):
             lines.append("[REDACTED invalid Codex event]")
             continue
-        containers = [event]
-        if isinstance(event.get("item"), dict):
-            containers.append(event["item"])
-        for container in containers:
-            for field in ("aggregated_output", "command", "message", "output", "text"):
-                if isinstance(container.get(field), str):
-                    container[field] = _bounded_diagnostic(container[field])
-        lines.append(json.dumps(event, ensure_ascii=False, separators=(",", ":")))
+        lines.append(json.dumps(sanitize(event), ensure_ascii=False, separators=(",", ":")))
     _private_text(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
 def _redact_diagnostic(value: str) -> str:
-    value = value.replace("\x00", "?")
+    value = flow_contract.redact_diagnostic(value)
+    value = re.sub(r'''\\+(?=["'])''', "", value)
     for pattern in _DIAGNOSTIC_REDACTIONS:
         value = pattern.sub("[REDACTED]", value)
     return value
@@ -673,17 +725,498 @@ class DeliveryCoordinator:
             )
             if recovered != decision:
                 raise DeliveryError("routing policy changed during a durable mission cycle")
-            return decisions[key]
-        decisions[key] = decision
-        self._save(paths, state)
-        return decision
+        else:
+            decisions[key] = decision
+            self._save(paths, state)
+        effective = state.setdefault("effective_route_decisions", {}).get(key)
+        if effective is not None:
+            try:
+                validated = flow_contract.validate_stored_delivery_route(
+                    self.policy, effective
+                )
+            except flow_contract.ContractError as error:
+                raise DeliveryError("durable capacity route decision is invalid") from error
+            if validated != effective or effective.get("base_decision") != decisions[key]:
+                raise DeliveryError("durable capacity route is detached from its base route")
+            return effective
+        return decisions[key]
 
     def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
         key = str(self._quality_failures(state))
-        decision = state.get("route_decisions", {}).get(key)
+        decision = state.get("effective_route_decisions", {}).get(key)
+        if decision is None:
+            decision = state.get("route_decisions", {}).get(key)
         if not isinstance(decision, dict) or decision.get("status") != "ready":
             raise DeliveryError("durable OpenAI route decision is missing")
+        try:
+            flow_contract.validate_stored_delivery_route(self.policy, decision)
+        except flow_contract.ContractError as error:
+            raise DeliveryError("durable OpenAI route decision is invalid") from error
         return decision
+
+    def _capacity_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_capacity")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        quality_epoch = self._quality_failures(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _CAPACITY_STATE_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != quality_epoch
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") not in {
+                "retry_wait", "route_fallback_wait", "capacity_round_wait",
+            }
+            or value.get("error_class") != "transient_capacity"
+            or not isinstance(value.get("claim_parked"), bool)
+            or not isinstance(value.get("reclaim_pending"), bool)
+            or not isinstance(value.get("reclaim_token"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["reclaim_token"]) is None
+            or not isinstance(value.get("last_error_sha256"), str)
+            or len(value["last_error_sha256"]) != 64
+            or isinstance(value.get("failures_on_route"), bool)
+            or not isinstance(value.get("failures_on_route"), int)
+            or not 0 <= value["failures_on_route"] < _CAPACITY_FAILURES_PER_ROUTE
+            or isinstance(value.get("round"), bool)
+            or not isinstance(value.get("round"), int)
+            or value["round"] < 0
+            or isinstance(value.get("not_before"), bool)
+            or not isinstance(value.get("not_before"), (int, float))
+            or not math.isfinite(float(value["not_before"]))
+            or value["not_before"] < 0
+        ):
+            raise DeliveryError("durable model-capacity checkpoint is invalid")
+        expected_candidate = state.get("candidate_sha") if value["role"] == "reviewer" else None
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("model-capacity checkpoint changed candidate identity")
+        return value
+
+    def _ambiguous_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_ambiguous")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _AMBIGUOUS_STATE_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != self._quality_failures(state)
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") != "reconciling"
+            or value.get("error_class") != "ambiguous_result"
+            or not isinstance(value.get("last_error_sha256"), str)
+            or len(value["last_error_sha256"]) != 64
+        ):
+            raise DeliveryError("durable ambiguous-model checkpoint is invalid")
+        expected_candidate = state.get("candidate_sha") if value["role"] == "reviewer" else None
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("ambiguous-model checkpoint changed candidate identity")
+        return value
+
+    def _model_invocation_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("model_invocation")
+        if value is None:
+            return None
+        route = self._current_route(state)
+        if (
+            not isinstance(value, dict)
+            or set(value) != _MODEL_INVOCATION_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("role") not in {"author", "reviewer"}
+            or value.get("quality_epoch") != self._quality_failures(state)
+            or value.get("route_decision_id") != route["decision_id"]
+            or value.get("status") != "in_flight"
+            or not isinstance(value.get("attempt_id"), str)
+            or len(value["attempt_id"]) != 64
+        ):
+            raise DeliveryError("durable model-invocation checkpoint is invalid")
+        expected_candidate = (
+            state.get("candidate_sha") if value["role"] == "reviewer" else None
+        )
+        if value.get("candidate_sha") != expected_candidate:
+            raise DeliveryError("model-invocation checkpoint changed candidate identity")
+        return value
+
+    def _prepare_model_invocation(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], *, role: str
+    ) -> None:
+        if role not in {"author", "reviewer"} or self._model_invocation_state(state) is not None:
+            raise DeliveryError("model invocation is already in flight")
+        route = self._current_route(state)
+        candidate = state.get("candidate_sha") if role == "reviewer" else None
+        identity = {
+            "mission_id": state.get("mission_id"),
+            "role": role,
+            "quality_epoch": self._quality_failures(state),
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate,
+            "review_cycle": state.get("review_cycle"),
+        }
+        state["model_invocation"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": identity["quality_epoch"],
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate,
+            "status": "in_flight",
+            "attempt_id": hashlib.sha256(
+                json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
+        }
+        self._save(paths, state)
+
+    def _park_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or waiting["claim_parked"]:
+            return
+        snapshot = self.backend.show(state["root_task_id"])
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("capacity wait found a different Kanban task owner")
+        active = [
+            run for run in runs
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if task.get("status") in {"running", "ready"}:
+            if task.get("status") == "running" and (
+                len(active) != 1
+                or str(active[0].get("id")) != str(state.get("run_id"))
+            ):
+                raise DeliveryError("capacity wait cannot park a different active Kanban run")
+            if task.get("status") == "ready" and active:
+                raise DeliveryError("capacity wait found an active run on a ready Kanban task")
+            if task.get("status") == "ready":
+                self._ensure_claimed(state)
+                self._save(paths, state)
+            self._assert_claim(state)
+            snapshot = self.backend.schedule(
+                state["root_task_id"], reason="automatic OpenAI capacity cooldown"
+            )
+            task = snapshot.get("task")
+            runs = snapshot.get("runs")
+        matching = [
+            run for run in runs or []
+            if isinstance(run, dict) and str(run.get("id")) == str(state.get("run_id"))
+        ]
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or task.get("status") != "scheduled"
+            or not isinstance(runs, list)
+            or any(isinstance(run, dict) and run.get("status") == "running" for run in runs)
+            or len(matching) != 1
+            or matching[0].get("status") != "scheduled"
+        ):
+            raise DeliveryError("capacity wait did not park the exact Kanban task")
+        waiting["claim_parked"] = True
+        waiting["reclaim_pending"] = False
+        self._save(paths, state)
+
+    def _resume_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or not waiting["claim_parked"]:
+            return
+        snapshot = self.backend.show(state["root_task_id"])
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("capacity retry found a different Kanban task owner")
+        active = [
+            run for run in runs
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        if not waiting["reclaim_pending"]:
+            if task.get("status") not in {"scheduled", "ready"} or active:
+                raise DeliveryError("capacity retry found a different active Kanban run")
+            waiting["reclaim_pending"] = True
+            self._save(paths, state)
+        if task.get("status") == "scheduled":
+            matching = [
+                run for run in runs
+                if isinstance(run, dict) and str(run.get("id")) == str(state.get("run_id"))
+            ]
+            if len(matching) != 1 or matching[0].get("status") != "scheduled":
+                raise DeliveryError("capacity retry lost the exact parked Kanban run")
+            snapshot = self.backend.unblock(
+                state["root_task_id"], reason="automatic OpenAI capacity retry due"
+            )
+            task = snapshot.get("task")
+            runs = snapshot.get("runs")
+            if (
+                not isinstance(task, dict)
+                or task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+                or not isinstance(runs, list)
+            ):
+                raise DeliveryError("capacity retry unblocked a different Kanban task owner")
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
+        if task.get("status") == "ready" and not active:
+            snapshot = self.backend.claim(
+                state["root_task_id"],
+                ttl_seconds=self.profile["claim_ttl_seconds"],
+                provenance=waiting["reclaim_token"],
+            )
+            task = snapshot.get("task")
+            runs = snapshot.get("runs")
+            if (
+                not isinstance(task, dict)
+                or task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+                or not isinstance(runs, list)
+            ):
+                raise DeliveryError("capacity retry claimed a different Kanban task owner")
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
+        if (
+            task.get("status") != "running"
+            or len(active) != 1
+            or active[0].get("profile") != self.profile["assignee"]
+        ):
+            raise DeliveryError("capacity retry found a different active Kanban run")
+        previous_run_id = state.get("run_id")
+        state["run_id"] = str(active[0]["id"])
+        try:
+            self._assert_claim(state, provenance=waiting["reclaim_token"])
+        except (DeliveryError, mission_adapter.AdapterError):
+            state["run_id"] = previous_run_id
+            raise
+        self._save(paths, state)
+        waiting["claim_parked"] = False
+        waiting["reclaim_pending"] = False
+        self._save(paths, state)
+
+    def _capacity_wait_result(
+        self, state: dict[str, Any], mission_id: str, paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any] | None:
+        waiting = self._capacity_state(state)
+        if waiting is None:
+            return None
+        self._park_capacity_claim(state, paths)
+        if waiting["not_before"] <= time.time():
+            self._resume_capacity_claim(state, paths)
+            return None
+        return {"action": "capacity_wait", "mission_id": mission_id, "state": state}
+
+    def _record_capacity_failure(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        failure: dict[str, Any],
+    ) -> None:
+        if role not in {"author", "reviewer"}:
+            raise DeliveryError("invalid model-capacity role")
+        route = self._current_route(state)
+        quality_epoch = self._quality_failures(state)
+        candidate_sha = state.get("candidate_sha") if role == "reviewer" else None
+        previous = state.get("model_capacity")
+        matching = (
+            isinstance(previous, dict)
+            and previous.get("role") == role
+            and previous.get("quality_epoch") == quality_epoch
+            and previous.get("route_decision_id") == route["decision_id"]
+            and previous.get("candidate_sha") == candidate_sha
+        )
+        failures = previous.get("failures_on_route", 0) + 1 if matching else 1
+        round_index = previous.get("round", 0) if matching else 0
+        status = "retry_wait"
+        if failures >= _CAPACITY_FAILURES_PER_ROUTE:
+            if role == "author" and route["route"] != "escalated":
+                base = state["route_decisions"][str(quality_epoch)]
+                next_index = route.get("capacity_fallback_index", 0) + 1
+                route = flow_contract.resolve_capacity_route(
+                    self.policy, base, next_index
+                )
+                state.setdefault("effective_route_decisions", {})[
+                    str(quality_epoch)
+                ] = route
+                failures = 0
+                status = "route_fallback_wait"
+            if status != "route_fallback_wait":
+                round_index += 1
+                failures = 0
+                status = "capacity_round_wait"
+        if status == "route_fallback_wait":
+            delay = _CAPACITY_ROUTE_SWITCH_DELAY_SECONDS
+        elif status == "capacity_round_wait":
+            capped_exponent = min(
+                max(round_index - 1, 0),
+                math.ceil(math.log2(
+                    _CAPACITY_MAX_ROUND_DELAY_SECONDS / _CAPACITY_ROUND_DELAY_SECONDS
+                )),
+            )
+            delay = min(
+                _CAPACITY_ROUND_DELAY_SECONDS * (2 ** capped_exponent),
+                _CAPACITY_MAX_ROUND_DELAY_SECONDS,
+            )
+        else:
+            delay = _CAPACITY_RETRY_DELAYS_SECONDS[failures - 1]
+        state.pop("model_invocation", None)
+        not_before = time.time() + delay
+        reclaim_identity = {
+            "mission_id": state.get("mission_id"),
+            "role": role,
+            "quality_epoch": quality_epoch,
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate_sha,
+            "failures_on_route": failures,
+            "round": round_index,
+            "status": status,
+            "not_before": not_before,
+            "last_error_sha256": failure["message_sha256"],
+        }
+        state["model_capacity"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": quality_epoch,
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate_sha,
+            "failures_on_route": failures,
+            "round": round_index,
+            "status": status,
+            "not_before": not_before,
+            "error_class": "transient_capacity",
+            "last_error_sha256": failure["message_sha256"],
+            "claim_parked": False,
+            "reclaim_pending": False,
+            "reclaim_token": hashlib.sha256(
+                json.dumps(
+                    reclaim_identity, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+        self._save(paths, state)
+
+    def _clear_capacity_failure(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], *, role: str
+    ) -> None:
+        previous = state.get("model_capacity")
+        if previous is None:
+            return
+        self._capacity_state(state)
+        if previous.get("role") != role:
+            raise DeliveryError("model-capacity checkpoint belongs to another role")
+        state.pop("model_capacity")
+        self._save(paths, state)
+
+    def _capacity_failure_is_retryable(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        result: subprocess.CompletedProcess[str],
+        events: pathlib.Path,
+        checkpoint: tuple[str, str],
+    ) -> dict[str, Any]:
+        failure = flow_contract.parse_codex_failure(events, result.stderr)
+        expected_head = (
+            state.get("candidate_sha") if role == "reviewer"
+            else state.get("candidate_sha") or state.get("base_sha")
+        )
+        checkout = paths["review"] if role == "reviewer" else paths["author"]
+        observed_status = self._git(
+            checkout, "status", "--porcelain=v1", "--untracked-files=all", "--ignored",
+        )
+        observed_head = self._git(checkout, "rev-parse", "HEAD")
+        unchanged = (
+            isinstance(expected_head, str)
+            and expected_head
+            and checkpoint[0] == expected_head
+            and observed_head == checkpoint[0]
+            and observed_status == checkpoint[1]
+        )
+        if (
+            failure["error_class"] != "transient_capacity"
+            or not failure["safe_before_side_effects"]
+            or not unchanged
+        ):
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role=role,
+                last_error_sha256=failure["message_sha256"],
+            )
+            raise DeliveryError(
+                "ambiguous Codex failure requires reconciliation before retry"
+            )
+        return failure
+
+    def _mark_model_ambiguous(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        last_error_sha256: str,
+    ) -> None:
+        if role not in {"author", "reviewer"} or len(last_error_sha256) != 64:
+            raise DeliveryError("invalid ambiguous-model checkpoint")
+        state.pop("model_capacity", None)
+        state.pop("model_invocation", None)
+        state["model_ambiguous"] = {
+            "schema_version": 1,
+            "role": role,
+            "quality_epoch": self._quality_failures(state),
+            "route_decision_id": self._current_route(state)["decision_id"],
+            "candidate_sha": state.get("candidate_sha") if role == "reviewer" else None,
+            "status": "reconciling",
+            "error_class": "ambiguous_result",
+            "last_error_sha256": last_error_sha256,
+        }
+        self._save(paths, state)
+
+    def _mark_model_timeout(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        role: str,
+        error: subprocess.TimeoutExpired,
+        events: pathlib.Path,
+    ) -> None:
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        _private_codex_events(events, output)
+        diagnostic = _bounded_diagnostic(
+            error.stderr.decode("utf-8", errors="replace")
+            if isinstance(error.stderr, bytes)
+            else error.stderr or str(error),
+            "Codex execution timed out",
+        )
+        self._mark_model_ambiguous(
+            state,
+            paths,
+            role=role,
+            last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+        )
 
     def _actor(self, state: dict[str, Any], component: str) -> dict[str, str]:
         actor = self._current_route(state).get(component)
@@ -792,6 +1325,7 @@ class DeliveryCoordinator:
             if self.profile["schema_version"] == 4:
                 state.setdefault("author_commit_count", 0)
             state.setdefault("route_decisions", {})
+            state.setdefault("effective_route_decisions", {})
             state.setdefault("owner_answers", [])
             self._owner_answers(state)
             migrated = False
@@ -869,6 +1403,7 @@ class DeliveryCoordinator:
             "discarded_author_attempts": 0,
             "author_commit_count": 0,
             "route_decisions": {},
+            "effective_route_decisions": {},
             "owner_answers": [],
             "crash_injected": False,
         }
@@ -1088,33 +1623,69 @@ class DeliveryCoordinator:
         snapshot = self.backend.show(state["root_task_id"])
         task = snapshot.get("task", {})
         runs = snapshot.get("runs")
-        if task.get("assignee") != self.profile["assignee"] or not isinstance(runs, list):
+        if (
+            task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
             raise DeliveryError("Kanban task is outside the approved assignee/run contract")
-        if task.get("status") == "ready" and not runs:
+        active = [
+            run for run in runs or []
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        durable_run_id = state.get("run_id")
+        claimed_here = False
+        if task.get("status") == "ready" and not active:
             snapshot = self.backend.claim(
                 state["root_task_id"], ttl_seconds=self.profile["claim_ttl_seconds"]
             )
+            claimed_here = True
             task = snapshot.get("task", {})
             runs = snapshot["runs"]
+            if (
+                task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+            ):
+                raise DeliveryError("Kanban claim changed the approved task owner")
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
         if (
             task.get("status") != "running"
-            or len(runs) != 1
-            or runs[0].get("status") != "running"
+            or len(active) != 1
         ):
             raise DeliveryError("Kanban task did not converge to one claimed run")
-        state["run_id"] = str(runs[0]["id"])
+        observed_run_id = str(active[0]["id"])
+        if not claimed_here and str(durable_run_id) != observed_run_id:
+            raise DeliveryError("refusing to adopt an undurable active Kanban run")
+        state["run_id"] = observed_run_id
         self._assert_claim(state)
 
-    def _assert_claim(self, state: dict[str, Any], *, min_remaining_seconds: int = 60) -> None:
+    def _assert_claim(
+        self,
+        state: dict[str, Any],
+        *,
+        min_remaining_seconds: int = 60,
+        provenance: str | None = None,
+    ) -> None:
         task_id = state.get("root_task_id")
         run_id = state.get("run_id")
         if not isinstance(task_id, str) or not task_id or run_id is None:
             raise DeliveryError("delivery has no durable Kanban task/run identity")
-        self.backend.verify_claim(
+        snapshot = self.backend.verify_claim(
             task_id,
             str(run_id),
             min_remaining_seconds=min_remaining_seconds,
+            provenance=provenance,
         )
+        task = snapshot.get("task") if isinstance(snapshot, dict) else None
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("assignee") != self.profile["assignee"]
+        ):
+            raise DeliveryError("Kanban claim no longer belongs to the approved task owner")
 
     def _assert_nonroutable_assignee(self) -> None:
         hermes_home = pathlib.Path(
@@ -1463,17 +2034,29 @@ class DeliveryCoordinator:
         )
         if self.profile["schema_version"] == 4:
             state["candidate_files"] = candidate_files
-        rollout = self._rollout(events)
-        telemetry = flow_contract.summarize_codex_events(
-            events,
-            component="author",
-            model=actor["model"],
-            reasoning_effort=actor["reasoning_effort"],
-            rollout=rollout,
-            sandbox="workspace-write",
-            worktree=paths["author"],
-            head=candidate,
-        )
+        try:
+            rollout = self._rollout(events)
+            telemetry = flow_contract.summarize_codex_events(
+                events,
+                component="author",
+                model=actor["model"],
+                reasoning_effort=actor["reasoning_effort"],
+                rollout=rollout,
+                sandbox="workspace-write",
+                worktree=paths["author"],
+                head=candidate,
+            )
+        except (DeliveryError, flow_contract.ContractError, OSError, ValueError) as error:
+            diagnostic = _bounded_diagnostic(str(error), "invalid Codex completion telemetry")
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role="author",
+                last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+            )
+            raise DeliveryError(
+                "invalid Codex completion requires reconciliation before retry"
+            ) from error
         summary = {
             "schema_version": 1,
             "repo": self.profile["repo"],
@@ -1511,6 +2094,7 @@ class DeliveryCoordinator:
         state.pop("pre_review_gate_version", None)
         state.pop("pre_review_ci_checks", None)
         state.pop("review_findings", None)
+        state.pop("model_invocation", None)
         self._save(paths, state)
 
     def _recover_author_commit(
@@ -1602,6 +2186,7 @@ class DeliveryCoordinator:
                 failure_kind="author_checks",
                 failure_error=failure,
             )
+        state.pop("model_invocation", None)
         self._save(paths, state)
 
     def _reject_invalid_candidate(
@@ -1617,6 +2202,7 @@ class DeliveryCoordinator:
         pending = state.get("invalid_candidate_cleanup")
         marker = {"review_cycle": state["review_cycle"], "error": failure}
         if pending is None:
+            state.pop("model_invocation", None)
             state["invalid_candidate_cleanup"] = marker
             self._save(paths, state)
         elif pending != marker:
@@ -1676,7 +2262,7 @@ class DeliveryCoordinator:
             state, paths, error,
         )
 
-    def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+    def _author(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool:
         cycle = state["review_cycle"]
         actor = self._actor(state, "author")
         events = paths["directory"] / f"author-{cycle}.jsonl"
@@ -1707,18 +2293,46 @@ class DeliveryCoordinator:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
+        checkpoint = (
+            self._git(paths["author"], "rev-parse", "HEAD"),
+            self._git(
+                paths["author"], "status", "--porcelain=v1",
+                "--untracked-files=all", "--ignored",
+            ),
+        )
+        self._prepare_model_invocation(state, paths, role="author")
         with _temporary_private_output() as raw_last:
-            result = self._run(
-                [
-                    self.profile["codex_bin"], "exec", "--ignore-user-config",
-                    *self._reasoning_args(state, "author"),
-                    "--model", actor["model"], "--sandbox", "workspace-write",
-                    "--cd", str(paths["author"]), "--json", "--output-last-message", str(raw_last), "-",
-                ],
-                cwd=paths["author"], input_text=prompt,
-                environment=self._model_env(paths),
-            )
+            try:
+                result = self._run(
+                    [
+                        self.profile["codex_bin"], "exec", "--ignore-user-config",
+                        *self._reasoning_args(state, "author"),
+                        "--model", actor["model"], "--sandbox", "workspace-write",
+                        "--cd", str(paths["author"]), "--json", "--output-last-message", str(raw_last), "-",
+                    ],
+                    cwd=paths["author"], input_text=prompt,
+                    environment=self._model_env(paths),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                self._mark_model_timeout(
+                    state, paths, role="author", error=error, events=events
+                )
+                raise DeliveryError(
+                    "ambiguous Codex timeout requires reconciliation before retry"
+                ) from error
             _private_codex_events(events, result.stdout)
+            if result.returncode:
+                failure = self._capacity_failure_is_retryable(
+                    state, paths, role="author", result=result, events=events,
+                    checkpoint=checkpoint,
+                )
+                self._record_capacity_failure(
+                    state, paths, role="author", failure=failure
+                )
+                self._park_capacity_claim(state, paths)
+                return False
+            self._clear_capacity_failure(state, paths, role="author")
             if raw_last.is_file():
                 _private_text(last, _bounded_diagnostic(raw_last.read_text(encoding="utf-8")))
         changed = self._changed_files(paths["author"])
@@ -1732,7 +2346,7 @@ class DeliveryCoordinator:
             if self.profile["schema_version"] == 3:
                 raise
             self._reject_invalid_candidate(state, paths, error)
-            return
+            return True
         fingerprint = self._candidate_fingerprint(paths["author"])
         try:
             checks = self._checks("author_checks", paths["author"], state, paths)
@@ -1741,13 +2355,14 @@ class DeliveryCoordinator:
             if not preserved:
                 error = DeliveryError("author checks mutated the exact candidate")
             self._record_author_check_failure(state, paths, error, retryable=preserved)
-            return
+            return True
         if self._candidate_fingerprint(paths["author"]) != fingerprint:
             raise DeliveryError("author checks changed the exact candidate")
         self._git(paths["author"], "add", "-A", "--")
         self._assert_claim(state)
         self._git(paths["author"], "commit", "-m", self.profile["commit_message"])
         self._record_author(state, paths, checks)
+        return True
 
     def _remove_worktree(self, path: pathlib.Path) -> None:
         if path.exists():
@@ -1994,7 +2609,7 @@ class DeliveryCoordinator:
         if state["phase"] != "pre_review_ci_green":
             raise DeliveryError("pre-review platform gate did not reach green")
 
-    def _review(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool:
+    def _review(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> bool | None:
         route = self._current_route(state)
         actor = route["reviewer"]
         self._assert_claim(
@@ -2037,19 +2652,47 @@ class DeliveryCoordinator:
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
         )
         self._require_draft_pr(state)
+        checkpoint = (
+            self._git(paths["review"], "rev-parse", "HEAD"),
+            self._git(
+                paths["review"], "status", "--porcelain=v1",
+                "--untracked-files=all", "--ignored",
+            ),
+        )
+        self._prepare_model_invocation(state, paths, role="reviewer")
         with _temporary_private_output() as raw_last:
-            result = self._run(
-                [
-                    self.profile["codex_bin"], "exec", "--ignore-user-config",
-                    *self._reasoning_args(state, "reviewer"),
-                    "--model", actor["model"], "--sandbox", "read-only",
-                    "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
-                    "--output-last-message", str(raw_last), "-",
-                ],
-                cwd=paths["review"], input_text=prompt,
-                environment=self._model_env(paths),
-            )
+            try:
+                result = self._run(
+                    [
+                        self.profile["codex_bin"], "exec", "--ignore-user-config",
+                        *self._reasoning_args(state, "reviewer"),
+                        "--model", actor["model"], "--sandbox", "read-only",
+                        "--cd", str(paths["review"]), "--json", "--output-schema", str(schema_path),
+                        "--output-last-message", str(raw_last), "-",
+                    ],
+                    cwd=paths["review"], input_text=prompt,
+                    environment=self._model_env(paths),
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as error:
+                self._mark_model_timeout(
+                    state, paths, role="reviewer", error=error, events=events
+                )
+                raise DeliveryError(
+                    "ambiguous Codex timeout requires reconciliation before retry"
+                ) from error
             _private_codex_events(events, result.stdout)
+            if result.returncode:
+                failure = self._capacity_failure_is_retryable(
+                    state, paths, role="reviewer", result=result, events=events,
+                    checkpoint=checkpoint,
+                )
+                self._record_capacity_failure(
+                    state, paths, role="reviewer", failure=failure
+                )
+                self._park_capacity_claim(state, paths)
+                return None
+            self._clear_capacity_failure(state, paths, role="reviewer")
             response = mission_adapter._read_json(raw_last)
         if (
             not isinstance(response, dict)
@@ -2065,17 +2708,29 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("reviewer verdict contradicts its actionable findings")
         checks = self._checks("review_checks", paths["review"], state, paths)
-        telemetry = flow_contract.summarize_codex_events(
-            events,
-            component="reviewer",
-            model=actor["model"],
-            reasoning_effort=actor["reasoning_effort"],
-            rollout=self._rollout(events),
-            sandbox="read-only",
-            worktree=paths["review"],
-            head=state["candidate_sha"],
-            source_attestation_path=attestation_path,
-        )
+        try:
+            telemetry = flow_contract.summarize_codex_events(
+                events,
+                component="reviewer",
+                model=actor["model"],
+                reasoning_effort=actor["reasoning_effort"],
+                rollout=self._rollout(events),
+                sandbox="read-only",
+                worktree=paths["review"],
+                head=state["candidate_sha"],
+                source_attestation_path=attestation_path,
+            )
+        except (DeliveryError, flow_contract.ContractError, OSError, ValueError) as error:
+            diagnostic = _bounded_diagnostic(str(error), "invalid Codex completion telemetry")
+            self._mark_model_ambiguous(
+                state,
+                paths,
+                role="reviewer",
+                last_error_sha256=hashlib.sha256(diagnostic.encode("utf-8")).hexdigest(),
+            )
+            raise DeliveryError(
+                "invalid Codex completion requires reconciliation before retry"
+            ) from error
         response = {"verdict": response["verdict"], "findings": findings}
         mission_adapter._write_json(last, response, private_parent=True)
         verification = {
@@ -2095,6 +2750,7 @@ class DeliveryCoordinator:
         mission_adapter._write_json(paths["directory"] / "review-verification.json", verification, private_parent=True)
         mission_adapter._write_json(paths["directory"] / "review-telemetry.json", telemetry, private_parent=True)
         state.update(review_verification=verification, reviewer_telemetry=telemetry)
+        state.pop("model_invocation", None)
         if verification["verdict"] == "accept":
             state["phase"] = "reviewed"
             self._save(paths, state)
@@ -3023,6 +3679,24 @@ class DeliveryCoordinator:
                 elif not consumed:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
+            if self._ambiguous_state(state) is not None:
+                return {
+                    "action": "reconciling", "mission_id": mission_id, "state": state,
+                }
+            invocation = self._model_invocation_state(state)
+            if invocation is not None:
+                self._mark_model_ambiguous(
+                    state,
+                    paths,
+                    role=invocation["role"],
+                    last_error_sha256=invocation["attempt_id"],
+                )
+                return {
+                    "action": "reconciling", "mission_id": mission_id, "state": state,
+                }
+            capacity_wait = self._capacity_wait_result(state, mission_id, paths)
+            if capacity_wait is not None:
+                return capacity_wait
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)
             if state["phase"] not in {
@@ -3080,7 +3754,12 @@ class DeliveryCoordinator:
             if state["phase"] in {"claimed", "needs_fix"}:
                 self._assert_claim(state)
                 if not self._recover_author_commit(state, paths):
-                    self._author(state, paths)
+                    author = self._author(state, paths)
+                    if author is False:
+                        return {
+                            "action": "capacity_wait", "mission_id": mission_id,
+                            "state": state,
+                        }
 
             if (
                 state["phase"] == "author_committed"
@@ -3113,7 +3792,13 @@ class DeliveryCoordinator:
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
                 self._require_draft_pr(state)
-                if not self._review(state, paths):
+                review = self._review(state, paths)
+                if review is None:
+                    return {
+                        "action": "capacity_wait", "mission_id": mission_id,
+                        "state": state,
+                    }
+                if not review:
                     if state["phase"] == "review_rejected":
                         return self._finish_rejection(state, paths)
                     return {"action": state["phase"], "mission_id": mission_id, "state": state}

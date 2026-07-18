@@ -127,6 +127,90 @@ def validate_review_with_telemetry(summary, verification, author, reviewer, **kw
 
 
 class FlowContractTests(unittest.TestCase):
+    def test_safe_error_redacts_cookie_header_forms(self):
+        secret = "standalone-cookie-secret"
+        for diagnostic in (
+            f"Cookie: {secret}",
+            f"Cookie={secret}",
+            f"Set-Cookie: session={secret}",
+            f"set-cookie=session={secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                redacted = flow._safe_error(diagnostic)
+                self.assertIn("[REDACTED]", redacted)
+                self.assertNotIn(secret, redacted)
+
+    def test_safe_error_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        for diagnostic in (
+            f"Authorization={secret}",
+            f"Proxy-Authorization={secret}",
+            f"token={secret}",
+            f"Bearer {secret}",
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "Proxy-Authorization": f"Basic {secret}",
+                "token": secret,
+            }),
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "Proxy-Authorization": f"Basic {secret}",
+                "token": secret,
+                "Cookie": f"session={secret}",
+                "response_set_cookie_value": f"session={secret}",
+            }).replace('"', r'\"'),
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "response_set_cookie_value": f"session={secret}",
+            }).replace('"', r'\u005cu0022'),
+            rf"Authorization\uD800: {secret}",
+            rf"Authorization\u00e9: {secret}",
+            rf"Authorization\u00G0: {secret}",
+            rf"\uD800Authorization: {secret}",
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
+            rf"Author\u@@ization: {secret}",
+            rf"Author\U0069zation: {secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                self.assertNotIn(secret, flow._safe_error(diagnostic))
+
+    def test_safe_error_bounds_nested_escape_work(self):
+        diagnostic = r"\u005c" + ("u005c" * 50_000) + "u0022"
+
+        self.assertEqual(
+            "[REDACTED: oversized diagnostic]", flow._safe_error(diagnostic)
+        )
+
+    def test_main_redacts_assignment_credentials(self):
+        secret = "short-secret"
+        for diagnostic in (
+            json.dumps({
+                "Authorization": f"Basic {secret}", "token": secret,
+            }).replace('"', r'\"'),
+            rf"Authorization\u@@@@: {secret}",
+            rf"Authorization\u{{D800}}: {secret}",
+            rf"Authorization\u: {secret}",
+            rf"Author\U0069zation: {secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        flow, "load_json", side_effect=flow.ContractError(diagnostic)
+                    ),
+                    mock.patch("sys.stderr", stderr),
+                ):
+                    status = flow.main([
+                        "delivery-route", "--policy", "policy.json",
+                        "--signals", "signals.json",
+                    ])
+
+                self.assertEqual(2, status)
+                self.assertIn("[REDACTED", stderr.getvalue())
+                self.assertNotIn(secret, stderr.getvalue())
+
     @classmethod
     def setUpClass(cls):
         cls.policy = POLICY
@@ -260,6 +344,166 @@ class FlowContractTests(unittest.TestCase):
         self.assertEqual("gpt-5.6-terra", first["author"]["model"])
         self.assertEqual("gpt-5.6-sol", first["reviewer"]["model"])
         self.assertEqual(64, len(first["decision_id"]))
+
+    def test_capacity_fallback_uses_only_monotonic_complete_approved_routes(self):
+        standard = flow.choose_delivery_route(self.policy, {
+            "schema_version": 1,
+            "changed_files": 1,
+            "prior_quality_failures": 0,
+            "flags": [],
+        })
+        complex_route = flow.resolve_capacity_route(self.policy, standard, 1)
+        escalated = flow.resolve_capacity_route(self.policy, standard, 2)
+        self.assertEqual("openai-autonomy-capacity-v1", complex_route["policy_id"])
+        self.assertEqual("complex", complex_route["route"])
+        self.assertEqual("gpt-5.6-sol", complex_route["author"]["model"])
+        self.assertEqual("gpt-5.6-terra", complex_route["reviewer"]["model"])
+        self.assertEqual("escalated", escalated["route"])
+        self.assertEqual(complex_route, flow.resolve_capacity_route(self.policy, standard, 1))
+        self.assertEqual(
+            complex_route,
+            flow.validate_stored_delivery_route(self.policy, complex_route),
+        )
+        summary = artifact("openai", "gpt-5.6-sol", "aaa")
+        summary["task_class"] = "complex_code"
+        summary["route_decision_id"] = complex_route["decision_id"]
+        verification = artifact("openai", "gpt-5.6-terra", "aaa", reviewer=True)
+        verification["route_decision_id"] = complex_route["decision_id"]
+        flow.validate_review(
+            summary,
+            verification,
+            telemetry(summary, "author", "workspace-write"),
+            telemetry(verification, "reviewer", "read-only"),
+            complex_route,
+            self.policy,
+            expected_repo=summary["repo"],
+            current_head="aaa",
+            ci_green=True,
+        )
+        with self.assertRaisesRegex(flow.ContractError, "exhausted"):
+            flow.resolve_capacity_route(self.policy, standard, 3)
+        with self.assertRaisesRegex(flow.ContractError, "positive integer"):
+            flow.resolve_capacity_route(self.policy, standard, 0)
+        with self.assertRaisesRegex(flow.ContractError, "base quality route"):
+            flow.resolve_capacity_route(self.policy, complex_route, 1)
+
+    def test_capacity_fallback_rejects_tampered_actor_tuple(self):
+        standard = flow.choose_delivery_route(self.policy, {
+            "schema_version": 1,
+            "changed_files": 1,
+            "prior_quality_failures": 0,
+            "flags": [],
+        })
+        decision = flow.resolve_capacity_route(self.policy, standard, 1)
+        decision["reviewer"]["model"] = "gpt-5.6-sol"
+        with self.assertRaisesRegex(flow.ContractError, "does not match"):
+            flow.validate_stored_delivery_route(self.policy, decision)
+
+    def test_capacity_classifier_trusts_only_exact_terminal_failures(self):
+        message = "Selected model is at capacity. Please try a different model."
+        cases = (
+            ([{"type": "error", "message": message}], "", "transient_capacity"),
+            ([{"type": "turn.failed", "error": {"message": message}}], "", "transient_capacity"),
+            ([], f"ERROR: {message}\n", "transient_capacity"),
+            ([{"type": "item.completed", "item": {"type": "agent_message", "text": message}}], "", "unknown"),
+            ([{"type": "item.completed", "item": {"type": "command_execution", "aggregated_output": message}}], "", "unknown"),
+            ([{"type": "error", "message": message + " later"}], "", "unknown"),
+            ([{"type": "error", "message": message, "error": {
+                "message": "conflicting nested failure",
+            }}], "", "unknown"),
+            ([{"type": "error", "message": message}], "conflicting stderr\n", "unknown"),
+            ([{"type": "error", "message": message, "error": {
+                "message": message,
+            }}], f"ERROR: {message}\n", "transient_capacity"),
+            ([{"type": "error", "error": {
+                "message": message, "codexErrorInfo": "BadRequest", "httpStatusCode": 400,
+            }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "codexErrorInfo": {"type": "usageLimitExceeded"},
+            }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "codexErrorInfo": {"type": "contextWindowExceeded"},
+            }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "codexErrorInfo": {
+                    "type": "httpConnectionFailed", "httpStatusCode": 400,
+                },
+            }}], "", "unknown"),
+            ([{"type": "turn.failed", "error": {
+                "message": message,
+                "httpStatusCode": None,
+                "codexErrorInfo": {
+                    "type": "httpConnectionFailed", "httpStatusCode": 400,
+                },
+            }}], "", "unknown"),
+            ([
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"message": "unknown failure"}},
+            ], "", "unknown"),
+            ([
+                {"type": "error", "message": message},
+                {"type": "turn.failed", "error": {"code": "unknown"}},
+            ], "", "unknown"),
+            ([{"type": "turn.failed", "error": {"code": "unknown"}}],
+             f"ERROR: {message}\n", "unknown"),
+            ([], f"warning\nERROR: {message}\n", "unknown"),
+        )
+        for events, stderr, expected in cases:
+            with self.subTest(events=events, stderr=stderr), tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", delete=False
+            ) as handle:
+                for event in events:
+                    handle.write(json.dumps(event) + "\n")
+                path = pathlib.Path(handle.name)
+            try:
+                result = flow.parse_codex_failure(path, stderr)
+                self.assertEqual(expected, result["error_class"])
+                if events == [{"type": "turn.failed", "error": {"message": message}}]:
+                    self.assertFalse(result["safe_before_side_effects"])
+            finally:
+                path.unlink()
+
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", delete=False
+        ) as handle:
+            handle.write("not-json\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path, f"ERROR: {message}\n")
+            self.assertEqual("unknown", result["error_class"])
+        finally:
+            path.unlink()
+
+    def test_capacity_after_turn_start_is_ambiguous_not_safe_retry(self):
+        message = "Selected model is at capacity. Please try a different model."
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            handle.write(json.dumps({"type": "thread.started", "thread_id": "t-1"}) + "\n")
+            handle.write(json.dumps({"type": "turn.started"}) + "\n")
+            handle.write(json.dumps({"type": "turn.failed", "message": message}) + "\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path)
+        finally:
+            path.unlink()
+        self.assertEqual("transient_capacity", result["error_class"])
+        self.assertFalse(result["safe_before_side_effects"])
+        self.assertTrue(result["thread_started"])
+        self.assertTrue(result["turn_started"])
+
+    def test_completed_turn_blocks_stderr_capacity_retry(self):
+        message = "Selected model is at capacity. Please try a different model."
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            handle.write(json.dumps({"type": "turn.completed"}) + "\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path, f"ERROR: {message}\n")
+        finally:
+            path.unlink()
+        self.assertEqual("unknown", result["error_class"])
+        self.assertFalse(result["safe_before_side_effects"])
 
     def test_delivery_policy_identity_is_semantic_and_binds_the_exact_policy(self):
         signals = {
