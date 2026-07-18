@@ -25,6 +25,12 @@ FILES = {
     ),
     "flow-policy.json": pathlib.Path("swarm-bin/flow-policy.json"),
     "hermes-flow-v2/SKILL.md": pathlib.Path(".hermes/skills/hermes-flow-v2/SKILL.md"),
+    "profiles/delivery-flow-pilot-registered-v4.json": pathlib.Path(
+        ".config/uap/delivery-flow-pilot-registered-v4.json"
+    ),
+}
+_PRIVATE_TARGETS = {
+    pathlib.Path(".config/uap/delivery-flow-pilot-registered-v4.json"),
 }
 _LEGACY_MODEL_FIELDS = {
     "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",
@@ -66,6 +72,9 @@ def install(
         dst = home / relative_target
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
+        if os.name != "nt" and relative_target in _PRIVATE_TARGETS:
+            dst.parent.chmod(0o700)
+            dst.chmod(0o600)
     for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
         (home / FILES[executable]).chmod(0o755)
 
@@ -78,6 +87,11 @@ def check(
         dst = home / relative_target
         if not dst.is_file() or dst.read_bytes() != src.read_bytes():
             raise SystemExit(f"flow-v2-install-error: stale or missing {dst}")
+        if os.name != "nt" and relative_target in _PRIVATE_TARGETS:
+            if dst.parent.stat().st_mode & 0o777 != 0o700:
+                raise SystemExit(f"flow-v2-install-error: insecure profile directory {dst.parent}")
+            if dst.stat().st_mode & 0o777 != 0o600:
+                raise SystemExit(f"flow-v2-install-error: insecure profile mode {dst}")
     if os.name != "nt":
         for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
             if not (home / FILES[executable]).stat().st_mode & 0o111:

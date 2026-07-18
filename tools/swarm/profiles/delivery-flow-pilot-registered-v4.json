@@ -1,0 +1,79 @@
+{
+  "allowed_path_prefixes": [
+    "Cargo.lock",
+    "Cargo.toml",
+    "counter.py",
+    "src",
+    "test_counter.py",
+    "tests"
+  ],
+  "assignee": "coordinator-codex-auto-a7",
+  "author_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets",
+      "--locked"
+    ],
+    [
+      "/usr/bin/python3",
+      "-m",
+      "unittest",
+      "-v"
+    ]
+  ],
+  "branch_prefix": "codex/registered-flow-pilot",
+  "ci_timeout_seconds": 3600,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered owner mission",
+  "default_branch": "main",
+  "dispatch_profile": "build1-flow-pilot-registered-v4",
+  "max_changed_files": 12,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets",
+      "--locked"
+    ],
+    [
+      "/usr/bin/python3",
+      "-m",
+      "unittest",
+      "-v"
+    ]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered owner mission",
+  "remote": "https://github.com/PavelLizunov/hermes-flow-v2-pilot.git",
+  "repo": "PavelLizunov/hermes-flow-v2-pilot",
+  "required_ci_checks": [
+    "test-linux",
+    "test-windows",
+    "test-macos",
+    "test-python"
+  ],
+  "review_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets",
+      "--locked"
+    ],
+    [
+      "/usr/bin/python3",
+      "-m",
+      "unittest",
+      "-v"
+    ]
+  ],
+  "route_flags": [
+    "durable_state",
+    "multi_platform"
+  ],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/hermes-flow-v2-pilot",
+  "worktree_root": "/home/uap/worktrees/flow-pilot-registered-v4"
+}
