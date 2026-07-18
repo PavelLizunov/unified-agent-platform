@@ -176,9 +176,10 @@ service:
   service, not the coordinator environment; the build-1 producer bearer/key pair cannot forge an owner answer;
 - the central mission SQLite file and build-1 adapter JSON are owner-only (`0600`); adapter-created mission state
   directories are `0700` on POSIX;
-- only the automatic delivery contract may publish `completed`: at least one Telegram subscription must be bound,
-  every bound Telegram cursor must checkpoint the prospective terminal projection, and then Central commits the same
-  terminal sequence; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
+- only the automatic delivery contract may publish `completed`: Central atomically commits the terminal event as soon
+  as the delivery gates pass, independently of Workspace or Telegram availability; notification cursors then deliver
+  that already-committed event at least once, and the existing persistent exact-profile poll drains one pending
+  terminal notification on later ticks; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
   forwarded client headers are ignored, and terminal retries with the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open

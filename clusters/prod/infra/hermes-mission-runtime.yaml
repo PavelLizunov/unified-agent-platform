@@ -34,7 +34,7 @@ data:
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-        "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "224d31e132a2a11b619be8b6a3c49e34d34399147bc1e92d96a535bec36b3bb6",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -620,6 +620,15 @@ data:
                 reconcile = request.query.get("reconcile", "0")
                 if reconcile not in {"0", "1"}:
                     raise MissionError("invalid reconcile selector")
+                notification = store.pending_terminal_notification(
+                    request.query.get("dispatch_profile")
+                )
+                if notification is not None:
+                    await self._notify_mission(store, notification)
+                    if store.completion_notification(notification["mission_id"]) is None:
+                        store.restore_parent_after_terminal_notification(
+                            notification["mission_id"]
+                        )
                 missions = (
                     store.dispatch_candidates(
                         request.query.get("dispatch_profile"),
@@ -723,18 +732,17 @@ data:
                 )
                 store = self._missions()
                 event, created = store.append_producer(mission_id, body)
-                if created:
-                    await self._notify_mission(store, event)
                 completed = store.complete_if_ready(mission_id)
-                if completed is None:
-                    notification = store.completion_notification(mission_id)
-                    if notification is not None:
-                        await self._notify_mission(store, notification, defer=False)
-                        completed = store.complete_if_ready(mission_id)
-                        if completed is None:
-                            raise RuntimeError("mission completion checkpoint did not converge")
-                if completed is not None and completed[1]:
-                    await self._notify_mission(store, completed[0])
+                if completed is None and created:
+                    await self._notify_mission(store, event)
+                terminal = completed[0] if completed is not None else store.completion_notification(mission_id)
+                if terminal is not None:
+                    await self._notify_mission(store, terminal)
+                if (
+                    store.projection(mission_id)["status"] in {"completed", "failed", "cancelled"}
+                    and store.completion_notification(mission_id) is None
+                ):
+                    store.restore_parent_after_terminal_notification(mission_id)
                 return web.json_response({
                     "created": created,
                     "event": event,
@@ -1257,13 +1265,10 @@ data:
         return "\n".join(lines)
 
 
-    def completion_ready(
-        view: dict[str, Any], *, telegram_terminal_ready: bool = False
-    ) -> bool:
+    def completion_ready(view: dict[str, Any]) -> bool:
         """Apply the narrow A7.3 one-task delivery completion policy."""
         if (
-            not telegram_terminal_ready
-            or view.get("status") != "active"
+            view.get("status") != "active"
             or view.get("question") is not None
         ):
             return False
@@ -1887,7 +1892,7 @@ data:
             return self._append(mission_id, _producer_submission(mission_id, submission))
 
         def completion_notification(self, mission_id: str) -> dict[str, Any] | None:
-            """Build the terminal Telegram projection without committing terminal state."""
+            """Return the committed terminal event while a Telegram cursor is behind."""
             mission_id = _require_id(mission_id, "mission_id")
             with self._db() as connection:
                 rows = connection.execute(
@@ -1898,34 +1903,54 @@ data:
                 if not previous:
                     raise MissionError("mission not found")
                 telegram = connection.execute(
-                    """SELECT 1 FROM mission_subscriptions
-                       WHERE mission_id = ? AND platform = 'telegram' LIMIT 1""",
+                    """SELECT last_notified_sequence FROM mission_subscriptions
+                       WHERE mission_id = ? AND platform = 'telegram'""",
                     (mission_id,),
-                ).fetchone()
-            view = project(previous)
-            if not telegram:
+                ).fetchall()
+            terminal = previous[-1]
+            if (
+                terminal["type"] not in TERMINAL_TYPES
+                or not telegram
+                or all(
+                    row["last_notified_sequence"] >= terminal["sequence"]
+                    for row in telegram
+                )
+            ):
                 return None
-            if completion_ready(view, telegram_terminal_ready=True):
-                event_type = "mission.completed"
-                producer_event_id = "central:auto-complete:v1"
-                payload = {"result": "Delivery completed, merged, and verified"}
-            elif rejection := _rejection_terminal(view):
-                event_type = "mission.failed"
-                producer_event_id, payload = rejection
-            else:
-                return None
-            sequence = len(previous) + 1
-            return {
-                "schema_version": SCHEMA_VERSION,
-                "mission_id": mission_id,
-                "sequence": sequence,
-                "event_id": f"{mission_id}:{sequence}",
-                "occurred_at": _utc_now(),
-                "type": event_type,
-                "source": "central-hermes",
-                "correlation": {"producer_event_id": producer_event_id},
-                "payload": payload,
-            }
+            return terminal
+
+        def pending_terminal_notification(
+            self, dispatch_profile: str | None = None
+        ) -> dict[str, Any] | None:
+            """Return one committed terminal event for the existing profile poll to drain."""
+            if dispatch_profile is not None:
+                dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
+            with self._db() as connection:
+                terminal_rows = connection.execute(
+                    """SELECT * FROM mission_events
+                       WHERE type IN ('mission.completed', 'mission.failed', 'mission.cancelled')
+                       ORDER BY rowid"""
+                ).fetchall()
+                for row in terminal_rows:
+                    terminal = self._row(row)
+                    accepted = connection.execute(
+                        """SELECT payload_json FROM mission_events
+                           WHERE mission_id = ? AND sequence = 1""",
+                        (terminal["mission_id"],),
+                    ).fetchone()
+                    if accepted is None:
+                        continue
+                    profile = json.loads(accepted["payload_json"]).get("dispatch_profile")
+                    if dispatch_profile is not None and profile != dispatch_profile:
+                        continue
+                    if connection.execute(
+                        """SELECT 1 FROM mission_subscriptions
+                           WHERE mission_id = ? AND platform = 'telegram'
+                             AND last_notified_sequence < ? LIMIT 1""",
+                        (terminal["mission_id"], terminal["sequence"]),
+                    ).fetchone():
+                        return terminal
+            return None
 
         def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
             """Let Central, never the producer, append the terminal delivery event."""
@@ -1941,20 +1966,12 @@ data:
                     raise MissionError("mission not found")
                 view = project(previous)
                 sequence = len(previous) + 1
-                telegram = connection.execute(
-                    """SELECT last_notified_sequence FROM mission_subscriptions
-                       WHERE mission_id = ? AND platform = 'telegram'""",
-                    (mission_id,),
-                ).fetchall()
-                telegram_terminal_ready = bool(telegram) and all(
-                    row["last_notified_sequence"] >= sequence for row in telegram
-                )
                 rejection = _rejection_terminal(view)
-                if completion_ready(view, telegram_terminal_ready=telegram_terminal_ready):
+                if completion_ready(view):
                     event_type = "mission.completed"
                     producer_event_id = "central:auto-complete:v1"
                     payload = {"result": "Delivery completed, merged, and verified"}
-                elif rejection is not None and (not telegram or telegram_terminal_ready):
+                elif rejection is not None:
                     event_type = "mission.failed"
                     producer_event_id, payload = rejection
                 else:
@@ -1992,11 +2009,6 @@ data:
                         event["correlation"]["producer_event_id"],
                     ),
                 )
-                parent_mission_id = view.get("parent_mission_id")
-                if isinstance(parent_mission_id, str):
-                    self._restore_parent_subscriptions(
-                        connection, mission_id, parent_mission_id
-                    )
                 self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
             return event, True
 
@@ -2085,13 +2097,33 @@ data:
                     raise MissionError("mission not found")
                 project([self._row(row) for row in rows])
                 current = connection.execute(
-                    """SELECT mission_id, notification_lease_until
+                    """SELECT mission_id, last_notified_sequence, notification_lease_until
                        FROM mission_subscriptions
                        WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
                     (platform, chat_id, thread_id),
                 ).fetchone()
                 if current and current["mission_id"] == mission_id:
                     return
+                if current:
+                    current_events = [
+                        self._row(row)
+                        for row in connection.execute(
+                            """SELECT * FROM mission_events
+                               WHERE mission_id = ? ORDER BY sequence""",
+                            (current["mission_id"],),
+                        ).fetchall()
+                    ]
+                    current_view = project(current_events)
+                    if (
+                        isinstance(current_view.get("parent_mission_id"), str)
+                        and (
+                            current_view["status"] not in {"completed", "failed", "cancelled"}
+                            or current["last_notified_sequence"] < current_view["sequence"]
+                        )
+                    ):
+                        raise MissionError(
+                            "repair mission binding is protected until terminal notification"
+                        )
                 if current and current["notification_lease_until"] > now:
                     raise MissionError("mission subscription notification in progress")
                 connection.execute(

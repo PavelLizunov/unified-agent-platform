@@ -220,8 +220,9 @@ def test_notification_checkpoint_cannot_cross_a_mission_rebind() -> None:
 
             pending = store.pending_subscriptions(new_mission, old_event["sequence"])
             assert len(pending) == 1 and pending[0]["last_notified_sequence"] == 0
-            assert store.completion_notification(new_mission) is not None
-            assert store.complete_if_ready(new_mission) is None
+            terminal = store.complete_if_ready(new_mission)
+            assert terminal is not None
+            assert store.completion_notification(new_mission) == terminal[0]
 
             store.bind(old_mission, "telegram", "43")
             leased = store.pending_subscriptions(old_mission, old_event["sequence"])[0]
@@ -528,12 +529,20 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
 
         publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, number + 1)
         assert store.completion_notification(mission_id) is None
-        assert store.complete_if_ready(mission_id) is None
+        completed = store.complete_if_ready(mission_id)
+        assert completed is not None and completed[1]
+        assert completed[0]["source"] == "central-hermes"
+        assert completed[0]["type"] == "mission.completed"
+        assert store.projection(mission_id)["status"] == "completed"
+        assert store.completion_notification(mission_id) is None
+        assert store.pending_terminal_notification("build1-target") is None
 
         store.bind(mission_id, "telegram", "42", "7")
         store.bind(mission_id, "telegram", "43", "8")
         notification = store.completion_notification(mission_id)
-        assert notification is not None and notification["type"] == "mission.completed"
+        assert notification == completed[0]
+        assert store.pending_terminal_notification("another-target") is None
+        assert store.pending_terminal_notification("build1-target") == completed[0]
         subscription = store.pending_subscriptions(mission_id, notification["sequence"])[0]
         wrong_sequence_token = store.claim_notification(subscription, 1)
         assert wrong_sequence_token is not None
@@ -543,7 +552,7 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             wrong_sequence_token,
             delivered=True,
         )
-        assert store.complete_if_ready(mission_id) is None
+        assert store.projection(mission_id)["status"] == "completed"
         assert store.finish_notification(
             subscription, 1, wrong_sequence_token, delivered=False
         )
@@ -556,14 +565,17 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             raise AssertionError("terminal notification failure was hidden")
         except RuntimeError as error:
             assert "Telegram outage" in str(error)
-        assert store.complete_if_ready(mission_id) is None
+        assert store.projection(mission_id)["status"] == "completed"
 
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        assert store.complete_if_ready(mission_id) is None
+        assert sum(
+            event["type"] in missions.TERMINAL_TYPES
+            for event in store.events(mission_id)
+        ) == 1
         notification = store.completion_notification(mission_id)
-        assert notification is not None
-        expected_terminal_text = missions.telegram_text(
-            missions.project([*store.events(mission_id), notification])
-        )
+        assert notification == completed[0]
+        expected_terminal_text = missions.telegram_text(store.projection(mission_id))
         first_attempt: list[tuple[str, str]] = []
 
         async def partial_sender(target: dict, text: str) -> None:
@@ -578,7 +590,8 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             assert "partial Telegram outage" in str(error)
         assert {chat_id for chat_id, _text in first_attempt} == {"42", "43"}
         assert all(text == expected_terminal_text for _chat_id, text in first_attempt)
-        assert store.complete_if_ready(mission_id) is None
+        assert store.projection(mission_id)["status"] == "completed"
+        assert store.pending_terminal_notification("build1-target") == completed[0]
 
         retry: list[tuple[str, str]] = []
 
@@ -587,12 +600,8 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
 
         assert asyncio.run(missions.notify_subscribers(store, notification, retry_sender)) == 1
         assert retry == [("43", expected_terminal_text)]
-        completed = store.complete_if_ready(mission_id)
-        assert completed is not None and completed[1]
-        assert completed[0]["sequence"] == notification["sequence"]
-        assert completed[0]["source"] == "central-hermes"
-        assert completed[0]["type"] == "mission.completed"
-        assert store.projection(mission_id)["status"] == "completed"
+        assert store.completion_notification(mission_id) is None
+        assert store.pending_terminal_notification("build1-target") is None
         assert asyncio.run(missions.notify_subscribers(store, completed[0], retry_sender)) == 0
         assert retry == [("43", expected_terminal_text)]
         assert store.complete_if_ready(mission_id) is None
@@ -614,15 +623,14 @@ def test_auto_completion_rejects_multiple_workers() -> None:
         ],
     )
     assert not missions.completion_ready(view)
-    assert not missions.completion_ready(view, telegram_terminal_ready=True)
     view.update(
         status="waiting_owner",
         workers=[{"worker_id": "worker-1", "status": "success"}],
     )
-    assert not missions.completion_ready(view, telegram_terminal_ready=True)
+    assert not missions.completion_ready(view)
 
 
-def test_completion_ready_requires_telegram_terminal_checkpoint() -> None:
+def test_completion_ready_depends_only_on_delivery_contract() -> None:
     view = missions.empty_projection()
     view.update(
         status="active",
@@ -637,8 +645,7 @@ def test_completion_ready_requires_telegram_terminal_checkpoint() -> None:
             for kind, status in missions._COMPLETION_DELIVERIES.items()
         ],
     )
-    assert not missions.completion_ready(view)
-    assert missions.completion_ready(view, telegram_terminal_ready=True)
+    assert missions.completion_ready(view)
 
 
 def test_auto_failure_requires_one_cleaned_review_rejection() -> None:
@@ -758,26 +765,16 @@ def test_auto_completion_snapshot_and_terminal_insert_are_one_transaction() -> N
                     "payload": payload,
                 },
             )
-        store.bind(mission_id, "telegram", "42")
-        notification = store.completion_notification(mission_id)
-        assert notification is not None
-        subscription = store.pending_subscriptions(mission_id, notification["sequence"])[0]
-        token = store.claim_notification(subscription, notification["sequence"])
-        assert token is not None
-        assert store.finish_notification(
-            subscription, notification["sequence"], token, delivered=True
-        )
-
         readiness_entered = threading.Event()
         release_completion = threading.Event()
         regression_started = threading.Event()
         outcome: dict[str, object] = {}
         original = missions.completion_ready
 
-        def observed(view: dict, *, telegram_terminal_ready: bool = False) -> bool:
+        def observed(view: dict) -> bool:
             readiness_entered.set()
             assert release_completion.wait(5)
-            return original(view, telegram_terminal_ready=telegram_terminal_ready)
+            return original(view)
 
         def complete() -> None:
             try:
@@ -930,7 +927,7 @@ def test_owner_answer_is_idempotent_and_resumes_the_same_mission() -> None:
         assert asyncio.run(missions.notify_subscribers(store, answer, send)) == 1
         assert deliveries and "Answer received: Preserve the current behavior" in deliveries[0]
         assert store.pending_subscriptions(mission_id, answer["sequence"]) == []
-        assert missions.completion_ready(resumed, telegram_terminal_ready=True)
+        assert missions.completion_ready(resumed)
 
 
 def test_mission_database_is_owner_only_on_posix() -> None:
@@ -1091,6 +1088,11 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
             store.accept("Deliver", mission_id=parent)
             store.bind(parent, "telegram", "42")
             store.accept("Repair", mission_id=child, parent_mission_id=parent)
+            try:
+                store.bind(parent, "telegram", "42")
+                raise AssertionError("active repair binding was manually bypassed")
+            except missions.MissionError as error:
+                assert "protected until terminal notification" in str(error)
             event, created = store.append_central(
                 child,
                 {
@@ -1103,6 +1105,11 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
                 },
             )
             assert created and store.bound_mission("telegram", "42") == child
+            try:
+                store.bind(parent, "telegram", "42")
+                raise AssertionError("terminal repair binding was bypassed before notification")
+            except missions.MissionError as error:
+                assert "protected until terminal notification" in str(error)
             try:
                 store.restore_parent_after_terminal_notification(child)
                 raise AssertionError("repair binding restored before terminal notification")
@@ -1133,6 +1140,75 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
     asyncio.run(scenario())
 
 
+def test_terminal_notification_outbox_survives_lease_and_restart() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "missions.sqlite3"
+            store = missions.MissionStore(database)
+            mission_id = "mission-terminal-outbox-restart"
+            store.accept("Deliver", mission_id=mission_id, dispatch_profile="build1-outbox")
+            store.bind(mission_id, "telegram", "42")
+            ready = [
+                ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+                ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+                *(("gate.upsert", {"gate_id": gate, "status": "passed"})
+                  for gate in missions._COMPLETION_GATES),
+                ("delivery.upsert", {
+                    "kind": "pull_request", "status": "merged",
+                    "url": "https://example.invalid/pr/1",
+                }),
+                ("delivery.upsert", {
+                    "kind": "default_branch", "status": "verified",
+                    "url": "https://example.invalid/commit/1",
+                }),
+            ]
+            for number, (event_type, payload) in enumerate(ready, 1):
+                store.append_producer(mission_id, {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:outbox:{number}"},
+                    "payload": payload,
+                })
+            completed = store.complete_if_ready(mission_id)
+            assert completed is not None
+            terminal = completed[0]
+            subscription = store.pending_subscriptions(mission_id, terminal["sequence"])[0]
+            token = store.claim_notification(subscription, terminal["sequence"])
+            assert token is not None
+
+            restarted = missions.MissionStore(database)
+            assert restarted.pending_terminal_notification("build1-outbox") == terminal
+            sent: list[str] = []
+
+            async def send(_subscription: dict, text: str) -> None:
+                sent.append(text)
+
+            assert await missions.notify_subscribers(restarted, terminal, send) == 0
+            assert sent == []
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    """UPDATE mission_subscriptions
+                       SET notification_lease_until = 0
+                       WHERE mission_id = ?""",
+                    (mission_id,),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            assert await missions.notify_subscribers(restarted, terminal, send) == 1
+            assert len(sent) == 1
+            assert restarted.pending_terminal_notification("build1-outbox") is None
+            assert sum(
+                event["type"] in missions.TERMINAL_TYPES
+                for event in restarted.events(mission_id)
+            ) == 1
+
+    asyncio.run(scenario())
+
+
 def test_terminal_retention_preserves_active_repair_chain() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -1152,9 +1228,9 @@ def test_terminal_retention_preserves_active_repair_chain() -> None:
                 "payload": {"reason": "test cleanup"},
             },
         )
-        store.bind(parent, "telegram", "42")
-        assert store.bound_mission("telegram", "42") == parent
+        assert store.bound_mission("telegram", "42") == child
         assert store.prune_terminal(keep=0) == 0
+        assert store.projection(parent)["status"] == "active"
         assert store.projection(child)["status"] == "cancelled"
 
     with tempfile.TemporaryDirectory() as temp:
@@ -1336,13 +1412,6 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
                     "payload": payload,
                 },
             )
-        notification = store.completion_notification(child)
-        assert notification is not None
-        subscription = store.pending_subscriptions(child, notification["sequence"])[0]
-        token = store.claim_notification(subscription, notification["sequence"])
-        assert token and store.finish_notification(
-            subscription, notification["sequence"], token, delivered=True
-        )
         store.append_central(
             parent,
             {
@@ -1385,6 +1454,15 @@ def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
         finally:
             store.prune_terminal = original_prune
         assert completed is not None and completed[0]["type"] == "mission.completed"
+        assert store.bound_mission("telegram", "42", "7") == child
+        notification = store.completion_notification(child)
+        assert notification == completed[0]
+        subscription = store.pending_subscriptions(child, notification["sequence"])[0]
+        token = store.claim_notification(subscription, notification["sequence"])
+        assert token and store.finish_notification(
+            subscription, notification["sequence"], token, delivered=True
+        )
+        store.restore_parent_after_terminal_notification(child)
         assert store.bound_mission("telegram", "42", "7") == parent
         connection = sqlite3.connect(store.path)
         try:
@@ -1465,7 +1543,7 @@ def test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify() ->
         )
 
 
-def test_failure_terminal_waits_for_telegram_checkpoint_and_retries() -> None:
+def test_failure_terminal_commits_before_telegram_and_retries_delivery() -> None:
     async def scenario() -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -1496,9 +1574,10 @@ def test_failure_terminal_waits_for_telegram_checkpoint_and_retries() -> None:
                     },
                 )
 
-            assert store.complete_if_ready(mission_id) is None
+            terminal = store.complete_if_ready(mission_id)
+            assert terminal is not None and terminal[0]["type"] == "mission.failed"
             notification = store.completion_notification(mission_id)
-            assert notification is not None and notification["type"] == "mission.failed"
+            assert notification == terminal[0]
 
             async def fail_once(_subscription: dict, _text: str) -> None:
                 raise RuntimeError("telegram unavailable")
@@ -1509,7 +1588,7 @@ def test_failure_terminal_waits_for_telegram_checkpoint_and_retries() -> None:
             except RuntimeError as error:
                 assert str(error) == "telegram unavailable"
             assert store.complete_if_ready(mission_id) is None
-            assert store.projection(mission_id)["status"] == "active"
+            assert store.projection(mission_id)["status"] == "failed"
 
             delivered: list[str] = []
 
@@ -1518,8 +1597,8 @@ def test_failure_terminal_waits_for_telegram_checkpoint_and_retries() -> None:
 
             assert await missions.notify_subscribers(store, notification, send) == 1
             assert delivered and "failed" in delivered[0].lower()
-            terminal = store.complete_if_ready(mission_id)
-            assert terminal is not None and terminal[0]["type"] == "mission.failed"
+            assert store.completion_notification(mission_id) is None
+            assert store.complete_if_ready(mission_id) is None
             assert store.pending_subscriptions(mission_id, terminal[0]["sequence"]) == []
 
     asyncio.run(scenario())
@@ -1538,7 +1617,7 @@ def main() -> None:
     test_owner_answer_capability_is_separate_from_the_producer_key()
     test_central_auto_completion_requires_the_full_delivery_contract()
     test_auto_completion_rejects_multiple_workers()
-    test_completion_ready_requires_telegram_terminal_checkpoint()
+    test_completion_ready_depends_only_on_delivery_contract()
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
     test_owner_answer_is_idempotent_and_resumes_the_same_mission()
     test_mission_database_is_owner_only_on_posix()
@@ -1546,12 +1625,13 @@ def main() -> None:
     test_terminal_append_applies_default_retention()
     test_bind_and_retention_cannot_create_a_dangling_subscription()
     test_explicit_repair_terminal_notifies_before_parent_restore()
+    test_terminal_notification_outbox_survives_lease_and_restart()
     test_terminal_retention_preserves_active_repair_chain()
     test_terminal_retention_preserves_parent_until_repair_notification()
     test_existing_subscription_table_gets_notification_lease_columns()
     test_repair_mission_inherits_and_restores_telegram_binding()
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
-    test_failure_terminal_waits_for_telegram_checkpoint_and_retries()
+    test_failure_terminal_commits_before_telegram_and_retries_delivery()
     print("hermes mission runtime checks passed")
 
 

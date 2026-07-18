@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-    "gateway/platforms/api_server.py": "8a119e37cfcecc89745eaa42f4de3d304b4e9a74a78680bb2e6b18d868b47244",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "224d31e132a2a11b619be8b6a3c49e34d34399147bc1e92d96a535bec36b3bb6",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -612,6 +612,15 @@ def connect(
             reconcile = request.query.get("reconcile", "0")
             if reconcile not in {"0", "1"}:
                 raise MissionError("invalid reconcile selector")
+            notification = store.pending_terminal_notification(
+                request.query.get("dispatch_profile")
+            )
+            if notification is not None:
+                await self._notify_mission(store, notification)
+                if store.completion_notification(notification["mission_id"]) is None:
+                    store.restore_parent_after_terminal_notification(
+                        notification["mission_id"]
+                    )
             missions = (
                 store.dispatch_candidates(
                     request.query.get("dispatch_profile"),
@@ -715,18 +724,17 @@ def connect(
             )
             store = self._missions()
             event, created = store.append_producer(mission_id, body)
-            if created:
-                await self._notify_mission(store, event)
             completed = store.complete_if_ready(mission_id)
-            if completed is None:
-                notification = store.completion_notification(mission_id)
-                if notification is not None:
-                    await self._notify_mission(store, notification, defer=False)
-                    completed = store.complete_if_ready(mission_id)
-                    if completed is None:
-                        raise RuntimeError("mission completion checkpoint did not converge")
-            if completed is not None and completed[1]:
-                await self._notify_mission(store, completed[0])
+            if completed is None and created:
+                await self._notify_mission(store, event)
+            terminal = completed[0] if completed is not None else store.completion_notification(mission_id)
+            if terminal is not None:
+                await self._notify_mission(store, terminal)
+            if (
+                store.projection(mission_id)["status"] in {"completed", "failed", "cancelled"}
+                and store.completion_notification(mission_id) is None
+            ):
+                store.restore_parent_after_terminal_notification(mission_id)
             return web.json_response({
                 "created": created,
                 "event": event,

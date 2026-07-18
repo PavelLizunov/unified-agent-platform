@@ -335,13 +335,10 @@ def telegram_text(view: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def completion_ready(
-    view: dict[str, Any], *, telegram_terminal_ready: bool = False
-) -> bool:
+def completion_ready(view: dict[str, Any]) -> bool:
     """Apply the narrow A7.3 one-task delivery completion policy."""
     if (
-        not telegram_terminal_ready
-        or view.get("status") != "active"
+        view.get("status") != "active"
         or view.get("question") is not None
     ):
         return False
@@ -965,7 +962,7 @@ class MissionStore:
         return self._append(mission_id, _producer_submission(mission_id, submission))
 
     def completion_notification(self, mission_id: str) -> dict[str, Any] | None:
-        """Build the terminal Telegram projection without committing terminal state."""
+        """Return the committed terminal event while a Telegram cursor is behind."""
         mission_id = _require_id(mission_id, "mission_id")
         with self._db() as connection:
             rows = connection.execute(
@@ -976,34 +973,54 @@ class MissionStore:
             if not previous:
                 raise MissionError("mission not found")
             telegram = connection.execute(
-                """SELECT 1 FROM mission_subscriptions
-                   WHERE mission_id = ? AND platform = 'telegram' LIMIT 1""",
+                """SELECT last_notified_sequence FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram'""",
                 (mission_id,),
-            ).fetchone()
-        view = project(previous)
-        if not telegram:
+            ).fetchall()
+        terminal = previous[-1]
+        if (
+            terminal["type"] not in TERMINAL_TYPES
+            or not telegram
+            or all(
+                row["last_notified_sequence"] >= terminal["sequence"]
+                for row in telegram
+            )
+        ):
             return None
-        if completion_ready(view, telegram_terminal_ready=True):
-            event_type = "mission.completed"
-            producer_event_id = "central:auto-complete:v1"
-            payload = {"result": "Delivery completed, merged, and verified"}
-        elif rejection := _rejection_terminal(view):
-            event_type = "mission.failed"
-            producer_event_id, payload = rejection
-        else:
-            return None
-        sequence = len(previous) + 1
-        return {
-            "schema_version": SCHEMA_VERSION,
-            "mission_id": mission_id,
-            "sequence": sequence,
-            "event_id": f"{mission_id}:{sequence}",
-            "occurred_at": _utc_now(),
-            "type": event_type,
-            "source": "central-hermes",
-            "correlation": {"producer_event_id": producer_event_id},
-            "payload": payload,
-        }
+        return terminal
+
+    def pending_terminal_notification(
+        self, dispatch_profile: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return one committed terminal event for the existing profile poll to drain."""
+        if dispatch_profile is not None:
+            dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
+        with self._db() as connection:
+            terminal_rows = connection.execute(
+                """SELECT * FROM mission_events
+                   WHERE type IN ('mission.completed', 'mission.failed', 'mission.cancelled')
+                   ORDER BY rowid"""
+            ).fetchall()
+            for row in terminal_rows:
+                terminal = self._row(row)
+                accepted = connection.execute(
+                    """SELECT payload_json FROM mission_events
+                       WHERE mission_id = ? AND sequence = 1""",
+                    (terminal["mission_id"],),
+                ).fetchone()
+                if accepted is None:
+                    continue
+                profile = json.loads(accepted["payload_json"]).get("dispatch_profile")
+                if dispatch_profile is not None and profile != dispatch_profile:
+                    continue
+                if connection.execute(
+                    """SELECT 1 FROM mission_subscriptions
+                       WHERE mission_id = ? AND platform = 'telegram'
+                         AND last_notified_sequence < ? LIMIT 1""",
+                    (terminal["mission_id"], terminal["sequence"]),
+                ).fetchone():
+                    return terminal
+        return None
 
     def complete_if_ready(self, mission_id: str) -> tuple[dict[str, Any], bool] | None:
         """Let Central, never the producer, append the terminal delivery event."""
@@ -1019,20 +1036,12 @@ class MissionStore:
                 raise MissionError("mission not found")
             view = project(previous)
             sequence = len(previous) + 1
-            telegram = connection.execute(
-                """SELECT last_notified_sequence FROM mission_subscriptions
-                   WHERE mission_id = ? AND platform = 'telegram'""",
-                (mission_id,),
-            ).fetchall()
-            telegram_terminal_ready = bool(telegram) and all(
-                row["last_notified_sequence"] >= sequence for row in telegram
-            )
             rejection = _rejection_terminal(view)
-            if completion_ready(view, telegram_terminal_ready=telegram_terminal_ready):
+            if completion_ready(view):
                 event_type = "mission.completed"
                 producer_event_id = "central:auto-complete:v1"
                 payload = {"result": "Delivery completed, merged, and verified"}
-            elif rejection is not None and (not telegram or telegram_terminal_ready):
+            elif rejection is not None:
                 event_type = "mission.failed"
                 producer_event_id, payload = rejection
             else:
@@ -1070,11 +1079,6 @@ class MissionStore:
                     event["correlation"]["producer_event_id"],
                 ),
             )
-            parent_mission_id = view.get("parent_mission_id")
-            if isinstance(parent_mission_id, str):
-                self._restore_parent_subscriptions(
-                    connection, mission_id, parent_mission_id
-                )
             self._prune_terminal(connection, _MAX_RETAINED_TERMINAL_MISSIONS)
         return event, True
 
@@ -1163,13 +1167,33 @@ class MissionStore:
                 raise MissionError("mission not found")
             project([self._row(row) for row in rows])
             current = connection.execute(
-                """SELECT mission_id, notification_lease_until
+                """SELECT mission_id, last_notified_sequence, notification_lease_until
                    FROM mission_subscriptions
                    WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
                 (platform, chat_id, thread_id),
             ).fetchone()
             if current and current["mission_id"] == mission_id:
                 return
+            if current:
+                current_events = [
+                    self._row(row)
+                    for row in connection.execute(
+                        """SELECT * FROM mission_events
+                           WHERE mission_id = ? ORDER BY sequence""",
+                        (current["mission_id"],),
+                    ).fetchall()
+                ]
+                current_view = project(current_events)
+                if (
+                    isinstance(current_view.get("parent_mission_id"), str)
+                    and (
+                        current_view["status"] not in {"completed", "failed", "cancelled"}
+                        or current["last_notified_sequence"] < current_view["sequence"]
+                    )
+                ):
+                    raise MissionError(
+                        "repair mission binding is protected until terminal notification"
+                    )
             if current and current["notification_lease_until"] > now:
                 raise MissionError("mission subscription notification in progress")
             connection.execute(
