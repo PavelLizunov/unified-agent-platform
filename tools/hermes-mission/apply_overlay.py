@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-    "gateway/platforms/api_server.py": "224d31e132a2a11b619be8b6a3c49e34d34399147bc1e92d96a535bec36b3bb6",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "b0e0b3b8d87a7ef10b9fe034e62e92e65c95280f8a20fe48e3548a96142f4fdd",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -641,21 +641,50 @@ def connect(
             body = await request.json()
             if not isinstance(body, dict):
                 raise MissionError("mission request must be an object")
-            if body.get("parent_mission_id") is not None and not producer_key_valid(
-                request.headers.get("X-Hermes-Mission-Producer-Key")
-            ):
-                return web.json_response(
-                    {"error": "Invalid mission producer key"}, status=401
-                )
             store = self._missions()
-            event, created = store.accept(
-                redact_sensitive_text(body.get("goal"), force=True),
-                mission_id=body.get("mission_id"),
-                session_id=body.get("session_id"),
-                run_id=body.get("run_id"),
-                dispatch_profile=body.get("dispatch_profile"),
-                parent_mission_id=body.get("parent_mission_id"),
-            )
+            producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")
+            owner_key = request.headers.get("X-Hermes-Mission-Owner-Key")
+            if producer_key is not None and owner_key is not None:
+                return web.json_response(
+                    {"error": "Ambiguous mission capability"}, status=401
+                )
+            if producer_key is not None:
+                if not producer_key_valid(producer_key):
+                    return web.json_response(
+                        {"error": "Invalid mission producer key"}, status=401
+                    )
+                event, created = store.accept(
+                    redact_sensitive_text(body.get("goal"), force=True),
+                    mission_id=body.get("mission_id"),
+                    session_id=body.get("session_id"),
+                    run_id=body.get("run_id"),
+                    dispatch_profile=body.get("dispatch_profile"),
+                    parent_mission_id=body.get("parent_mission_id"),
+                )
+            else:
+                if not owner_key_valid(owner_key):
+                    return web.json_response(
+                        {"error": "Invalid mission owner key"}, status=401
+                    )
+                allowed = {
+                    "goal", "platform", "source_message_id", "session_id",
+                    "chat_id", "thread_id",
+                }
+                if unknown := set(body) - allowed:
+                    raise MissionError(
+                        "unknown owner intake fields: " + ", ".join(sorted(unknown))
+                    )
+                for name in allowed & body.keys():
+                    if not isinstance(body[name], str):
+                        raise MissionError(f"invalid {name}")
+                event, created = store.ingest_owner_goal(
+                    redact_sensitive_text(body.get("goal"), force=True),
+                    platform=body.get("platform"),
+                    source_message_id=body.get("source_message_id"),
+                    session_id=body.get("session_id"),
+                    chat_id=body.get("chat_id"),
+                    thread_id=body.get("thread_id"),
+                )
             return web.json_response({
                 "created": created,
                 **store.workspace_payload(event["mission_id"]),

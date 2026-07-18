@@ -43,7 +43,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v42-terminal-authority"
+        "v43-dormant-intake-core"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -78,6 +78,8 @@ def main() -> None:
         container for container in template["spec"]["containers"]
         if container["name"] == "gateway"
     )
+    gateway_env_names = {entry["name"] for entry in gateway["env"]}
+    assert "HERMES_MISSION_INTAKE_ROUTES" not in gateway_env_names
     assert {
         "name": "HERMES_MISSION_OWNER_KEY",
         "valueFrom": {
