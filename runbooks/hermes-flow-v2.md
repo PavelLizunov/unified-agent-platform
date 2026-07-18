@@ -40,6 +40,24 @@ the retry state until that new archive event reaches the same bounded deadline. 
 owning profile timer removes it through an atomic rename and crash-retried recursive deletion. Verified worktrees and local branches are removed before Central completion; no
 separate GC daemon exists.
 
+For the registered profile, successful terminal convergence also creates
+`~/swarm-out/<mission>/completion-evidence.json` with mode `0600`. Verify it without trusting the surrounding
+Markdown evidence:
+
+```bash
+python3 ~/swarm-bin/flow_contract.py verify-completion-evidence \
+  --bundle ~/swarm-out/<mission>/completion-evidence.json \
+  --expected-sha256 <digest-from-delivery-state>
+```
+
+The verifier checks the canonical self-digest plus mission/runtime/route identity, exact candidate-to-review/PR
+lineage, distinct approved OpenAI author/reviewer sessions, CI run identities and green required checks, post-verify,
+cleanup and Central terminal state. Each natural coordinator restart is folded into a constant-size systemd invocation
+hash-chain, so long capacity waits do not grow state without bound. `UAP_COORDINATOR_UNIT` and the user-systemd
+`InvocationID` prove the service execution boundary; they do not distinguish a timer start from an operator invoking
+the same service. The initial bundle is therefore a delivery-kernel artifact, not yet a signed final two-channel
+Product Operating Contract certificate.
+
 ## When to use
 
 - Read-only or docs-only change up to three files: ordinary Hermes session is sufficient.

@@ -127,7 +127,175 @@ def validate_review_with_telemetry(summary, verification, author, reviewer, **kw
     )
 
 
+def completion_evidence():
+    candidate = "2" * 40
+    tree = "5" * 40
+    decision_id = "f" * 64
+    invocation = {
+        "unit": "hermes-delivery-coordinator@registered.service",
+        "invocation_id": "6" * 32,
+    }
+    value = {
+        "schema_version": 1,
+        "mission": {
+            "mission_id": "mission-evidence",
+            "dispatch_profile": "registered-v4",
+            "goal_sha256": "7" * 64,
+            "parent_mission_id": None,
+            "owner_answer_sha256s": [],
+        },
+        "runtime": {
+            "coordinator_sha256": "8" * 64,
+            "profile_sha256": "9" * 64,
+            "policy_sha256": "a" * 64,
+            "invocations": {
+                "count": 1,
+                "first": invocation,
+                "last": invocation,
+                "chain_sha256": flow.canonical_sha256({
+                    "previous": None, **invocation,
+                }),
+            },
+        },
+        "route": {
+            "decision_id": decision_id,
+            "policy_id": "openai-autonomy-v2",
+            "policy_sha256": "a" * 64,
+            "route": "standard",
+            "author_model": "gpt-5.6-luna",
+            "reviewer_model": "gpt-5.6-sol",
+        },
+        "execution": {"root_task_id": "task-1", "run_id": "7"},
+        "source": {
+            "repo": "PavelLizunov/hermes-flow-v2-pilot",
+            "base_sha": "1" * 40,
+            "candidate_sha": candidate,
+            "candidate_files": ["src/lib.rs"],
+            "merge_sha": "3" * 40,
+            "default_sha": "4" * 40,
+            "candidate_ancestor_of_merge": True,
+            "merge_ancestor_of_default": True,
+        },
+        "author": {
+            "session_id": "author-session",
+            "model": "gpt-5.6-luna",
+            "reasoning_effort": "medium",
+            "sandbox": "workspace-write",
+            "head_sha": candidate,
+            "tree_sha": tree,
+            "route_decision_id": decision_id,
+        },
+        "reviewer": {
+            "session_id": "review-session",
+            "model": "gpt-5.6-sol",
+            "reasoning_effort": "low",
+            "sandbox": "read-only",
+            "reviewed_sha": candidate,
+            "head_sha": candidate,
+            "tree_sha": tree,
+            "route_decision_id": decision_id,
+            "source_attestation_sha256": "c" * 64,
+        },
+        "delivery": {
+            "mode": "none",
+            "applicability": "not_applicable",
+            "pr_number": 42,
+            "pr_url": "https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/42",
+            "pr_head_sha": candidate,
+            "pr_base_branch": "main",
+            "ci_run_ids": [101, 102],
+        },
+        "gates": {
+            "required_ci_checks": ["test"],
+            "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+            "ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+            "post_verify_checks": [
+                {"command": "cargo test --locked", "exit_code": 0}
+            ],
+        },
+        "cleanup": {
+            "worktrees_removed": True,
+            "local_branch_deleted": True,
+            "remote_branch_deleted": True,
+            "task_archived": True,
+            "kanban_gc_ran": True,
+        },
+        "central": {
+            "status": "completed",
+            "sequence": 22,
+            "projection_id": "e" * 16,
+            "result": "Delivery completed, merged, and verified",
+        },
+    }
+    value["sha256"] = flow.canonical_sha256(value)
+    return value
+
+
 class FlowContractTests(unittest.TestCase):
+    def test_completion_evidence_is_self_digesting_and_semantically_closed(self):
+        value = completion_evidence()
+        self.assertEqual(value, flow.validate_completion_evidence(value))
+
+        tampered = json.loads(json.dumps(value))
+        tampered["central"]["sequence"] += 1
+        with self.assertRaisesRegex(flow.ContractError, "digest mismatch"):
+            flow.validate_completion_evidence(tampered)
+
+        tampered["sha256"] = flow.canonical_sha256({
+            key: item for key, item in tampered.items() if key != "sha256"
+        })
+        self.assertEqual(tampered, flow.validate_completion_evidence(tampered))
+
+        for field, invalid, message in (
+            ("candidate_ancestor_of_merge", False, "lineage"),
+            ("merge_ancestor_of_default", False, "lineage"),
+        ):
+            changed = completion_evidence()
+            changed["source"][field] = invalid
+            changed["sha256"] = flow.canonical_sha256({
+                key: item for key, item in changed.items() if key != "sha256"
+            })
+            with self.assertRaisesRegex(flow.ContractError, message):
+                flow.validate_completion_evidence(changed)
+
+    def test_completion_evidence_rejects_recomputed_policy_violations(self):
+        mutations = (
+            (lambda value: value["reviewer"].update(session_id="author-session"), "independent"),
+            (lambda value: value["reviewer"].update(tree_sha="f" * 40), "reviewed tree"),
+            (lambda value: value["delivery"].update(ci_run_ids=["101"]), "CI run"),
+            (lambda value: value["gates"].update(ci_checks=[{"name": "test", "outcome": "FAILURE"}]), "not green"),
+            (lambda value: value["cleanup"].update(worktrees_removed=False), "cleanup"),
+        )
+        for mutate, message in mutations:
+            with self.subTest(message=message):
+                value = completion_evidence()
+                mutate(value)
+                value["sha256"] = flow.canonical_sha256({
+                    key: item for key, item in value.items() if key != "sha256"
+                })
+                with self.assertRaisesRegex(flow.ContractError, message):
+                    flow.validate_completion_evidence(value)
+
+    def test_completion_evidence_cli_verifies_expected_digest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "evidence.json"
+            value = completion_evidence()
+            path.write_text(json.dumps(value), encoding="utf-8")
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", stdout):
+                status = flow.main([
+                    "verify-completion-evidence", "--bundle", str(path),
+                    "--expected-sha256", value["sha256"],
+                ])
+            self.assertEqual(0, status)
+            self.assertIn(value["sha256"], stdout.getvalue())
+
+    def test_completion_evidence_rejects_noncanonical_numbers(self):
+        value = completion_evidence()
+        value["central"]["sequence"] = float("nan")
+        with self.assertRaisesRegex(flow.ContractError, "canonical JSON"):
+            flow.validate_completion_evidence(value)
+
     def test_safe_error_redacts_cookie_header_forms(self):
         secret = "standalone-cookie-secret"
         for diagnostic in (

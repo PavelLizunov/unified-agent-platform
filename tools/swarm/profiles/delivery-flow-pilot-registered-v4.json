@@ -28,6 +28,7 @@
   "claim_ttl_seconds": 36000,
   "command_timeout_seconds": 3600,
   "commit_message": "feat: deliver registered owner mission",
+  "completion_evidence": true,
   "default_branch": "main",
   "delivery_mode": "none",
   "dispatch_profile": "build1-flow-pilot-registered-v4",

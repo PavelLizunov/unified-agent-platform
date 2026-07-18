@@ -140,6 +140,15 @@ Last updated: 2026-07-18
   gates are implemented; this closes applicability for the no-deploy pilot, not generic deployment automation.
   Exact PR/CI/Flux/build-1 rollout evidence:
   `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md`.
+- **Canonical completion evidence is implemented offline; rollout/live proof is pending (2026-07-18).** The registered
+  schema-v4 profile opts into one owner-only `completion-evidence.json` written only after Central terminal, cleanup
+  and Kanban archive. Its closed schema binds the mission and immutable goal digest to canonical profile/policy/runtime
+  hashes, a restart-safe systemd invocation hash-chain, exact candidate/review/PR/CI/merge/default identities,
+  runtime-attested distinct author/reviewer sessions, post-verify, cleanup and the terminal Central projection. A
+  deterministic CLI rejects changed bytes and recomputed semantic violations; restart verifies rather than rewrites a
+  completed bundle. Flow-contract and coordinator suites pass locally, as does `verify-local`. This is not yet a live
+  evidence claim: build-1 installation, one natural timer-created bundle, channel origin/cursors and signed artifact
+  attestation remain pending.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message
