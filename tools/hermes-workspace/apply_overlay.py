@@ -17,7 +17,7 @@ FILES = {
 "src/routes/api/models.ts": "0a8a94a277b3fe654c85d11def4283c9001639d1f9a80c55dfd7534c5e6e7b4a",
 "src/routes/api/sessions.ts": "209be41f615751d160af8b908bf938bed5db747fd393aab7f2a1d99e4d4cd720",
 "src/routes/api/send-stream.ts": "95e182b21253fd1d7a37a2338e2df6f66761b4ded99063258a71b80a43e6f5a0",
-"src/server/claude-api.ts": "303ef03606c25cccef8e02e947838988c5b28de62d5277ce6e92c9a45545796d",
+"src/server/claude-api.ts": "303ef03606c25cccef8e02e947838988c5b28de62d5277ce6e92c9a45545796d",  # gitleaks:allow -- pinned source SHA-256
 "src/server/kanban-backend.ts": "4987b6ea35d7eaf296f1d57a7cbb4da74a08cfb20d5958c4b43267de6193b93e",
 "src/routes/api/hermes-tasks.ts": "c20eb57f7d87fc444168032d78f87a0e3ceca54664463f573f9c188b3311e904",
 "src/routes/api/claude-jobs.ts": "cd47fd163f669070210d0bcb1f181ae08454665ca1806704b0211bdfcfdaa803",
@@ -37,7 +37,7 @@ PATCHED_FILES = {
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
 "src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",
-"src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",
+"src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
