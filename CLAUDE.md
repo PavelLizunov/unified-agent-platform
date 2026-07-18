@@ -202,8 +202,10 @@ Good next tasks that do not require redesign:
    and explicit `delivery_mode: none`; Central requires `delivery: not_applicable` before completing that target;
    its exact Workspace/Telegram intake registry and timer are enabled. Ordinary Workspace delivery passed live.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
-   ordinary Telegram intake and that question/resume path remain the next controlled live canary. See
+   PR #264 is deployed and passed an in-pod component check. Ordinary Telegram intake and a real owner
+   question/resume path remain the next controlled live canary. See
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
+   The answer rollout record is `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
