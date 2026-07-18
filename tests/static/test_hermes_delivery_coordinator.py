@@ -2510,7 +2510,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             value["required_ci_checks"],
         )
         self.assertEqual(
-            {"Cargo.lock", "Cargo.toml", "counter.py", "src", "test_counter.py", "tests"},
+            {"Cargo.lock", "Cargo.toml", "README.md", "counter.py", "src", "test_counter.py", "tests"},
             set(value["allowed_path_prefixes"]),
         )
         with tempfile.TemporaryDirectory() as directory:
