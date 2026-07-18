@@ -12,6 +12,7 @@ TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
 REPO_ROOT = TOOL.parents[2]
 COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
 LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
+PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -264,6 +265,9 @@ def main() -> None:
         mission_route = (clone / "src/routes/api/missions.ts").read_text()
         assert "gatewayFetch" in mission_route
         assert "Central mission API unavailable" in mission_route
+        assert "mission_id" in mission_route
+        assert "after=${after}" in mission_route
+        assert "Invalid mission replay request" in mission_route
         assert "POST: async ({ request })" in mission_route
         assert "/answer`" in mission_route
         assert "JSON.stringify({ question_id: questionId, text })" in mission_route
@@ -273,10 +277,42 @@ def main() -> None:
             clone / "src/screens/dashboard/components/mission-overview-card.tsx"
         ).read_text()
         assert "refetchInterval: 2_000" in mission_card
+        assert "mergeMissionReplay" in mission_card
+        assert "Mission event sequence gap" in mission_card
+        assert "Mission replay cursor mismatch" in mission_card
+        assert "previous?.cursor ?? 0" in mission_card
+        assert "Timeline" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
         assert 'aria-label="Answer"' in mission_card
         assert "question_id: question.question_id" in mission_card
+
+        previous_added = {
+            "src/routes/api/missions.ts":
+                "082ffe7f4d100d8a5a64fbde40893cfba1f98a1774c914acb2495ce1a857a243",
+            "src/screens/dashboard/components/mission-overview-card.tsx":
+                "990eb901032d2f2784eece487bc462b02b0672c1feb9f0c1bef403e1019e6b5b",
+        }
+        for relative, expected in previous_added.items():
+            previous_asset = subprocess.check_output(
+                [
+                    "git", "show",
+                    f"{PREVIOUS_UAP_COMMIT}:tools/hermes-workspace/files/{relative}",
+                ],
+                cwd=REPO_ROOT,
+            )
+            path = clone / relative
+            path.write_bytes(previous_asset)
+            assert hashlib.sha256(previous_asset).hexdigest() == expected
+        previous_added_check = run(clone, "--check")
+        assert previous_added_check.returncode == 0
+        assert previous_added_check.stdout.count("previous-needs-overlay") == 2
+        previous_added_upgrade = run(clone)
+        assert previous_added_upgrade.returncode == 0
+        assert "overlay applied" in previous_added_upgrade.stdout
+        previous_added_final = run(clone, "--check")
+        assert previous_added_final.returncode == 0
+        assert "previous-needs-overlay" not in previous_added_final.stdout
 
         for relative, expected in (
             (

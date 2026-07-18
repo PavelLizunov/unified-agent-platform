@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 
 type Item = Record<string, string>
 
@@ -24,8 +24,71 @@ export type MissionView = {
 }
 
 type MissionResponse = { missions?: Array<MissionView>; error?: string }
+type MissionEvent = {
+  event_id: string
+  sequence: number
+  type: string
+  occurred_at?: string
+}
+type MissionReplayResponse = {
+  mission?: MissionView
+  events?: Array<MissionEvent>
+  cursor?: number
+  error?: string
+}
+type MissionReplay = {
+  mission: MissionView
+  events: Array<MissionEvent>
+  cursor: number
+}
 
 const activeStatuses = new Set(['active', 'waiting_owner'])
+
+export function mergeMissionReplay(
+  previous: MissionReplay | null,
+  incoming: MissionReplayResponse,
+  missionId: string,
+): MissionReplay {
+  const mission = incoming.mission
+  const cursor = incoming.cursor
+  const events = incoming.events
+  if (
+    !mission ||
+    mission.mission_id !== missionId ||
+    typeof cursor !== 'number' ||
+    !Number.isSafeInteger(cursor) ||
+    cursor < 0 ||
+    !Array.isArray(events)
+  ) {
+    throw new Error('Invalid mission replay response')
+  }
+  const base = previous?.mission.mission_id === missionId ? previous : null
+  const baseCursor = base?.cursor ?? 0
+  const appended: Array<MissionEvent> = []
+  let expected = baseCursor + 1
+  for (const event of events) {
+    if (
+      !Number.isSafeInteger(event.sequence) ||
+      event.sequence < 1 ||
+      typeof event.event_id !== 'string' ||
+      typeof event.type !== 'string'
+    ) {
+      throw new Error('Invalid mission replay event')
+    }
+    if (event.sequence <= baseCursor) continue
+    if (event.sequence !== expected) throw new Error('Mission event sequence gap')
+    appended.push(event)
+    expected += 1
+  }
+  if (baseCursor + appended.length !== cursor) {
+    throw new Error('Mission replay cursor mismatch')
+  }
+  return {
+    mission,
+    events: [...(base?.events ?? []), ...appended],
+    cursor,
+  }
+}
 
 export function selectMission(
   missions: Array<MissionView>,
@@ -67,6 +130,7 @@ export function MissionOverviewCard() {
   const [answerDraft, setAnswerDraft] = useState({ questionId: '', text: '' })
   const [answerError, setAnswerError] = useState('')
   const [answering, setAnswering] = useState(false)
+  const replayRef = useRef<MissionReplay | null>(null)
   const query = useQuery<MissionResponse>({
     queryKey: ['central-missions'],
     queryFn: async () => {
@@ -80,7 +144,36 @@ export function MissionOverviewCard() {
     retry: 1,
   })
   const missions = query.data?.missions ?? []
-  const mission = selectMission(missions, selectedId)
+  const snapshotMission = selectMission(missions, selectedId)
+  const replayQuery = useQuery<MissionReplay>({
+    queryKey: ['central-mission-events', snapshotMission?.mission_id],
+    enabled: Boolean(snapshotMission),
+    queryFn: async () => {
+      const missionId = snapshotMission!.mission_id
+      const previous =
+        replayRef.current?.mission.mission_id === missionId
+          ? replayRef.current
+          : null
+      const response = await fetch(
+        `/api/missions?mission_id=${encodeURIComponent(missionId)}&after=${previous?.cursor ?? 0}`,
+        { cache: 'no-store' },
+      )
+      const body = (await response.json()) as MissionReplayResponse
+      if (!response.ok) throw new Error(body.error || `Mission API ${response.status}`)
+      const replay = mergeMissionReplay(previous, body, missionId)
+      replayRef.current = replay
+      return replay
+    },
+    refetchInterval: 2_000,
+    refetchOnWindowFocus: true,
+    retry: 1,
+  })
+  const mission = replayQuery.data?.mission ?? snapshotMission
+  const missionEvents =
+    replayQuery.data?.events ??
+    (replayRef.current?.mission.mission_id === mission?.mission_id
+      ? replayRef.current.events
+      : [])
 
   async function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -106,6 +199,7 @@ export function MissionOverviewCard() {
       if (!response.ok) throw new Error(body.error || `Mission API ${response.status}`)
       setAnswerDraft({ questionId: '', text: '' })
       await query.refetch()
+      await replayQuery.refetch()
     } catch (error) {
       setAnswerError(error instanceof Error ? error.message : 'Answer failed')
     } finally {
@@ -202,9 +296,14 @@ export function MissionOverviewCard() {
       ) : null}
       {mission.result ? <p className="mt-3 text-sm">Result: {mission.result}</p> : null}
       {mission.error ? <p className="mt-3 text-sm text-red-400">{mission.error}</p> : null}
+      {replayQuery.isError ? (
+        <p className="mt-3 text-xs text-red-400">
+          Mission history unavailable: {(replayQuery.error as Error).message}
+        </p>
+      ) : null}
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer select-none text-xs font-medium opacity-75">
-          Tasks {mission.tasks.length} · Workers {mission.workers.length} · Gates {mission.gates.length} · Changes {mission.changes.length}
+          Tasks {mission.tasks.length} · Workers {mission.workers.length} · Gates {mission.gates.length} · Changes {mission.changes.length} · Events {missionEvents.length}
         </summary>
         <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div><h3 className="mb-1 text-xs font-semibold">Tasks</h3>{rows(mission.tasks, 'title', 'status')}</div>
@@ -212,6 +311,22 @@ export function MissionOverviewCard() {
           <div><h3 className="mb-1 text-xs font-semibold">Gates</h3>{rows(mission.gates, 'gate_id', 'status')}</div>
           <div><h3 className="mb-1 text-xs font-semibold">Changes</h3>{rows(mission.changes, 'path', 'status')}</div>
         </div>
+        {missionEvents.length ? (
+          <div className="mt-4">
+            <h3 className="mb-1 text-xs font-semibold">Timeline</h3>
+            <ol className="max-h-44 space-y-1 overflow-auto text-xs">
+              {missionEvents.map((event) => (
+                <li key={event.event_id} className="flex gap-2">
+                  <span className="w-8 shrink-0 text-right opacity-45">{event.sequence}</span>
+                  <span>{event.type}</span>
+                  {event.occurred_at ? (
+                    <time className="ml-auto shrink-0 opacity-45">{event.occurred_at}</time>
+                  ) : null}
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : null}
         {mission.terminal.length ? (
           <pre className="mt-4 max-h-56 overflow-auto rounded-md bg-black/20 p-3 text-xs whitespace-pre-wrap">
             {mission.terminal.map((entry) => entry.text).join('')}
@@ -237,7 +352,7 @@ export function MissionOverviewCard() {
           </div>
         ) : null}
         <div className="mt-3 text-[10px] opacity-45">
-          {mission.mission_id} · event {mission.sequence} · state {mission.projection_id}
+          {mission.mission_id} · event {mission.sequence} · cursor {replayQuery.data?.cursor ?? 0} · state {mission.projection_id}
         </div>
       </details>
     </section>
