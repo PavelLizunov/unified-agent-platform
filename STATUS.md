@@ -129,6 +129,8 @@ Last updated: 2026-07-18
   missions without the field preserve their legacy completion contract. `deploy` and `release` route declarations
   fail before mission acceptance/profile activation until exact artifact, environment, deployed-revision and health
   gates are implemented; this closes applicability for the no-deploy pilot, not generic deployment automation.
+  Exact PR/CI/Flux/build-1 rollout evidence:
+  `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
