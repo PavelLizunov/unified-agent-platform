@@ -361,6 +361,55 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
         except missions.MissionError as error:
             assert "different parameters" in str(error)
 
+        telegram, telegram_created = restarted.ingest_owner_goal(
+            "Deliver from Telegram",
+            platform="telegram",
+            source_message_id="telegram-message-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert telegram_created
+        assert restarted.bound_mission(
+            "telegram", "owner-chat", "owner-thread"
+        ) == telegram["mission_id"]
+        assert restarted.binding_history()[-1]["reason"] == "owner-intake"
+        replayed_telegram, replayed_telegram_created = restarted.ingest_owner_goal(
+            "Deliver from Telegram",
+            platform="telegram",
+            source_message_id="telegram-message-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert not replayed_telegram_created and replayed_telegram == telegram
+        assert len(restarted.binding_history()) == 1
+
+        later_telegram, later_created = restarted.ingest_owner_goal(
+            "Deliver the next Telegram goal",
+            platform="telegram",
+            source_message_id="telegram-message-2",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert later_created
+        assert restarted.bound_mission(
+            "telegram", "owner-chat", "owner-thread"
+        ) == later_telegram["mission_id"]
+        restarted.ingest_owner_goal(
+            "Deliver from Telegram",
+            platform="telegram",
+            source_message_id="telegram-message-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert restarted.bound_mission(
+            "telegram", "owner-chat", "owner-thread"
+        ) == later_telegram["mission_id"]
+        assert len(restarted.binding_history()) == 2
+
         before = len(restarted.list(100))
         try:
             restarted.ingest_owner_goal(

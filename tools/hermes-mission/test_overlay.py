@@ -166,6 +166,27 @@ def main() -> None:
         )
         assert 'requested.startswith("answer ")' in gateway
         assert "store.answer(" in gateway
+        assert 'event._uap_owner_goal = True' in gateway
+        assert 'platform="telegram"' in gateway
+        assert 'source_message_id = str(event.message_id or "").strip()' in gateway
+        assert 'reason="owner-intake"' in (clone / "hermes_cli/uap_missions.py").read_text(
+            encoding="utf-8"
+        )
+        stream_handler = api[
+            api.index("    async def _handle_session_chat_stream"):
+            api.index("    async def _handle_chat_completions")
+        ]
+        synchronous_handler = api[
+            api.index("    async def _handle_session_chat("):
+            api.index("    async def _handle_session_chat_stream")
+        ]
+        assert 'source_message_id = body.get("source_message_id")' not in synchronous_handler
+        assert 'source_message_id = body.get("source_message_id")' in stream_handler
+        assert 'platform="workspace"' in stream_handler
+        assert 'code="mission_intake_failed"' in stream_handler
+        assert stream_handler.index("store.ingest_owner_goal(") < stream_handler.index(
+            "system_prompt = body.get"
+        )
         assert "atomic sticky initial block" not in kanban
         assert '"blocked",\n                        {"reason": None, "kind": "needs_input"}' in kanban
         assert "uq_tasks_active_idempotency" in kanban

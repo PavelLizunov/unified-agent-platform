@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v43-dormant-intake-core"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v44-ordinary-owner-intake"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -204,6 +204,7 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-mission, key: producer-key } }
             - name: HERMES_MISSION_OWNER_KEY
               valueFrom: { secretKeyRef: { name: hermes-agent-owner, key: owner-key } }
+            - { name: HERMES_MISSION_INTAKE_ROUTES, value: '{"workspace":"build1-flow-pilot-registered-v4","telegram":"build1-flow-pilot-registered-v4"}' }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }

@@ -214,9 +214,10 @@ not add an application service, workflow engine or mission database.
 4. **Registered reusable profile — ✅ STANDING IDLE CONSUMER INSTALLED (2026-07-18).** PR #245 added one repo-owned
    schema-v4 profile for `hermes-flow-v2-pilot`; exact merge `c19d4bd...` was installed on build-1 and its standing
    timer completed the first automatic idle tick with status 0. The profile binds each Central goal durably, applies
-   cumulative path/file limits and requires Python/Linux/macOS/Windows CI. The Central registry remains absent, so
-   ordinary Workspace/Telegram intake still fails closed. See the
-   [rollout evidence](evidence/registered-flow-profile-v4-rollout-2026-07-18.md).
+   cumulative path/file limits and requires Python/Linux/macOS/Windows CI. The next repository change wires the
+   server-owned Central registry and stable ordinary-message identities from Workspace and Telegram; it still needs
+   live rollout and one non-toy owner-message canary. See the
+   [installed-consumer evidence](evidence/registered-flow-profile-v4-rollout-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
