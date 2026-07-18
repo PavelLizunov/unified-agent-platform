@@ -238,6 +238,8 @@ not add an application service, workflow engine or mission database.
    `delivery: not_applicable` event before terminal completion. Legacy missions remain compatible. A configured
    `deploy` or `release` mode is rejected until exact artifact, environment, deployed-revision and health evidence is
    implemented, so fresh-main verification is no longer allowed to imply deployment for the registered target.
+   Exact rollout evidence:
+   [registered delivery applicability](evidence/registered-delivery-applicability-rollout-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
