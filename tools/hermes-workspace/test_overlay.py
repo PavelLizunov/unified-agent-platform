@@ -151,6 +151,12 @@ def main() -> None:
         assert "source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined" in send_stream
         claude_api = (clone / "src/server/claude-api.ts").read_text()
         assert "source_message_id?: string" in claude_api
+        assert "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" in claude_api
+        create_session = claude_api.index("export async function createSession")
+        update_session = claude_api.index("export async function updateSession")
+        assert "if (!CENTRAL_ONLY && getCapabilities().dashboard.available)" in (
+            claude_api[create_session:update_session]
+        )
 
         send_stream_path = clone / "src/routes/api/send-stream.ts"
         previous_send_stream = send_stream.replace("""        if (CENTRAL_ONLY) {
@@ -173,6 +179,29 @@ def main() -> None:
         assert previous_checked.returncode == 0
         assert "previous-needs-overlay" not in previous_checked.stdout
         assert "src/routes/api/send-stream.ts: exact-patched" in previous_checked.stdout
+
+        claude_api_path = clone / "src/server/claude-api.ts"
+        previous_claude_api = claude_api.replace(
+            "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'\n",
+            "",
+            1,
+        ).replace(
+            "if (!CENTRAL_ONLY && getCapabilities().dashboard.available)",
+            "if (getCapabilities().dashboard.available)",
+            1,
+        )
+        claude_api_path.write_text(previous_claude_api, encoding="utf-8")
+        assert hashlib.sha256(claude_api_path.read_bytes()).hexdigest() == (
+            "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92"
+        )
+        previous_api = run(clone, "--check")
+        assert previous_api.returncode == 0
+        assert "src/server/claude-api.ts: previous-needs-overlay" in previous_api.stdout
+        previous_api_upgrade = run(clone)
+        assert previous_api_upgrade.returncode == 0, previous_api_upgrade.stderr
+        previous_api_checked = run(clone, "--check")
+        assert previous_api_checked.returncode == 0
+        assert "src/server/claude-api.ts: exact-patched" in previous_api_checked.stdout
 
         kanban = (clone / "src/server/kanban-backend.ts").read_text()
         central_selection = kanban.index("if (CENTRAL_ONLY)", kanban.index("export function resolveKanbanBackend"))
