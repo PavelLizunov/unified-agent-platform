@@ -138,6 +138,11 @@ Last updated: 2026-07-18
   followed by green CI and exact-head merge. Exact evidence:
   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+  Current source now applies the same parent-bound namespace to author Codex turns. The author receives one additional
+  writable path—its deterministic disposable worktree—while source checkout, sibling worktrees and mission state
+  remain read-only; common credentials, control-plane environment, unrelated `/proc` and the user runtime remain
+  hidden. Coordinator tests cover the exact author/reviewer command boundaries. Linux installed-wrapper and one real
+  author execution through this new boundary remain rollout gates before it can be called deployed proof.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is

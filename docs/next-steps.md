@@ -293,6 +293,13 @@ not add an application service, workflow engine or mission database.
     required CI, exact Flux rollout, mounted-runtime hash and an in-pod byte-for-byte Central/Telegram assertion passed.
     A later real terminal message remains the evidence gate. See the
     [rollout evidence](evidence/concrete-terminal-result-rollout-2026-07-19.md).
+12. **Author OS isolation — SOURCE GATE PASS; BUILD-1 PROOF PENDING.** Reuse the reviewer transient user-systemd
+    boundary for author Codex turns. The author may write only its deterministic disposable worktree and the existing
+    mission-local model/Codex homes; source checkout, sibling worktrees and mission state stay read-only, while common
+    credentials, control-plane environment, unrelated processes and the user runtime stay inaccessible. The existing
+    route, prompt, capacity/retry and exact runtime-attestation contracts do not change. Coordinator tests cover both
+    actor variants. Required next evidence is an installed exact-wrapper write/credential/process probe followed by
+    one real runtime-attested author turn through the boundary.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

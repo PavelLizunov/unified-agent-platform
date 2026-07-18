@@ -58,6 +58,10 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   `docs/evidence/a7-lifecycle-rollout-2026-07-17.md` and
   `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`. Generic repository intake and complete cross-channel
   chat/session history remain outside that proof.
+- **Model process isolation:** reviewer OS isolation is installed and live-proven. Current source reuses that exact
+  parent-bound transient user-systemd boundary for author, with only the disposable author worktree plus model/Codex
+  homes writable. Do not claim author rollout proof until the build-1 installed-wrapper probe and a real author turn
+  pass; see `STATUS.md` and `docs/next-steps.md`.
 - Git branch `master`. For exact history run `git log --oneline -8` (this file is not the source of truth for hashes).
   Plan fact-check (2026-06-18, `STATUS.md`): Garage (ADR-019), Restate→S3 (ADR-020), RU egress (ADR-018),
   k3s-over-Tailscale (ADR-021). The ad-hoc egress + Vaultwarden on `uap-ops-1` (2 GB non-cluster VM) remain a
