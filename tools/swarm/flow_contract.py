@@ -27,7 +27,11 @@ def _decode_diagnostic_escapes(text: str) -> str | None:
     decoded: list[str] = []
     index = 0
     while index < len(text):
-        if not text.startswith(r"\u", index):
+        if not (
+            text[index] == "\\"
+            and index + 1 < len(text)
+            and text[index + 1] in "uU"
+        ):
             decoded.append(text[index])
             index += 1
             continue
@@ -44,7 +48,7 @@ def _decode_diagnostic_escapes(text: str) -> str | None:
                 return None
             index += 4
             character = chr(codepoint)
-            if character == "\\" and index < len(text) and text[index] == "u":
+            if character == "\\" and index < len(text) and text[index] in "uU":
                 index += 1
                 continue
             decoded.append(character)

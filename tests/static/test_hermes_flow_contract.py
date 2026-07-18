@@ -171,6 +171,7 @@ class FlowContractTests(unittest.TestCase):
             rf"Authorization\u{{D800}}: {secret}",
             rf"Authorization\u: {secret}",
             rf"Author\u@@ization: {secret}",
+            rf"Author\U0069zation: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertNotIn(secret, flow._safe_error(diagnostic))
@@ -191,6 +192,7 @@ class FlowContractTests(unittest.TestCase):
             rf"Authorization\u@@@@: {secret}",
             rf"Authorization\u{{D800}}: {secret}",
             rf"Authorization\u: {secret}",
+            rf"Author\U0069zation: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 stderr = io.StringIO()

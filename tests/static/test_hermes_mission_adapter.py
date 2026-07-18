@@ -491,6 +491,7 @@ class MissionAdapterTests(unittest.TestCase):
             rf"Authorization\u@@@@: {secret}",
             rf"Authorization\u{{D800}}: {secret}",
             rf"Authorization\u: {secret}",
+            rf"Author\U0069zation: {secret}",
         )
 
         for diagnostic in diagnostics:

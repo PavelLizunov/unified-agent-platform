@@ -766,6 +766,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             rf"Authorization\u@@@@: {secret}",
             rf"Authorization\u{{D800}}: {secret}",
             rf"Authorization\u: {secret}",
+            rf"Author\U0069zation: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 result = subprocess.CompletedProcess(
@@ -883,6 +884,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             rf"Authorization\u@@@@: {secret}",
             rf"Authorization\u{{D800}}: {secret}",
             rf"Authorization\u: {secret}",
+            rf"Author\U0069zation: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 stderr = io.StringIO()
