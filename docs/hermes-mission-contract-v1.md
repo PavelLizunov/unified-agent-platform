@@ -82,13 +82,20 @@ configuration match authorizes handoff. An absent or unknown label does not disp
 - A missing central authority is an explicit unavailable state. `HERMES_CENTRAL_ONLY=1` must not switch to local
   sessions, profiles, tasks, Kanban, jobs or native-swarm execution.
 
-### Registered owner intake
+### Deterministic owner-intake primitive (production-disabled)
 
-The owner-facing `POST /api/missions` shape is closed to `goal`, channel identity and a stable source-message ID. It
-does not accept a repository, path, command, model or `dispatch_profile`. Central resolves the exact profile from its
-server-owned `HERMES_MISSION_INTAKE_ROUTES` registry; the matching build-1 profile remains the authority for repository
-and execution boundaries. An absent, malformed or unknown channel route fails before any mission event is stored.
-Producer-authenticated repair/internal callers retain the explicit identity/profile form.
+The owner-facing `POST /api/missions` primitive has a shape closed to `goal`, channel identity and a stable
+source-message ID. It does not accept a repository, path, command, model or `dispatch_profile`. When enabled, Central
+resolves the exact profile from its server-owned `HERMES_MISSION_INTAKE_ROUTES` registry; the matching build-1 profile
+remains the authority for repository and execution boundaries. An absent, malformed or unknown channel route fails
+before any mission event is stored. Producer-authenticated repair/internal callers retain the explicit
+identity/profile form.
+
+The production Deployment intentionally does not set `HERMES_MISSION_INTAKE_ROUTES` at this checkpoint. The installed
+schema-v3 canary profile has a fixed goal and is not a safe target for arbitrary owner messages, while ordinary
+Workspace and Telegram message handlers do not yet supply the source identity. Therefore the owner form currently
+fails closed with no mission state. Tests and the API smoke inject a disposable registry explicitly. Production
+enablement requires a reusable owner-approved profile and both channel ingress paths in the same follow-up rollout.
 
 For an ordinary owner turn, Central derives `mission_id` from the platform, channel/session identity and stable source
 message ID. The existing immutable `mission.accepted` event is therefore also the durable intake receipt: a retry
@@ -146,7 +153,7 @@ variables rather than argv. The caller supplies the fixed assignee and non-scrat
 becomes a shell command.
 
 `dispatch_profile` remains an immutable routing selector, not a capability. Internal producers may supply it only
-with the producer key; ordinary owner intake obtains it from Central's exact registered channel route. The
+with the producer key; enabled ordinary owner intake obtains it from Central's exact registered channel route. The
 owner-approved build-1 invocation supplies the matching profile, workspace and optional assignee. A7.1 considers the
 blocked root handed off once its deterministic `task.upsert` is projected. Reconciliation
 uses a separate bounded `reconcile` command and `reconcile=1` Central selector: it finds one already handed-off active
