@@ -1065,10 +1065,15 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         )
         publish(
             "worker.upsert",
-            {"worker_id": "task-1:run:1", "run_id": "1", "profile": "codex-luna", "status": "success"},
+            {"worker_id": "task-1:run:1", "run_id": "1", "profile": "codex-luna", "status": "scheduled"},
             2,
         )
-        number = 3
+        publish(
+            "worker.upsert",
+            {"worker_id": "task-1:run:2", "run_id": "2", "profile": "codex-luna", "status": "success"},
+            3,
+        )
+        number = 4
         for gate_id in ("tests", "review", "ci", "post-verify"):
             publish("gate.upsert", {"gate_id": gate_id, "status": "passed"}, number)
             number += 1
@@ -1171,7 +1176,7 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert store.complete_if_ready(mission_id) is None
 
 
-def test_auto_completion_rejects_multiple_workers() -> None:
+def test_auto_completion_accepts_only_scheduled_capacity_history() -> None:
     view = missions.empty_projection()
     view.update(
         status="active",
@@ -1188,9 +1193,17 @@ def test_auto_completion_rejects_multiple_workers() -> None:
     )
     assert not missions.completion_ready(view)
     view.update(
-        status="waiting_owner",
-        workers=[{"worker_id": "worker-1", "status": "success"}],
+        workers=[
+            {"worker_id": "worker-1", "status": "scheduled"},
+            {"worker_id": "worker-2", "status": "success"},
+        ],
     )
+    assert missions.completion_ready(view)
+    view["workers"][0]["status"] = "running"
+    assert not missions.completion_ready(view)
+    view["workers"][0]["status"] = "failed"
+    assert not missions.completion_ready(view)
+    view.update(status="waiting_owner", workers=[{"worker_id": "worker-1", "status": "success"}])
     assert not missions.completion_ready(view)
 
 
@@ -2185,7 +2198,7 @@ def main() -> None:
     test_terminal_authority_is_loopback_only()
     test_owner_answer_capability_is_separate_from_the_producer_key()
     test_central_auto_completion_requires_the_full_delivery_contract()
-    test_auto_completion_rejects_multiple_workers()
+    test_auto_completion_accepts_only_scheduled_capacity_history()
     test_completion_ready_depends_only_on_delivery_contract()
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()
     test_owner_answer_is_idempotent_and_resumes_the_same_mission()

@@ -464,6 +464,22 @@ def telegram_text(view: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _one_terminal_worker(
+    workers: Any, terminal_statuses: set[str]
+) -> bool:
+    if (
+        not isinstance(workers, list)
+        or not workers
+        or not all(isinstance(worker, dict) for worker in workers)
+    ):
+        return False
+    statuses = [worker.get("status") for worker in workers]
+    return (
+        statuses[-1] in terminal_statuses
+        and all(status == "scheduled" for status in statuses[:-1])
+    )
+
+
 def completion_ready(view: dict[str, Any]) -> bool:
     """Apply the narrow A7.3 one-task delivery completion policy."""
     if (
@@ -477,9 +493,7 @@ def completion_ready(view: dict[str, Any]) -> bool:
         not isinstance(tasks, list)
         or len(tasks) != 1
         or tasks[0].get("status") not in {"done", "archived"}
-        or not isinstance(workers, list)
-        or len(workers) != 1
-        or workers[0].get("status") not in {"success", "completed"}
+        or not _one_terminal_worker(workers, {"success", "completed"})
     ):
         return False
     gates = {
@@ -518,9 +532,7 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         not isinstance(tasks, list)
         or len(tasks) != 1
         or tasks[0].get("status") not in {"done", "archived"}
-        or not isinstance(workers, list)
-        or len(workers) != 1
-        or workers[0].get("status") != "completed"
+        or not _one_terminal_worker(workers, {"completed"})
     ):
         return False
     gates = {
