@@ -37,7 +37,7 @@ PATCHED_FILES = {
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
 "src/routes/api/send-stream.ts": "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
-"src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned patched SHA-256
+"src/server/claude-api.ts": "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
@@ -50,6 +50,7 @@ LEGACY_FILES = {
 }
 PREVIOUS_PATCHED_FILES = {
 "src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
+"src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
 }
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
@@ -330,6 +331,17 @@ function readString""", "send stream central-only flag")
                   source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
                 },""", "ordinary goal forwarding")
     elif rel == "src/server/claude-api.ts":
+        text = replace(text, """} from './claude-dashboard-api'
+
+const _authHeaders""", """} from './claude-dashboard-api'
+
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+const _authHeaders""", "central-only session source")
+        text = replace(text, """}): Promise<ClaudeSession> {
+  if (getCapabilities().dashboard.available) {
+    const resp = await createDashboardSession(opts || {})""", """}): Promise<ClaudeSession> {
+  if (!CENTRAL_ONLY && getCapabilities().dashboard.available) {
+    const resp = await createDashboardSession(opts || {})""", "central-only session creation")
         return replace(text, """    attachments?: Array<Record<string, unknown>>
   },""", """    attachments?: Array<Record<string, unknown>>
     source_message_id?: string
@@ -482,6 +494,18 @@ def upgrade_previous(rel, text):
         }""", """        if (CENTRAL_ONLY) {
           chatMode = 'enhanced-claude'
         }""", "central-only stream upgrade")
+    if rel == "src/server/claude-api.ts":
+        text = replace(text, """} from './claude-dashboard-api'
+
+const _authHeaders""", """} from './claude-dashboard-api'
+
+const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
+const _authHeaders""", "central-only session source upgrade")
+        return replace(text, """}): Promise<ClaudeSession> {
+  if (getCapabilities().dashboard.available) {
+    const resp = await createDashboardSession(opts || {})""", """}): Promise<ClaudeSession> {
+  if (!CENTRAL_ONLY && getCapabilities().dashboard.available) {
+    const resp = await createDashboardSession(opts || {})""", "central-only session creation upgrade")
     raise SystemExit(f"no previous patched upgrade for {rel}")
 
 def main():
