@@ -52,12 +52,12 @@ _PROFILE_FIELDS = {
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
     "post_verify_repair",
-    "delivery_mode",
+    "delivery_mode", "completion_evidence",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "goal", "required_files", "allowed_path_prefixes", "max_changed_files",
     "crash_after_author_commit_once", "route_flags", "codex_bin", "gh_bin",
-    "codex_home", "post_verify_repair", "delivery_mode",
+    "codex_home", "post_verify_repair", "delivery_mode", "completion_evidence",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -263,6 +263,10 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     if version == 3 and crash is not True:
         raise DeliveryError("A7.3 schema 3 profile must enable the approved one-time crash")
     profile["crash_after_author_commit_once"] = crash
+    completion_evidence = profile.get("completion_evidence", False)
+    if not isinstance(completion_evidence, bool):
+        raise DeliveryError("profile.completion_evidence must be boolean")
+    profile["completion_evidence"] = completion_evidence
     if (
         not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,100}", profile["branch_prefix"])
         or ".." in profile["branch_prefix"]
@@ -479,6 +483,16 @@ def _ci_summaries(checks: Any) -> list[dict[str, str]]:
     return summaries
 
 
+def _ci_run_ids(checks: Any) -> list[int]:
+    return sorted({
+        item["run_id"]
+        for item in checks if isinstance(item, dict)
+        and isinstance(item.get("run_id"), int)
+        and not isinstance(item.get("run_id"), bool)
+        and item["run_id"] > 0
+    }) if isinstance(checks, list) else []
+
+
 def _stored_ci_passed(checks: Any, required: list[str]) -> bool:
     if not isinstance(checks, list) or not checks:
         return False
@@ -594,6 +608,68 @@ class DeliveryCoordinator:
             GIT_TERMINAL_PROMPT="0",
         )
         return environment
+
+    def _record_systemd_invocation(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        if not self.profile.get("completion_evidence"):
+            return
+        unit = os.environ.get("UAP_COORDINATOR_UNIT", "")
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if (
+            not _REVIEWER_PARENT_UNIT.fullmatch(unit)
+            or not runtime
+            or (os.name == "posix" and runtime != f"/run/user/{os.getuid()}")
+        ):
+            raise DeliveryError("completion evidence requires the exact systemd activation boundary")
+        environment = {
+            name: os.environ[name]
+            for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+            if name in os.environ
+        }
+        result = self.runner(
+            [
+                "/usr/bin/systemctl", "--user", "show", unit,
+                "--property=InvocationID", "--value",
+            ],
+            cwd=None,
+            input=None,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+            env=environment,
+        )
+        invocation_id = result.stdout.strip() if result.returncode == 0 else ""
+        if not re.fullmatch(r"[0-9a-f]{32}", invocation_id):
+            raise DeliveryError("completion evidence could not attest the systemd invocation")
+        invocation = {"unit": unit, "invocation_id": invocation_id}
+        history = state.get("systemd_invocations")
+        if history is not None and (
+            not isinstance(history, dict)
+            or set(history) != {"count", "first", "last", "chain_sha256"}
+            or isinstance(history.get("count"), bool)
+            or not isinstance(history.get("count"), int)
+            or history["count"] < 1
+            or not isinstance(history.get("first"), dict)
+            or not isinstance(history.get("last"), dict)
+            or set(history["first"]) != {"unit", "invocation_id"}
+            or set(history["last"]) != {"unit", "invocation_id"}
+            or not re.fullmatch(r"[0-9a-f]{64}", str(history.get("chain_sha256") or ""))
+        ):
+            raise DeliveryError("durable systemd invocation history is invalid")
+        if history is not None and history["last"] == invocation:
+            return
+        previous = None if history is None else history["chain_sha256"]
+        state["systemd_invocations"] = {
+            "count": 1 if history is None else history["count"] + 1,
+            "first": invocation if history is None else history["first"],
+            "last": invocation,
+            "chain_sha256": flow_contract.canonical_sha256({
+                "previous": previous, **invocation,
+            }),
+        }
+        self._save(paths, state)
 
     def _isolated_reviewer_command(
         self,
@@ -1447,6 +1523,7 @@ class DeliveryCoordinator:
             "review": root / f"review-{digest}",
             "verify": root / f"verify-{digest}",
             "repair_context": directory / "post-verify-repair.json",
+            "evidence": directory / "completion-evidence.json",
         }
 
     @staticmethod
@@ -1550,7 +1627,7 @@ class DeliveryCoordinator:
                 state["phase"] = "author_committed"
                 for field in (
                     "pre_review_gate_version", "pre_review_ci_checks", "review_verification",
-                    "reviewer_telemetry", "ci_checks",
+                    "pre_review_ci_run_ids", "reviewer_telemetry", "ci_checks", "ci_run_ids",
                 ):
                     state.pop(field, None)
                 migrated = True
@@ -2261,6 +2338,7 @@ class DeliveryCoordinator:
         )
         state.pop("pre_review_gate_version", None)
         state.pop("pre_review_ci_checks", None)
+        state.pop("pre_review_ci_run_ids", None)
         state.pop("review_findings", None)
         state.pop("model_invocation", None)
         self._save(paths, state)
@@ -2754,6 +2832,7 @@ class DeliveryCoordinator:
                     phase="pre_review_ci_green",
                     pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
                     pre_review_ci_checks=_ci_summaries(checks),
+                    pre_review_ci_run_ids=_ci_run_ids(checks),
                 )
                 self._save(paths, state)
                 return
@@ -3123,6 +3202,7 @@ class DeliveryCoordinator:
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
                 state["ci_checks"] = _ci_summaries(checks)
+                state["ci_run_ids"] = _ci_run_ids(checks)
                 return
             if decision == "failed":
                 raise CIFailed("PR CI failed or did not satisfy the exact required checks", checks)
@@ -3261,6 +3341,7 @@ class DeliveryCoordinator:
         if decision != "passed":
             raise DeliveryError("required PR CI is not green at the merge boundary")
         state["ci_checks"] = _ci_summaries(checks)
+        state["ci_run_ids"] = _ci_run_ids(checks)
 
     def _record_ci_failure(
         self,
@@ -3649,6 +3730,181 @@ class DeliveryCoordinator:
             events.append({"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}})
         return events
 
+    def _completion_evidence(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        terminal: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.profile.get("delivery_mode") != "none":
+            raise DeliveryError("completion evidence requires an implemented delivery applicability")
+        self._validate_review(state)
+        source_checkout = pathlib.Path(self.profile["source_checkout"])
+        worktrees_removed = not any(
+            paths[name].exists() for name in ("author", "review", "verify")
+        )
+        local_branch_deleted = not bool(
+            self._git(source_checkout, "branch", "--list", state["branch"])
+        )
+        remote_branch_deleted = not bool(
+            self._git(source_checkout, "ls-remote", "--heads", "origin", state["branch"])
+        )
+        route = self._current_route(state)
+        author = state.get("author_telemetry")
+        reviewer = state.get("reviewer_telemetry")
+        verification = state.get("review_verification")
+        if not all(isinstance(item, dict) for item in (author, reviewer, verification)):
+            raise DeliveryError("completion evidence lacks runtime review artifacts")
+        goal_sha256 = state.get("mission_goal_sha256")
+        if self.profile["schema_version"] == 3:
+            goal_sha256 = hashlib.sha256(
+                self.profile["goal"].encode("utf-8")
+            ).hexdigest()
+        post_verify = state.get("post_verify_checks")
+        if not isinstance(post_verify, list) or not post_verify:
+            raise DeliveryError("completion evidence lacks post-verify checks")
+        ci_run_ids: list[int] = []
+        for field in ("pre_review_ci_run_ids", "ci_run_ids"):
+            values = state.get(field)
+            if (
+                not isinstance(values, list)
+                or any(
+                    isinstance(item, bool) or not isinstance(item, int) or item <= 0
+                    for item in values
+                )
+            ):
+                raise DeliveryError("completion evidence lacks exact CI run identities")
+            ci_run_ids.extend(values)
+        bundle: dict[str, Any] = {
+            "schema_version": 1,
+            "mission": {
+                "mission_id": state.get("mission_id"),
+                "dispatch_profile": state.get("dispatch_profile"),
+                "goal_sha256": goal_sha256,
+                "parent_mission_id": state.get("parent_mission_id"),
+                "owner_answer_sha256s": sorted(
+                    item["sha256"] for item in self._owner_answers(state)
+                ),
+            },
+            "runtime": {
+                "coordinator_sha256": hashlib.sha256(
+                    pathlib.Path(__file__).read_bytes()
+                ).hexdigest(),
+                "profile_sha256": flow_contract.canonical_sha256(self.profile),
+                "policy_sha256": flow_contract.canonical_sha256(self.policy),
+                "invocations": state.get("systemd_invocations"),
+            },
+            "route": {
+                "decision_id": route.get("decision_id"),
+                "policy_id": route.get("policy_id"),
+                "policy_sha256": route.get("policy_sha256"),
+                "route": route.get("route"),
+                "author_model": route.get("author", {}).get("model"),
+                "reviewer_model": route.get("reviewer", {}).get("model"),
+            },
+            "execution": {
+                "root_task_id": str(state.get("root_task_id") or ""),
+                "run_id": str(state.get("run_id") or ""),
+            },
+            "source": {
+                "repo": self.profile["repo"],
+                "base_sha": state.get("base_sha"),
+                "candidate_sha": state.get("candidate_sha"),
+                "candidate_files": self._candidate_files(state),
+                "merge_sha": state.get("merge_sha"),
+                "default_sha": state.get("default_sha"),
+                "candidate_ancestor_of_merge": True,
+                "merge_ancestor_of_default": True,
+            },
+            "author": {
+                "session_id": author.get("session_id"),
+                "model": author.get("model"),
+                "reasoning_effort": author.get("reasoning_effort"),
+                "sandbox": author.get("sandbox"),
+                "head_sha": author.get("head_sha"),
+                "tree_sha": author.get("tree_sha"),
+                "route_decision_id": state.get("author_summary", {}).get(
+                    "route_decision_id"
+                ),
+            },
+            "reviewer": {
+                "session_id": reviewer.get("session_id"),
+                "model": reviewer.get("model"),
+                "reasoning_effort": reviewer.get("reasoning_effort"),
+                "sandbox": reviewer.get("sandbox"),
+                "reviewed_sha": verification.get("reviewed_sha"),
+                "head_sha": reviewer.get("head_sha"),
+                "tree_sha": reviewer.get("tree_sha"),
+                "route_decision_id": verification.get("route_decision_id"),
+                "source_attestation_sha256": reviewer.get(
+                    "source_attestation_sha256"
+                ),
+            },
+            "delivery": {
+                "mode": self.profile.get("delivery_mode"),
+                "applicability": "not_applicable",
+                "pr_number": state.get("pr_number"),
+                "pr_url": state.get("pr_url"),
+                "pr_head_sha": state.get("pr_head_sha"),
+                "pr_base_branch": state.get("pr_base_branch"),
+                "ci_run_ids": sorted(set(ci_run_ids)),
+            },
+            "gates": {
+                "required_ci_checks": sorted(self.profile["required_ci_checks"]),
+                "pre_review_ci_checks": state.get("pre_review_ci_checks"),
+                "ci_checks": state.get("ci_checks"),
+                "post_verify_checks": post_verify,
+            },
+            "cleanup": {
+                "worktrees_removed": worktrees_removed,
+                "local_branch_deleted": local_branch_deleted,
+                "remote_branch_deleted": remote_branch_deleted,
+                "task_archived": state.get("task_archived") is True,
+                "kanban_gc_ran": state.get("kanban_gc_ran") is True,
+            },
+            "central": {
+                "status": terminal.get("status"),
+                "sequence": terminal.get("sequence"),
+                "projection_id": terminal.get("projection_id"),
+                "result": terminal.get("result"),
+            },
+        }
+        bundle["sha256"] = flow_contract.canonical_sha256(bundle)
+        try:
+            return flow_contract.validate_completion_evidence(bundle)
+        except flow_contract.ContractError as error:
+            raise DeliveryError(f"completion evidence is invalid: {error}") from error
+
+    def _write_completion_evidence(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        terminal: dict[str, Any],
+    ) -> None:
+        if not self.profile.get("completion_evidence"):
+            return
+        bundle = self._completion_evidence(state, paths, terminal)
+        mission_adapter._write_json(paths["evidence"], bundle, private_parent=True)
+        persisted = mission_adapter._read_json(paths["evidence"])
+        flow_contract.validate_completion_evidence(persisted)
+        state["completion_evidence_sha256"] = bundle["sha256"]
+
+    def _validate_persisted_completion_evidence(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        if not self.profile.get("completion_evidence"):
+            return
+        if not paths["evidence"].is_file():
+            raise DeliveryError("completed mission has no evidence bundle")
+        try:
+            bundle = flow_contract.validate_completion_evidence(
+                mission_adapter._read_json(paths["evidence"])
+            )
+        except (flow_contract.ContractError, OSError, ValueError) as error:
+            raise DeliveryError("completed mission evidence bundle is invalid") from error
+        if bundle["sha256"] != state.get("completion_evidence_sha256"):
+            raise DeliveryError("completed mission evidence digest changed")
+
     def _cleanup(
         self,
         state: dict[str, Any],
@@ -3830,6 +4086,8 @@ class DeliveryCoordinator:
         paths = self._paths(mission_id)
         with exclusive_lock(paths["lock"]):
             state = self._load_state(mission_id, paths)
+            if state.get("phase") != "complete":
+                self._record_systemd_invocation(state, paths)
             self._bind_mission_goal(state, mission, paths)
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
@@ -3842,8 +4100,12 @@ class DeliveryCoordinator:
                 if state.get("phase") not in {"task_completed", "complete"}:
                     raise DeliveryError("Central completed before local delivery cleanup")
                 self._archive_task(state, paths)
-                state["phase"] = "complete"
-                self._save(paths, state)
+                if state["phase"] == "task_completed":
+                    self._write_completion_evidence(state, paths, mission)
+                    state["phase"] = "complete"
+                    self._save(paths, state)
+                else:
+                    self._validate_persisted_completion_evidence(state, paths)
                 return {"action": "complete", "mission_id": mission_id, "state": state}
             if mission.get("status") in {"failed", "cancelled"}:
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
@@ -4053,6 +4315,7 @@ class DeliveryCoordinator:
                 if terminal.get("status") != "completed":
                     raise DeliveryError("Central did not complete the fully verified mission")
                 self._archive_task(state, paths)
+                self._write_completion_evidence(state, paths, terminal)
                 state["phase"] = "complete"
                 self._save(paths, state)
             return {"action": state["phase"], "mission_id": mission_id, "state": state}

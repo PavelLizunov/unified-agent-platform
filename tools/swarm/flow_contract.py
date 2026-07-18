@@ -115,6 +115,310 @@ def write_json(path: str | pathlib.Path, value: dict[str, Any]) -> None:
         handle.write("\n")
 
 
+def canonical_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value, allow_nan=False, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate one closed, self-digesting successful-delivery evidence bundle."""
+    top = {
+        "schema_version", "sha256", "mission", "runtime", "route", "execution",
+        "source", "author", "reviewer", "delivery", "gates", "cleanup", "central",
+    }
+    if set(value) != top or value.get("schema_version") != 1:
+        raise ContractError("completion evidence has an invalid schema")
+    digest = _required_text(value, "sha256", "completion_evidence")
+    unsigned = {key: item for key, item in value.items() if key != "sha256"}
+    try:
+        computed_digest = canonical_sha256(unsigned)
+    except (TypeError, ValueError) as error:
+        raise ContractError("completion evidence is not canonical JSON") from error
+    if not re.fullmatch(r"[0-9a-f]{64}", digest) or computed_digest != digest:
+        raise ContractError("completion evidence digest mismatch")
+
+    expected = {
+        "mission": {
+            "mission_id", "dispatch_profile", "goal_sha256", "parent_mission_id",
+            "owner_answer_sha256s",
+        },
+        "runtime": {
+            "coordinator_sha256", "profile_sha256", "policy_sha256", "invocations",
+        },
+        "route": {
+            "decision_id", "policy_id", "policy_sha256", "route", "author_model",
+            "reviewer_model",
+        },
+        "execution": {"root_task_id", "run_id"},
+        "source": {
+            "repo", "base_sha", "candidate_sha", "candidate_files", "merge_sha",
+            "default_sha", "candidate_ancestor_of_merge", "merge_ancestor_of_default",
+        },
+        "author": {
+            "session_id", "model", "reasoning_effort", "sandbox", "head_sha",
+            "tree_sha", "route_decision_id",
+        },
+        "reviewer": {
+            "session_id", "model", "reasoning_effort", "sandbox", "reviewed_sha",
+            "head_sha", "tree_sha", "route_decision_id", "source_attestation_sha256",
+        },
+        "delivery": {
+            "mode", "applicability", "pr_number", "pr_url", "pr_head_sha",
+            "pr_base_branch", "ci_run_ids",
+        },
+        "gates": {
+            "required_ci_checks", "pre_review_ci_checks", "ci_checks",
+            "post_verify_checks",
+        },
+        "cleanup": {
+            "worktrees_removed", "local_branch_deleted", "remote_branch_deleted",
+            "task_archived", "kanban_gc_ran",
+        },
+        "central": {"status", "sequence", "projection_id", "result"},
+    }
+    parts: dict[str, dict[str, Any]] = {}
+    for name, fields in expected.items():
+        item = value.get(name)
+        if not isinstance(item, dict) or set(item) != fields:
+            raise ContractError(f"completion evidence {name} has an invalid schema")
+        parts[name] = item
+
+    mission, runtime, route = parts["mission"], parts["runtime"], parts["route"]
+    source, author, reviewer = parts["source"], parts["author"], parts["reviewer"]
+    delivery, gates = parts["delivery"], parts["gates"]
+    cleanup, central = parts["cleanup"], parts["central"]
+    execution = parts["execution"]
+    for item, field, where in (
+        (mission, "mission_id", "mission"),
+        (mission, "dispatch_profile", "mission"),
+        (source, "repo", "source"),
+        (route, "decision_id", "route"),
+        (route, "policy_id", "route"),
+        (route, "route", "route"),
+        (execution, "root_task_id", "execution"),
+        (execution, "run_id", "execution"),
+        (delivery, "pr_url", "delivery"),
+        (delivery, "pr_base_branch", "delivery"),
+        (central, "projection_id", "central"),
+        (central, "result", "central"),
+    ):
+        _required_text(item, field, where)
+    for item, fields in (
+        (mission, ("goal_sha256",)),
+        (runtime, ("coordinator_sha256", "profile_sha256", "policy_sha256")),
+        (route, ("decision_id", "policy_sha256")),
+    ):
+        for field in fields:
+            field_value = item.get(field)
+            if not isinstance(field_value, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", field_value
+            ):
+                raise ContractError(f"completion evidence {field} is not SHA-256")
+    if mission["parent_mission_id"] is not None and (
+        not isinstance(mission["parent_mission_id"], str)
+        or not mission["parent_mission_id"]
+    ):
+        raise ContractError("completion evidence parent mission identity is invalid")
+    answers = mission["owner_answer_sha256s"]
+    if (
+        not isinstance(answers, list)
+        or len(answers) > 8
+        or any(
+            not isinstance(item, str) or not re.fullmatch(r"[0-9a-f]{64}", item)
+            for item in answers
+        )
+        or len(answers) != len(set(answers))
+    ):
+        raise ContractError("completion evidence owner answers are invalid")
+
+    invocations = runtime["invocations"]
+    if not isinstance(invocations, dict) or set(invocations) != {
+        "count", "first", "last", "chain_sha256",
+    }:
+        raise ContractError("completion evidence requires systemd invocation identity")
+    count = invocations["count"]
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ContractError("completion evidence invocation count is invalid")
+    for invocation in (invocations["first"], invocations["last"]):
+        if (
+            not isinstance(invocation, dict)
+            or set(invocation) != {"unit", "invocation_id"}
+            or not re.fullmatch(
+                r"hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service",
+                str(invocation.get("unit") or ""),
+            )
+            or not re.fullmatch(r"[0-9a-f]{32}", str(invocation.get("invocation_id") or ""))
+        ):
+            raise ContractError("completion evidence systemd invocation is invalid")
+    if count == 1 and invocations["first"] != invocations["last"]:
+        raise ContractError("completion evidence invocation endpoints disagree")
+    chain = invocations["chain_sha256"]
+    if not isinstance(chain, str) or not re.fullmatch(r"[0-9a-f]{64}", chain):
+        raise ContractError("completion evidence invocation chain is invalid")
+    if count == 1 and chain != canonical_sha256({
+        "previous": None, **invocations["first"],
+    }):
+        raise ContractError("completion evidence invocation chain does not verify")
+
+    git_sha_fields = (
+        (source, "base_sha"), (source, "candidate_sha"), (source, "merge_sha"),
+        (source, "default_sha"), (author, "head_sha"), (author, "tree_sha"),
+        (reviewer, "reviewed_sha"), (reviewer, "head_sha"), (reviewer, "tree_sha"),
+        (delivery, "pr_head_sha"),
+    )
+    for item, field in git_sha_fields:
+        field_value = item.get(field)
+        if not isinstance(field_value, str) or not re.fullmatch(
+            r"[0-9a-f]{40,64}", field_value
+        ):
+            raise ContractError(f"completion evidence {field} is not a Git object identity")
+    candidate = source["candidate_sha"]
+    if not all(
+        item == candidate
+        for item in (
+            author["head_sha"], reviewer["reviewed_sha"], reviewer["head_sha"],
+            delivery["pr_head_sha"],
+        )
+    ):
+        raise ContractError("completion evidence candidate lineage mismatch")
+    if author["tree_sha"] != reviewer["tree_sha"]:
+        raise ContractError("completion evidence reviewed tree mismatch")
+    if (
+        source["candidate_ancestor_of_merge"] is not True
+        or source["merge_ancestor_of_default"] is not True
+    ):
+        raise ContractError("completion evidence default branch lineage mismatch")
+    files = source["candidate_files"]
+    if (
+        not isinstance(files, list)
+        or not files
+        or not all(isinstance(item, str) and item for item in files)
+        or files != sorted(set(files))
+        or any(
+            pathlib.PurePosixPath(item).is_absolute()
+            or ".." in pathlib.PurePosixPath(item).parts
+            for item in files
+        )
+    ):
+        raise ContractError("completion evidence candidate files are invalid")
+
+    for actor, expected_model, expected_sandbox in (
+        (author, route["author_model"], "workspace-write"),
+        (reviewer, route["reviewer_model"], "read-only"),
+    ):
+        for field in ("session_id", "model", "reasoning_effort", "sandbox", "route_decision_id"):
+            _required_text(actor, field, "completion evidence actor")
+        if actor["model"] != expected_model or actor["sandbox"] != expected_sandbox:
+            raise ContractError("completion evidence actor route mismatch")
+        if actor["route_decision_id"] != route["decision_id"]:
+            raise ContractError("completion evidence route decision mismatch")
+    if author["session_id"] == reviewer["session_id"] or author["model"] == reviewer["model"]:
+        raise ContractError("completion evidence review is not independent")
+    source_attestation = reviewer["source_attestation_sha256"]
+    if not isinstance(source_attestation, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", source_attestation
+    ):
+        raise ContractError("completion evidence reviewer source attestation is invalid")
+    approved = _OPENAI_AUTONOMY_ROUTES.get(route["route"])
+    if (
+        route["policy_id"] not in {
+            "openai-autonomy-v1", "openai-autonomy-v2", _CAPACITY_POLICY_ID,
+        }
+        or route["policy_sha256"] != runtime["policy_sha256"]
+        or not isinstance(approved, dict)
+        or route["author_model"] != approved["author"]["model"]
+        or route["reviewer_model"] != approved["reviewer"]["model"]
+        or author["reasoning_effort"] != approved["author"]["reasoning_effort"]
+        or reviewer["reasoning_effort"] != approved["reviewer"]["reasoning_effort"]
+    ):
+        raise ContractError("completion evidence route is outside the approved policy")
+
+    if (
+        delivery["mode"] != "none"
+        or delivery["applicability"] != "not_applicable"
+        or isinstance(delivery["pr_number"], bool)
+        or not isinstance(delivery["pr_number"], int)
+        or delivery["pr_number"] <= 0
+    ):
+        raise ContractError("completion evidence delivery identity is invalid")
+    if delivery["pr_url"] != (
+        f"https://github.com/{source['repo']}/pull/{delivery['pr_number']}"
+    ):
+        raise ContractError("completion evidence PR identity mismatch")
+    run_ids = delivery["ci_run_ids"]
+    if (
+        not isinstance(run_ids, list)
+        or not run_ids
+        or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in run_ids)
+        or run_ids != sorted(set(run_ids))
+    ):
+        raise ContractError("completion evidence CI run identities are invalid")
+    required = gates["required_ci_checks"]
+    if (
+        not isinstance(required, list)
+        or not required
+        or any(not isinstance(item, str) or not item for item in required)
+        or required != sorted(set(required))
+    ):
+        raise ContractError("completion evidence required CI checks are invalid")
+    for field in ("pre_review_ci_checks", "ci_checks"):
+        checks = gates[field]
+        if (
+            not isinstance(checks, list)
+            or not checks
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {"name", "outcome"}
+                or not isinstance(item["name"], str)
+                or not item["name"]
+                or not isinstance(item["outcome"], str)
+                or not item["outcome"]
+                for item in checks
+            )
+        ):
+            raise ContractError(f"completion evidence {field} is empty")
+        if any(
+            not any(
+                item["name"] == name and item["outcome"] == "SUCCESS"
+                for item in checks
+            )
+            for name in required
+        ):
+            raise ContractError(f"completion evidence {field} is not green")
+    post_verify = gates["post_verify_checks"]
+    if (
+        not isinstance(post_verify, list)
+        or not post_verify
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"command", "exit_code"}
+            or not isinstance(item["command"], str)
+            or not item["command"]
+            or isinstance(item["exit_code"], bool)
+            or item["exit_code"] != 0
+            for item in post_verify
+        )
+    ):
+        raise ContractError("completion evidence post-verify checks are not green")
+
+    if any(cleanup[field] is not True for field in (
+        "worktrees_removed", "local_branch_deleted", "remote_branch_deleted",
+        "task_archived",
+    )) or not isinstance(cleanup["kanban_gc_ran"], bool):
+        raise ContractError("completion evidence cleanup is incomplete")
+    if (
+        central["status"] != "completed"
+        or not re.fullmatch(r"[0-9a-f]{16}", central["projection_id"])
+        or isinstance(central["sequence"], bool)
+        or not isinstance(central["sequence"], int)
+        or central["sequence"] <= 0
+    ):
+        raise ContractError("completion evidence Central terminal state is invalid")
+    return value
+
+
 def _required_text(obj: dict[str, Any], key: str, where: str) -> str:
     value = obj.get(key)
     if not isinstance(value, str) or not value.strip():
@@ -1080,6 +1384,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     telemetry.add_argument("--output", required=True)
 
+    evidence = sub.add_parser("verify-completion-evidence")
+    evidence.add_argument("--bundle", required=True)
+    evidence.add_argument("--expected-sha256")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "delivery-route":
@@ -1124,6 +1432,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             write_json(args.output, result)
             print("hermes-flow-telemetry-ok")
+            return 0
+        if args.command == "verify-completion-evidence":
+            result = validate_completion_evidence(load_json(args.bundle))
+            if args.expected_sha256 is not None and result["sha256"] != args.expected_sha256:
+                raise ContractError("completion evidence does not match the expected digest")
+            print(f"hermes-flow-completion-evidence-ok {result['sha256']}")
             return 0
     except (ContractError, OSError, json.JSONDecodeError) as error:
         print(f"hermes-flow-error: {_safe_error(error)}", file=sys.stderr)

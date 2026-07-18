@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import io
 import json
 import os
@@ -2567,6 +2568,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertNotIn("required_files", value)
         self.assertNotIn("crash_after_author_commit_once", value)
         self.assertEqual("none", value["delivery_mode"])
+        self.assertIs(value["completion_evidence"], True)
         self.assertEqual(
             ["test-linux", "test-windows", "test-macos", "test-python"],
             value["required_ci_checks"],
@@ -2625,11 +2627,248 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 with self.assertRaisesRegex(coordinator.DeliveryError, "delivery_mode"):
                     coordinator.load_profile(path)
 
+            invalid = reusable_profile(root)
+            invalid["completion_evidence"] = "yes"
+            path.write_text(json.dumps(invalid), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "completion_evidence"):
+                coordinator.load_profile(path)
+
             legacy = profile(root)
             legacy["delivery_mode"] = "none"
             path.write_text(json.dumps(legacy), encoding="utf-8")
             with self.assertRaisesRegex(coordinator.DeliveryError, "schema 3 forbids"):
                 coordinator.load_profile(path)
+
+    def test_completion_evidence_records_a_restart_safe_systemd_chain(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value = reusable_profile(root)
+            value.update(completion_evidence=True, delivery_mode="none")
+            path = root / "profile.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            invocation = ["1" * 32]
+
+            def runner(command, **_kwargs):
+                self.assertEqual("/usr/bin/systemctl", command[0])
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=invocation[0] + "\n", stderr=""
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(path), FakeClient(), FakeBackend(),
+                root / "state", runner=runner,
+            )
+            paths = instance._paths("mission-systemd")
+            state = instance._load_state("mission-systemd", paths)
+            environment = {
+                "UAP_COORDINATOR_UNIT": (
+                    "hermes-delivery-coordinator@registered.service"
+                ),
+                "XDG_RUNTIME_DIR": f"/run/user/{os.getuid() if os.name == 'posix' else 1000}",
+                "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+            }
+            with mock.patch.dict(os.environ, environment, clear=False):
+                instance._record_systemd_invocation(state, paths)
+                first = json.loads(json.dumps(state["systemd_invocations"]))
+                instance._record_systemd_invocation(state, paths)
+                self.assertEqual(first, state["systemd_invocations"])
+                invocation[0] = "2" * 32
+                instance._record_systemd_invocation(state, paths)
+
+            history = state["systemd_invocations"]
+            self.assertEqual(2, history["count"])
+            self.assertEqual("1" * 32, history["first"]["invocation_id"])
+            self.assertEqual("2" * 32, history["last"]["invocation_id"])
+            self.assertRegex(history["chain_sha256"], r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                history,
+                coordinator.mission_adapter._read_json(paths["state"])[
+                    "systemd_invocations"
+                ],
+            )
+
+            with (
+                mock.patch.dict(os.environ, {"UAP_COORDINATOR_UNIT": "manual"}),
+                self.assertRaisesRegex(coordinator.DeliveryError, "systemd activation"),
+            ):
+                instance._record_systemd_invocation(state, paths)
+
+    def test_completion_evidence_is_written_once_then_verified_on_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value = reusable_profile(root)
+            value.update(completion_evidence=True, delivery_mode="none")
+            path = root / "profile.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            approved = coordinator.load_profile(path)
+            client = FakeClient()
+            client.mission.update(
+                status="completed", tasks=[{"task_id": "task-1"}],
+                delivery_mode="none", sequence=22,
+                projection_id="a" * 16,
+                result="Delivery completed, merged, and verified",
+            )
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths(client.mission["mission_id"])
+            state = instance._load_state(client.mission["mission_id"], paths)
+            state.update(phase="task_completed", root_task_id="task-1", run_id="7")
+            instance._save(paths, state)
+
+            writes = []
+            validations = []
+
+            def write(current, _paths, terminal):
+                writes.append(terminal["projection_id"])
+                current["completion_evidence_sha256"] = "b" * 64
+
+            with (
+                mock.patch.object(instance, "_record_systemd_invocation"),
+                mock.patch.object(instance, "_write_completion_evidence", side_effect=write),
+                mock.patch.object(
+                    instance, "_validate_persisted_completion_evidence",
+                    side_effect=lambda *_args: validations.append(True),
+                ),
+            ):
+                first = instance.tick()
+                second = instance.tick()
+
+            self.assertEqual("complete", first["action"])
+            self.assertEqual("complete", second["action"])
+            self.assertEqual(["a" * 16], writes)
+            self.assertEqual([True], validations)
+
+    def test_completion_evidence_binds_runtime_delivery_and_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value = reusable_profile(root)
+            value.update(completion_evidence=True, delivery_mode="none")
+            path = root / "profile.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            approved = coordinator.load_profile(path)
+            pathlib.Path(approved["source_checkout"]).mkdir(parents=True)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-evidence")
+            candidate = "2" * 40
+            tree = "5" * 40
+            decision = coordinator.flow_contract.choose_delivery_route(
+                instance.policy,
+                {
+                    "schema_version": 1,
+                    "changed_files": approved["max_changed_files"],
+                    "prior_quality_failures": 0,
+                    "flags": approved["route_flags"],
+                },
+            )
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-evidence",
+                "dispatch_profile": approved["dispatch_profile"],
+                "mission_goal": "Deliver a verified change",
+                "mission_goal_sha256": hashlib.sha256(
+                    b"Deliver a verified change"
+                ).hexdigest(),
+                "parent_mission_id": None,
+                "owner_answers": [],
+                "phase": "task_completed",
+                "branch": "codex/a7-3-vpnrouter-evidence",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "base_sha": "1" * 40,
+                "candidate_sha": candidate,
+                "candidate_files": ["src/runtime.py"],
+                "merge_sha": "3" * 40,
+                "default_sha": "4" * 40,
+                "route_decisions": {"0": decision},
+                "effective_route_decisions": {},
+                "prior_author_failures": 0,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "author_summary": {"route_decision_id": decision["decision_id"]},
+                "author_telemetry": {
+                    "session_id": "author-session",
+                    "model": decision["author"]["model"],
+                    "reasoning_effort": decision["author"]["reasoning_effort"],
+                    "sandbox": "workspace-write",
+                    "head_sha": candidate,
+                    "tree_sha": tree,
+                },
+                "review_verification": {
+                    "reviewed_sha": candidate,
+                    "route_decision_id": decision["decision_id"],
+                },
+                "reviewer_telemetry": {
+                    "session_id": "review-session",
+                    "model": decision["reviewer"]["model"],
+                    "reasoning_effort": decision["reviewer"]["reasoning_effort"],
+                    "sandbox": "read-only",
+                    "head_sha": candidate,
+                    "tree_sha": tree,
+                    "source_attestation_sha256": "6" * 64,
+                },
+                "pr_number": 42,
+                "pr_url": "https://github.com/PavelLizunov/VPNRouter/pull/42",
+                "pr_head_sha": candidate,
+                "pr_base_branch": approved["default_branch"],
+                "pre_review_ci_checks": [
+                    {"name": "test", "outcome": "SUCCESS"}
+                ],
+                "pre_review_ci_run_ids": [101],
+                "ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+                "ci_run_ids": [102],
+                "post_verify_checks": [
+                    {"command": "dotnet test", "exit_code": 0}
+                ],
+                "task_archived": True,
+                "kanban_gc_ran": True,
+                "systemd_invocations": {
+                    "count": 2,
+                    "first": {
+                        "unit": "hermes-delivery-coordinator@registered.service",
+                        "invocation_id": "7" * 32,
+                    },
+                    "last": {
+                        "unit": "hermes-delivery-coordinator@registered.service",
+                        "invocation_id": "8" * 32,
+                    },
+                    "chain_sha256": "9" * 64,
+                },
+            }
+            terminal = {
+                "status": "completed",
+                "sequence": 22,
+                "projection_id": "a" * 16,
+                "result": "Delivery completed, merged, and verified",
+            }
+            with (
+                mock.patch.object(instance, "_validate_review"),
+                mock.patch.object(instance, "_git", return_value=""),
+                mock.patch.object(
+                    instance, "_candidate_files", return_value=["src/runtime.py"]
+                ),
+            ):
+                instance._write_completion_evidence(state, paths, terminal)
+
+            bundle = coordinator.mission_adapter._read_json(paths["evidence"])
+            self.assertEqual(
+                bundle, coordinator.flow_contract.validate_completion_evidence(bundle)
+            )
+            self.assertEqual(bundle["sha256"], state["completion_evidence_sha256"])
+            self.assertEqual([101, 102], bundle["delivery"]["ci_run_ids"])
+            self.assertEqual(candidate, bundle["reviewer"]["reviewed_sha"])
+            if os.name == "posix":
+                self.assertEqual(0o600, paths["evidence"].stat().st_mode & 0o777)
+
+            bundle["cleanup"]["task_archived"] = False
+            coordinator.mission_adapter._write_json(
+                paths["evidence"], bundle, private_parent=True
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "invalid"):
+                instance._validate_persisted_completion_evidence(state, paths)
 
     def test_reusable_profile_checks_cumulative_and_both_sides_of_rename(self):
         with tempfile.TemporaryDirectory() as directory:

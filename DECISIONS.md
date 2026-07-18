@@ -501,6 +501,14 @@
   `docs/next-steps.md`; сначала contract/state mapping и offline tests, затем один central mission, build-1 executor
   adapter, синхронные Workspace/Telegram views и только после этого controlled end-to-end canary. Spark Runner остаётся
   остановленным до отдельного решения владельца.
+  Successful delivery также должна оставлять проверяемый машиной, а не только вручную написанный evidence record.
+  Для зарегистрированного профиля coordinator после Central terminal, cleanup и archive записывает owner-only closed
+  JSON bundle: mission/route/runtime hashes, постоянного размера systemd invocation hash-chain, exact Git и PR/CI
+  identities, runtime-derived author/reviewer attestations, post-verify, cleanup и Central projection. Bundle имеет
+  canonical SHA-256 и отдельный semantic verifier; restart либо воспроизводит ещё не зафиксированный bundle, либо
+  только проверяет уже сохранённый. Systemd identity доказывает service boundary, но сама по себе не доказывает timer
+  origin и не заменяет signed GitHub attestation, channel cursors или live canary. Не реализованные `deploy/release`
+  modes по-прежнему fail-closed; bundle для pilot допустим только при явном `delivery_mode: none`.
 
 ## ADR-031 — Автоматическая OpenAI-only маршрутизация без оператора
 
