@@ -125,8 +125,11 @@ Last updated: 2026-07-18
   writes outside the two approved homes while hiding the actual delivery credential file, unrelated `/proc` and
   user-runtime IPC. The first real reviewer attempt exposed an ordering deadlock: `After=` made the transient child
   wait for its still-activating Type=oneshot parent while the parent waited for review. The source fix retains
-  `BindsTo=` but removes that ordering edge; regression coverage and restart of the same durable candidate are the
-  current gate. A completed real Codex reviewer run through the corrected boundary is still pending. Exact rollout evidence:
+  `BindsTo=` but removes that ordering edge; PR #271 is merged and installed. Recovery then correctly quarantined the
+  interrupted in-flight reviewer, exposing that the durable `reconciling` state had no convergence transition. The
+  current source adds reviewer-only retry after proving the old transient unit is unloaded, the read-only checkout is
+  clean at the exact candidate and the draft PR is unchanged. Author ambiguity remains fail-closed. Rollout and a
+  completed real Codex reviewer run through this corrected recovery boundary are still pending. Exact rollout evidence:
   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic

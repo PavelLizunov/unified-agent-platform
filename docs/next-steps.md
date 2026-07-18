@@ -376,8 +376,11 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   exact-wrapper probe proved write denial plus credential/proc/user-runtime isolation while preserving only the two
   approved write roots. The first real attempt found that `After=` deadlocked the transient reviewer against its
   still-activating Type=oneshot parent; the minimal correction keeps `BindsTo=` and removes only that ordering edge.
-  One completed runtime-attested Codex review through the corrected boundary is still required before claiming a
-  live reviewer canary. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
+  PR #271 is merged and installed. Its crash recovery then exposed a second narrow gap: the interrupted reviewer was
+  safely quarantined but remained in `reconciling` forever. The follow-up source retries only a reviewer whose old
+  transient unit is unloaded and whose read-only exact-SHA checkout and draft PR are unchanged; author ambiguity stays
+  fail-closed. Rollout and one completed runtime-attested review are still required before claiming a live reviewer
+  canary. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
   the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.

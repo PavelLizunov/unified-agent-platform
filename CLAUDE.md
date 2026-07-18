@@ -222,7 +222,9 @@ Good next tasks that do not require redesign:
    read-only filesystem/home, hidden unrelated `/proc`, private tmp, explicit model/Codex runtime write paths and
    masked common credentials/user-runtime IPC. PR #266 and installed exact-wrapper probe are green. The first real
    attempt found an `After=`/Type=oneshot parent deadlock; the source correction keeps `BindsTo=` without that ordering
-   edge, and the same durable candidate must resume after install. Evidence:
+   edge and PR #271 is installed. Its restart preserved the same candidate but stopped in a permanent reviewer
+   `reconciling` checkpoint. The current follow-up source adds the guarded reviewer-only convergence transition; it
+   must be merged, installed and allowed to resume the same candidate through a natural timer tick. Evidence:
    `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
