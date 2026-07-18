@@ -1016,11 +1016,66 @@ class DeliveryCoordinator:
         waiting = self._capacity_state(state)
         if waiting is None:
             return None
-        self._park_capacity_claim(state, paths)
         if waiting["not_before"] <= time.time():
-            self._resume_capacity_claim(state, paths)
+            if waiting["claim_parked"]:
+                self._resume_capacity_claim(state, paths)
+            else:
+                self._assert_claim(state)
+            self._publish_capacity_notice(state, recovered=True)
             return None
+        self._park_capacity_claim(state, paths)
+        self._publish_capacity_notice(state, recovered=False)
         return {"action": "capacity_wait", "mission_id": mission_id, "state": state}
+
+    def _publish_capacity_notice(
+        self, state: dict[str, Any], *, recovered: bool
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None:
+            raise DeliveryError("model-capacity notice has no durable checkpoint")
+        route = self._current_route(state)
+        role = waiting["role"]
+        actor = route[role]
+        if recovered:
+            payload = {
+                "code": "capacity_recovered",
+                "message": (
+                    f"OpenAI capacity recovered; automatic {role} execution resumed "
+                    f"on {actor['model']}."
+                ),
+                "owner_action_required": False,
+            }
+        else:
+            if waiting["status"] == "route_fallback_wait":
+                message = (
+                    f"OpenAI capacity: switched to approved {route['route']} route; "
+                    f"automatic {role} retry scheduled."
+                )
+            elif waiting["status"] == "capacity_round_wait":
+                message = (
+                    f"Approved {role} route is temporarily at capacity; "
+                    "the next automatic retry round is scheduled."
+                )
+            else:
+                message = (
+                    f"OpenAI capacity: automatic {role} retry scheduled "
+                    f"on {actor['model']}."
+                )
+            payload = {
+                "code": "capacity_wait",
+                "message": message,
+                "owner_action_required": False,
+                "next_attempt_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(waiting["not_before"])
+                ),
+            }
+        event = mission_adapter._producer_event(
+            state["mission_id"],
+            "mission.notice",
+            payload,
+            {"task_id": state["root_task_id"]},
+        )
+        self.client.publish(state["mission_id"], event)
 
     def _record_capacity_failure(
         self,

@@ -285,6 +285,8 @@ def main() -> None:
         assert "const missionEvents = replayQuery.data?.events ?? []" in mission_card
         assert "replayRef.current.events" not in mission_card
         assert "Timeline" in mission_card
+        assert "Owner action required:" in mission_card
+        assert "Next automatic attempt:" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
         assert 'aria-label="Answer"' in mission_card
@@ -338,6 +340,25 @@ def main() -> None:
         vulnerable_upgrade = run(clone)
         assert vulnerable_upgrade.returncode == 0
         assert "overlay applied" in vulnerable_upgrade.stdout
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
+
+        current_card = subprocess.check_output(
+            [
+                "git", "show",
+                "ce231273a5786ed032ef3c1777de762c421330bb:"
+                "tools/hermes-workspace/files/src/screens/dashboard/components/"
+                "mission-overview-card.tsx",
+            ],
+            cwd=REPO_ROOT,
+        )
+        vulnerable_card_path.write_bytes(current_card)
+        assert hashlib.sha256(current_card).hexdigest() == (
+            "486df3f1451ce7cbc4e80dbce70dd3105d39b78b64b5c61d2a2a6e91fd0b532d"
+        )
+        current_check = run(clone, "--check")
+        assert current_check.returncode == 0
+        assert current_check.stdout.count("previous-needs-overlay") == 1
+        assert run(clone).returncode == 0
         assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
         for relative, expected in (

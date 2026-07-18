@@ -55,6 +55,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 |---|---|---|
 | `mission.accepted` | `goal`; optional `dispatch_profile` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
+| `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
 | `mission.answer` | `question_id`, `text` | records the redacted owner answer, clears that exact question and resumes `active` |
 | `task.upsert` | `task_id`, `title`, `status` | creates or replaces one task projection |

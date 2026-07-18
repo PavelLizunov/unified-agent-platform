@@ -9,13 +9,14 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 FIXTURE = ROOT / "tests" / "fixtures" / "hermes-mission-events-v1.json"
 EVENT_TYPES = {
-    "mission.accepted", "mission.stage", "mission.question", "mission.answer", "task.upsert",
+    "mission.accepted", "mission.stage", "mission.notice", "mission.question", "mission.answer", "task.upsert",
     "worker.upsert", "terminal.append", "change.upsert", "gate.upsert",
     "delivery.upsert", "mission.completed", "mission.failed", "mission.cancelled",
 }
 REQUIRED_PAYLOAD = {
     "mission.accepted": {"goal"},
     "mission.stage": {"stage", "progress_percent"},
+    "mission.notice": {"code", "message", "owner_action_required"},
     "mission.question": {"question_id", "text"},
     "mission.answer": {"question_id", "text"},
     "task.upsert": {"task_id", "title", "status"},
@@ -94,7 +95,7 @@ class Projection:
         self.event_ids = set()
         self.state = {
             "mission_id": None, "status": None, "stage": None, "progress_percent": 0,
-            "goal": None, "tasks": {}, "workers": {}, "terminal": [], "changes": {},
+            "goal": None, "notice": None, "tasks": {}, "workers": {}, "terminal": [], "changes": {},
             "gates": {}, "delivery": {}, "question": None, "answer": None, "result": None,
         }
 
@@ -112,7 +113,12 @@ class Projection:
         if event_type == "mission.accepted":
             self.state.update(status="active", stage="accepted", goal=payload["goal"])
         elif event_type == "mission.stage":
-            self.state.update(stage=payload["stage"], progress_percent=payload["progress_percent"])
+            self.state.update(
+                stage=payload["stage"], progress_percent=payload["progress_percent"],
+                notice=None,
+            )
+        elif event_type == "mission.notice":
+            self.state["notice"] = payload
         elif event_type == "mission.question":
             self.state.update(status="waiting_owner", question=payload, answer=None)
         elif event_type == "mission.answer":
