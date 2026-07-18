@@ -163,9 +163,20 @@ class FlowContractTests(unittest.TestCase):
                 "Authorization": f"Basic {secret}",
                 "response_set_cookie_value": f"session={secret}",
             }).replace('"', r'\u005cu0022'),
+            rf"Authorization\uD800: {secret}",
+            rf"Authorization\u00e9: {secret}",
+            rf"Authorization\u00G0: {secret}",
+            rf"\uD800Authorization: {secret}",
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertNotIn(secret, flow._safe_error(diagnostic))
+
+    def test_safe_error_bounds_nested_escape_work(self):
+        diagnostic = r"\u005c" + ("u005c" * 50_000) + "u0022"
+
+        self.assertEqual(
+            "[REDACTED: oversized diagnostic]", flow._safe_error(diagnostic)
+        )
 
     def test_main_redacts_assignment_credentials(self):
         secret = "short-secret"

@@ -759,6 +759,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("[REDACTED]", message)
         self.assertNotIn(secret, message)
 
+        for diagnostic in (
+            rf"Authorization\uD800: {secret}",
+            rf"Authorization\u00e9: {secret}",
+            rf"Authorization\u00G0: {secret}",
+        ):
+            with self.subTest(diagnostic=diagnostic):
+                result = subprocess.CompletedProcess(
+                    ["gate"], 1, stdout=diagnostic, stderr=""
+                )
+                self.assertNotIn(secret, coordinator._command_failure(result, result.args))
+
     def test_persisted_codex_events_redact_and_bound_command_output(self):
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "events.jsonl"

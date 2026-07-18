@@ -20,21 +20,28 @@ class ContractError(ValueError):
     pass
 
 
+_MAX_DIAGNOSTIC_INPUT_CHARS = 65_536
+
+
 def redact_diagnostic(value: object, *, limit: int | None = None) -> str:
     text = str(value)
-    while True:
-        decoded = re.sub(
-            r"(?i)\\u([0-9a-f]{4})",
-            lambda match: (
-                chr(int(match.group(1), 16))
-                if int(match.group(1), 16) < 128
-                else match.group(0)
-            ),
-            text,
-        )
-        if decoded == text:
-            break
-        text = decoded
+    if len(text) > _MAX_DIAGNOSTIC_INPUT_CHARS:
+        return "[REDACTED: oversized diagnostic]"
+
+    def decode_ascii_escape(match: re.Match[str]) -> str:
+        try:
+            codepoint = int(match.group(1), 16)
+        except ValueError:
+            return ""
+        return chr(codepoint) if codepoint < 128 else ""
+
+    # Collapse arbitrarily nested escaped backslashes in one linear pass. Any
+    # malformed or non-ASCII escape is removed fail-closed so it cannot split a
+    # protected field name such as ``Authorization`` before redaction.
+    text = re.sub(
+        r"(?i)\\u005c(?:u005c)*u([0-9a-z]{4})", decode_ascii_escape, text
+    )
+    text = re.sub(r"(?i)\\u([0-9a-z]{4})", decode_ascii_escape, text)
     text = text.replace("\x00", "?")
     text = re.sub(r'''\\+(?=["'])''', "", text)
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)

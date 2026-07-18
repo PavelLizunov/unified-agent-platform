@@ -477,36 +477,49 @@ class MissionAdapterTests(unittest.TestCase):
 
     def test_native_and_top_level_errors_redact_escaped_credentials(self):
         secret = "short-secret"
-        diagnostic = json.dumps({
-            "Authorization": f"Basic {secret}",
-            "Proxy-Authorization": f"Basic {secret}",
-            "token": secret,
-            "Cookie": f"session={secret}",
-            "response_set_cookie_value": f"session={secret}",
-        }).replace('"', r'\u005cu0022')
+        diagnostics = (
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "Proxy-Authorization": f"Basic {secret}",
+                "token": secret,
+                "Cookie": f"session={secret}",
+                "response_set_cookie_value": f"session={secret}",
+            }).replace('"', r'\u005cu0022'),
+            rf"Authorization\uD800: {secret}",
+            rf"Authorization\u00e9: {secret}",
+            rf"Authorization\u00G0: {secret}",
+        )
 
-        def runner(command):
-            return subprocess.CompletedProcess(command, 1, stdout="", stderr=diagnostic)
+        for diagnostic in diagnostics:
+            with self.subTest(diagnostic=diagnostic):
+                def runner(command):
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr=diagnostic
+                    )
 
-        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
-        with self.assertRaises(adapter.AdapterError) as raised:
-            backend.show("task-1")
-        self.assertIn("[REDACTED]", str(raised.exception))
-        self.assertNotIn(secret, str(raised.exception))
-        with self.assertRaises(adapter.AdapterError) as raised:
-            backend.gc()
-        self.assertIn("[REDACTED]", str(raised.exception))
-        self.assertNotIn(secret, str(raised.exception))
+                backend = adapter.HermesKanbanBackend(
+                    "/opt/hermes", "central", runner=runner
+                )
+                with self.assertRaises(adapter.AdapterError) as raised:
+                    backend.show("task-1")
+                self.assertIn("[REDACTED]", str(raised.exception))
+                self.assertNotIn(secret, str(raised.exception))
+                with self.assertRaises(adapter.AdapterError) as raised:
+                    backend.gc()
+                self.assertIn("[REDACTED]", str(raised.exception))
+                self.assertNotIn(secret, str(raised.exception))
 
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(adapter, "_read_json", side_effect=adapter.AdapterError(diagnostic)),
-            mock.patch("sys.stderr", stderr),
-        ):
-            status = adapter.main(["accept", "--event", "unused.json"])
-        self.assertEqual(2, status)
-        self.assertIn("[REDACTED]", stderr.getvalue())
-        self.assertNotIn(secret, stderr.getvalue())
+                stderr = io.StringIO()
+                with (
+                    mock.patch.object(
+                        adapter, "_read_json", side_effect=adapter.AdapterError(diagnostic)
+                    ),
+                    mock.patch("sys.stderr", stderr),
+                ):
+                    status = adapter.main(["accept", "--event", "unused.json"])
+                self.assertEqual(2, status)
+                self.assertIn("[REDACTED]", stderr.getvalue())
+                self.assertNotIn(secret, stderr.getvalue())
 
     def test_native_capacity_schedule_and_unblock_are_fail_closed(self):
         commands = []
