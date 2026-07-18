@@ -83,7 +83,9 @@ Last updated: 2026-07-18
   leaves the mission terminal, while the existing persistent profile poll drains one pending terminal outbox event on
   later ticks until only the lagging cursors catch up. Repair missions keep their inherited binding until their
   committed terminal update is checkpointed. Restart, expired-lease, partial-send, late-subscription and
-  single-terminal regression tests cover the boundary; live rollout verification remains the merge gate for this change.
+  single-terminal regression tests cover the boundary. The two ordinary Workspace missions on 2026-07-18 then each
+  committed exactly one terminal event without a Telegram delivery prerequisite, providing live success-path rollout
+  evidence; Telegram-outage recovery remains covered hermetically rather than by that campaign.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,
@@ -442,12 +444,18 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   the bounded lifecycle baseline are installed. Rejected projections still expose only a generic error/stage, and
   complete Workspace/Telegram chat-session history is not unified. No generic arbitrary-repository timer is enabled;
   only exact owner-approved profiles run.
-- **Registered schema-v4 consumer installed (2026-07-18):** PR #245 installed a repo-owned reusable
-  `build1-flow-pilot-registered-v4` profile and enabled its standing build-1 timer. Its first timer-triggered idle tick
-  returned success/null without a mission, model or delivery state; exact source/installed hashes and `0700`/`0600`
-  modes matched. The current repository manifest now adds exact Workspace/Telegram ordinary-message intake into that
-  profile with deterministic source-message replay; live rollout and non-toy delivery evidence remain pending.
-  Installed-consumer evidence: `docs/evidence/registered-flow-profile-v4-rollout-2026-07-18.md`.
+- **Registered Workspace intake and delivery accepted (2026-07-18):** PRs #248-#253 installed ordinary-message
+  intake and serialized exact Central session creation; a normal Workspace goal then created
+  `mission-intake-9c00cff752112583d629c1f144abadb9` and the standing timer delivered non-toy Rust code through Sol
+  author, exact-SHA Terra review, multi-platform CI, PR #6, exact merge, fresh-main verification and cleanup without
+  manual poll/tick/coordinator steps. That first mission exposed a real truth gap: README was requested but excluded
+  by the profile and the platform still declared completion. PR #254 added only the missing approved path. A second
+  normal Workspace goal created `mission-intake-f53871c022ce187501a0e9d9021b8823`; its first README candidate was
+  rejected by the independent reviewer, automatically corrected, re-reviewed, merged as target PR #7 and completed
+  with one terminal event and cleanup. This accepts ordinary Workspace intake for the exact registered profile, not
+  arbitrary repositories, ordinary Telegram intake, full cross-channel history or a self-diagnosing single-mission
+  repair of the first goal. Exact evidence:
+  `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.

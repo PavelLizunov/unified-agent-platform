@@ -106,10 +106,12 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the mission projection and owner question/answer resume, but not complete
    cross-channel chat/session history.
-2. The profile-bound A7 coordinator, schema-v3 profile and `openai-autonomy-v2` route are installed. The corrected
-   runtime passed one Telegram-bound non-toy acceptance canary through timer intake, runtime-attested author/reviewer,
-   multi-platform CI, exact-head merge, fresh-main post-verify, Central/Workspace/Telegram terminal convergence and
-   cleanup, including recovery from the planned durable checkpoint. This proves exact configured profiles; generic
+2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
+   passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
+   profile later accepted ordinary Workspace goals and delivered non-toy code plus a follow-up documentation repair
+   through runtime-attested author/reviewer, multi-platform CI, exact-head merge, fresh-main post-verify, Central
+   terminal convergence and cleanup. The follow-up included a real review rejection and autonomous correction. This
+   proves ordinary Workspace intake only for one exact registered profile; ordinary Telegram intake, generic
    arbitrary-repository intake and route-profile creation from an unconstrained owner goal remain outside that proof.
 3. Workspace polls current snapshots. It does not provide durable event-cursor replay for every intermediate terminal
    update, and direct logs/tmux may still be needed for full live detail.
