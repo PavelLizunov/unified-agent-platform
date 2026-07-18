@@ -1218,6 +1218,7 @@ data:
     _MAX_TERMINAL_ENTRIES = 200
     _MAX_TERMINAL_CHARS = 65_536
     _MAX_OWNER_ANSWER_CHARS = 4_000
+    _MAX_COMPLETION_RESULT_CHARS = 3_000
     _MAX_RETAINED_TERMINAL_MISSIONS = 100
     _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
     _COMPLETION_DELIVERIES = {
@@ -1636,6 +1637,43 @@ data:
         return (
             statuses[-1] in terminal_statuses
             and all(status == "scheduled" for status in statuses[:-1])
+        )
+
+
+    def _completion_result(view: dict[str, Any]) -> str:
+        """Render one bounded owner result from the already verified projection."""
+        def compact(value: Any, limit: int) -> str:
+            text = " ".join(str(value or "").split())
+            return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+        deliveries = {
+            item.get("kind"): item
+            for item in view.get("deliveries", [])
+            if isinstance(item, dict)
+        }
+        lines = [f"Completed: {compact(view.get('goal'), 700)}"]
+        for label, kind in (("PR", "pull_request"), ("Merge", "default_branch")):
+            url = deliveries.get(kind, {}).get("url")
+            if isinstance(url, str) and url.strip():
+                lines.append(f"{label}: {compact(url, 512)}")
+        lines.append("Checks: tests, review, CI, post-verify, cleanup passed")
+        if view.get("delivery_mode") == "none":
+            lines.append("Delivery: not applicable")
+        paths = sorted({
+            item.get("path")
+            for item in view.get("changes", [])
+            if isinstance(item, dict) and isinstance(item.get("path"), str)
+        })
+        if paths:
+            visible = ", ".join(compact(path, 120) for path in paths[:8])
+            if len(paths) > 8:
+                visible += f", +{len(paths) - 8} more"
+            lines.append(f"Changed files ({len(paths)}): {visible}")
+        result = "\n".join(lines)
+        return (
+            result
+            if len(result) <= _MAX_COMPLETION_RESULT_CHARS
+            else result[:_MAX_COMPLETION_RESULT_CHARS - 1].rstrip() + "…"
         )
 
 
@@ -2632,7 +2670,7 @@ data:
                 if completion_ready(view):
                     event_type = "mission.completed"
                     producer_event_id = "central:auto-complete:v1"
-                    payload = {"result": "Delivery completed, merged, and verified"}
+                    payload = {"result": _completion_result(view)}
                 elif rejection is not None:
                     event_type = "mission.failed"
                     producer_event_id, payload = rejection
