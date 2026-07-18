@@ -188,16 +188,28 @@ async def smoke(checkout: pathlib.Path) -> None:
             "source_message_id": "owner-message-smoke",
             "session_id": "owner-session-smoke",
         }
-        owner = await client.post("/api/missions", json=owner_body)
+        owner_headers = {"X-Hermes-Mission-Owner-Key": "test-owner-key"}
+        missing_owner_key = await client.post("/api/missions", json=owner_body)
+        assert missing_owner_key.status == 401, await missing_owner_key.text()
+        ambiguous = await client.post(
+            "/api/missions", json=owner_body, headers={**headers, **owner_headers}
+        )
+        assert ambiguous.status == 401, await ambiguous.text()
+        owner = await client.post(
+            "/api/missions", json=owner_body, headers=owner_headers
+        )
         owner_payload = await owner.json()
         assert owner.status == 201, owner_payload
         assert owner_payload["mission"]["dispatch_profile"] == "build1-owner-smoke"
-        owner_replay = await client.post("/api/missions", json=owner_body)
+        owner_replay = await client.post(
+            "/api/missions", json=owner_body, headers=owner_headers
+        )
         replay_payload = await owner_replay.json()
         assert owner_replay.status == 200 and replay_payload["created"] is False
         assert replay_payload["mission"]["mission_id"] == owner_payload["mission"]["mission_id"]
         forbidden_profile = await client.post(
-            "/api/missions", json={**owner_body, "dispatch_profile": "build1-forged"}
+            "/api/missions", json={**owner_body, "dispatch_profile": "build1-forged"},
+            headers=owner_headers,
         )
         assert forbidden_profile.status == 400, await forbidden_profile.text()
     finally:

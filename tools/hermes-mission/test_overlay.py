@@ -129,6 +129,8 @@ def main() -> None:
         assert 'producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")' in api
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
         assert "store.ingest_owner_goal(" in api
+        assert "if not owner_key_valid(owner_key)" in api
+        assert "Ambiguous mission capability" in api
         assert '"goal", "platform", "source_message_id", "session_id"' in api
         assert "unknown owner intake fields" in api
         assert "notify_subscribers" in api

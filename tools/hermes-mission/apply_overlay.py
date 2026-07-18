@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-    "gateway/platforms/api_server.py": "011776f134e53bab1a383e4a69681e396713eed48c82718e902e3bccb5193c5b",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "e3dee0dce9555a3431885fa6d7708b2d8f3f2af1153dd98e0280a9ecbd8ccd24",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -643,7 +643,12 @@ def connect(
                 raise MissionError("mission request must be an object")
             store = self._missions()
             producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")
-            if producer_key:
+            owner_key = request.headers.get("X-Hermes-Mission-Owner-Key")
+            if producer_key is not None and owner_key is not None:
+                return web.json_response(
+                    {"error": "Ambiguous mission capability"}, status=401
+                )
+            if producer_key is not None:
                 if not producer_key_valid(producer_key):
                     return web.json_response(
                         {"error": "Invalid mission producer key"}, status=401
@@ -657,6 +662,10 @@ def connect(
                     parent_mission_id=body.get("parent_mission_id"),
                 )
             else:
+                if not owner_key_valid(owner_key):
+                    return web.json_response(
+                        {"error": "Invalid mission owner key"}, status=401
+                    )
                 allowed = {
                     "goal", "platform", "source_message_id", "session_id",
                     "chat_id", "thread_id",
@@ -665,6 +674,8 @@ def connect(
                     raise MissionError(
                         "unknown owner intake fields: " + ", ".join(sorted(unknown))
                     )
+                if not isinstance(body.get("goal"), str):
+                    raise MissionError("invalid mission goal")
                 event, created = store.ingest_owner_goal(
                     redact_sensitive_text(body.get("goal"), force=True),
                     platform=body.get("platform"),

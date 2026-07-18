@@ -88,8 +88,9 @@ The owner-facing `POST /api/missions` primitive has a shape closed to `goal`, ch
 source-message ID. It does not accept a repository, path, command, model or `dispatch_profile`. When enabled, Central
 resolves the exact profile from its server-owned `HERMES_MISSION_INTAKE_ROUTES` registry; the matching build-1 profile
 remains the authority for repository and execution boundaries. An absent, malformed or unknown channel route fails
-before any mission event is stored. Producer-authenticated repair/internal callers retain the explicit
-identity/profile form.
+before any mission event is stored. The owner branch requires the separate `HERMES_MISSION_OWNER_KEY`; a caller with
+only the generic API bearer or producer key cannot impersonate owner intake. Producer-authenticated repair/internal
+callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
 The production Deployment intentionally does not set `HERMES_MISSION_INTAKE_ROUTES` at this checkpoint. The installed
 schema-v3 canary profile has a fixed goal and is not a safe target for arbitrary owner messages, while ordinary

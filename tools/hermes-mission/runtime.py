@@ -104,7 +104,11 @@ def _require_id(value: Any, name: str) -> str:
 
 
 def _require_source_value(value: Any, name: str, *, optional: bool = False) -> str:
-    text = str(value or "").strip()
+    if value is None and optional:
+        return ""
+    if not isinstance(value, str):
+        raise MissionError(f"invalid {name}")
+    text = value.strip()
     if not text and optional:
         return ""
     if not text or len(text) > 256 or re.search(r"[\x00-\x1f\x7f]", text):
@@ -114,18 +118,30 @@ def _require_source_value(value: Any, name: str, *, optional: bool = False) -> s
 
 def registered_intake_route(platform: str) -> str:
     """Resolve one owner channel to an exact server-owned delivery profile."""
+    if not isinstance(platform, str):
+        raise MissionError("invalid intake platform")
     platform = _require_id(platform, "intake platform")
     raw = os.environ.get("HERMES_MISSION_INTAKE_ROUTES", "").strip()
     if not raw or len(raw.encode("utf-8")) > 16_384:
         raise MissionError("mission intake is not configured")
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise MissionError("invalid mission intake routes")
+            result[key] = value
+        return result
+
     try:
-        routes = json.loads(raw)
-    except json.JSONDecodeError as error:
+        routes = json.loads(raw, object_pairs_hook=unique_object)
+    except (json.JSONDecodeError, MissionError) as error:
         raise MissionError("invalid mission intake routes") from error
     if not isinstance(routes, dict) or not routes or len(routes) > 16:
         raise MissionError("invalid mission intake routes")
     normalized: dict[str, str] = {}
     for route_platform, dispatch_profile in routes.items():
+        if not isinstance(dispatch_profile, str):
+            raise MissionError("invalid mission intake routes")
         route_platform = _require_id(route_platform, "intake platform")
         normalized[route_platform] = _require_id(
             dispatch_profile, "dispatch_profile"
@@ -760,6 +776,10 @@ class MissionStore:
         thread_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Accept one ordinary owner turn exactly once on its registered route."""
+        if not isinstance(goal, str):
+            raise MissionError("invalid mission goal")
+        if not isinstance(platform, str):
+            raise MissionError("invalid intake platform")
         platform = _require_id(platform, "intake platform")
         route = registered_intake_route(platform)
         source_message_id = _require_source_value(

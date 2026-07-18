@@ -374,6 +374,77 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             assert "no registered delivery route" in str(error)
         assert len(restarted.list(100)) == before
 
+        for malformed in (
+            None,
+            "[]",
+            "{}",
+            '{"workspace":true}',
+            '{"workspace":"first","workspace":"second"}',
+        ):
+            environment = (
+                {} if malformed is None
+                else {"HERMES_MISSION_INTAKE_ROUTES": malformed}
+            )
+            with mock.patch.dict(os.environ, environment, clear=True):
+                try:
+                    restarted.ingest_owner_goal(
+                        "Malformed registry",
+                        platform="workspace",
+                        source_message_id="message-malformed",
+                        session_id="session-owner",
+                    )
+                    raise AssertionError("malformed owner intake registry was accepted")
+                except missions.MissionError:
+                    pass
+            assert len(restarted.list(100)) == before
+
+        invalid_owner_values = (
+            {
+                "goal": 1,
+                "platform": "workspace",
+                "source_message_id": "message-bad-goal",
+                "session_id": "session-owner",
+            },
+            {
+                "goal": "Bad platform",
+                "platform": True,
+                "source_message_id": "message-bad-platform",
+                "session_id": "session-owner",
+            },
+            {
+                "goal": "Bad message",
+                "platform": "workspace",
+                "source_message_id": 1,
+                "session_id": "session-owner",
+            },
+            {
+                "goal": "Bad session",
+                "platform": "workspace",
+                "source_message_id": "message-bad-session",
+                "session_id": {"id": "owner"},
+            },
+            {
+                "goal": "Bad chat",
+                "platform": "workspace",
+                "source_message_id": "message-bad-chat",
+                "chat_id": True,
+            },
+            {
+                "goal": "Bad thread",
+                "platform": "workspace",
+                "source_message_id": "message-bad-thread",
+                "chat_id": "owner-chat",
+                "thread_id": [],
+            },
+        )
+        for arguments in invalid_owner_values:
+            try:
+                restarted.ingest_owner_goal(**arguments)
+                raise AssertionError("non-string owner intake value was accepted")
+            except missions.MissionError:
+                pass
+            assert len(restarted.list(100)) == before
+
 
 def test_concurrent_owner_intake_converges_on_one_acceptance() -> None:
     routes = json.dumps({"workspace": "build1-registered"})
