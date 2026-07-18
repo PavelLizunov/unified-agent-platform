@@ -5055,6 +5055,85 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("1", model_environment["GIT_CONFIG_NOSYSTEM"])
             self.assertNotIn("GH_TOKEN", model_environment)
 
+    def test_reviewer_command_is_os_readonly_and_credential_isolated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_home=str(root / "codex"))
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                runner=lambda *_args, **_kwargs: None,
+            )
+            paths = instance._paths("mission-review-isolation")
+            state = {"model_invocation": {"attempt_id": "a" * 64}}
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "CLAUDE_CODE_OAUTH_TOKEN": "claude-secret-value",
+                    "GH_TOKEN": "github-secret-value",
+                    "HERMES_API_TOKEN": "hermes-secret-value",
+                    "XDG_RUNTIME_DIR": "/run/user/1000",
+                },
+                clear=False,
+            ):
+                environment = instance._model_env(paths)
+                command = instance._isolated_reviewer_command(
+                    state, paths, ["codex", "exec", "-"], environment
+                )
+            rendered = "\n".join(command)
+            self.assertEqual(str(pathlib.Path("/usr/bin/systemd-run")), command[0])
+            self.assertIn("--unit=uap-review-" + "a" * 24, command)
+            self.assertIn(
+                "-p\nBindsTo=hermes-delivery-coordinator@test.service", rendered
+            )
+            self.assertIn(str(pathlib.Path(approved["source_checkout"]).resolve()), rendered)
+            self.assertIn(str(pathlib.Path(approved["worktree_root"]).resolve()), rendered)
+            self.assertIn(str(paths["directory"].resolve()), rendered)
+            self.assertIn(
+                "ReadWritePaths=" + str(pathlib.Path(environment["HOME"]).resolve()),
+                rendered,
+            )
+            self.assertIn(str(pathlib.Path(environment["CODEX_HOME"]).resolve()), rendered)
+            for property_value in (
+                "PrivateUsers=true", "ProtectProc=invisible", "ProcSubset=pid",
+                "ProtectSystem=strict", "ProtectHome=read-only", "PrivateTmp=true",
+            ):
+                self.assertIn(property_value, command)
+            for relative in coordinator._REVIEWER_CREDENTIAL_PATHS:
+                self.assertIn(str((pathlib.Path.home() / relative).resolve()), rendered)
+            self.assertIn(str(pathlib.Path("/run/user/1000").resolve()), rendered)
+            for name in (
+                "CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "HERMES_API_TOKEN",
+            ):
+                self.assertIn(name, rendered)
+            for value in (
+                "claude-secret-value", "github-secret-value", "hermes-secret-value",
+            ):
+                self.assertNotIn(value, rendered)
+            self.assertIn("--setenv=GIT_OPTIONAL_LOCKS=0", command)
+            self.assertIn("--setenv=TMPDIR=/tmp", command)
+            self.assertEqual(["codex", "exec", "-"], command[-3:])
+
+    def test_reviewer_isolation_fails_closed_without_coordinator_unit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_home=str(root / "codex"))
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-review-isolation")
+            environment = instance._model_env(paths)
+            state = {"model_invocation": {"attempt_id": "b" * 64}}
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "requires the systemd coordinator unit",
+                ):
+                    instance._isolated_reviewer_command(
+                        state, paths, ["codex", "exec", "-"], environment
+                    )
+
     def test_systemd_timer_retries_the_expected_crash_without_a_daemon(self):
         service = (ROOT / "tools/swarm/systemd/hermes-delivery-coordinator@.service").read_text()
         timer = (ROOT / "tools/swarm/systemd/hermes-delivery-coordinator@.timer").read_text()
@@ -5063,6 +5142,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("UMask=0077", service)
         self.assertIn(
             "EnvironmentFile=%h/.config/uap/delivery-coordinator.env", service
+        )
+        self.assertIn(
+            "Environment=UAP_COORDINATOR_UNIT=hermes-delivery-coordinator@%i.service",
+            service,
         )
         self.assertIn("UnsetEnvironment=HERMES_MISSION_OWNER_KEY", service)
         self.assertNotIn("%h/hermes-workspace/.env", service)

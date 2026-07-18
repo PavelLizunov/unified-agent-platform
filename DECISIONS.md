@@ -512,6 +512,10 @@
   Платформа детерминированно выбирает сложность, reasoning effort, retry и escalation. Все reviewer runs используют
   отдельную read-only session, exact candidate SHA и runtime-derived model/sandbox attestation. Один OpenAI provider
   является принятой продуктовой политикой, а не degraded mode.
+  Reviewer дополнительно запускается внутри parent-bound transient user-systemd unit: Linux mount/proc namespace
+  делает filesystem/home read-only кроме mission-local model home и Codex runtime home, скрывает unrelated processes,
+  маскирует common credential stores и удаляет control-plane credential environment. Ошибка установки этой границы
+  fail-closed останавливает review; новый сервис или provider для этого не создаётся.
   `openai-autonomy-v2` считает failed author gate, independent-review rejection, required-CI failure или истечение
   bounded CI timeout одним quality-failure signal. Дополнение от 2026-07-16 явно подтверждено владельцем: ошибка
   компиляции/теста до commit является таким же сигналом недостаточной текущей route, поэтому следующий bounded author

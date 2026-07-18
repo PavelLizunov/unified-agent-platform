@@ -131,13 +131,19 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    exhausts all autonomous repair cycles is intentionally retained with its exact remote branch as bounded failure
    evidence because GitHub offers no conditional PR-close mutation.
 5. The Flow contract derives model, effort and sandbox policy from the exact Codex rollout `turn_context`; the
-   OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. OS-independent read-only filesystem and
-   credential isolation remain unproven. Restart-safe capacity retry/whole-route fallback is covered hermetically,
+   OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. The source coordinator now adds a
+   Linux OS-enforced reviewer process boundary: strict read-only filesystem/home, explicit writable model/Codex
+   runtime homes, read-only candidate/state, hidden unrelated `/proc`, and inaccessible common credential stores and
+   control-plane environment names. Hermetic policy tests and a disposable build-1 exact-wrapper probe passed, but the
+   exact merged binary and a real runtime-attested review through this boundary are not deployed evidence yet.
+   Restart-safe capacity retry/whole-route fallback is covered hermetically,
    including scheduled cooldown outside the finite Kanban claim TTL, but its exact deployed Codex terminal envelope
    and no-duplicate recovery still need a controlled live canary.
 6. The terminal endpoint requires both the general API bearer and a direct loopback source. Producer events use a
    closed schema and protect every allowed string before storage; mission DB and adapter state are owner-only on POSIX.
-   The A7 success path exercised terminal completion, but least-privilege process isolation remains follow-up work.
+   The A7 success path exercised terminal completion. The new reviewer boundary narrows filesystem writes and
+   credential reach on build-1; author isolation and secrets stored outside the enumerated host stores remain
+   follow-up work.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 

@@ -217,6 +217,10 @@ Good next tasks that do not require redesign:
    CI persistence is bounded, repair pushes use an exact prior-head lease,
    initial push/PR-create and repair-push response loss converge, and compatible v1 in-progress routes/PR identities
    resume.
+   Reviewer execution is now source-hardened through a parent-bound transient user-systemd unit with strict
+   read-only filesystem/home, hidden unrelated `/proc`, private tmp, explicit model/Codex runtime write paths and
+   masked common credentials. Rollout and a real reviewer canary are still pending; do not claim them from source
+   tests alone.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

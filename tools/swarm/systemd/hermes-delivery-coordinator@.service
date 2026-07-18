@@ -8,6 +8,7 @@ ConditionPathExists=%h/.config/uap/delivery-%i.json
 Type=oneshot
 WorkingDirectory=%h
 EnvironmentFile=%h/.config/uap/delivery-coordinator.env
+Environment=UAP_COORDINATOR_UNIT=hermes-delivery-coordinator@%i.service
 UnsetEnvironment=HERMES_MISSION_OWNER_KEY
 ExecStart=/usr/bin/python3 %h/swarm-bin/delivery_coordinator.py --profile %h/.config/uap/delivery-%i.json
 SuccessExitStatus=75
