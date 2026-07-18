@@ -260,11 +260,18 @@ not add an application service, workflow engine or mission database.
    systemd service identity is not proof of timer origin; channel origin/cursors and signed artifact attestation
    remain later evidence fields. See the
    [rollout evidence](evidence/canonical-completion-evidence-rollout-2026-07-18.md).
+10. **Ordinary Workspace answer — SOURCE + MANIFEST READY; ROLLOUT PENDING (2026-07-18).** The exact Central session
+    that accepted a Workspace mission now routes a later ordinary message to its one open mission question through
+    the same `MissionStore.ingest_owner_turn()` path. The source message ID is persisted in `mission.answer`; restart,
+    delayed replay and changed-text collision are deterministic, and multiple open questions fail closed. The
+    structured answer action remains compatible. This closes the implementation asymmetry with Telegram without a
+    new service; deployment and one real cross-channel question/answer canary remain required.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
-Telegram now share authoritative mission status and owner question/resume. A bound Telegram chat can also answer the
-open question with an ordinary message; complete cross-channel chat/session history remains a separate Product
+Telegram now share authoritative mission status and owner question/resume. A bound Telegram chat and, after the
+pending rollout, the exact accepting Workspace session can answer the open question with an ordinary message;
+complete cross-channel chat/session history remains a separate Product
 Operating Contract gap.
 
 ---

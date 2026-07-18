@@ -105,8 +105,9 @@ The A6.4 controlled canary added one central mission log, fail-closed central-on
 build-1 execution evidence. The remaining gaps are not accepted end-state behaviour:
 
 1. Workspace and Telegram synchronize the mission projection and owner question/answer resume, but not complete
-   cross-channel chat/session history. A bound Telegram chat can route an ordinary message to its exact open mission
-   question with restart-safe source-message replay; ordinary Workspace chat still uses the structured answer action.
+   cross-channel chat/session history. A bound Telegram chat and the exact accepting Workspace session can route an
+   ordinary message to their one open mission question with restart-safe source-message replay. The Workspace path is
+   implemented in source and its rollout/live owner-channel proof remains pending.
 2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
    passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
    profile later accepted ordinary Workspace goals and delivered non-toy code plus a follow-up documentation repair

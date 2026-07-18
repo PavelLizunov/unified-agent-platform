@@ -160,6 +160,12 @@ Last updated: 2026-07-18
   A real owner-channel question/answer canary is still required. Ordinary Workspace chat answers and complete
   cross-channel transcript synchronization are not claimed. Exact evidence:
   `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.
+- **Ordinary Workspace owner answers are source-complete; rollout pending (2026-07-18).** A later ordinary message in
+  the exact Central session that accepted a mission now answers its single open question through
+  `MissionStore.ingest_owner_turn()` instead of creating a second goal. The stable source message ID survives restart
+  and delayed replay, changed text collides fail-closed, and multiple open questions are rejected rather than guessed.
+  The existing structured answer action remains compatible. Static/runtime regressions and the production revision
+  bump are in this change; Flux rollout and a real owner-channel canary are not yet claimed.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

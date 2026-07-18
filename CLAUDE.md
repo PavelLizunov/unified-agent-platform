@@ -202,7 +202,8 @@ Good next tasks that do not require redesign:
    and explicit `delivery_mode: none`; Central requires `delivery: not_applicable` before completing that target;
    its exact Workspace/Telegram intake registry and timer are enabled. Ordinary Workspace delivery passed live.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
-   PR #264 is deployed and passed an in-pod component check. Ordinary Telegram intake and a real owner
+   PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is
+   implemented with restart/collision/ambiguity tests and awaits Flux rollout. Ordinary Telegram intake and a real owner
    question/resume path remain the next controlled live canary. See
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
    The answer rollout record is `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.

@@ -888,6 +888,61 @@ class MissionStore:
             raise MissionError("owner turn source identity collision")
         return matches[0] if matches else None
 
+    def _session_missions(self, session_id: str) -> list[str]:
+        """Return root and repair missions owned by one Central session."""
+        with self._db() as connection:
+            accepted = [
+                self._row(row)
+                for row in connection.execute(
+                    """SELECT * FROM mission_events
+                       WHERE sequence = 1 AND type = 'mission.accepted'
+                       ORDER BY rowid"""
+                )
+            ]
+        related: list[str] = []
+        for event in accepted:
+            if (
+                event["correlation"].get("session_id") == session_id
+                or event["payload"].get("parent_mission_id") in related
+            ):
+                related.append(event["mission_id"])
+        return related
+
+    def _session_answer_receipt(
+        self, session_id: str, source_message_id: str
+    ) -> dict[str, Any] | None:
+        """Find a prior Workspace answer after restart or later session turns."""
+        related = set(self._session_missions(session_id))
+        if not related:
+            return None
+        with self._db() as connection:
+            matches = [
+                self._row(row)
+                for row in connection.execute(
+                    """SELECT * FROM mission_events
+                       WHERE type = 'mission.answer' ORDER BY rowid DESC"""
+                )
+                if row["mission_id"] in related
+                and json.loads(row["payload_json"]).get("source_message_id")
+                == source_message_id
+            ]
+        if len(matches) > 1:
+            raise MissionError("owner turn source identity collision")
+        return matches[0] if matches else None
+
+    def _session_open_question(
+        self, session_id: str
+    ) -> tuple[str, dict[str, Any]] | None:
+        matches = []
+        for mission_id in self._session_missions(session_id):
+            view = self.projection(mission_id)
+            question = view.get("question")
+            if view.get("status") == "waiting_owner" and isinstance(question, dict):
+                matches.append((mission_id, question))
+        if len(matches) > 1:
+            raise MissionError("session has multiple open mission questions")
+        return matches[0] if matches else None
+
     def ingest_owner_turn(
         self,
         text: str,
@@ -905,6 +960,9 @@ class MissionStore:
         registered_intake_target(platform)
         source_message_id = _require_source_value(
             source_message_id, "source_message_id"
+        )
+        session_id = _require_source_value(
+            session_id, "session_id", optional=True
         )
         chat_id = _require_source_value(chat_id, "chat_id", optional=True)
         thread_id = _require_source_value(
@@ -929,6 +987,21 @@ class MissionStore:
                         text,
                         source_message_id=source_message_id,
                     )
+        elif session_id:
+            receipt = self._session_answer_receipt(session_id, source_message_id)
+            if receipt:
+                if receipt["payload"].get("text") != text.strip():
+                    raise MissionError("owner turn idempotency collision")
+                return receipt, False
+            open_question = self._session_open_question(session_id)
+            if open_question:
+                mission_id, question = open_question
+                return self.answer(
+                    mission_id,
+                    question.get("question_id"),
+                    text,
+                    source_message_id=source_message_id,
+                )
         return self.ingest_owner_goal(
             text,
             platform=platform,
