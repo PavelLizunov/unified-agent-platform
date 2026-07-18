@@ -137,7 +137,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    runtime homes, read-only candidate/state, hidden unrelated `/proc`, and inaccessible common credential stores and
    control-plane environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the
    installed exact-wrapper probe proved the intended write/credential/proc/user-runtime boundary. A real
-   runtime-attested Codex review through this boundary remains pending.
+   attempt then found a Type=oneshot ordering deadlock in the transient unit. The correction removes `After=` while
+   retaining the parent `BindsTo=` lifetime boundary; a completed runtime-attested review remains pending.
    Restart-safe capacity retry/whole-route fallback is covered hermetically,
    including scheduled cooldown outside the finite Kanban claim TTL, but its exact deployed Codex terminal envelope
    and no-duplicate recovery still need a controlled live canary.

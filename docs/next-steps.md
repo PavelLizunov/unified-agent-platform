@@ -374,7 +374,9 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   mission-local model/Codex runtime write paths, and masks common delivery/host credential stores and control-plane
   environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the installed
   exact-wrapper probe proved write denial plus credential/proc/user-runtime isolation while preserving only the two
-  approved write roots. One runtime-attested Codex review through that boundary is still required before claiming a
+  approved write roots. The first real attempt found that `After=` deadlocked the transient reviewer against its
+  still-activating Type=oneshot parent; the minimal correction keeps `BindsTo=` and removes only that ordering edge.
+  One completed runtime-attested Codex review through the corrected boundary is still required before claiming a
   live reviewer canary. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after

@@ -123,7 +123,10 @@ Last updated: 2026-07-18
   scratch data. PR #266 passed required CI and exact merge `a0d8f391...` is installed on build-1. Source/installed
   coordinator and systemd-unit hashes match, all five timers resumed, and the installed exact-wrapper probe denied
   writes outside the two approved homes while hiding the actual delivery credential file, unrelated `/proc` and
-  user-runtime IPC. A real Codex reviewer run through the boundary is still pending. Exact rollout evidence:
+  user-runtime IPC. The first real reviewer attempt exposed an ordering deadlock: `After=` made the transient child
+  wait for its still-activating Type=oneshot parent while the parent waited for review. The source fix retains
+  `BindsTo=` but removes that ordering edge; regression coverage and restart of the same durable candidate are the
+  current gate. A completed real Codex reviewer run through the corrected boundary is still pending. Exact rollout evidence:
   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
