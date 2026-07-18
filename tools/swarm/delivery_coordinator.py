@@ -108,6 +108,13 @@ _MODEL_INVOCATION_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "status", "attempt_id",
 }
+_OWNER_GATE_FIELDS = {
+    "schema_version", "mission_id", "goal_sha256", "policy_sha256", "flags",
+    "question_id", "question_text", "status", "answer_sha256",
+}
+_AUTOMATIC_OWNER_APPROVAL_FLAGS = {"architecture_change"}
+_OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
+_OWNER_GATE_APPROVAL = "APPROVE"
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(
         r"\b(?:AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|"
@@ -911,9 +918,33 @@ class DeliveryCoordinator:
     def _ensure_route(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
+        signals = self._route_signals(state)
         decision = flow_contract.choose_delivery_route(
-            self.policy, self._route_signals(state)
+            self.policy, signals
         )
+        if decision.get("status") == "owner_approval_required":
+            record = self._owner_gate_record(state, decision)
+            if record["status"] != "approved":
+                raise DeliveryError("mission requires owner approval before routing")
+            approval_sha256 = hashlib.sha256(
+                _OWNER_GATE_APPROVAL.encode("utf-8")
+            ).hexdigest()
+            if (
+                record["answer_sha256"] != approval_sha256
+                or not any(
+                    answer["question_id"] == record["question_id"]
+                    and answer["sha256"] == approval_sha256
+                    for answer in self._owner_answers(state)
+                )
+            ):
+                raise DeliveryError("owner approval is detached from its durable answer")
+            approved_signals = {
+                **signals,
+                "flags": sorted(set(signals["flags"]) - set(record["flags"])),
+            }
+            decision = flow_contract.choose_delivery_route(
+                self.policy, approved_signals
+            )
         if decision.get("status") != "ready":
             raise DeliveryError("mission requires a capability outside the configured OpenAI policy")
         key = str(self._quality_failures(state))
@@ -939,6 +970,151 @@ class DeliveryCoordinator:
                 raise DeliveryError("durable capacity route is detached from its base route")
             return effective
         return decisions[key]
+
+    @staticmethod
+    def _owner_gate_flags(decision: dict[str, Any]) -> list[str]:
+        reasons = decision.get("reasons")
+        if (
+            decision.get("status") != "owner_approval_required"
+            or not isinstance(reasons, list)
+            or not reasons
+            or not all(
+                isinstance(reason, str) and reason.startswith("flag:")
+                for reason in reasons
+            )
+        ):
+            raise DeliveryError("owner-gated route decision is invalid")
+        flags = sorted(reason.removeprefix("flag:") for reason in reasons)
+        if len(flags) != len(set(flags)):
+            raise DeliveryError("owner-gated route flags are not unique")
+        return flags
+
+    def _owner_gate_expected(
+        self, state: dict[str, Any], decision: dict[str, Any]
+    ) -> dict[str, Any]:
+        flags = self._owner_gate_flags(decision)
+        if unsupported := set(flags) - _AUTOMATIC_OWNER_APPROVAL_FLAGS:
+            raise DeliveryError(
+                "mission requires an unsupported owner-gated capability: "
+                + ", ".join(sorted(unsupported))
+            )
+        mission_id = state.get("mission_id")
+        if not isinstance(mission_id, str) or not mission_id:
+            raise DeliveryError("owner gate requires a durable mission identity")
+        goal_sha256 = hashlib.sha256(
+            self._mission_goal(state).encode("utf-8")
+        ).hexdigest()
+        policy_sha256 = decision.get("policy_sha256")
+        if not isinstance(policy_sha256, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", policy_sha256
+        ):
+            raise DeliveryError("owner gate requires an exact policy identity")
+        identity = flow_contract.canonical_sha256({
+            "mission_id": mission_id,
+            "goal_sha256": goal_sha256,
+            "policy_sha256": policy_sha256,
+            "flags": flags,
+        })
+        question_text = (
+            "This mission changes an accepted architecture boundary. "
+            "Reply exactly APPROVE to authorize that change for this mission; "
+            "any other reply is rejected and execution stays blocked."
+        )
+        return {
+            "schema_version": 1,
+            "mission_id": mission_id,
+            "goal_sha256": goal_sha256,
+            "policy_sha256": policy_sha256,
+            "flags": flags,
+            "question_id": f"{_OWNER_GATE_QUESTION_PREFIX}{identity[:24]}",
+            "question_text": question_text,
+        }
+
+    def _owner_gate_record(
+        self, state: dict[str, Any], decision: dict[str, Any]
+    ) -> dict[str, Any]:
+        expected = self._owner_gate_expected(state, decision)
+        record = state.get("owner_gate")
+        if not isinstance(record, dict) or set(record) != _OWNER_GATE_FIELDS:
+            raise DeliveryError("durable owner gate is missing or invalid")
+        if any(record.get(key) != value for key, value in expected.items()):
+            raise DeliveryError("durable owner gate changed after its checkpoint")
+        status = record.get("status")
+        answer_sha256 = record.get("answer_sha256")
+        if (
+            status not in {"pending", "approved"}
+            or (status == "pending" and answer_sha256 is not None)
+            or (
+                status == "approved"
+                and answer_sha256
+                != hashlib.sha256(_OWNER_GATE_APPROVAL.encode("utf-8")).hexdigest()
+            )
+        ):
+            raise DeliveryError("durable owner gate status is invalid")
+        return record
+
+    def _ensure_owner_gate_question(
+        self,
+        state: dict[str, Any],
+        mission: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+    ) -> dict[str, Any] | None:
+        decision = flow_contract.choose_delivery_route(
+            self.policy, self._route_signals(state)
+        )
+        if decision.get("status") == "ready":
+            if state.get("owner_gate") is not None:
+                raise DeliveryError("owner gate survived a non-gated route")
+            return None
+        expected = self._owner_gate_expected(state, decision)
+        record = state.get("owner_gate")
+        if record is None:
+            if state.get("phase") != "new":
+                raise DeliveryError("owner gate was discovered after execution started")
+            record = {
+                **expected,
+                "status": "pending",
+                "answer_sha256": None,
+            }
+            state["owner_gate"] = record
+            self._save(paths, state)
+        else:
+            record = self._owner_gate_record(state, decision)
+        if record["status"] == "approved":
+            if mission.get("answer") is None:
+                raise DeliveryError("approved owner gate lost its Central answer")
+            return None
+        if state.get("phase") != "new":
+            raise DeliveryError("owner gate is outside the pre-execution checkpoint")
+        handoff = mission_adapter.coordinator_tick(
+            self.client,
+            self.state_root,
+            self.backend,
+            dispatch_profile=self.profile["dispatch_profile"],
+            workspace=f"worktree:{paths['author']}",
+            activate=False,
+        )
+        if not isinstance(handoff, dict) or not isinstance(
+            handoff.get("root_task_id"), str
+        ):
+            raise DeliveryError("owner gate inert handoff was not created or recovered")
+        state["root_task_id"] = handoff["root_task_id"]
+        self._save(paths, state)
+        self.client.publish(
+            mission["mission_id"],
+            mission_adapter._producer_event(
+                mission["mission_id"],
+                "mission.question",
+                {
+                    "question_id": record["question_id"],
+                    "text": record["question_text"],
+                },
+                {},
+            ),
+        )
+        return self._wait_for_owner(
+            state, self.client.get_mission(mission["mission_id"]), paths
+        )
 
     def _current_route(self, state: dict[str, Any]) -> dict[str, Any]:
         key = str(self._quality_failures(state))
@@ -1827,16 +2003,39 @@ class DeliveryCoordinator:
         answer = mission.get("answer")
         if (
             not isinstance(answer, dict)
-            or set(answer) != {"question_id", "text"}
+            or set(answer) not in (
+                {"question_id", "text"},
+                {"question_id", "text", "source_message_id"},
+            )
             or not isinstance(answer.get("question_id"), str)
             or not answer["question_id"]
             or not isinstance(answer.get("text"), str)
             or not answer["text"]
+            or (
+                "source_message_id" in answer
+                and (
+                    not isinstance(answer["source_message_id"], str)
+                    or not answer["source_message_id"]
+                    or len(answer["source_message_id"]) > 256
+                    or re.search(r"[\x00-\x1f\x7f]", answer["source_message_id"])
+                )
+            )
         ):
             raise DeliveryError("owner answer projection is invalid")
         previous = state.get("owner_question")
         if isinstance(previous, dict) and previous.get("question_id") != answer["question_id"]:
             raise DeliveryError("owner answer does not match the durable question")
+        owner_gate = state.get("owner_gate")
+        if owner_gate is not None:
+            decision = flow_contract.choose_delivery_route(
+                self.policy, self._route_signals(state)
+            )
+            owner_gate = self._owner_gate_record(state, decision)
+            if (
+                owner_gate["question_id"] != answer["question_id"]
+                or answer["text"] != _OWNER_GATE_APPROVAL
+            ):
+                raise DeliveryError("owner answer does not approve the durable owner gate")
         text = _bounded_diagnostic(answer["text"])
         entry = {
             "question_id": answer["question_id"],
@@ -1862,6 +2061,8 @@ class DeliveryCoordinator:
             }
         ):
             raise DeliveryError("owner answer does not reference the exact Kanban root")
+        if owner_gate is not None:
+            owner_gate.update(status="approved", answer_sha256=entry["sha256"])
         state.update(
             phase="owner_answer_pending",
             root_task_id=adapter_state["root_task_id"],
@@ -4215,6 +4416,12 @@ class DeliveryCoordinator:
             if state.get("phase") == "waiting_owner" and mission.get("answer") is None:
                 raise DeliveryError("owner question cleared without a durable answer")
             answer = mission.get("answer")
+            if not isinstance(answer, dict):
+                waiting = self._ensure_owner_gate_question(
+                    state, mission, paths
+                )
+                if waiting is not None:
+                    return waiting
             if isinstance(answer, dict):
                 consumed = any(
                     item["question_id"] == answer.get("question_id")

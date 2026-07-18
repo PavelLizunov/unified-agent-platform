@@ -561,6 +561,12 @@
   опасности или новой власти: destructive/необратимая потеря данных, выход за поставленную цель, изменение закрытой
   architecture/security boundary, новые credentials/external authority, новый provider/Claude, local inference/GPU
   и destructive/chaos/failover test с риском для недиспозабельного состояния.
+- **Pre-execution owner question:** `architecture_change` — единственный текущий owner-gated signal, который
+  coordinator может самостоятельно разрешить после ответа: сначала создаётся inert sticky-blocked root, затем один
+  deterministic `mission.question`. Central принимает только точное `APPROVE`; approval связывается с exact
+  mission/goal/policy и тем же root до любого model turn. Потерянный HTTP response повторяет тот же producer event.
+  `destructive`, credentials/external authority, new provider/Claude и local/GPU не становятся разрешёнными от
+  свободного текста и по-прежнему fail-closed до отдельной capability/setup границы.
 - **Обоснование:** это убирает владельца из execution loop, использует уже оплаченный надёжный маршрут и сохраняет
   независимость review через session/SHA/read-only/runtime boundaries без нового сервиса или провайдера.
 - **Отвергнуто:** Claude как default reviewer; подтверждение каждой более сильной OpenAI-модели; локальная модель как

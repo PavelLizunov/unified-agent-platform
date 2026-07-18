@@ -754,6 +754,49 @@ def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
         ) == next_goal["mission_id"]
 
 
+def test_owner_gate_accepts_only_exact_approval_without_clearing_question() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.accept(
+            "Architecture change",
+            mission_id="mission-owner-gate",
+            dispatch_profile="build1-owner-gate",
+        )
+        assert created
+        question_id = "owner-gate:0123456789abcdef01234567"
+        store.append_producer(
+            accepted["mission_id"],
+            {
+                "schema_version": 1,
+                "mission_id": accepted["mission_id"],
+                "type": "mission.question",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:owner-gate:1"},
+                "payload": {
+                    "question_id": question_id,
+                    "text": "Reply exactly APPROVE",
+                },
+            },
+        )
+
+        for text in ("approve", "NO", "APPROVE architecture"):
+            try:
+                store.answer(accepted["mission_id"], question_id, text)
+                raise AssertionError("non-exact owner approval was accepted")
+            except missions.MissionError as error:
+                assert "exactly APPROVE" in str(error)
+            projection = store.projection(accepted["mission_id"])
+            assert projection["status"] == "waiting_owner"
+            assert projection["question"]["question_id"] == question_id
+            assert projection["answer"] is None
+
+        answer, answer_created = store.answer(
+            accepted["mission_id"], question_id, "APPROVE"
+        )
+        assert answer_created and answer["payload"]["text"] == "APPROVE"
+        assert store.projection(accepted["mission_id"])["status"] == "active"
+
+
 def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
     routes = json.dumps({
         "workspace": {
@@ -2280,6 +2323,7 @@ def main() -> None:
     test_dispatch_profile_is_projected_and_immutable()
     test_registered_owner_intake_is_deterministic_and_fail_closed()
     test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
+    test_owner_gate_accepts_only_exact_approval_without_clearing_question()
     test_session_ordinary_owner_turn_answers_once_and_survives_restart()
     test_session_owner_turn_fails_closed_for_multiple_open_questions()
     test_concurrent_owner_intake_converges_on_one_acceptance()

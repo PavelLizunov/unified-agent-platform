@@ -253,12 +253,66 @@ class OwnerAnswerClient(FakeClient):
         )
 
 
+class AutomaticOwnerGateClient(FakeClient):
+    def __init__(self, *, lose_question_response_once=False):
+        super().__init__()
+        self.mission.update(question=None, answer=None)
+        self.events = {}
+        self.lose_question_response_once = lose_question_response_once
+
+    def list_missions(self, _profile, *, reconcile=False):
+        has_tasks = bool(self.mission["tasks"])
+        return [self.mission] if reconcile == has_tasks else []
+
+    def publish(self, _mission_id, event):
+        producer_id = event["correlation"]["producer_event_id"]
+        previous = self.events.get(producer_id)
+        if previous is not None:
+            assert previous == event
+            return
+        self.events[producer_id] = event
+        self.stages.append(event)
+        if event["type"] == "task.upsert":
+            self.mission["tasks"] = [dict(event["payload"])]
+        elif event["type"] == "mission.question":
+            self.mission.update(
+                status="waiting_owner",
+                question=dict(event["payload"]),
+                answer=None,
+            )
+            if self.lose_question_response_once:
+                self.lose_question_response_once = False
+                raise coordinator.mission_adapter.AdapterError(
+                    "question committed before response loss"
+                )
+
+    def get_mission(self, _mission_id):
+        return {
+            **self.mission,
+            "tasks": [dict(task) for task in self.mission["tasks"]],
+        }
+
+    def answer(self):
+        question = self.mission["question"]
+        assert isinstance(question, dict)
+        self.mission.update(
+            status="active",
+            question=None,
+            answer={
+                "question_id": question["question_id"],
+                "text": "APPROVE",
+                "source_message_id": "workspace-answer-1",
+            },
+        )
+
+
 class OwnerAnswerBackend(FakeBackend):
-    def __init__(self, failure_point):
+    def __init__(self, failure_point, *, expected_question_id="q-product"):
         super().__init__()
         self.task = None
         self.events = []
         self.failure_point = failure_point
+        self.expected_question_id = expected_question_id
         self.resume_calls = 0
 
     def ensure_root(self, *, mission_id, goal, allow_dispatch, assignee, workspace):
@@ -297,7 +351,7 @@ class OwnerAnswerBackend(FakeBackend):
             self.failure_point = None
             raise coordinator.mission_adapter.AdapterError("crash before Kanban update")
         assert self.task is not None and self.task["id"] == task_id
-        assert kwargs["question_id"] == "q-product"
+        assert kwargs["question_id"] == self.expected_question_id
         assert kwargs["workspace"] == f"worktree:{self.task['workspace_path']}"
         if self.task["status"] == "blocked":
             self.task.update(status="ready", assignee=kwargs["assignee"])
@@ -651,6 +705,94 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 self.assertEqual("running", backend.task["status"])
                 self.assertEqual(1, backend.claims)
                 self.assertEqual(2, backend.resume_calls)
+
+    def test_automatic_owner_gate_replays_question_and_resumes_exact_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["route_flags"] = ["architecture_change"]
+            client = AutomaticOwnerGateClient(lose_question_response_once=True)
+            backend = OwnerAnswerBackend(None)
+            state_root = root / "state"
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root
+            )
+
+            with self.assertRaisesRegex(
+                coordinator.mission_adapter.AdapterError,
+                "question committed before response loss",
+            ):
+                instance.tick()
+            self.assertEqual("waiting_owner", client.mission["status"])
+            self.assertEqual("blocked", backend.task["status"])
+            self.assertIsNone(backend.task["assignee"])
+            self.assertEqual([], backend.runs)
+            questions = [
+                event for event in client.events.values()
+                if event["type"] == "mission.question"
+            ]
+            self.assertEqual(1, len(questions))
+            self.assertTrue(
+                questions[0]["payload"]["question_id"].startswith("owner-gate:")
+            )
+            backend.expected_question_id = questions[0]["payload"]["question_id"]
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root
+            )
+            waiting = restarted.tick()
+            self.assertEqual("waiting_owner", waiting["action"])
+            self.assertEqual(1, len([
+                event for event in client.events.values()
+                if event["type"] == "mission.question"
+            ]))
+
+            client.answer()
+            with (
+                mock.patch.object(restarted, "_assert_nonroutable_assignee"),
+                mock.patch.object(restarted, "_ensure_worktree"),
+                mock.patch.object(restarted, "_publish_stage"),
+                mock.patch.object(restarted, "_reconcile_active"),
+                mock.patch.object(restarted, "_recover_author_commit", return_value=False),
+                mock.patch.object(
+                    restarted,
+                    "_author",
+                    side_effect=coordinator.InjectedCrash("stop after approved resume"),
+                ),
+                self.assertRaisesRegex(
+                    coordinator.InjectedCrash, "stop after approved resume"
+                ),
+            ):
+                restarted.tick()
+
+            state = coordinator.mission_adapter._read_json(
+                restarted._paths("mission-a7-3")["state"]
+            )
+            self.assertEqual("approved", state["owner_gate"]["status"])
+            self.assertEqual("APPROVE", state["owner_answers"][0]["text"])
+            self.assertNotIn("source_message_id", state["owner_answers"][0])
+            self.assertEqual([], state["route_decisions"]["0"]["signals"]["flags"])
+            self.assertEqual("running", backend.task["status"])
+            self.assertEqual(1, backend.claims)
+
+    def test_unsupported_owner_gated_capability_stays_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["route_flags"] = ["local_or_gpu"]
+            client = AutomaticOwnerGateClient()
+            backend = OwnerAnswerBackend(None)
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError,
+                "unsupported owner-gated capability: local_or_gpu",
+            ):
+                instance.tick()
+            self.assertIsNone(backend.task)
+            self.assertEqual([], client.stages)
 
     def test_owner_answer_is_bound_into_the_next_author_prompt(self):
         with tempfile.TemporaryDirectory() as directory:
