@@ -145,6 +145,8 @@ def main() -> None:
         assert "uq_tasks_active_idempotency" in kanban
         assert "def _harden_db_permissions" in kanban
         assert "kb.unblock_task(conn, tid, reason=reason)" in kanban_cli
+        assert 'p_claim.add_argument("--claimer"' in kanban_cli
+        assert "claimer=args.claimer" in kanban_cli
         assert 'payload["reason"] = reason' in kanban
         assert '"--require-idle"' in kanban_cli
         assert "GC deferred: board is not idle" in kanban_cli

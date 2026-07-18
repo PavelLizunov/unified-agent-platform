@@ -2,11 +2,13 @@
 import copy
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -15,6 +17,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "tools" / "swarm" / "mission_adapter.py"
+sys.path.insert(0, str(MODULE_PATH.parent))
 SPEC = importlib.util.spec_from_file_location("mission_adapter", MODULE_PATH)
 adapter = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -457,7 +460,10 @@ class MissionAdapterTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
         backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
-        claimed = backend.claim("task-1", ttl_seconds=60)
+        provenance = "a" * 64
+        claimed = backend.claim(
+            "task-1", ttl_seconds=60, provenance=provenance
+        )
         self.assertEqual("running", claimed["task"]["status"])
         completed = backend.complete(
             "task-1", result="success", summary="done", metadata={"mission_events": []}
@@ -466,6 +472,36 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertTrue(all(isinstance(command, list) for command in commands))
         complete_command = next(command for command in commands if "complete" in command)
         self.assertIn("--metadata", complete_command)
+        claim_command = next(command for command in commands if "claim" in command)
+        self.assertEqual(provenance, claim_command[claim_command.index("--claimer") + 1])
+
+    def test_native_and_top_level_errors_redact_escaped_credentials(self):
+        secret = "short-secret"
+        diagnostic = json.dumps({
+            "Authorization": f"Basic {secret}",
+            "Proxy-Authorization": f"Basic {secret}",
+            "token": secret,
+            "Cookie": f"session={secret}",
+        }).replace('"', r'\"')
+
+        def runner(command):
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr=diagnostic)
+
+        backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
+        with self.assertRaises(adapter.AdapterError) as raised:
+            backend.show("task-1")
+        self.assertIn("[REDACTED]", str(raised.exception))
+        self.assertNotIn(secret, str(raised.exception))
+
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(adapter, "_read_json", side_effect=adapter.AdapterError(diagnostic)),
+            mock.patch("sys.stderr", stderr),
+        ):
+            status = adapter.main(["accept", "--event", "unused.json"])
+        self.assertEqual(2, status)
+        self.assertIn("[REDACTED]", stderr.getvalue())
+        self.assertNotIn(secret, stderr.getvalue())
 
     def test_native_capacity_schedule_and_unblock_are_fail_closed(self):
         commands = []
@@ -527,6 +563,7 @@ class MissionAdapterTests(unittest.TestCase):
         expires = int(time.time()) + 600
         event_run_id = 9
         competing_run = False
+        claim_lock = "b" * 64
 
         def runner(command):
             return subprocess.CompletedProcess(
@@ -544,7 +581,7 @@ class MissionAdapterTests(unittest.TestCase):
                     "events": [{
                         "kind": "claimed",
                         "payload": {
-                            "lock": "build-1:123",
+                            "lock": claim_lock,
                             "expires": expires,
                             "run_id": 9,
                         },
@@ -557,8 +594,14 @@ class MissionAdapterTests(unittest.TestCase):
         backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
         self.assertEqual(
             "running",
-            backend.verify_claim("task-1", "9", min_remaining_seconds=60)["task"]["status"],
+            backend.verify_claim(
+                "task-1", "9", min_remaining_seconds=60, provenance=claim_lock
+            )["task"]["status"],
         )
+        with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
+            backend.verify_claim(
+                "task-1", "9", min_remaining_seconds=60, provenance="c" * 64
+            )
         with self.assertRaisesRegex(adapter.AdapterError, "stale, or expired"):
             backend.verify_claim("task-1", "other", min_remaining_seconds=60)
 

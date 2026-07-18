@@ -132,7 +132,7 @@ class FakeBackend:
     def show(self, _task_id):
         return {"task": dict(self.task), "runs": [dict(run) for run in self.runs]}
 
-    def claim(self, _task_id, *, ttl_seconds):
+    def claim(self, _task_id, *, ttl_seconds, provenance=None):
         assert ttl_seconds == 28800
         self.claims += 1
         expires = int(time.time()) + ttl_seconds
@@ -142,6 +142,7 @@ class FakeBackend:
             "id": run_id,
             "status": "running",
             "profile": "coordinator-codex-luna-a7",
+            "claim_lock": provenance or f"fake-claim-{run_id}",
             "claim_expires": expires,
         })
         return self.show("task-1")
@@ -173,7 +174,9 @@ class FakeBackend:
         self.task.update(status="ready", claim_expires=None)
         return self.show("task-1")
 
-    def verify_claim(self, task_id, run_id, *, min_remaining_seconds=60):
+    def verify_claim(
+        self, task_id, run_id, *, min_remaining_seconds=60, provenance=None
+    ):
         snapshot = self.show(task_id)
         matching = [run for run in snapshot["runs"] if str(run["id"]) == str(run_id)]
         minimum = int(time.time()) + min_remaining_seconds
@@ -183,6 +186,10 @@ class FakeBackend:
             or len(matching) != 1
             or matching[0].get("status") != "running"
             or matching[0].get("claim_expires", 0) <= minimum
+            or (
+                provenance is not None
+                and matching[0].get("claim_lock") != provenance
+            )
         ):
             raise coordinator.mission_adapter.AdapterError("stale claim")
         return snapshot
@@ -306,9 +313,11 @@ class OwnerAnswerBackend(FakeBackend):
             raise coordinator.mission_adapter.AdapterError("crash after Kanban update")
         return self.show(task_id)
 
-    def claim(self, task_id, *, ttl_seconds):
+    def claim(self, task_id, *, ttl_seconds, provenance=None):
         assert self.task is not None
-        return super().claim(task_id, ttl_seconds=ttl_seconds)
+        return super().claim(
+            task_id, ttl_seconds=ttl_seconds, provenance=provenance
+        )
 
 
 class MutatingCompletionBackend(FakeBackend):
@@ -761,6 +770,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "api_key": "short-secret",
                     "apiKey": "camel-short-secret",
                     "clientSecret": "client-short-secret",
+                    "oauth_token_value": "nested-token-secret",
+                    "response_set_cookie_value": "nested-cookie-secret",
                     "Cookie": "session=field-cookie-secret",
                     "setCookie": "session=camel-cookie-secret",
                     "headers": [
@@ -816,6 +827,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("[REDACTED]", parsed["error"]["api_key"])
             self.assertEqual("[REDACTED]", parsed["error"]["apiKey"])
             self.assertEqual("[REDACTED]", parsed["error"]["clientSecret"])
+            self.assertEqual("[REDACTED]", parsed["error"]["oauth_token_value"])
+            self.assertEqual("[REDACTED]", parsed["error"]["response_set_cookie_value"])
             self.assertEqual("[REDACTED]", parsed["error"]["Cookie"])
             self.assertEqual("[REDACTED]", parsed["error"]["setCookie"])
             self.assertTrue(all("cookie-secret" not in item for item in parsed["error"]["headers"]))
@@ -1389,8 +1402,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         class CrashAfterClaimBackend(FakeBackend):
             crash_after_claim = False
 
-            def claim(self, task_id, *, ttl_seconds):
-                snapshot = super().claim(task_id, ttl_seconds=ttl_seconds)
+            def claim(self, task_id, *, ttl_seconds, provenance=None):
+                snapshot = super().claim(
+                    task_id, ttl_seconds=ttl_seconds, provenance=provenance
+                )
                 if self.crash_after_claim:
                     self.crash_after_claim = False
                     raise coordinator.InjectedCrash("after capacity reclaim side effect")
@@ -1448,6 +1463,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertTrue(persisted["model_capacity"]["reclaim_pending"])
             self.assertEqual("7", persisted["run_id"])
             self.assertEqual("8", str(backend.runs[-1]["id"]))
+            self.assertEqual(
+                persisted["model_capacity"]["reclaim_token"],
+                backend.runs[-1]["claim_lock"],
+            )
 
             restarted = coordinator.DeliveryCoordinator(
                 approved, FakeClient(), backend, root / "state"
@@ -1463,6 +1482,72 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertFalse(recovered["model_capacity"]["claim_parked"])
             self.assertFalse(recovered["model_capacity"]["reclaim_pending"])
             self.assertEqual(1, sum(run["status"] == "running" for run in backend.runs))
+
+    def test_capacity_reclaim_pending_rejects_foreign_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-foreign-provenance")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-foreign-provenance",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "d" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(
+                    state, "capacity-foreign-provenance", paths
+                )
+            state["model_capacity"]["reclaim_pending"] = True
+            instance._save(paths, state)
+            backend.unblock("task-1", reason="competing claimant")
+            backend.claim(
+                "task-1",
+                ttl_seconds=approved["claim_ttl_seconds"],
+                provenance="f" * 64,
+            )
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state("capacity-foreign-provenance", paths)
+            with (
+                mock.patch.object(coordinator.time, "time", return_value=1006),
+                self.assertRaisesRegex(
+                    coordinator.mission_adapter.AdapterError, "stale claim"
+                ),
+            ):
+                restarted._capacity_wait_result(
+                    recovered, "capacity-foreign-provenance", paths
+                )
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("7", persisted["run_id"])
+            self.assertTrue(persisted["model_capacity"]["reclaim_pending"])
+            self.assertEqual(2, backend.claims)
 
     def test_capacity_wait_rejects_reassignment_before_park_or_resume(self):
         with tempfile.TemporaryDirectory() as directory:

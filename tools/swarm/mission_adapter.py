@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Callable
+
+import flow_contract
 
 
 class AdapterError(ValueError):
@@ -124,7 +127,9 @@ class HermesKanbanBackend:
     def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
         result = self.runner(self._command(*args))
         if result.returncode:
-            raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban command failed")
+            raise AdapterError(flow_contract._safe_error(
+                (result.stderr or result.stdout).strip() or "Hermes Kanban command failed"
+            ))
         return result
 
     def _json(self, *args: str) -> Any:
@@ -289,13 +294,22 @@ class HermesKanbanBackend:
         if result.returncode:
             if "no log" in (result.stderr or "").lower():
                 return ""
-            raise AdapterError((result.stderr or result.stdout).strip() or "Hermes Kanban log failed")
+            raise AdapterError(flow_contract._safe_error(
+                (result.stderr or result.stdout).strip() or "Hermes Kanban log failed"
+            ))
         return result.stdout
 
-    def claim(self, task_id: str, *, ttl_seconds: int) -> dict[str, Any]:
+    def claim(
+        self, task_id: str, *, ttl_seconds: int, provenance: str | None = None
+    ) -> dict[str, Any]:
         if ttl_seconds <= 0:
             raise AdapterError("Kanban claim TTL must be positive")
-        self._run("claim", task_id, "--ttl", str(ttl_seconds))
+        if provenance is not None and re.fullmatch(r"[0-9a-f]{64}", provenance) is None:
+            raise AdapterError("Kanban claim provenance is invalid")
+        command = ["claim", task_id, "--ttl", str(ttl_seconds)]
+        if provenance is not None:
+            command.extend(("--claimer", provenance))
+        self._run(*command)
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
@@ -348,8 +362,15 @@ class HermesKanbanBackend:
         return snapshot
 
     def verify_claim(
-        self, task_id: str, run_id: str, *, min_remaining_seconds: int = 60
+        self,
+        task_id: str,
+        run_id: str,
+        *,
+        min_remaining_seconds: int = 60,
+        provenance: str | None = None,
     ) -> dict[str, Any]:
+        if provenance is not None and re.fullmatch(r"[0-9a-f]{64}", provenance) is None:
+            raise AdapterError("Kanban claim provenance is invalid")
         snapshot = self.show(task_id)
         task = snapshot.get("task")
         runs = snapshot.get("runs")
@@ -386,6 +407,10 @@ class HermesKanbanBackend:
             or len(claims) != 1
             or not isinstance(claims[0]["payload"].get("lock"), str)
             or not claims[0]["payload"]["lock"]
+            or (
+                provenance is not None
+                and claims[0]["payload"]["lock"] != provenance
+            )
             or not isinstance(claims[0]["payload"].get("expires"), int)
             or claims[0]["payload"]["expires"] <= minimum
         ):
@@ -962,7 +987,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
     except (AdapterError, OSError, json.JSONDecodeError, subprocess.SubprocessError) as error:
-        print(f"hermes-mission-adapter-error: {error}", file=sys.stderr)
+        print(
+            f"hermes-mission-adapter-error: {flow_contract._safe_error(error)}",
+            file=sys.stderr,
+        )
         return 2
 
 

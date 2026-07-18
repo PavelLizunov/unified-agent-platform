@@ -22,7 +22,7 @@ FILES = {
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
-    "hermes_cli/kanban.py": "92d6c82cf7c7adf3eace25173aa00a8434367a4403f14942fee60013056bd6bb",
+    "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
@@ -37,6 +37,7 @@ LEGACY_BUILD1_PATCHED_FILES = {
     "hermes_cli/kanban.py": (
         "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
         "0727f59ca0fe089e042b270612c2c472f05015c39d6a271f37d86319820e7b88",
+        "92d6c82cf7c7adf3eace25173aa00a8434367a4403f14942fee60013056bd6bb",
     ),
     "hermes_cli/kanban_db.py": (
         "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
@@ -87,6 +88,23 @@ def transform(relative: str, text: str) -> str:
             "mission command",
         )
     if relative == "hermes_cli/kanban.py":
+        text = replace(
+            text,
+            '''    p_claim.add_argument("--ttl", type=int, default=kb.DEFAULT_CLAIM_TTL_SECONDS,
+                         help="Claim TTL in seconds (default: 900)")''',
+            '''    p_claim.add_argument("--ttl", type=int, default=kb.DEFAULT_CLAIM_TTL_SECONDS,
+                         help="Claim TTL in seconds (default: 900)")
+    p_claim.add_argument("--claimer", default=None, help=argparse.SUPPRESS)''',
+            "explicit claim provenance option",
+        )
+        text = replace(
+            text,
+            '''        task = kb.claim_task(conn, args.task_id, ttl_seconds=args.ttl)''',
+            '''        task = kb.claim_task(
+            conn, args.task_id, ttl_seconds=args.ttl, claimer=args.claimer
+        )''',
+            "explicit claim provenance binding",
+        )
         text = replace(
             text,
             '''    author = _profile_author() if reason else None

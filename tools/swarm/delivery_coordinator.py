@@ -81,7 +81,7 @@ _CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
 _CAPACITY_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "failures_on_route", "round", "status", "not_before", "error_class",
-    "last_error_sha256", "claim_parked", "reclaim_pending",
+    "last_error_sha256", "claim_parked", "reclaim_pending", "reclaim_token",
 }
 _AMBIGUOUS_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
@@ -334,8 +334,13 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
             "authorization", "token", "apikey", "accesskey", "privatekey",
             "secret", "password", "passwd", "credential", "cookie", "setcookie",
         )
+        components = set(name.split("_"))
         return (
             name in exact
+            or bool(components & {
+                "authorization", "token", "secret", "password", "passwd",
+                "credential", "credentials", "cookie",
+            })
             or any(name.startswith(f"{stem}_") for stem in stems)
             or any(name.endswith(f"_{stem}") for stem in stems)
             or any(compact.startswith(stem) for stem in compact_stems)
@@ -785,6 +790,8 @@ class DeliveryCoordinator:
             or value.get("error_class") != "transient_capacity"
             or not isinstance(value.get("claim_parked"), bool)
             or not isinstance(value.get("reclaim_pending"), bool)
+            or not isinstance(value.get("reclaim_token"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["reclaim_token"]) is None
             or not isinstance(value.get("last_error_sha256"), str)
             or len(value["last_error_sha256"]) != 64
             or isinstance(value.get("failures_on_route"), bool)
@@ -985,7 +992,9 @@ class DeliveryCoordinator:
             ]
         if task.get("status") == "ready" and not active:
             snapshot = self.backend.claim(
-                state["root_task_id"], ttl_seconds=self.profile["claim_ttl_seconds"]
+                state["root_task_id"],
+                ttl_seconds=self.profile["claim_ttl_seconds"],
+                provenance=waiting["reclaim_token"],
             )
             task = snapshot.get("task")
             runs = snapshot.get("runs")
@@ -1006,8 +1015,13 @@ class DeliveryCoordinator:
             or active[0].get("profile") != self.profile["assignee"]
         ):
             raise DeliveryError("capacity retry found a different active Kanban run")
+        previous_run_id = state.get("run_id")
         state["run_id"] = str(active[0]["id"])
-        self._assert_claim(state)
+        try:
+            self._assert_claim(state, provenance=waiting["reclaim_token"])
+        except (DeliveryError, mission_adapter.AdapterError):
+            state["run_id"] = previous_run_id
+            raise
         self._save(paths, state)
         waiting["claim_parked"] = False
         waiting["reclaim_pending"] = False
@@ -1081,6 +1095,19 @@ class DeliveryCoordinator:
         else:
             delay = _CAPACITY_RETRY_DELAYS_SECONDS[failures - 1]
         state.pop("model_invocation", None)
+        not_before = time.time() + delay
+        reclaim_identity = {
+            "mission_id": state.get("mission_id"),
+            "role": role,
+            "quality_epoch": quality_epoch,
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": candidate_sha,
+            "failures_on_route": failures,
+            "round": round_index,
+            "status": status,
+            "not_before": not_before,
+            "last_error_sha256": failure["message_sha256"],
+        }
         state["model_capacity"] = {
             "schema_version": 1,
             "role": role,
@@ -1090,11 +1117,16 @@ class DeliveryCoordinator:
             "failures_on_route": failures,
             "round": round_index,
             "status": status,
-            "not_before": time.time() + delay,
+            "not_before": not_before,
             "error_class": "transient_capacity",
             "last_error_sha256": failure["message_sha256"],
             "claim_parked": False,
             "reclaim_pending": False,
+            "reclaim_token": hashlib.sha256(
+                json.dumps(
+                    reclaim_identity, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest(),
         }
         self._save(paths, state)
 
@@ -1647,7 +1679,13 @@ class DeliveryCoordinator:
         state["run_id"] = observed_run_id
         self._assert_claim(state)
 
-    def _assert_claim(self, state: dict[str, Any], *, min_remaining_seconds: int = 60) -> None:
+    def _assert_claim(
+        self,
+        state: dict[str, Any],
+        *,
+        min_remaining_seconds: int = 60,
+        provenance: str | None = None,
+    ) -> None:
         task_id = state.get("root_task_id")
         run_id = state.get("run_id")
         if not isinstance(task_id, str) or not task_id or run_id is None:
@@ -1656,6 +1694,7 @@ class DeliveryCoordinator:
             task_id,
             str(run_id),
             min_remaining_seconds=min_remaining_seconds,
+            provenance=provenance,
         )
         task = snapshot.get("task") if isinstance(snapshot, dict) else None
         if (
