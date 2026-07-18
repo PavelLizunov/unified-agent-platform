@@ -25,8 +25,8 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "dd9e027d578bdbe1e7b2d194dbadd7612ab1b6cbf62f08c6975ac37ea53ab0f5",
-    "gateway/platforms/api_server.py": "b0e0b3b8d87a7ef10b9fe034e62e92e65c95280f8a20fe48e3548a96142f4fdd",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "7b83f8adaf44d9b85e492329060a61cfedda328346b69a11a1c2e3451484e5c8",
+    "gateway/platforms/api_server.py": "e7ab1798573e78dbe26234ac625be82fa103cb429b71dabfc0a1b6186cf1c731",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -527,7 +527,7 @@ def connect(
             "module exit propagation",
         )
     if relative == "gateway/run.py":
-        return replace(
+        text = replace(
             text,
             '''        if canonical == "status":
             return await self._handle_status_command(event)
@@ -579,6 +579,76 @@ def connect(
         if canonical == "agents":''',
             "mission gateway handler",
         )
+        text = replace(
+            text,
+            '''        if canonical == "voice":
+            return await self._handle_voice_command(event)
+
+        if self._draining:''',
+            '''        if canonical == "voice":
+            return await self._handle_voice_command(event)
+
+        if (
+            not command
+            and not is_internal
+            and source.platform
+            and source.platform.value == "telegram"
+        ):
+            event._uap_owner_goal = True
+
+        if self._draining:''',
+            "ordinary Telegram mission intake marker",
+        )
+        return replace(
+            text,
+            '''        # Build session context
+        context = build_session_context(source, self.config, session_entry)''',
+            '''        if getattr(event, "_uap_owner_goal", False):
+            from agent.redact import redact_sensitive_text
+            from hermes_cli.uap_missions import MissionError, MissionStore, telegram_text
+
+            try:
+                source_message_id = str(event.message_id or "").strip()
+                if not source_message_id:
+                    raise MissionError("mission intake requires a stable source message")
+                store = MissionStore.default()
+                accepted, _ = store.ingest_owner_goal(
+                    redact_sensitive_text(event.text, force=True),
+                    platform="telegram",
+                    source_message_id=source_message_id,
+                    session_id=session_entry.session_id,
+                    chat_id=str(source.chat_id or ""),
+                    thread_id=str(source.thread_id or ""),
+                )
+                response = telegram_text(store.projection(accepted["mission_id"]))
+                if not self.session_store.has_platform_message_id(
+                    session_entry.session_id, source_message_id
+                ):
+                    self.session_store.append_to_transcript(
+                        session_entry.session_id,
+                        {
+                            "role": "user",
+                            "content": event.text,
+                            "platform_message_id": source_message_id,
+                            "timestamp": event.timestamp,
+                        },
+                    )
+                    self.session_store.append_to_transcript(
+                        session_entry.session_id,
+                        {
+                            "role": "assistant",
+                            "content": response,
+                            "platform_message_id": f"uap-mission:{source_message_id}",
+                        },
+                    )
+                return response
+            except MissionError as error:
+                return f"Mission intake unavailable: {error}"
+
+        # Build session context
+        context = build_session_context(source, self.config, session_entry)''',
+            "ordinary Telegram mission intake",
+        )
     if relative == "gateway/platforms/api_server.py":
         text = replace(
             text,
@@ -598,6 +668,100 @@ def connect(
             "        self._mission_store: Optional[MissionStore] = None",
             "mission store",
         )
+        stream_marker = '''    async def _handle_session_chat_stream(self, request: "web.Request") -> "web.StreamResponse":'''
+        if text.count(stream_marker) != 1:
+            raise RuntimeError("overlay anchor mismatch for session chat stream")
+        before_stream, stream_and_tail = text.split(stream_marker, 1)
+        stream_and_tail = replace(
+            stream_and_tail,
+            '''        user_message, err = _session_chat_user_message(body)
+        if err is not None:
+            return err
+        system_prompt = body.get("system_message") or body.get("instructions")''',
+            '''        user_message, err = _session_chat_user_message(body)
+        if err is not None:
+            return err
+        source_message_id = body.get("source_message_id")
+        if source_message_id is not None:
+            try:
+                if not isinstance(user_message, str):
+                    raise MissionError("mission intake requires a text goal")
+                store = self._missions()
+                accepted, _ = store.ingest_owner_goal(
+                    redact_sensitive_text(user_message, force=True),
+                    platform="workspace",
+                    source_message_id=source_message_id,
+                    session_id=session_id,
+                )
+                mission_id = accepted["mission_id"]
+                response_text = (
+                    f"Mission {mission_id} accepted. Delivery continues automatically; "
+                    "no owner action is required."
+                )
+                database = self._ensure_session_db()
+                receipt = f"workspace:{source_message_id}"
+                if not database.has_platform_message_id(session_id, receipt):
+                    database.append_message(
+                        session_id, "user", user_message, platform_message_id=receipt
+                    )
+                    database.append_message(
+                        session_id,
+                        "assistant",
+                        response_text,
+                        platform_message_id=f"{receipt}:mission",
+                    )
+            except MissionError as error:
+                return web.json_response(
+                    _openai_error(str(error), code="mission_intake_failed"), status=400
+                )
+            digest = hashlib.sha256(mission_id.encode("utf-8")).hexdigest()[:32]
+            run_id = f"run_{digest}"
+            message_id = f"msg_{digest}"
+            now = time.time()
+            events = (
+                ("run.started", {
+                    "session_id": session_id, "run_id": run_id, "seq": 1, "ts": now,
+                    "user_message": {"role": "user", "content": user_message},
+                }),
+                ("message.started", {
+                    "session_id": session_id, "run_id": run_id, "seq": 2, "ts": now,
+                    "message": {"id": message_id, "role": "assistant"},
+                }),
+                ("assistant.completed", {
+                    "session_id": session_id, "run_id": run_id, "seq": 3, "ts": now,
+                    "message_id": message_id, "content": response_text,
+                    "completed": True, "partial": False, "interrupted": False,
+                }),
+                ("run.completed", {
+                    "session_id": session_id, "run_id": run_id, "seq": 4, "ts": now,
+                    "message_id": message_id, "completed": True,
+                    "messages": [
+                        {"role": "user", "content": user_message},
+                        {"role": "assistant", "content": response_text},
+                    ],
+                    "usage": {},
+                }),
+                ("done", {
+                    "session_id": session_id, "run_id": run_id, "seq": 5, "ts": now,
+                }),
+            )
+            payload = "".join(
+                f"event: {name}\\ndata: {json.dumps(data, ensure_ascii=False)}\\n\\n"
+                for name, data in events
+            ).encode("utf-8")
+            return web.Response(
+                body=payload,
+                headers={
+                    "Content-Type": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "X-Hermes-Session-Id": session_id,
+                },
+            )
+        system_prompt = body.get("system_message") or body.get("instructions")''',
+            "ordinary Workspace mission intake",
+        )
+        text = before_stream + stream_marker + stream_and_tail
         methods = '''    def _missions(self) -> MissionStore:
         if self._mission_store is None:
             self._mission_store = MissionStore.default()

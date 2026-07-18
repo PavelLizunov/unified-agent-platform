@@ -445,9 +445,9 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
 - **Registered schema-v4 consumer installed (2026-07-18):** PR #245 installed a repo-owned reusable
   `build1-flow-pilot-registered-v4` profile and enabled its standing build-1 timer. Its first timer-triggered idle tick
   returned success/null without a mission, model or delivery state; exact source/installed hashes and `0700`/`0600`
-  modes matched. Central's owner-intake registry is still absent and ordinary Workspace/Telegram ingress is not wired,
-  so this is a ready exact-profile consumer, not yet a live ordinary-goal path. Evidence:
-  `docs/evidence/registered-flow-profile-v4-rollout-2026-07-18.md`.
+  modes matched. The current repository manifest now adds exact Workspace/Telegram ordinary-message intake into that
+  profile with deterministic source-message replay; live rollout and non-toy delivery evidence remain pending.
+  Installed-consumer evidence: `docs/evidence/registered-flow-profile-v4-rollout-2026-07-18.md`.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.
