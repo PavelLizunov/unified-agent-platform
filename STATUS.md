@@ -80,10 +80,10 @@ Last updated: 2026-07-18
 - **Central terminal authority is transport-independent (2026-07-18).** Delivery/rejection gates now cause Central
   to atomically commit the authoritative terminal event without requiring a Workspace client, Telegram subscriber or
   notification checkpoint. Telegram leases and cursors deliver that already-committed event at least once; an outage
-  leaves the mission terminal and makes the producer request retryable until only the lagging cursors catch up. Repair
-  missions keep their inherited binding until their committed terminal update is checkpointed. Restart, partial-send,
-  late-subscription and single-terminal regression tests cover the boundary; live rollout verification remains the
-  merge gate for this change.
+  leaves the mission terminal, while the existing persistent profile poll drains one pending terminal outbox event on
+  later ticks until only the lagging cursors catch up. Repair missions keep their inherited binding until their
+  committed terminal update is checkpointed. Restart, expired-lease, partial-send, late-subscription and
+  single-terminal regression tests cover the boundary; live rollout verification remains the merge gate for this change.
 - **OpenAI autonomy policy is explicit and fail-closed (2026-07-15, ADR-031).** `flow_contract.py delivery-route`
   deterministically maps closed repo-contract signals to standing-approved Luna/Sol (`standard`), Sol/Terra
   (`complex`) or Terra/Sol (`escalated`) author/reviewer sessions. Ordinary subscription spend, reasoning effort,

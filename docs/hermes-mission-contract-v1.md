@@ -178,7 +178,8 @@ service:
   directories are `0700` on POSIX;
 - only the automatic delivery contract may publish `completed`: Central atomically commits the terminal event as soon
   as the delivery gates pass, independently of Workspace or Telegram availability; notification cursors then deliver
-  that already-committed event at least once; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
+  that already-committed event at least once, and the existing persistent exact-profile poll drains one pending
+  terminal notification on later ticks; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
   forwarded client headers are ignored, and terminal retries with the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open

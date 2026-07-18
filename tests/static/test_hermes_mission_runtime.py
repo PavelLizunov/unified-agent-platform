@@ -535,11 +535,14 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert completed[0]["type"] == "mission.completed"
         assert store.projection(mission_id)["status"] == "completed"
         assert store.completion_notification(mission_id) is None
+        assert store.pending_terminal_notification("build1-target") is None
 
         store.bind(mission_id, "telegram", "42", "7")
         store.bind(mission_id, "telegram", "43", "8")
         notification = store.completion_notification(mission_id)
         assert notification == completed[0]
+        assert store.pending_terminal_notification("another-target") is None
+        assert store.pending_terminal_notification("build1-target") == completed[0]
         subscription = store.pending_subscriptions(mission_id, notification["sequence"])[0]
         wrong_sequence_token = store.claim_notification(subscription, 1)
         assert wrong_sequence_token is not None
@@ -588,6 +591,7 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert {chat_id for chat_id, _text in first_attempt} == {"42", "43"}
         assert all(text == expected_terminal_text for _chat_id, text in first_attempt)
         assert store.projection(mission_id)["status"] == "completed"
+        assert store.pending_terminal_notification("build1-target") == completed[0]
 
         retry: list[tuple[str, str]] = []
 
@@ -597,6 +601,7 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert asyncio.run(missions.notify_subscribers(store, notification, retry_sender)) == 1
         assert retry == [("43", expected_terminal_text)]
         assert store.completion_notification(mission_id) is None
+        assert store.pending_terminal_notification("build1-target") is None
         assert asyncio.run(missions.notify_subscribers(store, completed[0], retry_sender)) == 0
         assert retry == [("43", expected_terminal_text)]
         assert store.complete_if_ready(mission_id) is None
@@ -1083,6 +1088,11 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
             store.accept("Deliver", mission_id=parent)
             store.bind(parent, "telegram", "42")
             store.accept("Repair", mission_id=child, parent_mission_id=parent)
+            try:
+                store.bind(parent, "telegram", "42")
+                raise AssertionError("active repair binding was manually bypassed")
+            except missions.MissionError as error:
+                assert "protected until terminal notification" in str(error)
             event, created = store.append_central(
                 child,
                 {
@@ -1095,6 +1105,11 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
                 },
             )
             assert created and store.bound_mission("telegram", "42") == child
+            try:
+                store.bind(parent, "telegram", "42")
+                raise AssertionError("terminal repair binding was bypassed before notification")
+            except missions.MissionError as error:
+                assert "protected until terminal notification" in str(error)
             try:
                 store.restore_parent_after_terminal_notification(child)
                 raise AssertionError("repair binding restored before terminal notification")
@@ -1125,6 +1140,75 @@ def test_explicit_repair_terminal_notifies_before_parent_restore() -> None:
     asyncio.run(scenario())
 
 
+def test_terminal_notification_outbox_survives_lease_and_restart() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "missions.sqlite3"
+            store = missions.MissionStore(database)
+            mission_id = "mission-terminal-outbox-restart"
+            store.accept("Deliver", mission_id=mission_id, dispatch_profile="build1-outbox")
+            store.bind(mission_id, "telegram", "42")
+            ready = [
+                ("task.upsert", {"task_id": "task-1", "title": "Root", "status": "done"}),
+                ("worker.upsert", {"worker_id": "worker-1", "status": "success"}),
+                *(("gate.upsert", {"gate_id": gate, "status": "passed"})
+                  for gate in missions._COMPLETION_GATES),
+                ("delivery.upsert", {
+                    "kind": "pull_request", "status": "merged",
+                    "url": "https://example.invalid/pr/1",
+                }),
+                ("delivery.upsert", {
+                    "kind": "default_branch", "status": "verified",
+                    "url": "https://example.invalid/commit/1",
+                }),
+            ]
+            for number, (event_type, payload) in enumerate(ready, 1):
+                store.append_producer(mission_id, {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": event_type,
+                    "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:outbox:{number}"},
+                    "payload": payload,
+                })
+            completed = store.complete_if_ready(mission_id)
+            assert completed is not None
+            terminal = completed[0]
+            subscription = store.pending_subscriptions(mission_id, terminal["sequence"])[0]
+            token = store.claim_notification(subscription, terminal["sequence"])
+            assert token is not None
+
+            restarted = missions.MissionStore(database)
+            assert restarted.pending_terminal_notification("build1-outbox") == terminal
+            sent: list[str] = []
+
+            async def send(_subscription: dict, text: str) -> None:
+                sent.append(text)
+
+            assert await missions.notify_subscribers(restarted, terminal, send) == 0
+            assert sent == []
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute(
+                    """UPDATE mission_subscriptions
+                       SET notification_lease_until = 0
+                       WHERE mission_id = ?""",
+                    (mission_id,),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+            assert await missions.notify_subscribers(restarted, terminal, send) == 1
+            assert len(sent) == 1
+            assert restarted.pending_terminal_notification("build1-outbox") is None
+            assert sum(
+                event["type"] in missions.TERMINAL_TYPES
+                for event in restarted.events(mission_id)
+            ) == 1
+
+    asyncio.run(scenario())
+
+
 def test_terminal_retention_preserves_active_repair_chain() -> None:
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -1144,9 +1228,9 @@ def test_terminal_retention_preserves_active_repair_chain() -> None:
                 "payload": {"reason": "test cleanup"},
             },
         )
-        store.bind(parent, "telegram", "42")
-        assert store.bound_mission("telegram", "42") == parent
+        assert store.bound_mission("telegram", "42") == child
         assert store.prune_terminal(keep=0) == 0
+        assert store.projection(parent)["status"] == "active"
         assert store.projection(child)["status"] == "cancelled"
 
     with tempfile.TemporaryDirectory() as temp:
@@ -1541,6 +1625,7 @@ def main() -> None:
     test_terminal_append_applies_default_retention()
     test_bind_and_retention_cannot_create_a_dangling_subscription()
     test_explicit_repair_terminal_notifies_before_parent_restore()
+    test_terminal_notification_outbox_survives_lease_and_restart()
     test_terminal_retention_preserves_active_repair_chain()
     test_terminal_retention_preserves_parent_until_repair_notification()
     test_existing_subscription_table_gets_notification_lease_columns()
