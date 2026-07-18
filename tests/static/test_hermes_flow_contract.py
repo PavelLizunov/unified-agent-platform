@@ -127,7 +127,7 @@ def validate_review_with_telemetry(summary, verification, author, reviewer, **kw
     )
 
 
-def completion_evidence():
+def completion_evidence(*, schema_version=1):
     candidate = "2" * 40
     tree = "5" * 40
     decision_id = "f" * 64
@@ -136,7 +136,7 @@ def completion_evidence():
         "invocation_id": "6" * 32,
     }
     value = {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "mission": {
             "mission_id": "mission-evidence",
             "dispatch_profile": "registered-v4",
@@ -227,6 +227,16 @@ def completion_evidence():
             "result": "Delivery completed, merged, and verified",
         },
     }
+    if schema_version == 2:
+        source_key_sha256 = "b" * 64
+        value["mission"]["mission_id"] = (
+            "mission-intake-" + source_key_sha256[:32]
+        )
+        value["input"] = {
+            "platform": "telegram",
+            "source_key_sha256": source_key_sha256,
+            "source_message_sha256": "d" * 64,
+        }
     value["sha256"] = flow.canonical_sha256(value)
     return value
 
@@ -257,6 +267,31 @@ class FlowContractTests(unittest.TestCase):
             })
             with self.assertRaisesRegex(flow.ContractError, message):
                 flow.validate_completion_evidence(changed)
+
+    def test_completion_evidence_v2_binds_registered_input_lineage(self):
+        value = completion_evidence(schema_version=2)
+        self.assertEqual(value, flow.validate_completion_evidence(value))
+
+        mutations = (
+            (lambda item: item["input"].update(platform="signal"), "platform"),
+            (
+                lambda item: item["input"].update(source_message_sha256="invalid"),
+                "SHA-256",
+            ),
+            (
+                lambda item: item["mission"].update(mission_id="mission-intake-" + "0" * 32),
+                "mission lineage",
+            ),
+        )
+        for mutate, message in mutations:
+            with self.subTest(message=message):
+                changed = completion_evidence(schema_version=2)
+                mutate(changed)
+                changed["sha256"] = flow.canonical_sha256({
+                    key: item for key, item in changed.items() if key != "sha256"
+                })
+                with self.assertRaisesRegex(flow.ContractError, message):
+                    flow.validate_completion_evidence(changed)
 
     def test_completion_evidence_rejects_recomputed_policy_violations(self):
         mutations = (

@@ -161,10 +161,12 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
    registered no-deploy profile and installed on build-1. The ordinary Telegram campaign produced the first live
    artifact; the installed verifier accepted semantic digest `d05c16b7...`. The initial schema binds delivery
-   runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. It does not yet bind ordinary input
-   channel/source event, Workspace and Telegram cursors, a deployed revision, a journal proof of timer origin or a
-   signed/GitHub-attested artifact. Those omissions prevent treating it as the final Product Operating Contract
-   completion certificate.
+   runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. Current source adds a compatible
+   closed v2 schema that binds the server-owned ordinary input platform and hashed source key/message to the
+   deterministic mission identity without persisting raw channel identifiers; rollout and a new v2 live artifact are
+   pending. Workspace/Telegram delivery cursors, a deployed revision, a journal proof of timer origin and a
+   signed/GitHub-attested artifact remain absent. Those omissions prevent treating it as the final Product Operating
+   Contract completion certificate.
 
 These gaps drive the post-A6 milestones in `docs/next-steps.md`. Spark Runner remains parked until the UAP mission
 plane is coherent and the owner explicitly resumes it.

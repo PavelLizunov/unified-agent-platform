@@ -2925,7 +2925,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             instance = coordinator.DeliveryCoordinator(
                 approved, FakeClient(), FakeBackend(), root / "state"
             )
-            paths = instance._paths("mission-evidence")
+            source_key_sha256 = "b" * 64
+            mission_id = "mission-intake-" + source_key_sha256[:32]
+            paths = instance._paths(mission_id)
             candidate = "2" * 40
             tree = "5" * 40
             decision = coordinator.flow_contract.choose_delivery_route(
@@ -2939,7 +2941,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             state = {
                 "schema_version": 1,
-                "mission_id": "mission-evidence",
+                "mission_id": mission_id,
                 "dispatch_profile": approved["dispatch_profile"],
                 "mission_goal": "Deliver a verified change",
                 "mission_goal_sha256": hashlib.sha256(
@@ -3016,6 +3018,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "sequence": 22,
                 "projection_id": "a" * 16,
                 "result": "Delivery completed, merged, and verified",
+                "input_platform": "workspace",
+                "input_source_key_sha256": source_key_sha256,
+                "input_source_message_sha256": "c" * 64,
             }
             with (
                 mock.patch.object(instance, "_validate_review"),
@@ -3024,6 +3029,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance, "_candidate_files", return_value=["src/runtime.py"]
                 ),
             ):
+                partial = dict(terminal)
+                partial.pop("input_source_message_sha256")
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "partial input lineage"
+                ):
+                    instance._completion_evidence(state, paths, partial)
                 instance._write_completion_evidence(state, paths, terminal)
 
             bundle = coordinator.mission_adapter._read_json(paths["evidence"])
@@ -3033,6 +3044,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(bundle["sha256"], state["completion_evidence_sha256"])
             self.assertEqual([101, 102], bundle["delivery"]["ci_run_ids"])
             self.assertEqual(candidate, bundle["reviewer"]["reviewed_sha"])
+            self.assertEqual(2, bundle["schema_version"])
+            self.assertEqual("workspace", bundle["input"]["platform"])
+            self.assertEqual(
+                source_key_sha256, bundle["input"]["source_key_sha256"]
+            )
             if os.name == "posix":
                 self.assertEqual(0o600, paths["evidence"].stat().st_mode & 0o777)
 
