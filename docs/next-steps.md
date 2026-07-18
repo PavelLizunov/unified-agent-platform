@@ -271,10 +271,11 @@ not add an application service, workflow engine or mission database.
    attestation remain later evidence fields. See the
    [rollout evidence](evidence/canonical-completion-evidence-rollout-2026-07-18.md) and
    [live campaign](evidence/ordinary-telegram-capacity-recovery-2026-07-18.md).
-   Current source adds backward-compatible closed schema v2: new registered ordinary missions bind the server-owned
+   PR #275 deploys backward-compatible closed schema v2: new registered ordinary missions bind the server-owned
    input platform and hashed source key/message to deterministic `mission-intake-*`, while existing v1 bundles still
-   verify. Rollout and one v2 live artifact remain the next evidence gate; channel delivery cursors, timer-origin proof
-   and signing are still separate.
+   verify. Exact Central/build-1 rollout, in-pod replay and installed v1/v2 verifier checks passed. One v2 live artifact
+   remains the next evidence gate; channel delivery cursors, timer-origin proof and signing are still separate. See the
+   [input-lineage rollout](evidence/completion-input-lineage-rollout-2026-07-18.md).
 10. **Ordinary Workspace answer — ✅ DEPLOYED COMPONENT PASS; LIVE CROSS-CHANNEL CANARY PENDING (2026-07-18).** The exact Central session
     that accepted a Workspace mission now routes a later ordinary message to its one open mission question through
     the same `MissionStore.ingest_owner_turn()` path. The source message ID is persisted in `mission.answer`; restart,
@@ -284,6 +285,11 @@ not add an application service, workflow engine or mission database.
     implementation asymmetry with Telegram without a new service; one real cross-channel question/answer canary remains
     required. See the
     [rollout evidence](evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md).
+11. **Concrete owner terminal result — IMPLEMENTATION GAP.** The first ordinary Telegram delivery completed correctly,
+    but its terminal notification only said `Delivery completed, merged, and verified`. Build a bounded redacted result
+    from the canonical evidence already held by the coordinator: what changed, target PR, merge revision, required-CI
+    outcome, post-verify outcome and delivery applicability. Central remains authoritative and Workspace/Telegram must
+    render the same facts; do not generate the summary with another model or trust free-form worker output.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
