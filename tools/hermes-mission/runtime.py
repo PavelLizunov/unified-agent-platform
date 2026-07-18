@@ -677,6 +677,8 @@ class MissionStore:
     ) -> list[dict[str, Any]]:
         dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
         limit = max(1, min(int(limit), 100))
+        if not reconcile:
+            limit = 1
         with self._db() as connection:
             rows = connection.execute(
                 """SELECT mission_id, payload_json FROM mission_events

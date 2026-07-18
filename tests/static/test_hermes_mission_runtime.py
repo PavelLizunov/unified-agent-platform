@@ -331,6 +331,9 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
             )
 
         assert all(item["mission_id"] != "mission-old" for item in store.list(100))
+        assert [item["mission_id"] for item in store.dispatch_candidates(
+            "build1-uap", 2
+        )] == ["mission-old"]
         candidates = store.dispatch_candidates("build1-uap", 1)
         assert [item["mission_id"] for item in candidates] == ["mission-old"]
 
@@ -376,7 +379,7 @@ def test_dispatch_candidates_do_not_starve_behind_newer_missions() -> None:
             },
         )
         assert [item["mission_id"] for item in store.dispatch_candidates(
-            "build1-uap", 1
+            "build1-uap", 2
         )] == ["mission-second"]
 
 
