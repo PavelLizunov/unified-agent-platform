@@ -353,8 +353,10 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   Reviewer process hardening is implemented in the source coordinator without another service: a transient
   user-systemd unit is bound to the active coordinator, uses a strict read-only mount/proc namespace, exposes only
   mission-local model/Codex runtime write paths, and masks common delivery/host credential stores and control-plane
-  environment names. Hermetic policy tests and a disposable build-1 exact-wrapper probe are green; rollout and one
-  runtime-attested review through that boundary are still required before calling it live proof.
+  environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the installed
+  exact-wrapper probe proved write denial plus credential/proc/user-runtime isolation while preserving only the two
+  approved write roots. One runtime-attested Codex review through that boundary is still required before claiming a
+  live reviewer canary. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
   the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.

@@ -134,8 +134,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    OpenAI-only v2 route ran live with Sol author and separate Terra reviewer. The source coordinator now adds a
    Linux OS-enforced reviewer process boundary: strict read-only filesystem/home, explicit writable model/Codex
    runtime homes, read-only candidate/state, hidden unrelated `/proc`, and inaccessible common credential stores and
-   control-plane environment names. Hermetic policy tests and a disposable build-1 exact-wrapper probe passed, but the
-   exact merged binary and a real runtime-attested review through this boundary are not deployed evidence yet.
+   control-plane environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the
+   installed exact-wrapper probe proved the intended write/credential/proc/user-runtime boundary. A real
+   runtime-attested Codex review through this boundary remains pending.
    Restart-safe capacity retry/whole-route fallback is covered hermetically,
    including scheduled cooldown outside the finite Kanban claim TTL, but its exact deployed Codex terminal envelope
    and no-duplicate recovery still need a controlled live canary.
