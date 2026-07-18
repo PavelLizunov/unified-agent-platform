@@ -2,6 +2,7 @@
   "allowed_path_prefixes": [
     "Cargo.lock",
     "Cargo.toml",
+    "README.md",
     "counter.py",
     "src",
     "test_counter.py",
