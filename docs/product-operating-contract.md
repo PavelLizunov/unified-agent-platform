@@ -106,15 +106,20 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 
 1. Workspace and Telegram synchronize the mission projection and owner question/answer resume, but not complete
    cross-channel chat/session history. A bound Telegram chat and the exact accepting Workspace session can route an
-   ordinary message to their one open mission question with restart-safe source-message replay. The Workspace path is
-   implemented in source and its rollout/live owner-channel proof remains pending.
+   ordinary message to their one open mission question with restart-safe source-message replay. Both implementations
+   are deployed and passed in-pod component checks; a real cross-channel owner question/answer campaign remains
+   pending.
 2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
    passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
    profile later accepted ordinary Workspace goals and delivered non-toy code plus a follow-up documentation repair
    through runtime-attested author/reviewer, multi-platform CI, exact-head merge, fresh-main post-verify, Central
-   terminal convergence and cleanup. The follow-up included a real review rejection and autonomous correction. This
-   proves ordinary Workspace intake only for one exact registered profile; live ordinary Telegram intake, generic
-   arbitrary-repository intake and route-profile creation from an unconstrained owner goal remain outside that proof.
+   terminal convergence and cleanup. The follow-up included a real review rejection and autonomous correction. A later
+   ordinary Telegram goal used the same registered profile, survived a controlled exact pre-turn capacity failure,
+   completed Sol/Terra delivery and produced terminal sequence 27 plus a verified completion bundle. That was an
+   adversarial correction campaign: reviewer recovery and Central capacity-history completion fixes were installed
+   while preserving the same durable mission, so a clean all-fixes-preinstalled run remains stronger evidence. These
+   campaigns prove both owner entry channels only for one exact registered profile; generic arbitrary-repository intake
+   and route-profile creation from an unconstrained owner goal remain outside that proof.
    The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
    `delivery: not_applicable` evidence instead of treating fresh-main verification as a deploy. Actual `deploy` and
    `release` modes remain fail-closed until their artifact, environment and deployed-revision gates are implemented
@@ -137,14 +142,15 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    runtime homes, read-only candidate/state, hidden unrelated `/proc`, and inaccessible common credential stores and
    control-plane environment names. PR #266 passed required CI, exact merge `a0d8f391...` is installed, and the
    installed exact-wrapper probe proved the intended write/credential/proc/user-runtime boundary. A real
-   attempt then found a Type=oneshot ordering deadlock in the transient unit. The correction removes `After=` while
-   retaining the parent `BindsTo=` lifetime boundary. The first corrected restart safely quarantined the interrupted
-   reviewer but exposed a permanent `reconciling` state; the follow-up source permits only a clean exact-SHA,
-   unchanged-draft-PR reviewer retry after the old unit is unloaded. Rollout and a completed runtime-attested review
-   remain pending; author ambiguity still fails closed.
-   Restart-safe capacity retry/whole-route fallback is covered hermetically,
-   including scheduled cooldown outside the finite Kanban claim TTL, but its exact deployed Codex terminal envelope
-   and no-duplicate recovery still need a controlled live canary.
+   attempt then found a Type=oneshot ordering deadlock in the transient unit. PR #271 removed `After=` while retaining
+   the parent `BindsTo=` lifetime boundary. The first corrected restart safely quarantined the interrupted reviewer but
+   exposed a permanent `reconciling` state; PR #272 now permits only a clean exact-SHA, unchanged-draft-PR reviewer
+   retry after the old unit is unloaded. The same mission completed a runtime-attested Terra read-only review inside
+   the corrected unit. Author ambiguity still fails closed.
+   Restart-safe capacity retry/whole-route fallback is covered hermetically, including scheduled cooldown outside the
+   finite Kanban claim TTL. The ordinary Telegram campaign proved one controlled exact pre-turn stderr recovery on the
+   same Sol model without an owner question or duplicate terminal result. It did not observe a natural provider
+   envelope, `capacity_wait`, exhausted burst or whole-route fallback.
 6. The terminal endpoint requires both the general API bearer and a direct loopback source. Producer events use a
    closed schema and protect every allowed string before storage; mission DB and adapter state are owner-only on POSIX.
    The A7 success path exercised terminal completion. The new reviewer boundary narrows filesystem writes and
@@ -153,8 +159,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
-   registered no-deploy profile and installed on build-1, but have not yet produced a live mission artifact. The
-   initial schema binds delivery
+   registered no-deploy profile and installed on build-1. The ordinary Telegram campaign produced the first live
+   artifact; the installed verifier accepted semantic digest `d05c16b7...`. The initial schema binds delivery
    runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. It does not yet bind ordinary input
    channel/source event, Workspace and Telegram cursors, a deployed revision, a journal proof of timer origin or a
    signed/GitHub-attested artifact. Those omissions prevent treating it as the final Product Operating Contract

@@ -2,9 +2,11 @@
 
 ## Scope
 
-This record covers the narrow reviewer process boundary added to the existing build-1 delivery coordinator. It does
-not claim a completed Product Operating Contract, author isolation, a real Codex reviewer canary through the new
-boundary, or generic protection for secrets stored outside the enumerated host credential locations.
+This record covers the narrow reviewer process boundary added to the existing build-1 delivery coordinator. The
+original rollout did not include a real Codex review through the new boundary; the controlled follow-up below now
+records one completed runtime-attested reviewer after two production corrections. It still does not claim a completed
+Product Operating Contract, author isolation or generic protection for secrets stored outside the enumerated host
+credential locations.
 
 ## Immutable GitHub identity
 
@@ -101,7 +103,37 @@ no new owner mission had arrived during this rollout.
 
 ## Honest boundary
 
-This evidence proves that the merged and installed coordinator can create the enforced Linux reviewer boundary and
-that the boundary denies the tested writes and credential/process/runtime access. It does not prove that a full Codex
-review has completed inside that boundary. The next ordinary owner mission must retain a runtime-attested distinct
-reviewer session, exact candidate SHA and green review/CI gates while the transient unit is present.
+At rollout time, this evidence proved that the merged and installed coordinator could create the enforced Linux
+reviewer boundary and that the boundary denied the tested writes and credential/process/runtime access. It did not yet
+prove a full Codex review inside that boundary; the follow-up below records that later gate.
+
+## Controlled live follow-up
+
+The next ordinary Telegram mission reached a real reviewer and exposed an actual ordering defect. `After=` made the
+transient child wait for its still-activating oneshot parent while that parent waited for the review. PR #271 (merge
+`a360e61`, required run `29659665632`) removed only that ordering edge and retained `BindsTo=`.
+
+Restart then preserved the same candidate but correctly classified the interrupted attempt as ambiguous. That safe
+quarantine had no convergence transition. PR #272 (merge `ea597a9`, required run `29660284068`) added a reviewer-only
+retry after proving the old unit was unloaded, the checkout was clean at the exact candidate and the draft PR was
+unchanged. Author ambiguity remains fail-closed.
+
+The same mission then completed a real reviewer inside transient unit
+`uap-review-4e34190fad46d832ab1d2c03.service`. Live properties retained the parent `BindsTo=` without the parent
+ordering edge and showed the expected private-user, strict read-only filesystem/home, private tmp and hidden-proc
+boundary with only the mission-local model and Codex homes writable. Runtime attestation recorded:
+
+```text
+model:              gpt-5.6-terra
+reasoning effort:   xhigh
+sandbox:            read-only
+session:            019f76fd-40b7-73a2-a46a-32625a2e41ac
+reviewed SHA:       255d4e464864f316fc739bf72aa49a750e3e1c5c
+tree:               7feb4103e6e3cc7bf822ce3b003347ffa4aacf61
+verdict:            accept
+```
+
+The distinct Sol author session, required multi-platform CI and exact-head merge subsequently passed. This accepts one
+real Codex reviewer execution through the corrected OS boundary. It does not prove author isolation, hostile
+same-UID resistance outside the unit, generic secret-store coverage or a clean campaign that began with both fixes
+already installed.

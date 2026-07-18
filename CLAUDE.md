@@ -201,12 +201,18 @@ Good next tasks that do not require redesign:
    A separate repo-owned schema-v4 `build1-flow-pilot-registered-v4` consumer is now installed with a standing timer
    and explicit `delivery_mode: none`; Central requires `delivery: not_applicable` before completing that target;
    its exact Workspace/Telegram intake registry and timer are enabled. Ordinary Workspace delivery passed live.
+   A later ordinary Telegram goal survived a controlled exact pre-turn capacity error and completed Sol/Terra
+   author/review, target PR #8, multi-platform CI, merge, post-verify, cleanup, terminal sequence 27 and a verified
+   canonical completion bundle. The campaign preserved its durable mission while PRs #271–#273 corrected reviewer
+   recovery and Central historical-worker completion, so it is adversarial recovery evidence rather than a clean
+   frozen-runtime run. Evidence: `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
-   PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is
-   implemented with restart/collision/ambiguity tests and awaits Flux rollout. Ordinary Telegram intake and a real owner
-   question/resume path remain the next controlled live canary. See
+   PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
+   through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the
+   next controlled live canary. See
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
-   The answer rollout record is `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.
+   The answer rollout records are `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
+   `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
@@ -221,11 +227,11 @@ Good next tasks that do not require redesign:
    Reviewer execution is deployed through a parent-bound transient user-systemd unit with strict
    read-only filesystem/home, hidden unrelated `/proc`, private tmp, explicit model/Codex runtime write paths and
    masked common credentials/user-runtime IPC. PR #266 and installed exact-wrapper probe are green. The first real
-   attempt found an `After=`/Type=oneshot parent deadlock; the source correction keeps `BindsTo=` without that ordering
-   edge and PR #271 is installed. Its restart preserved the same candidate but stopped in a permanent reviewer
-   `reconciling` checkpoint. The current follow-up source adds the guarded reviewer-only convergence transition; it
-   must be merged, installed and allowed to resume the same candidate through a natural timer tick. Evidence:
-   `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
+   attempt found an `After=`/Type=oneshot parent deadlock; PR #271 keeps `BindsTo=` without that ordering edge. Its
+   restart preserved the same candidate but exposed a permanent reviewer `reconciling` checkpoint. PR #272 is merged
+   and installed with the guarded reviewer-only convergence transition; the same mission then completed a real
+   runtime-attested Terra review of the exact candidate inside the corrected transient unit. Author ambiguity remains
+   fail-closed. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

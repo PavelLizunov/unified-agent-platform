@@ -7,9 +7,9 @@ Central can now project a bounded `mission.notice`, Workspace renders it, Telegr
 same projection, and the delivery coordinator emits deterministic wait/recovery notices without creating an owner
 question.
 
-This is deployment evidence, not a successful live capacity canary. No real `capacity_wait` event had been produced
-when this record was written; the controlled Telegram-origin canary remained armed and was waiting for the owner's
-ordinary goal.
+At the time of this rollout, this was deployment evidence rather than a successful live capacity canary. The later
+ordinary Telegram campaign is recorded separately in
+[`ordinary-telegram-capacity-recovery-2026-07-18.md`](ordinary-telegram-capacity-recovery-2026-07-18.md).
 
 ## Landed implementation
 
@@ -105,7 +105,7 @@ Accepted:
 > recovery notices through the one authoritative mission state, with `owner_action_required=false`, without changing
 > mission progress or creating an owner question.
 
-Not accepted yet:
+Not accepted at that rollout checkpoint:
 
 - the exact live Codex capacity error envelope and exit ordering;
 - a real `mission.notice: capacity_wait` followed by `capacity_recovered`;
@@ -114,5 +114,15 @@ Not accepted yet:
 - ordinary Telegram intake for the armed canary;
 - automatic cross-channel question generation/answer and first-class deploy/release applicability.
 
-The armed canary must still prove these runtime facts before the Product Operating Contract can claim live capacity
-failover.
+## Controlled live follow-up
+
+The later ordinary Telegram campaign fired the pre-announced wrapper once with the exact trusted pre-turn CLI
+compatibility message, then recovered automatically on the same approved Sol model. Central sequence 6 projected
+`capacity_recovered` with `owner_action_required=false`; the mission did not create a question or increment quality
+counters. It continued through runtime-attested Sol author and Terra reviewer sessions, PR/CI/merge/post-verify,
+cleanup, terminal sequence 27 and a verified canonical completion bundle.
+
+This closes the controlled deployed recovery gate, but not every item in the earlier list. The wrapper deliberately
+injected the exact stderr phrase before Codex started; it was not a naturally occurring provider-capacity response.
+The first retry recovered, so no `capacity_wait`, burst exhaustion or whole-route fallback event occurred. Those facts
+remain outside the live evidence even though the deterministic state machine is covered hermetically.
