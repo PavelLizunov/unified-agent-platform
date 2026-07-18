@@ -117,11 +117,12 @@ a delayed replay of an older accepted turn cannot replace the binding of a later
 
 When an ordinary Telegram message comes from the chat/topic currently bound to a `waiting_owner` mission,
 `ingest_owner_turn()` records it as the answer to that mission's exact open question instead of accepting another
-mission. The platform message ID is stored with the answer: replay after commit or restart returns the same event,
-while reuse of that ID with different text fails closed. A distinct ordinary turn after the answer is again a new
-goal and rebinds the chat to its new mission. The existing structured Workspace answer action and `/mission answer`
-remain compatible. Ordinary Workspace chat-to-question routing and full Workspace/Telegram transcript convergence
-remain separate lifecycle work.
+mission. Workspace applies the same rule to the exact Central session that accepted the mission. The stable source
+message ID is stored with the answer: replay after commit, restart or later session turns returns the same event,
+while reuse of that ID with different text fails closed. Multiple open questions for one session are rejected rather
+than guessed. A distinct ordinary turn after the answer is again a new goal; Telegram also rebinds its chat to that
+new mission. The structured Workspace answer action and `/mission answer` remain compatible. Full
+Workspace/Telegram transcript convergence remains separate lifecycle work.
 
 ## Hermetic gate
 

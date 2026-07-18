@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
-    "gateway/platforms/api_server.py": "866b570a1f63bf10612f67f2e120e2a0694adc6663be7beb4c9d43fcf6cff179",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "f87b41aafab3d93d4c6c7d7d98607357540b28f74f2f19ca3f7449172551e460",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -687,17 +687,23 @@ def connect(
                 if not isinstance(user_message, str):
                     raise MissionError("mission intake requires a text goal")
                 store = self._missions()
-                accepted, _ = store.ingest_owner_turn(
+                owner_event, _ = store.ingest_owner_turn(
                     redact_sensitive_text(user_message, force=True),
                     platform="workspace",
                     source_message_id=source_message_id,
                     session_id=session_id,
                 )
-                mission_id = accepted["mission_id"]
-                response_text = (
-                    f"Mission {mission_id} accepted. Delivery continues automatically; "
-                    "no owner action is required."
-                )
+                mission_id = owner_event["mission_id"]
+                if owner_event["type"] == "mission.answer":
+                    response_text = (
+                        f"Answer recorded for mission {mission_id}. "
+                        "Delivery resumes automatically."
+                    )
+                else:
+                    response_text = (
+                        f"Mission {mission_id} accepted. Delivery continues automatically; "
+                        "no owner action is required."
+                    )
                 database = self._ensure_session_db()
                 receipt = f"workspace:{source_message_id}"
                 if not database.has_platform_message_id(session_id, receipt):
@@ -714,7 +720,11 @@ def connect(
                 return web.json_response(
                     _openai_error(str(error), code="mission_intake_failed"), status=400
                 )
-            digest = hashlib.sha256(mission_id.encode("utf-8")).hexdigest()[:32]
+            stream_identity = (
+                mission_id if owner_event["type"] == "mission.accepted"
+                else f"{mission_id}:{source_message_id}"
+            )
+            digest = hashlib.sha256(stream_identity.encode("utf-8")).hexdigest()[:32]
             run_id = f"run_{digest}"
             message_id = f"msg_{digest}"
             now = time.time()

@@ -185,6 +185,9 @@ def main() -> None:
         assert 'source_message_id = body.get("source_message_id")' in stream_handler
         assert 'platform="workspace"' in stream_handler
         assert 'code="mission_intake_failed"' in stream_handler
+        assert 'owner_event["type"] == "mission.answer"' in stream_handler
+        assert "Answer recorded for mission" in stream_handler
+        assert 'f"{mission_id}:{source_message_id}"' in stream_handler
         assert stream_handler.index("store.ingest_owner_turn(") < stream_handler.index(
             "system_prompt = body.get"
         )
