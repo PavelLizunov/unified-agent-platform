@@ -454,8 +454,10 @@ class HermesKanbanBackend:
             return False
         if result.returncode:
             raise AdapterError(
-                (result.stderr or result.stdout).strip()
-                or "Hermes Kanban command failed"
+                flow_contract._safe_error(
+                    (result.stderr or result.stdout).strip()
+                    or "Hermes Kanban command failed"
+                )
             )
         if not output.startswith("GC complete: "):
             raise AdapterError("Hermes Kanban returned an invalid GC result")

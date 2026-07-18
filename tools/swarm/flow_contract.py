@@ -20,7 +20,7 @@ class ContractError(ValueError):
     pass
 
 
-def _safe_error(value: object) -> str:
+def redact_diagnostic(value: object, *, limit: int | None = None) -> str:
     text = str(value).replace("\x00", "?")
     text = re.sub(r'''\\+(?=["'])''', "", text)
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
@@ -38,7 +38,7 @@ def _safe_error(value: object) -> str:
     )
     text = re.sub(
         r'''(?i)(?<![A-Z0-9_.-])(?:"|')?[A-Z0-9_.-]*'''
-        r'''(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)'''
+        r'''(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential|cookie)'''
         r'''[A-Z0-9_.-]*(?:"|')?\s*[:=]\s*'''
         r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)''',
         "[REDACTED]",
@@ -51,7 +51,11 @@ def _safe_error(value: object) -> str:
         "[REDACTED]",
         text,
     )
-    return text[-4000:] or "contract failed"
+    return text[-limit:] if limit is not None else text
+
+
+def _safe_error(value: object) -> str:
+    return redact_diagnostic(value, limit=4000) or "contract failed"
 
 
 def load_json(path: str | pathlib.Path) -> dict[str, Any]:

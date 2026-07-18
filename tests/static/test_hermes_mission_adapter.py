@@ -482,6 +482,7 @@ class MissionAdapterTests(unittest.TestCase):
             "Proxy-Authorization": f"Basic {secret}",
             "token": secret,
             "Cookie": f"session={secret}",
+            "response_set_cookie_value": f"session={secret}",
         }).replace('"', r'\"')
 
         def runner(command):
@@ -490,6 +491,10 @@ class MissionAdapterTests(unittest.TestCase):
         backend = adapter.HermesKanbanBackend("/opt/hermes", "central", runner=runner)
         with self.assertRaises(adapter.AdapterError) as raised:
             backend.show("task-1")
+        self.assertIn("[REDACTED]", str(raised.exception))
+        self.assertNotIn(secret, str(raised.exception))
+        with self.assertRaises(adapter.AdapterError) as raised:
+            backend.gc()
         self.assertIn("[REDACTED]", str(raised.exception))
         self.assertNotIn(secret, str(raised.exception))
 

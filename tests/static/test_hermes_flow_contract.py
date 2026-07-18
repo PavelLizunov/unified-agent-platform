@@ -157,6 +157,7 @@ class FlowContractTests(unittest.TestCase):
                 "Proxy-Authorization": f"Basic {secret}",
                 "token": secret,
                 "Cookie": f"session={secret}",
+                "response_set_cookie_value": f"session={secret}",
             }).replace('"', r'\"'),
         ):
             with self.subTest(diagnostic=diagnostic):

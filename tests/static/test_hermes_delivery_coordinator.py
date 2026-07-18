@@ -749,6 +749,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "Authorization": f"Basic {secret}",
                 "Proxy-Authorization": f"Basic {secret}",
                 "Cookie": f"session={secret}",
+                "response_set_cookie_value": f"session={secret}",
             }).replace('"', r'\"'),
             stderr=json.dumps({"token": secret, "message": f"Bearer {secret}"}),
         )
@@ -792,6 +793,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                             "Proxy-Authorization": "Basic escaped-proxy-secret",
                             "token": "escaped-token-secret",
                             "Cookie": "session=escaped-cookie-secret",
+                            "response_set_cookie_value": "escaped-nested-cookie-secret",
                         }).replace('"', r'\"'),
                     ],
                 },
@@ -1188,7 +1190,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 instance._author(state, paths)
 
             persisted = coordinator.mission_adapter._read_json(paths["state"])
-            self.assertEqual(["failed at https[REDACTED]host/path"], persisted["review_findings"])
+            self.assertEqual(
+                ["failed at https://[REDACTED]@host/path"],
+                persisted["review_findings"],
+            )
             self.assertIn("[REDACTED]", captured["prompt"])
             self.assertNotIn(secret, captured["prompt"])
 

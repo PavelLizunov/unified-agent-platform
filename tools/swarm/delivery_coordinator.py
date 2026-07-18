@@ -93,25 +93,8 @@ _MODEL_INVOCATION_FIELDS = {
 }
 _DIAGNOSTIC_REDACTIONS = (
     re.compile(
-        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:authorization|proxy-authorization)(?:"|')?'''
-        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)'''
-    ),
-    re.compile(
-        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:set-cookie|cookie)(?:"|')?'''
-        r'''\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)'''
-    ),
-    re.compile(
-        r'''(?i)(?<![A-Z0-9_.-])(?:"|')?[A-Z0-9_.-]*'''
-        r'''(?:token|secret|password|passwd|api[_-]?key|access[_-]?key|credential)'''
-        r'''[A-Z0-9_.-]*(?:"|')?\s*[:=]\s*'''
-        r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}]+)'''
-    ),
-    re.compile(r"(?i)://[^/\s@]+@"),
-    re.compile(r"(?i)\bbearer\s+[^\s,;]+"),
-    re.compile(
-        r"\b(?:sk-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{40,}|"
-        r"gh[pousr]_[A-Za-z0-9]{36}|tskey-(?:auth|client|api)-[A-Za-z0-9_-]+|"
-        r"AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|[0-9]{8,10}:[A-Za-z0-9_-]{35})\b"
+        r"\b(?:AGE-" r"SECRET-" r"KEY-[A-Z0-9-]+|"
+        r"[0-9]{8,10}:[A-Za-z0-9_-]{35})\b"
     ),
     re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])"),
 )
@@ -352,7 +335,7 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
             return "[REDACTED]"
         if isinstance(value, str):
             if field == "thread_id":
-                value = value.replace("\x00", "?")
+                value = flow_contract.redact_diagnostic(value)
                 for pattern in _DIAGNOSTIC_REDACTIONS[:-1]:
                     value = pattern.sub("[REDACTED]", value)
                 return value[-_MAX_CHECK_FAILURE_CHARS:]
@@ -378,7 +361,7 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
 
 
 def _redact_diagnostic(value: str) -> str:
-    value = value.replace("\x00", "?")
+    value = flow_contract.redact_diagnostic(value)
     value = re.sub(r'''\\+(?=["'])''', "", value)
     for pattern in _DIAGNOSTIC_REDACTIONS:
         value = pattern.sub("[REDACTED]", value)
