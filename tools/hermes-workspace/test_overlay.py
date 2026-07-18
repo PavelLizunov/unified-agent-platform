@@ -142,8 +142,10 @@ def main() -> None:
         assert "if (!CENTRAL_ONLY && getLocalSession(sessionKey))" in sessions
 
         send_stream = (clone / "src/routes/api/send-stream.ts").read_text()
-        assert "if (CENTRAL_ONLY && chatMode === 'portable')" in send_stream
-        assert "Central session stream unavailable" in send_stream
+        central_stream = send_stream.index("if (CENTRAL_ONLY) {\n          chatMode = 'enhanced-claude'")
+        portable_session = send_stream.index("if (chatMode === 'portable' && sessionKey === 'new')")
+        assert central_stream < portable_session
+        assert "Central session stream unavailable" not in send_stream
         assert "message identity required" in send_stream
         assert "message: CENTRAL_ONLY ? message : scopedMessage" in send_stream
         assert "source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined" in send_stream
@@ -151,24 +153,17 @@ def main() -> None:
         assert "source_message_id?: string" in claude_api
 
         send_stream_path = clone / "src/routes/api/send-stream.ts"
-        previous_send_stream = send_stream.replace("""        const sourceMessageId =
-          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
-        if (CENTRAL_ONLY && !sourceMessageId) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'message identity required' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-""", "", 1).replace(
-            "message: CENTRAL_ONLY ? message : scopedMessage", "message: scopedMessage", 1
-        ).replace(
-            "                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,\n",
-            "",
-            1,
-        )
+        previous_send_stream = send_stream.replace("""        if (CENTRAL_ONLY) {
+          chatMode = 'enhanced-claude'
+        }""", """        if (CENTRAL_ONLY && chatMode === 'portable') {
+          return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }""", 1)
         send_stream_path.write_text(previous_send_stream, encoding="utf-8")
         assert hashlib.sha256(send_stream_path.read_bytes()).hexdigest() == (
-            "d61df1f062067cf9991ce33cf6d754c041e44148355423af28dc68d343c85f37"
+            "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de"
         )
         previous = run(clone, "--check")
         assert previous.returncode == 0 and "previous-needs-overlay" in previous.stdout

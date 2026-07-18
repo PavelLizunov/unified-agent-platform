@@ -36,7 +36,7 @@ PATCHED_FILES = {
 "src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
-"src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",
+"src/routes/api/send-stream.ts": "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
 "src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
@@ -49,7 +49,7 @@ LEGACY_FILES = {
 "src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
 }
 PREVIOUS_PATCHED_FILES = {
-"src/routes/api/send-stream.ts": "d61df1f062067cf9991ce33cf6d754c041e44148355423af28dc68d343c85f37",  # gitleaks:allow -- pinned previous patched SHA-256
+"src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
 }
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
@@ -307,11 +307,8 @@ function readString""", """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'
 const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
 
 function readString""", "send stream central-only flag")
-        text = replace(text, """        if (chatMode === 'portable' && sessionKey === 'new') {""", """        if (CENTRAL_ONLY && chatMode === 'portable') {
-          return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
-            status: 503,
-            headers: { 'Content-Type': 'application/json' },
-          })
+        text = replace(text, """        if (chatMode === 'portable' && sessionKey === 'new') {""", """        if (CENTRAL_ONLY) {
+          chatMode = 'enhanced-claude'
         }
         if (chatMode === 'portable' && sessionKey === 'new') {""", "send stream portable fallback")
         text = replace(text, """        const message = String(body.message ?? '')
@@ -477,24 +474,14 @@ def upgrade_legacy(rel, text):
 
 def upgrade_previous(rel, text):
     if rel == "src/routes/api/send-stream.ts":
-        text = replace(text, """        const message = String(body.message ?? '')
-        const thinking =""", """        const message = String(body.message ?? '')
-        const sourceMessageId =
-          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
-        if (CENTRAL_ONLY && !sourceMessageId) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'message identity required' }),
-            { status: 400, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        const thinking =""", "ordinary goal identity upgrade")
-        text = replace(text, """                  message: scopedMessage,
-                  model:""", """                  message: CENTRAL_ONLY ? message : scopedMessage,
-                  model:""", "ordinary goal text upgrade")
-        return replace(text, """                  attachments: attachments || undefined,
-                },""", """                  attachments: attachments || undefined,
-                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
-                },""", "ordinary goal forwarding upgrade")
+        return replace(text, """        if (CENTRAL_ONLY && chatMode === 'portable') {
+          return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }""", """        if (CENTRAL_ONLY) {
+          chatMode = 'enhanced-claude'
+        }""", "central-only stream upgrade")
     raise SystemExit(f"no previous patched upgrade for {rel}")
 
 def main():
