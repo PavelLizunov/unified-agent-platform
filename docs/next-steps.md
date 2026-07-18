@@ -248,15 +248,18 @@ not add an application service, workflow engine or mission database.
    exact runtime and a temporary-store scenario passed inside the Ready pod. It does not claim a real owner-channel
    question/answer canary, ordinary Workspace chat answers or complete cross-channel transcript synchronization. See
    the [rollout evidence](evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md).
-9. **Canonical completion evidence — ✅ OFFLINE GATE PASS; BUILD-1/LIVE BUNDLE PENDING (2026-07-18).** The existing
+9. **Canonical completion evidence — ✅ DEPLOYED; FIRST LIVE BUNDLE PENDING (2026-07-18).** The existing
    coordinator can now write one closed, self-digesting `completion-evidence.json` after terminal convergence,
    cleanup and task archive. The bundle joins mission/goal, canonical profile/policy/runtime hashes, a bounded-size
    systemd invocation chain, exact Git/PR/CI/review/post-verify identities, cleanup and the Central projection. The
    stdlib verifier checks both canonical SHA-256 and semantic lineage, so recomputing the digest after weakening
    review, CI, cleanup or Git ancestry still fails. Restart verifies an already completed bundle instead of silently
-   replacing it. The next gate is install/check on build-1 and one naturally timer-driven registered mission that
-   produces and independently verifies the file. A systemd service identity is not proof of timer origin; channel
-   origin/cursors and signed artifact attestation remain later evidence fields.
+   replacing it. PR #268 passed required CI; exact merged source is installed on build-1, source/installed hashes
+   match and one natural idle timer tick exited successfully without consuming the armed capacity fault. The next
+   gate is one naturally timer-driven registered mission that produces and independently verifies the file. A
+   systemd service identity is not proof of timer origin; channel origin/cursors and signed artifact attestation
+   remain later evidence fields. See the
+   [rollout evidence](evidence/canonical-completion-evidence-rollout-2026-07-18.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
