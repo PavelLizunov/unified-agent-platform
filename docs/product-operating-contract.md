@@ -148,7 +148,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
-   registered no-deploy profile, but have not yet produced a live build-1 artifact. The initial schema binds delivery
+   registered no-deploy profile and installed on build-1, but have not yet produced a live mission artifact. The
+   initial schema binds delivery
    runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. It does not yet bind ordinary input
    channel/source event, Workspace and Telegram cursors, a deployed revision, a journal proof of timer origin or a
    signed/GitHub-attested artifact. Those omissions prevent treating it as the final Product Operating Contract
