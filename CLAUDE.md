@@ -198,6 +198,9 @@ Good next tasks that do not require redesign:
    Telegram cursor reached 22. This proves the exact configured profile, not generic repository intake or complete
    cross-channel chat-session history. Evidence: `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md` and the earlier
    recovery history in `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
+   A separate repo-owned schema-v4 `build1-flow-pilot-registered-v4` consumer is now installed with a standing timer;
+   its first automatic idle tick succeeded. Central intake remains disabled and channel ingress is not wired. See
+   `docs/evidence/registered-flow-profile-v4-rollout-2026-07-18.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
