@@ -144,6 +144,11 @@ def main() -> None:
         send_stream = (clone / "src/routes/api/send-stream.ts").read_text()
         assert "if (CENTRAL_ONLY && chatMode === 'portable')" in send_stream
         assert "Central session stream unavailable" in send_stream
+        assert "message identity required" in send_stream
+        assert "message: CENTRAL_ONLY ? message : scopedMessage" in send_stream
+        assert "source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined" in send_stream
+        claude_api = (clone / "src/server/claude-api.ts").read_text()
+        assert "source_message_id?: string" in claude_api
 
         kanban = (clone / "src/server/kanban-backend.ts").read_text()
         central_selection = kanban.index("if (CENTRAL_ONLY)", kanban.index("export function resolveKanbanBackend"))

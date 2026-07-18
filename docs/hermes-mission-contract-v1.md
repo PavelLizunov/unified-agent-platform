@@ -82,7 +82,7 @@ configuration match authorizes handoff. An absent or unknown label does not disp
 - A missing central authority is an explicit unavailable state. `HERMES_CENTRAL_ONLY=1` must not switch to local
   sessions, profiles, tasks, Kanban, jobs or native-swarm execution.
 
-### Deterministic owner-intake primitive (production-disabled)
+### Deterministic ordinary owner intake
 
 The owner-facing `POST /api/missions` primitive has a shape closed to `goal`, channel identity and a stable
 source-message ID. It does not accept a repository, path, command, model or `dispatch_profile`. When enabled, Central
@@ -92,17 +92,24 @@ before any mission event is stored. The owner branch requires the separate `HERM
 only the generic API bearer or producer key cannot impersonate owner intake. Producer-authenticated repair/internal
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
-The production Deployment intentionally does not set `HERMES_MISSION_INTAKE_ROUTES` at this checkpoint. The installed
-schema-v3 canary profile has a fixed goal and is not a safe target for arbitrary owner messages, while ordinary
-Workspace and Telegram message handlers do not yet supply the source identity. Therefore the owner form currently
-fails closed with no mission state. Tests and the API smoke inject a disposable registry explicitly. Production
-enablement requires a reusable owner-approved profile and both channel ingress paths in the same follow-up rollout.
+The production manifest maps `workspace` and `telegram` only to the repo-owned
+`build1-flow-pilot-registered-v4` profile. Workspace forwards its existing stable optimistic message identity to the
+Central session stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery.
+Both handlers call the same `ingest_owner_goal()` primitive and return a deterministic acknowledgement without
+running the generic Hermes chat model. The profile, repository, paths, checks, OpenAI route and commands remain
+server-owned. Removing or corrupting the registry therefore disables new ordinary intake before mission state or a
+worker is created.
 
 For an ordinary owner turn, Central derives `mission_id` from the platform, channel/session identity and stable source
 message ID. The existing immutable `mission.accepted` event is therefore also the durable intake receipt: a retry
 after commit or restart returns the same mission, while reuse of that source identity with a different goal or route
 is rejected. SQLite still serializes concurrent creators, and the loser re-reads the same accepted event. No second
-receipt table or intake service is introduced.
+receipt table or intake service is introduced. Telegram intake also binds the source chat/topic to the new mission;
+a delayed replay of an older accepted turn cannot replace the binding of a later accepted mission.
+
+This checkpoint treats a plain message on an enabled owner route as a new goal. Ordinary cross-channel answers to an
+open owner question and full Workspace/Telegram transcript convergence remain separate lifecycle work; the existing
+structured Workspace answer action and `/mission answer` continue to use the same authoritative question event.
 
 ## Hermetic gate
 

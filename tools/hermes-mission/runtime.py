@@ -816,14 +816,20 @@ class MissionStore:
             "dispatch_profile": route,
         }
         try:
-            return self.accept(goal, **arguments)
+            result = self.accept(goal, **arguments)
         except MissionError as error:
             # Two processes can both pass accept()'s optimistic read.  The
             # SQLite writer serializes them; re-read only this exact race so
             # changed goal/profile payloads still fail closed as collisions.
             if str(error) != "mission already accepted":
                 raise
-            return self.accept(goal, **arguments)
+            result = self.accept(goal, **arguments)
+        if chat_id:
+            self.bind(
+                result[0]["mission_id"], platform, chat_id, thread_id,
+                reason="owner-intake",
+            )
+        return result
 
     def accept(
         self,
@@ -1258,13 +1264,22 @@ class MissionStore:
             )
         return event, True
 
-    def bind(self, mission_id: str, platform: str, chat_id: str, thread_id: str | None = None) -> None:
+    def bind(
+        self,
+        mission_id: str,
+        platform: str,
+        chat_id: str,
+        thread_id: str | None = None,
+        *,
+        reason: str = "manual-bind",
+    ) -> None:
         mission_id = _require_id(mission_id, "mission_id")
         platform = _require_id(platform, "platform")
         chat_id = str(chat_id or "").strip()
         thread_id = str(thread_id or "").strip()
         if not chat_id or len(chat_id) > 256 or len(thread_id) > 256:
             raise MissionError("invalid mission subscription")
+        reason = _require_id(reason, "binding reason")
         now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -1283,6 +1298,19 @@ class MissionStore:
             ).fetchone()
             if current and current["mission_id"] == mission_id:
                 return
+            if current and reason == "owner-intake":
+                target_order = connection.execute(
+                    "SELECT MIN(rowid) FROM mission_events WHERE mission_id = ?",
+                    (mission_id,),
+                ).fetchone()[0]
+                current_order = connection.execute(
+                    "SELECT MIN(rowid) FROM mission_events WHERE mission_id = ?",
+                    (current["mission_id"],),
+                ).fetchone()[0]
+                # A delayed transport replay of an older owner turn must not
+                # steal the channel binding from a later accepted mission.
+                if target_order < current_order:
+                    return
             if current:
                 current_events = [
                     self._row(row)
@@ -1324,7 +1352,7 @@ class MissionStore:
                 {"platform": platform, "chat_id": chat_id, "thread_id": thread_id},
                 current["mission_id"] if current else "",
                 mission_id,
-                "manual-bind",
+                reason,
                 mission_id,
             )
 
