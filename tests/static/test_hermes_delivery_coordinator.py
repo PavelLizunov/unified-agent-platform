@@ -2495,6 +2495,37 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with self.assertRaisesRegex(coordinator.DeliveryError, "schema 4 forbids"):
                 coordinator.load_profile(path)
 
+    def test_registered_flow_pilot_profile_is_closed_and_reusable(self):
+        registered = ROOT / "tools/swarm/profiles/delivery-flow-pilot-registered-v4.json"
+        value = json.loads(registered.read_text(encoding="utf-8"))
+        self.assertEqual(4, value["schema_version"])
+        self.assertEqual(
+            "build1-flow-pilot-registered-v4", value["dispatch_profile"]
+        )
+        self.assertNotIn("goal", value)
+        self.assertNotIn("required_files", value)
+        self.assertNotIn("crash_after_author_commit_once", value)
+        self.assertEqual(
+            ["test-linux", "test-windows", "test-macos", "test-python"],
+            value["required_ci_checks"],
+        )
+        self.assertEqual(
+            {"Cargo.lock", "Cargo.toml", "counter.py", "src", "test_counter.py", "tests"},
+            set(value["allowed_path_prefixes"]),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value.update(
+                source_checkout=str(root / "source"),
+                worktree_root=str(root / "worktrees"),
+            )
+            path = root / "delivery-flow-pilot-registered-v4.json"
+            path.write_text(json.dumps(value), encoding="utf-8")
+            loaded = coordinator.load_profile(path)
+        self.assertEqual(12, loaded["max_changed_files"])
+        self.assertEqual(["durable_state", "multi_platform"], loaded["route_flags"])
+        self.assertFalse(loaded["crash_after_author_commit_once"])
+
     def test_reusable_profile_checks_cumulative_and_both_sides_of_rename(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

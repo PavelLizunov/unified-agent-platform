@@ -16,6 +16,14 @@ coordinator tick or mid-run repair. A7.3 is accepted for exact configured profil
 and complete cross-channel chat-session history remain outside that boundary. Exact evidence is in
 `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`.
 
+The repository also owns one reusable schema-v4 profile at
+`tools/swarm/profiles/delivery-flow-pilot-registered-v4.json`. The normal installer copies it to
+`~/.config/uap/delivery-flow-pilot-registered-v4.json` with a `0700` parent and `0600` file mode. It binds any accepted
+goal to the Central mission once, restricts candidates to the pilot repository's Rust/Python source and test paths,
+and requires all four current CI jobs. Installation does not enable its timer or the Central intake registry. Enable
+the standing timer only after the exact installed profile and runtime pass `install_flow_v2.py --check`; channel
+ingress and the Central registry remain a separate rollout gate.
+
 Lifecycle is deliberately handled by the existing stores and timer. Central keeps the newest 100 unbound terminal
 missions, skips the current Workspace/Telegram binding and leaves only a payload-free stable-ID tombstone for pruned
 history. Active parent/repair-child chains and a subscribed repair's parent remain retained through terminal-notification
