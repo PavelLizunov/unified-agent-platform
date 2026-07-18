@@ -736,7 +736,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             stdout=json.dumps({
                 "Authorization": f"Basic {secret}",
                 "Proxy-Authorization": f"Basic {secret}",
-            }),
+            }) + "\n" + json.dumps({
+                "Authorization": f"Basic {secret}",
+                "Proxy-Authorization": f"Basic {secret}",
+                "Cookie": f"session={secret}",
+            }).replace('"', r'\"'),
             stderr=json.dumps({"token": secret, "message": f"Bearer {secret}"}),
         )
 
@@ -772,6 +776,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                             "Proxy-Authorization": "Basic opaque-proxy-secret",
                             "token": "opaque-token-secret",
                         }),
+                        json.dumps({
+                            "Authorization": "Basic escaped-auth-secret",
+                            "Proxy-Authorization": "Basic escaped-proxy-secret",
+                            "token": "escaped-token-secret",
+                            "Cookie": "session=escaped-cookie-secret",
+                        }).replace('"', r'\"'),
                     ],
                 },
                 "usage": {"input_tokens": 123, "inputTokens": "ordinary-count-label"},
@@ -845,7 +855,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 side_effect=coordinator.flow_contract.ContractError(
                     json.dumps({
                         "Proxy-Authorization": f"Basic {secret}", "token": secret,
-                    })
+                    }).replace('"', r'\"')
                 ),
             ),
             mock.patch("sys.stderr", stderr),
@@ -1374,6 +1384,85 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("8", state["run_id"])
             self.assertEqual(2, backend.claims)
             self.assertEqual(["scheduled", "running"], [run["status"] for run in backend.runs])
+
+    def test_capacity_reclaim_adopts_the_same_run_after_claim_response_crash(self):
+        class CrashAfterClaimBackend(FakeBackend):
+            crash_after_claim = False
+
+            def claim(self, task_id, *, ttl_seconds):
+                snapshot = super().claim(task_id, ttl_seconds=ttl_seconds)
+                if self.crash_after_claim:
+                    self.crash_after_claim = False
+                    raise coordinator.InjectedCrash("after capacity reclaim side effect")
+                return snapshot
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = CrashAfterClaimBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("capacity-reclaim-crash")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-reclaim-crash",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1000):
+                instance._record_capacity_failure(
+                    state, paths, role="author",
+                    failure={
+                        "error_class": "transient_capacity",
+                        "message_sha256": "c" * 64,
+                    },
+                )
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._capacity_wait_result(
+                    state, "capacity-reclaim-crash", paths
+                )
+
+            backend.crash_after_claim = True
+            with (
+                mock.patch.object(coordinator.time, "time", return_value=1006),
+                self.assertRaisesRegex(coordinator.InjectedCrash, "reclaim side effect"),
+            ):
+                instance._capacity_wait_result(
+                    state, "capacity-reclaim-crash", paths
+                )
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertTrue(persisted["model_capacity"]["claim_parked"])
+            self.assertTrue(persisted["model_capacity"]["reclaim_pending"])
+            self.assertEqual("7", persisted["run_id"])
+            self.assertEqual("8", str(backend.runs[-1]["id"]))
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state("capacity-reclaim-crash", paths)
+            with mock.patch.object(coordinator.time, "time", return_value=1006):
+                self.assertIsNone(restarted._capacity_wait_result(
+                    recovered, "capacity-reclaim-crash", paths
+                ))
+
+            self.assertEqual(2, backend.claims)
+            self.assertEqual("8", recovered["run_id"])
+            self.assertFalse(recovered["model_capacity"]["claim_parked"])
+            self.assertFalse(recovered["model_capacity"]["reclaim_pending"])
+            self.assertEqual(1, sum(run["status"] == "running" for run in backend.runs))
 
     def test_capacity_wait_rejects_reassignment_before_park_or_resume(self):
         with tempfile.TemporaryDirectory() as directory:

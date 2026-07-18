@@ -152,6 +152,12 @@ class FlowContractTests(unittest.TestCase):
                 "Proxy-Authorization": f"Basic {secret}",
                 "token": secret,
             }),
+            json.dumps({
+                "Authorization": f"Basic {secret}",
+                "Proxy-Authorization": f"Basic {secret}",
+                "token": secret,
+                "Cookie": f"session={secret}",
+            }).replace('"', r'\"'),
         ):
             with self.subTest(diagnostic=diagnostic):
                 self.assertNotIn(secret, flow._safe_error(diagnostic))
@@ -164,7 +170,9 @@ class FlowContractTests(unittest.TestCase):
                 flow,
                 "load_json",
                 side_effect=flow.ContractError(
-                    json.dumps({"Authorization": f"Basic {secret}", "token": secret})
+                    json.dumps({
+                        "Authorization": f"Basic {secret}", "token": secret,
+                    }).replace('"', r'\"')
                 ),
             ),
             mock.patch("sys.stderr", stderr),

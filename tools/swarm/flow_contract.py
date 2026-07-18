@@ -22,6 +22,7 @@ class ContractError(ValueError):
 
 def _safe_error(value: object) -> str:
     text = str(value).replace("\x00", "?")
+    text = re.sub(r'''\\+(?=["'])''', "", text)
     text = re.sub(r"(?i)://[^/\s@]+@", "://[REDACTED]@", text)
     text = re.sub(
         r'''(?i)(?<![A-Z0-9_.-])(?:"|')?(?:authorization|proxy-authorization)(?:"|')?'''

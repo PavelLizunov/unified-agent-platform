@@ -81,7 +81,7 @@ _CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
 _CAPACITY_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "failures_on_route", "round", "status", "not_before", "error_class",
-    "last_error_sha256", "claim_parked",
+    "last_error_sha256", "claim_parked", "reclaim_pending",
 }
 _AMBIGUOUS_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
@@ -374,6 +374,7 @@ def _private_codex_events(path: pathlib.Path, text: str) -> None:
 
 def _redact_diagnostic(value: str) -> str:
     value = value.replace("\x00", "?")
+    value = re.sub(r'''\\+(?=["'])''', "", value)
     for pattern in _DIAGNOSTIC_REDACTIONS:
         value = pattern.sub("[REDACTED]", value)
     return value
@@ -783,6 +784,7 @@ class DeliveryCoordinator:
             }
             or value.get("error_class") != "transient_capacity"
             or not isinstance(value.get("claim_parked"), bool)
+            or not isinstance(value.get("reclaim_pending"), bool)
             or not isinstance(value.get("last_error_sha256"), str)
             or len(value["last_error_sha256"]) != 64
             or isinstance(value.get("failures_on_route"), bool)
@@ -930,6 +932,7 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("capacity wait did not park the exact Kanban task")
         waiting["claim_parked"] = True
+        waiting["reclaim_pending"] = False
         self._save(paths, state)
 
     def _resume_capacity_claim(
@@ -952,6 +955,11 @@ class DeliveryCoordinator:
             run for run in runs
             if isinstance(run, dict) and run.get("status") == "running"
         ]
+        if not waiting["reclaim_pending"]:
+            if task.get("status") not in {"scheduled", "ready"} or active:
+                raise DeliveryError("capacity retry found a different active Kanban run")
+            waiting["reclaim_pending"] = True
+            self._save(paths, state)
         if task.get("status") == "scheduled":
             matching = [
                 run for run in runs
@@ -971,18 +979,38 @@ class DeliveryCoordinator:
                 or not isinstance(runs, list)
             ):
                 raise DeliveryError("capacity retry unblocked a different Kanban task owner")
-            active = []
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
         if task.get("status") == "ready" and not active:
-            self._ensure_claimed(state)
-        elif (
-            task.get("status") == "running"
-            and len(active) == 1
-            and str(active[0].get("id")) == str(state.get("run_id"))
+            snapshot = self.backend.claim(
+                state["root_task_id"], ttl_seconds=self.profile["claim_ttl_seconds"]
+            )
+            task = snapshot.get("task")
+            runs = snapshot.get("runs")
+            if (
+                not isinstance(task, dict)
+                or task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+                or not isinstance(runs, list)
+            ):
+                raise DeliveryError("capacity retry claimed a different Kanban task owner")
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
+        if (
+            task.get("status") != "running"
+            or len(active) != 1
+            or active[0].get("profile") != self.profile["assignee"]
         ):
-            self._assert_claim(state)
-        else:
             raise DeliveryError("capacity retry found a different active Kanban run")
+        state["run_id"] = str(active[0]["id"])
+        self._assert_claim(state)
+        self._save(paths, state)
         waiting["claim_parked"] = False
+        waiting["reclaim_pending"] = False
         self._save(paths, state)
 
     def _capacity_wait_result(
@@ -1066,6 +1094,7 @@ class DeliveryCoordinator:
             "error_class": "transient_capacity",
             "last_error_sha256": failure["message_sha256"],
             "claim_parked": False,
+            "reclaim_pending": False,
         }
         self._save(paths, state)
 
