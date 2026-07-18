@@ -94,12 +94,19 @@ only the generic API bearer or producer key cannot impersonate owner intake. Pro
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
 The production manifest maps `workspace` and `telegram` only to the repo-owned
-`build1-flow-pilot-registered-v4` profile. Workspace forwards its existing stable optimistic message identity to the
+`build1-flow-pilot-registered-v4` profile and explicitly marks that target `delivery_mode: none`. Workspace forwards
+its existing stable optimistic message identity to the
 Central session stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery.
 Both handlers call the same `ingest_owner_goal()` primitive and return a deterministic acknowledgement without
 running the generic Hermes chat model. The profile, repository, paths, checks, OpenAI route and commands remain
 server-owned. Removing or corrupting the registry therefore disables new ordinary intake before mission state or a
 worker is created.
+
+`delivery_mode: none` is immutable mission acceptance data, not an inference from the completed checks. Central will
+not complete such a mission until the coordinator publishes `delivery: not_applicable` in addition to PR merge,
+default-branch verification and all required gates. A route that declares `deploy` or `release` is rejected before
+mission acceptance until an exact revision/artifact/environment contract is implemented; fresh-main verification is
+therefore never silently treated as a deployment.
 
 For an ordinary owner turn, Central derives `mission_id` from the platform, channel/session identity and stable source
 message ID. The existing immutable `mission.accepted` event is therefore also the durable intake receipt: a retry

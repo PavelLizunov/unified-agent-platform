@@ -20,7 +20,11 @@ The repository also owns one reusable schema-v4 profile at
 `tools/swarm/profiles/delivery-flow-pilot-registered-v4.json`. The normal installer copies it to
 `~/.config/uap/delivery-flow-pilot-registered-v4.json` with a `0700` parent and `0600` file mode. It binds any accepted
 goal to the Central mission once, restricts candidates to the pilot repository's Rust/Python source and test paths,
-and requires all four current CI jobs. Installation does not enable its timer or the Central intake registry. Enable
+requires all four current CI jobs, and declares `delivery_mode: none` because the pilot repository has no deploy or
+release step. Central requires the resulting `delivery: not_applicable` evidence before completion; a future profile
+cannot silently substitute fresh-main tests for deployment. `deploy` and `release` modes remain fail-closed until
+their exact artifact/revision/environment contract exists. Installation does not enable its timer or the Central
+intake registry. Enable
 the standing timer only after the exact installed profile and runtime pass `install_flow_v2.py --check`; channel
 ingress and the Central registry remain a separate rollout gate.
 

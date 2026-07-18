@@ -2566,6 +2566,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertNotIn("goal", value)
         self.assertNotIn("required_files", value)
         self.assertNotIn("crash_after_author_commit_once", value)
+        self.assertEqual("none", value["delivery_mode"])
         self.assertEqual(
             ["test-linux", "test-windows", "test-macos", "test-python"],
             value["required_ci_checks"],
@@ -2583,9 +2584,52 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path = root / "delivery-flow-pilot-registered-v4.json"
             path.write_text(json.dumps(value), encoding="utf-8")
             loaded = coordinator.load_profile(path)
+            instance = coordinator.DeliveryCoordinator(
+                loaded, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-delivery-none")
+            state = instance._load_state("mission-delivery-none", paths)
+            mission = {
+                "mission_id": "mission-delivery-none",
+                "goal": "Deliver without a project deployment",
+                "delivery_mode": "none",
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertEqual("none", state["delivery_mode"])
+            with mock.patch.object(
+                instance, "_candidate_files", return_value=["src/lib.rs"]
+            ):
+                self.assertIn(
+                    {"type": "delivery.upsert", "payload": {
+                        "kind": "delivery", "status": "not_applicable",
+                    }},
+                    instance._events({
+                        "pr_url": "https://example.invalid/pr/1",
+                        "default_sha": "default-sha",
+                    }, cleanup=True),
+                )
+            changed = dict(mission, delivery_mode=None)
+            with self.assertRaisesRegex(coordinator.DeliveryError, "delivery mode"):
+                instance._bind_mission_goal(state, changed, paths)
         self.assertEqual(12, loaded["max_changed_files"])
         self.assertEqual(["durable_state", "multi_platform"], loaded["route_flags"])
         self.assertFalse(loaded["crash_after_author_commit_once"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "delivery-invalid.json"
+            for mode in ("deploy", "release", "", None):
+                invalid = reusable_profile(root)
+                invalid["delivery_mode"] = mode
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaisesRegex(coordinator.DeliveryError, "delivery_mode"):
+                    coordinator.load_profile(path)
+
+            legacy = profile(root)
+            legacy["delivery_mode"] = "none"
+            path.write_text(json.dumps(legacy), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "schema 3 forbids"):
+                coordinator.load_profile(path)
 
     def test_reusable_profile_checks_cumulative_and_both_sides_of_rename(self):
         with tempfile.TemporaryDirectory() as directory:

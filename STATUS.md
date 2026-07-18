@@ -123,6 +123,12 @@ Last updated: 2026-07-18
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
   `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound acceptance canary passed on the
   corrected runtime; channel/session work beyond the authoritative mission projection remains a separate product gap.
+- **Delivery applicability is explicit for the registered pilot (2026-07-18).** Its server-owned intake route and
+  schema-v4 profile declare immutable `delivery_mode: none`. Central completion now additionally requires the
+  coordinator's `delivery: not_applicable` event, so fresh-main post-verify cannot masquerade as a deployment. Existing
+  missions without the field preserve their legacy completion contract. `deploy` and `release` route declarations
+  fail before mission acceptance/profile activation until exact artifact, environment, deployed-revision and health
+  gates are implemented; this closes applicability for the no-deploy pilot, not generic deployment automation.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

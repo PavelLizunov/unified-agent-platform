@@ -24,7 +24,7 @@ REQUIRED_PAYLOAD = {
     "terminal.append": {"stream", "text"},
     "change.upsert": {"path", "status"},
     "gate.upsert": {"gate_id", "status"},
-    "delivery.upsert": {"kind", "status", "url"},
+    "delivery.upsert": {"kind", "status"},
     "mission.completed": {"result"},
     "mission.failed": {"error"},
     "mission.cancelled": {"reason"},
@@ -74,6 +74,16 @@ def validate_events(document):
             if not isinstance(next_progress, int) or not progress <= next_progress <= 100:
                 raise ContractError("progress must be monotonic")
             progress = next_progress
+        if event["type"] == "delivery.upsert":
+            payload = event["payload"]
+            not_applicable = (
+                payload.get("kind") == "delivery"
+                and payload.get("status") == "not_applicable"
+            )
+            if (not_applicable and "url" in payload) or (
+                not not_applicable and not payload.get("url")
+            ):
+                raise ContractError("invalid delivery applicability")
         if event["type"] in TERMINAL_TYPES and sequence != len(events):
             raise ContractError("terminal event must be last")
     if events[-1]["type"] not in TERMINAL_TYPES:
@@ -95,7 +105,7 @@ class Projection:
         self.event_ids = set()
         self.state = {
             "mission_id": None, "status": None, "stage": None, "progress_percent": 0,
-            "goal": None, "notice": None, "tasks": {}, "workers": {}, "terminal": [], "changes": {},
+            "goal": None, "delivery_mode": None, "notice": None, "tasks": {}, "workers": {}, "terminal": [], "changes": {},
             "gates": {}, "delivery": {}, "question": None, "answer": None, "result": None,
         }
 
@@ -111,7 +121,10 @@ class Projection:
         payload = event["payload"]
         event_type = event["type"]
         if event_type == "mission.accepted":
-            self.state.update(status="active", stage="accepted", goal=payload["goal"])
+            self.state.update(
+                status="active", stage="accepted", goal=payload["goal"],
+                delivery_mode=payload.get("delivery_mode"),
+            )
         elif event_type == "mission.stage":
             self.state.update(
                 stage=payload["stage"], progress_percent=payload["progress_percent"],
@@ -195,6 +208,18 @@ class MissionContractTests(unittest.TestCase):
         gap["sequence"] = 3
         with self.assertRaisesRegex(ContractError, "sequence gap"):
             projection.apply(gap)
+
+    def test_not_applicable_delivery_has_no_fake_url(self):
+        document = copy.deepcopy(self.document)
+        delivery = next(
+            event for event in document["events"]
+            if event["type"] == "delivery.upsert"
+        )
+        delivery["payload"] = {"kind": "delivery", "status": "not_applicable"}
+        validate_events(document)
+        delivery["payload"]["url"] = "https://example.invalid/fake-deploy"
+        with self.assertRaisesRegex(ContractError, "delivery applicability"):
+            validate_events(document)
 
 
 if __name__ == "__main__":

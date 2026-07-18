@@ -29,6 +29,7 @@
   "command_timeout_seconds": 3600,
   "commit_message": "feat: deliver registered owner mission",
   "default_branch": "main",
+  "delivery_mode": "none",
   "dispatch_profile": "build1-flow-pilot-registered-v4",
   "max_changed_files": 12,
   "max_review_cycles": 7,

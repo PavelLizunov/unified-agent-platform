@@ -50,20 +50,21 @@ REQUIRED_PAYLOAD = {
     "terminal.append": {"stream", "text"},
     "change.upsert": {"path", "status"},
     "gate.upsert": {"gate_id", "status"},
-    "delivery.upsert": {"kind", "status", "url"},
+    "delivery.upsert": {"kind", "status"},
     "mission.completed": {"result"},
     "mission.failed": {"error"},
     "mission.cancelled": {"reason"},
 }
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
-    "mission.accepted": {"goal", "dispatch_profile", "parent_mission_id"},
+    "mission.accepted": {"goal", "dispatch_profile", "delivery_mode", "parent_mission_id"},
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
     },
     "task.upsert": {"task_id", "title", "status", "assignee"},
     "worker.upsert": {"worker_id", "status", "run_id", "profile"},
     "terminal.append": {"stream", "text", "offset"},
+    "delivery.upsert": {"kind", "status", "url"},
 }
 CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
 PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
@@ -72,7 +73,7 @@ PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
-    "assignee", "code", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
+    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
     "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -123,8 +124,8 @@ def _require_source_value(value: Any, name: str, *, optional: bool = False) -> s
     return text
 
 
-def registered_intake_route(platform: str) -> str:
-    """Resolve one owner channel to an exact server-owned delivery profile."""
+def registered_intake_target(platform: str) -> dict[str, str | None]:
+    """Resolve one owner channel to an exact server-owned delivery target."""
     if not isinstance(platform, str):
         raise MissionError("invalid intake platform")
     platform = _require_id(platform, "intake platform")
@@ -145,20 +146,39 @@ def registered_intake_route(platform: str) -> str:
         raise MissionError("invalid mission intake routes") from error
     if not isinstance(routes, dict) or not routes or len(routes) > 16:
         raise MissionError("invalid mission intake routes")
-    normalized: dict[str, str] = {}
-    for route_platform, dispatch_profile in routes.items():
-        if not isinstance(dispatch_profile, str):
-            raise MissionError("invalid mission intake routes")
+    normalized: dict[str, dict[str, str | None]] = {}
+    for route_platform, target in routes.items():
         route_platform = _require_id(route_platform, "intake platform")
         if route_platform in normalized:
             raise MissionError("invalid mission intake routes")
-        normalized[route_platform] = _require_id(
-            dispatch_profile, "dispatch_profile"
-        )
+        if isinstance(target, str):
+            normalized[route_platform] = {
+                "dispatch_profile": _require_id(target, "dispatch_profile"),
+                "delivery_mode": None,
+            }
+            continue
+        if not isinstance(target, dict) or set(target) != {
+            "dispatch_profile", "delivery_mode"
+        }:
+            raise MissionError("invalid mission intake routes")
+        mode = target.get("delivery_mode")
+        if mode != "none":
+            raise MissionError("unsupported mission delivery mode")
+        normalized[route_platform] = {
+            "dispatch_profile": _require_id(
+                target.get("dispatch_profile"), "dispatch_profile"
+            ),
+            "delivery_mode": mode,
+        }
     try:
         return normalized[platform]
     except KeyError as error:
         raise MissionError("owner channel has no registered delivery route") from error
+
+
+def registered_intake_route(platform: str) -> str:
+    """Return the legacy exact profile view of a registered intake target."""
+    return str(registered_intake_target(platform)["dispatch_profile"])
 
 
 def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[str, Any]:
@@ -227,6 +247,19 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 raise MissionError("invalid mission notice timestamp")
     if event_type == "mission.accepted" and "dispatch_profile" in payload:
         _require_id(payload.get("dispatch_profile"), "dispatch_profile")
+    if event_type == "mission.accepted" and "delivery_mode" in payload:
+        if payload.get("delivery_mode") != "none":
+            raise MissionError("invalid mission delivery mode")
+    if event_type == "delivery.upsert":
+        not_applicable = (
+            payload.get("kind") == "delivery"
+            and payload.get("status") == "not_applicable"
+        )
+        if not_applicable:
+            if "url" in payload:
+                raise MissionError("not-applicable delivery must not have a URL")
+        elif "url" not in payload:
+            raise MissionError("delivery URL is required")
     normalized = {
         "schema_version": SCHEMA_VERSION,
         "mission_id": mission_id,
@@ -280,6 +313,7 @@ def empty_projection() -> dict[str, Any]:
         "notice": None,
         "goal": None,
         "dispatch_profile": None,
+        "delivery_mode": None,
         "parent_mission_id": None,
         "question": None,
         "answer": None,
@@ -321,6 +355,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 stage="accepted",
                 goal=payload["goal"],
                 dispatch_profile=payload.get("dispatch_profile"),
+                delivery_mode=payload.get("delivery_mode"),
                 parent_mission_id=payload.get("parent_mission_id"),
             )
         elif kind == "mission.stage":
@@ -456,10 +491,15 @@ def completion_ready(view: dict[str, Any]) -> bool:
         for item in view.get("deliveries", [])
         if isinstance(item, dict)
     }
-    return all(
+    if not all(
         deliveries.get(kind) == status
         for kind, status in _COMPLETION_DELIVERIES.items()
-    )
+    ):
+        return False
+    mode = view.get("delivery_mode")
+    if mode is None:
+        return True
+    return mode == "none" and deliveries.get("delivery") == "not_applicable"
 
 
 def rejection_ready(view: dict[str, Any]) -> bool:
@@ -823,7 +863,7 @@ class MissionStore:
         if not isinstance(platform, str):
             raise MissionError("invalid intake platform")
         platform = _require_id(platform, "intake platform")
-        route = registered_intake_route(platform)
+        target = registered_intake_target(platform)
         source_message_id = _require_source_value(
             source_message_id, "source_message_id"
         )
@@ -853,7 +893,8 @@ class MissionStore:
         arguments = {
             "mission_id": mission_id,
             "session_id": session_id or None,
-            "dispatch_profile": route,
+            "dispatch_profile": target["dispatch_profile"],
+            "delivery_mode": target["delivery_mode"],
         }
         try:
             result = self.accept(goal, **arguments)
@@ -879,6 +920,7 @@ class MissionStore:
         session_id: str | None = None,
         run_id: str | None = None,
         dispatch_profile: str | None = None,
+        delivery_mode: str | None = None,
         parent_mission_id: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         goal = str(goal or "").strip()
@@ -887,6 +929,8 @@ class MissionStore:
         mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
         if dispatch_profile is not None:
             dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
+        if delivery_mode is not None and delivery_mode != "none":
+            raise MissionError("invalid mission delivery mode")
         if parent_mission_id is not None:
             parent_mission_id = _require_id(parent_mission_id, "parent_mission_id")
             if parent_mission_id == mission_id:
@@ -904,6 +948,7 @@ class MissionStore:
                 first["type"] == "mission.accepted"
                 and first["payload"].get("goal") == goal
                 and first["payload"].get("dispatch_profile") == dispatch_profile
+                and first["payload"].get("delivery_mode") == delivery_mode
                 and first["payload"].get("parent_mission_id") == parent_mission_id
             ):
                 if (
@@ -917,6 +962,8 @@ class MissionStore:
         payload = {"goal": goal}
         if dispatch_profile is not None:
             payload["dispatch_profile"] = dispatch_profile
+        if delivery_mode is not None:
+            payload["delivery_mode"] = delivery_mode
         if parent_mission_id is not None:
             payload["parent_mission_id"] = parent_mission_id
         accepted = self._append(

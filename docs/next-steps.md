@@ -233,6 +233,11 @@ not add an application service, workflow engine or mission database.
    build-1 and Workspace source/install hashes and health checks then matched. This proves deployment readiness, not a
    real capacity failure: the Telegram-origin controlled canary is armed but no live capacity notice/recovery has yet
    occurred. See the [rollout evidence](evidence/automatic-capacity-observation-rollout-2026-07-18.md).
+7. **Delivery applicability — EXPLICIT `none`; DEPLOY/RELEASE STILL FAIL-CLOSED (2026-07-18).** The registered pilot's
+   server-owned route and schema-v4 profile carry immutable `delivery_mode: none`; Central requires the coordinator's
+   `delivery: not_applicable` event before terminal completion. Legacy missions remain compatible. A configured
+   `deploy` or `release` mode is rejected until exact artifact, environment, deployed-revision and health evidence is
+   implemented, so fresh-main verification is no longer allowed to imply deployment for the registered target.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
