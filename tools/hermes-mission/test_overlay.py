@@ -132,6 +132,16 @@ def main() -> None:
         assert "complete_if_ready" in api
         assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
+        append_handler = api[
+            api.index("    async def _handle_append_mission_event"):
+            api.index("    async def _handle_answer_mission")
+        ]
+        assert append_handler.index("store.complete_if_ready(mission_id)") < append_handler.index(
+            "await self._notify_mission(store, terminal, defer=False)"
+        )
+        assert append_handler.index(
+            "await self._notify_mission(store, terminal, defer=False)"
+        ) < append_handler.index("store.restore_parent_after_terminal_notification(mission_id)")
         terminal_handler = api[api.index("    async def _handle_finish_mission"):]
         assert terminal_handler.index(
             "await self._notify_mission(store, event, defer=False)"
