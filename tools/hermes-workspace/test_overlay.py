@@ -13,6 +13,7 @@ REPO_ROOT = TOOL.parents[2]
 COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
 LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
 PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
+CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -281,6 +282,8 @@ def main() -> None:
         assert "Mission event sequence gap" in mission_card
         assert "Mission replay cursor mismatch" in mission_card
         assert "previous?.cursor ?? 0" in mission_card
+        assert "const missionEvents = replayQuery.data?.events ?? []" in mission_card
+        assert "replayRef.current.events" not in mission_card
         assert "Timeline" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
@@ -313,6 +316,29 @@ def main() -> None:
         previous_added_final = run(clone, "--check")
         assert previous_added_final.returncode == 0
         assert "previous-needs-overlay" not in previous_added_final.stdout
+
+        vulnerable_card = subprocess.check_output(
+            [
+                "git", "show",
+                f"{CURSOR_REPLAY_COMMIT}:tools/hermes-workspace/files/"
+                "src/screens/dashboard/components/mission-overview-card.tsx",
+            ],
+            cwd=REPO_ROOT,
+        )
+        vulnerable_card_path = (
+            clone / "src/screens/dashboard/components/mission-overview-card.tsx"
+        )
+        vulnerable_card_path.write_bytes(vulnerable_card)
+        assert hashlib.sha256(vulnerable_card).hexdigest() == (
+            "8fc9a10f19a40df929f57695e3efaf44c2ae1f8fdd19df80212f7161d195be89"
+        )
+        vulnerable_check = run(clone, "--check")
+        assert vulnerable_check.returncode == 0
+        assert vulnerable_check.stdout.count("previous-needs-overlay") == 1
+        vulnerable_upgrade = run(clone)
+        assert vulnerable_upgrade.returncode == 0
+        assert "overlay applied" in vulnerable_upgrade.stdout
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
         for relative, expected in (
             (

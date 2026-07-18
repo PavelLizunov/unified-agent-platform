@@ -169,11 +169,7 @@ export function MissionOverviewCard() {
     retry: 1,
   })
   const mission = replayQuery.data?.mission ?? snapshotMission
-  const missionEvents =
-    replayQuery.data?.events ??
-    (replayRef.current?.mission.mission_id === mission?.mission_id
-      ? replayRef.current.events
-      : [])
+  const missionEvents = replayQuery.data?.events ?? []
 
   async function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
