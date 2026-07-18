@@ -168,6 +168,11 @@ Last updated: 2026-07-18
   channel cursors, timer-origin journal proof and signed artifact attestation remain absent from the bundle schema.
   Exact evidence: `docs/evidence/canonical-completion-evidence-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+  Current source adds closed bundle schema v2 for future registered ordinary intake: Central persists only the
+  server-owned `workspace`/`telegram` platform plus full source-key and source-message SHA-256 values, the verifier
+  requires the source-key prefix to match deterministic `mission-intake-*`, and existing v1 bundles remain valid. This
+  source revision still requires rollout and a new live bundle; channel delivery cursors, timer-origin proof and
+  signing remain separate gaps.
 - **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message

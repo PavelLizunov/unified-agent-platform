@@ -206,6 +206,10 @@ Good next tasks that do not require redesign:
    canonical completion bundle. The campaign preserved its durable mission while PRs #271–#273 corrected reviewer
    recovery and Central historical-worker completion, so it is adversarial recovery evidence rather than a clean
    frozen-runtime run. Evidence: `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+   The current follow-up source introduces completion-bundle schema v2 for future registered ordinary missions. It
+   binds the server-owned Workspace/Telegram platform and hashed source key/message to deterministic
+   `mission-intake-*`, keeps existing v1 bundles valid and stores no raw channel/message identity. Central/build-1
+   rollout and one new live artifact remain the evidence gate; channel cursors and signing remain later fields.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
    PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
    through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the

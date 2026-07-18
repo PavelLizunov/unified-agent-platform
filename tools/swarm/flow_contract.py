@@ -124,11 +124,14 @@ def canonical_sha256(value: Any) -> str:
 
 def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     """Validate one closed, self-digesting successful-delivery evidence bundle."""
+    schema_version = value.get("schema_version")
     top = {
         "schema_version", "sha256", "mission", "runtime", "route", "execution",
         "source", "author", "reviewer", "delivery", "gates", "cleanup", "central",
     }
-    if set(value) != top or value.get("schema_version") != 1:
+    if schema_version == 2:
+        top.add("input")
+    if set(value) != top or schema_version not in {1, 2}:
         raise ContractError("completion evidence has an invalid schema")
     digest = _required_text(value, "sha256", "completion_evidence")
     unsigned = {key: item for key, item in value.items() if key != "sha256"}
@@ -178,6 +181,10 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         },
         "central": {"status", "sequence", "projection_id", "result"},
     }
+    if schema_version == 2:
+        expected["input"] = {
+            "platform", "source_key_sha256", "source_message_sha256",
+        }
     parts: dict[str, dict[str, Any]] = {}
     for name, fields in expected.items():
         item = value.get(name)
@@ -190,6 +197,20 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     delivery, gates = parts["delivery"], parts["gates"]
     cleanup, central = parts["cleanup"], parts["central"]
     execution = parts["execution"]
+    if schema_version == 2:
+        input_lineage = parts["input"]
+        if input_lineage["platform"] not in {"workspace", "telegram"}:
+            raise ContractError("completion evidence input platform is invalid")
+        for field in ("source_key_sha256", "source_message_sha256"):
+            field_value = input_lineage[field]
+            if not isinstance(field_value, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", field_value
+            ):
+                raise ContractError(f"completion evidence {field} is not SHA-256")
+        if mission["mission_id"] != (
+            "mission-intake-" + input_lineage["source_key_sha256"][:32]
+        ):
+            raise ContractError("completion evidence input mission lineage mismatch")
     for item, field, where in (
         (mission, "mission_id", "mission"),
         (mission, "dispatch_profile", "mission"),

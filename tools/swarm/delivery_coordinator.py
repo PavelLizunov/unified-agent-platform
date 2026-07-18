@@ -3844,8 +3844,18 @@ class DeliveryCoordinator:
             ):
                 raise DeliveryError("completion evidence lacks exact CI run identities")
             ci_run_ids.extend(values)
+        input_lineage = {
+            "platform": terminal.get("input_platform"),
+            "source_key_sha256": terminal.get("input_source_key_sha256"),
+            "source_message_sha256": terminal.get("input_source_message_sha256"),
+        }
+        if any(value is not None for value in input_lineage.values()) and not all(
+            isinstance(value, str) and value for value in input_lineage.values()
+        ):
+            raise DeliveryError("completion evidence has partial input lineage")
+        evidence_version = 2 if all(input_lineage.values()) else 1
         bundle: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": evidence_version,
             "mission": {
                 "mission_id": state.get("mission_id"),
                 "dispatch_profile": state.get("dispatch_profile"),
@@ -3938,6 +3948,8 @@ class DeliveryCoordinator:
                 "result": terminal.get("result"),
             },
         }
+        if evidence_version == 2:
+            bundle["input"] = input_lineage
         bundle["sha256"] = flow_contract.canonical_sha256(bundle)
         try:
             return flow_contract.validate_completion_evidence(bundle)

@@ -271,6 +271,10 @@ not add an application service, workflow engine or mission database.
    attestation remain later evidence fields. See the
    [rollout evidence](evidence/canonical-completion-evidence-rollout-2026-07-18.md) and
    [live campaign](evidence/ordinary-telegram-capacity-recovery-2026-07-18.md).
+   Current source adds backward-compatible closed schema v2: new registered ordinary missions bind the server-owned
+   input platform and hashed source key/message to deterministic `mission-intake-*`, while existing v1 bundles still
+   verify. Rollout and one v2 live artifact remain the next evidence gate; channel delivery cursors, timer-origin proof
+   and signing are still separate.
 10. **Ordinary Workspace answer — ✅ DEPLOYED COMPONENT PASS; LIVE CROSS-CHANNEL CANARY PENDING (2026-07-18).** The exact Central session
     that accepted a Workspace mission now routes a later ordinary message to its one open mission question through
     the same `MissionStore.ingest_owner_turn()` path. The source message ID is persisted in `mission.answer`; restart,

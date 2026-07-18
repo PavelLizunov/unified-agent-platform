@@ -57,7 +57,10 @@ REQUIRED_PAYLOAD = {
 }
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
-    "mission.accepted": {"goal", "dispatch_profile", "delivery_mode", "parent_mission_id"},
+    "mission.accepted": {
+        "goal", "dispatch_profile", "delivery_mode", "parent_mission_id",
+        "input_platform", "input_source_key_sha256", "input_source_message_sha256",
+    },
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
     },
@@ -74,7 +77,7 @@ PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
-    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "kind", "parent_mission_id", "profile", "question_id",
+    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "question_id",
     "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -253,6 +256,23 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.accepted" and "delivery_mode" in payload:
         if payload.get("delivery_mode") != "none":
             raise MissionError("invalid mission delivery mode")
+    if event_type == "mission.accepted":
+        input_fields = (
+            payload.get("input_platform"),
+            payload.get("input_source_key_sha256"),
+            payload.get("input_source_message_sha256"),
+        )
+        if any(value is not None for value in input_fields):
+            platform, source_key_sha256, source_message_sha256 = input_fields
+            if (
+                platform not in {"workspace", "telegram"}
+                or not isinstance(source_key_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", source_key_sha256)
+                or not isinstance(source_message_sha256, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", source_message_sha256)
+                or mission_id != f"mission-intake-{source_key_sha256[:32]}"
+            ):
+                raise MissionError("invalid mission input lineage")
     if event_type == "delivery.upsert":
         not_applicable = (
             payload.get("kind") == "delivery"
@@ -318,6 +338,9 @@ def empty_projection() -> dict[str, Any]:
         "dispatch_profile": None,
         "delivery_mode": None,
         "parent_mission_id": None,
+        "input_platform": None,
+        "input_source_key_sha256": None,
+        "input_source_message_sha256": None,
         "question": None,
         "answer": None,
         "result": None,
@@ -360,6 +383,9 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 dispatch_profile=payload.get("dispatch_profile"),
                 delivery_mode=payload.get("delivery_mode"),
                 parent_mission_id=payload.get("parent_mission_id"),
+                input_platform=payload.get("input_platform"),
+                input_source_key_sha256=payload.get("input_source_key_sha256"),
+                input_source_message_sha256=payload.get("input_source_message_sha256"),
             )
         elif kind == "mission.stage":
             progress = payload["progress_percent"]
@@ -1063,14 +1089,18 @@ class MissionStore:
         )
         # ponytail: deterministic acceptance identity is the durable receipt;
         # a second table would duplicate the same uniqueness invariant.
-        mission_id = "mission-intake-" + hashlib.sha256(
-            source_key.encode("utf-8")
-        ).hexdigest()[:32]
+        source_key_sha256 = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
+        mission_id = "mission-intake-" + source_key_sha256[:32]
         arguments = {
             "mission_id": mission_id,
             "session_id": session_id or None,
             "dispatch_profile": target["dispatch_profile"],
             "delivery_mode": target["delivery_mode"],
+            "input_platform": platform,
+            "input_source_key_sha256": source_key_sha256,
+            "input_source_message_sha256": hashlib.sha256(
+                source_message_id.encode("utf-8")
+            ).hexdigest(),
         }
         try:
             result = self.accept(goal, **arguments)
@@ -1098,6 +1128,9 @@ class MissionStore:
         dispatch_profile: str | None = None,
         delivery_mode: str | None = None,
         parent_mission_id: str | None = None,
+        input_platform: str | None = None,
+        input_source_key_sha256: str | None = None,
+        input_source_message_sha256: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         goal = str(goal or "").strip()
         if not goal or len(goal) > 8_192:
@@ -1112,6 +1145,18 @@ class MissionStore:
             if parent_mission_id == mission_id:
                 raise MissionError("mission cannot be its own parent")
             self._require_repair_parent(parent_mission_id, mission_id)
+        input_fields = (
+            input_platform, input_source_key_sha256, input_source_message_sha256,
+        )
+        if any(value is not None for value in input_fields) and (
+            input_platform not in {"workspace", "telegram"}
+            or not isinstance(input_source_key_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", input_source_key_sha256)
+            or not isinstance(input_source_message_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", input_source_message_sha256)
+            or mission_id != f"mission-intake-{input_source_key_sha256[:32]}"
+        ):
+            raise MissionError("invalid mission input lineage")
         correlation = {
             key: value
             for key, value in (("session_id", session_id), ("run_id", run_id))
@@ -1120,12 +1165,32 @@ class MissionStore:
         existing = self.events(mission_id)
         if existing:
             first = existing[0]
+            exact_input = all(
+                first["payload"].get(name) == value
+                for name, value in (
+                    ("input_platform", input_platform),
+                    ("input_source_key_sha256", input_source_key_sha256),
+                    ("input_source_message_sha256", input_source_message_sha256),
+                )
+            )
+            legacy_input = (
+                input_source_key_sha256 is not None
+                and all(
+                    first["payload"].get(name) is None
+                    for name in (
+                        "input_platform", "input_source_key_sha256",
+                        "input_source_message_sha256",
+                    )
+                )
+                and mission_id == f"mission-intake-{input_source_key_sha256[:32]}"
+            )
             if (
                 first["type"] == "mission.accepted"
                 and first["payload"].get("goal") == goal
                 and first["payload"].get("dispatch_profile") == dispatch_profile
                 and first["payload"].get("delivery_mode") == delivery_mode
                 and first["payload"].get("parent_mission_id") == parent_mission_id
+                and (exact_input or legacy_input)
             ):
                 if (
                     parent_mission_id is not None
@@ -1142,6 +1207,12 @@ class MissionStore:
             payload["delivery_mode"] = delivery_mode
         if parent_mission_id is not None:
             payload["parent_mission_id"] = parent_mission_id
+        if input_source_key_sha256 is not None:
+            payload.update(
+                input_platform=input_platform,
+                input_source_key_sha256=input_source_key_sha256,
+                input_source_message_sha256=input_source_message_sha256,
+            )
         accepted = self._append(
             mission_id,
             {

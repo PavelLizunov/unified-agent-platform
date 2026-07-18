@@ -509,6 +509,10 @@
   только проверяет уже сохранённый. Systemd identity доказывает service boundary, но сама по себе не доказывает timer
   origin и не заменяет signed GitHub attestation, channel cursors или live canary. Не реализованные `deploy/release`
   modes по-прежнему fail-closed; bundle для pilot допустим только при явном `delivery_mode: none`.
+  Bundle schema v2 для нового registered ordinary intake дополнительно связывает server-owned channel
+  (`workspace`/`telegram`), full source-key SHA-256 и source-message SHA-256 с детерминированным `mission-intake-*`;
+  raw channel/message identity в evidence не пишется. Verifier сохраняет closed-schema совместимость с уже
+  выпущенными v1 bundles.
 
 ## ADR-031 — Автоматическая OpenAI-only маршрутизация без оператора
 

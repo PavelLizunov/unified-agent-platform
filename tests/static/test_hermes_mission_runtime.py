@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import os
@@ -417,6 +418,31 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
         assert accepted["mission_id"].startswith("mission-intake-")
         assert accepted["payload"]["dispatch_profile"] == "build1-registered"
         assert accepted["payload"]["delivery_mode"] == "none"
+        workspace_source_key = missions._json({
+            "platform": "workspace",
+            "session_id": "session-owner",
+            "chat_id": "",
+            "thread_id": "",
+            "source_message_id": "4f1d8ea8-2d27-4b50-a351-f04272f5ea70",
+        })
+        workspace_source_sha256 = hashlib.sha256(
+            workspace_source_key.encode("utf-8")
+        ).hexdigest()
+        assert accepted["mission_id"] == (
+            "mission-intake-" + workspace_source_sha256[:32]
+        )
+        assert accepted["payload"]["input_platform"] == "workspace"
+        assert accepted["payload"]["input_source_key_sha256"] == (
+            workspace_source_sha256
+        )
+        assert accepted["payload"]["input_source_message_sha256"] == (
+            hashlib.sha256(
+                b"4f1d8ea8-2d27-4b50-a351-f04272f5ea70"
+            ).hexdigest()
+        )
+        projection = store.projection(accepted["mission_id"])
+        assert projection["input_platform"] == "workspace"
+        assert projection["input_source_key_sha256"] == workspace_source_sha256
 
         restarted = missions.MissionStore(database)
         replayed, replay_created = restarted.ingest_owner_goal(
@@ -462,6 +488,10 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
         )
         assert not replayed_telegram_created and replayed_telegram == telegram
         assert len(restarted.binding_history()) == 1
+        assert telegram["payload"]["input_platform"] == "telegram"
+        assert telegram["payload"]["input_source_message_sha256"] == (
+            hashlib.sha256(b"telegram-message-1").hexdigest()
+        )
 
         later_telegram, later_created = restarted.ingest_owner_goal(
             "Deliver the next Telegram goal",
@@ -487,6 +517,47 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             "telegram", "owner-chat", "owner-thread"
         ) == later_telegram["mission_id"]
         assert len(restarted.binding_history()) == 2
+
+        legacy_source_key = missions._json({
+            "platform": "workspace",
+            "session_id": "legacy-session",
+            "chat_id": "",
+            "thread_id": "",
+            "source_message_id": "legacy-message",
+        })
+        legacy_source_sha256 = hashlib.sha256(
+            legacy_source_key.encode("utf-8")
+        ).hexdigest()
+        legacy_id = "mission-intake-" + legacy_source_sha256[:32]
+        legacy, legacy_created = restarted.accept(
+            "Replay a pre-lineage ordinary goal",
+            mission_id=legacy_id,
+            session_id="legacy-session",
+            dispatch_profile="build1-registered",
+            delivery_mode="none",
+        )
+        assert legacy_created
+        legacy_replay, legacy_replay_created = restarted.ingest_owner_goal(
+            "Replay a pre-lineage ordinary goal",
+            platform="workspace",
+            source_message_id="legacy-message",
+            session_id="legacy-session",
+        )
+        assert not legacy_replay_created and legacy_replay == legacy
+
+        try:
+            restarted.accept(
+                "Forged input lineage",
+                mission_id="mission-intake-" + "0" * 32,
+                dispatch_profile="build1-registered",
+                delivery_mode="none",
+                input_platform="workspace",
+                input_source_key_sha256="1" * 64,
+                input_source_message_sha256="2" * 64,
+            )
+            raise AssertionError("mismatched input lineage was accepted")
+        except missions.MissionError as error:
+            assert "input lineage" in str(error)
 
         before = len(restarted.list(100))
         try:
