@@ -15,6 +15,7 @@ LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
 PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
 CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
 PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
+PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -100,6 +101,41 @@ def main() -> None:
         assert second.returncode == 0 and "overlay already applied" in second.stdout
         checked = run(clone, "--check")
         assert checked.returncode == 0 and "exact-patched" in checked.stdout
+
+        previous_script = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_PROJECTS_COMMIT}:tools/hermes-workspace/apply_overlay.py",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            encoding="utf-8",
+        )
+        previous_namespace = {
+            "__name__": "previous_workspace_overlay",
+            "__file__": str(TOOL),
+        }
+        exec(compile(previous_script, "previous_workspace_overlay.py", "exec"), previous_namespace)
+        previous_outputs = {}
+        for relative in (
+            "src/routes/api/send-stream.ts",
+            "src/server/claude-api.ts",
+        ):
+            upstream_text = subprocess.check_output(
+                ["git", "show", f"{COMMIT}:{relative}"],
+                cwd=clone,
+                text=True,
+                encoding="utf-8",
+            )
+            previous_text = previous_namespace["transform"](relative, upstream_text)
+            previous_outputs[relative] = previous_text
+            (clone / relative).write_text(previous_text, encoding="utf-8")
+        previous_check = run(clone, "--check")
+        assert previous_check.returncode == 0
+        assert previous_check.stdout.count("previous-needs-overlay") == 2
+        previous_upgrade = run(clone)
+        assert previous_upgrade.returncode == 0
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
         assignees = (clone / "src/routes/api/claude-tasks-assignees.ts").read_text()
         assert "? await gatewayFetch(url" in assignees
@@ -189,9 +225,27 @@ def main() -> None:
         assert "message identity required" in send_stream
         assert "message: CENTRAL_ONLY ? message : scopedMessage" in send_stream
         assert "source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined" in send_stream
+        assert "project_id: CENTRAL_ONLY ? projectId : undefined" in send_stream
+        assert "Выберите проект в Настройки → Проекты и доступы" in send_stream
+
+        project_api = (clone / "src/routes/api/mission-projects.ts").read_text()
+        assert "gatewayFetch('/api/mission-projects?platform=workspace'" in project_api
+        assert "Project is not registered" in project_api
+        assert "HttpOnly; SameSite=Strict" in project_api
+        project_settings = (
+            clone / "src/components/settings/project-permissions.tsx"
+        ).read_text()
+        assert "Платформа может менять код" in project_settings
+        settings_sidebar = (
+            clone / "src/components/settings/settings-sidebar.tsx"
+        ).read_text()
+        assert "{ id: 'projects', label: 'Проекты и доступы' }" in settings_sidebar
+        settings_page = (clone / "src/routes/settings/index.tsx").read_text()
+        assert "<ProjectPermissions />" in settings_page
         claude_api = (clone / "src/server/claude-api.ts").read_text()
         assert "source_message_id?: string" in claude_api
         assert "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" in claude_api
+        assert "project_id?: string" in claude_api
         create_session = claude_api.index("export async function createSession")
         update_session = claude_api.index("export async function updateSession")
         assert "if (!CENTRAL_ONLY && getCapabilities().dashboard.available)" in (
@@ -199,7 +253,7 @@ def main() -> None:
         )
 
         send_stream_path = clone / "src/routes/api/send-stream.ts"
-        previous_send_stream = send_stream.replace("""        if (CENTRAL_ONLY) {
+        previous_send_stream = previous_outputs["src/routes/api/send-stream.ts"].replace("""        if (CENTRAL_ONLY) {
           chatMode = 'enhanced-claude'
         }""", """        if (CENTRAL_ONLY && chatMode === 'portable') {
           return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
@@ -221,7 +275,7 @@ def main() -> None:
         assert "src/routes/api/send-stream.ts: exact-patched" in previous_checked.stdout
 
         claude_api_path = clone / "src/server/claude-api.ts"
-        previous_claude_api = claude_api.replace(
+        previous_claude_api = previous_outputs["src/server/claude-api.ts"].replace(
             "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'\n",
             "",
             1,

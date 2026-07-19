@@ -111,10 +111,15 @@ def main() -> None:
         kanban = (clone / "hermes_cli/kanban_db.py").read_text(encoding="utf-8")
         hermes_main = (clone / "hermes_cli/main.py").read_text(encoding="utf-8")
         assert 'CommandDef("mission"' in commands
+        assert 'CommandDef("projects"' in commands
+        assert 'HERMES_OWNER_COMMANDS' in commands
         assert 'if canonical == "mission"' in gateway
+        assert 'if canonical == "projects"' in gateway
+        assert "Hermes сам создаст задачу" in gateway
         assert api.count('self._app.router.add_') >= 4
         for route in (
             '"/api/missions"',
+            '"/api/mission-projects"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
             '"/api/missions/{mission_id}/answer"',
@@ -132,6 +137,7 @@ def main() -> None:
         assert "if not owner_key_valid(owner_key)" in api
         assert "Ambiguous mission capability" in api
         assert '"goal", "platform", "source_message_id", "session_id"' in api
+        assert '"chat_id", "thread_id", "project_id"' in api
         assert "unknown owner intake fields" in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
@@ -171,6 +177,9 @@ def main() -> None:
         assert 'platform="telegram"' in gateway
         assert 'source_message_id = str(event.message_id or "").strip()' in gateway
         assert "store.ingest_owner_turn(" in gateway
+        assert "_enrich_message_with_transcription(" in gateway
+        assert "MissionProjectRequired" in gateway
+        assert "Для какого проекта выполнить задачу?" in gateway
         assert 'reason="owner-intake"' in (clone / "hermes_cli/uap_missions.py").read_text(
             encoding="utf-8"
         )
@@ -185,6 +194,8 @@ def main() -> None:
         assert 'source_message_id = body.get("source_message_id")' not in synchronous_handler
         assert 'source_message_id = body.get("source_message_id")' in stream_handler
         assert 'platform="workspace"' in stream_handler
+        assert 'project_id=body.get("project_id")' in stream_handler
+        assert '"projects": error.projects' in stream_handler
         assert 'code="mission_intake_failed"' in stream_handler
         assert 'owner_event["type"] == "mission.answer"' in stream_handler
         assert "Ответ принят для задачи" in stream_handler

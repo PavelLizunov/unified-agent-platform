@@ -14,6 +14,9 @@ runtime hard deny.
 - The owner provides a goal and may discuss material product, performance or technology trade-offs.
 - The owner is **not** a developer, reviewer, operator or test runner in the delivery loop.
 - UAP turns the goal into a mission and carries it to the repository-specific Definition of Done.
+- The owner chooses from server-registered projects in Workspace or names one in Telegram; repository paths, models
+  and commands are never accepted from the owner message. If the project is ambiguous, the platform asks one
+  deterministic clarification and resumes the original goal.
 - UAP asks the owner only when a decision is irreversible, materially changes the product, requires new credentials
   or external authority, creates real destructive risk, or no safe allowed route can make progress.
 - Existing repository contracts and recorded preferences are used before asking a repeated question.
@@ -85,6 +88,8 @@ Workspace shows a compact mission view:
 - final result and evidence without requiring the owner to inspect raw logs.
 
 Telegram receives the same mission status, owner questions and final result. It must not maintain a separate history.
+Telegram voice notes are ordinary owner input after successful transcription through the configured Hermes STT path;
+a transcription failure is reported without creating a mission.
 
 The normal final report is concise: outcome, important technical decisions, completed checks, PR/deploy/release links and
 known debt.

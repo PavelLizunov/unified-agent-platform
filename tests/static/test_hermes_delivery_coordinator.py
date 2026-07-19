@@ -3213,6 +3213,40 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path.write_text(json.dumps(owner_gate_value), encoding="utf-8")
             coordinator.load_profile(path)
 
+        registered_projects = {
+            "delivery-vpnctl-registered-v4.json": (
+                "build1-vpnctl-registered-v4",
+                "PavelLizunov/vpnctl",
+                {"cargo check", "cargo fmt --check", "cargo clippy -D warnings",
+                 "cargo test", "cargo deny", "gitleaks",
+                 "e2e (testcontainers — Docker required)"},
+            ),
+            "delivery-vpnrouter-registered-v4.json": (
+                "build1-vpnrouter-registered-v4",
+                "PavelLizunov/VPNRouter",
+                {"test", "grep"},
+            ),
+        }
+        for filename, (dispatch_profile, repo, required_ci) in registered_projects.items():
+            profile_path = ROOT / "tools/swarm/profiles" / filename
+            project_value = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(4, project_value["schema_version"])
+            self.assertEqual(dispatch_profile, project_value["dispatch_profile"])
+            self.assertEqual(repo, project_value["repo"])
+            self.assertEqual(["."], project_value["allowed_path_prefixes"])
+            self.assertEqual(required_ci, set(project_value["required_ci_checks"]))
+            self.assertEqual("none", project_value["delivery_mode"])
+            self.assertIs(project_value["completion_evidence"], True)
+            with tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                project_value.update(
+                    source_checkout=str(root / "source"),
+                    worktree_root=str(root / "worktrees"),
+                )
+                path = root / filename
+                path.write_text(json.dumps(project_value), encoding="utf-8")
+                coordinator.load_profile(path)
+
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             path = root / "delivery-invalid.json"

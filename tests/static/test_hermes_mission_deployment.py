@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 
 import yaml
@@ -43,7 +44,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v55-russian-mission-progress"
+        "v56-project-permissions"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -79,11 +80,40 @@ def main() -> None:
         if container["name"] == "gateway"
     )
     gateway_env = {entry["name"]: entry for entry in gateway["env"]}
-    assert gateway_env["HERMES_MISSION_INTAKE_ROUTES"]["value"] == (
-        '{"workspace":{"dispatch_profile":"build1-flow-pilot-registered-v4",'
-        '"delivery_mode":"none"},"telegram":{"dispatch_profile":'
-        '"build1-flow-pilot-registered-v4","delivery_mode":"none"}}'
+    assert "HERMES_MISSION_INTAKE_ROUTES" not in gateway_env
+    assert gateway_env["HERMES_OWNER_COMMANDS"]["value"] == (
+        "projects,mission,status,help,stop"
     )
+    projects = json.loads(gateway_env["HERMES_MISSION_PROJECTS"]["value"])
+    assert projects["schema_version"] == 1
+    assert {
+        project["project_id"]: (
+            project["repository"],
+            project["dispatch_profile"],
+            project["delivery_mode"],
+            set(project["platforms"]),
+        )
+        for project in projects["projects"]
+    } == {
+        "flow-ledger": (
+            "PavelLizunov/hermes-flow-v2-pilot",
+            "build1-flow-pilot-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "vpnctl": (
+            "PavelLizunov/vpnctl",
+            "build1-vpnctl-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "vpnrouter": (
+            "PavelLizunov/VPNRouter",
+            "build1-vpnrouter-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+    }
     assert {
         "name": "HERMES_MISSION_OWNER_KEY",
         "valueFrom": {
