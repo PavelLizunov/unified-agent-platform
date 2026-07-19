@@ -82,7 +82,7 @@ def main() -> None:
     assert gateway_env["HERMES_MISSION_INTAKE_ROUTES"]["value"] == (
         '{"workspace":{"dispatch_profile":"build1-flow-pilot-registered-v4",'
         '"delivery_mode":"none"},"telegram":{"dispatch_profile":'
-        '"build1-flow-pilot-owner-gate-v4","delivery_mode":"none"}}'
+        '"build1-flow-pilot-registered-v4","delivery_mode":"none"}}'
     )
     assert {
         "name": "HERMES_MISSION_OWNER_KEY",
