@@ -20,3 +20,13 @@ regexes = [
   '''CHANGEME''',
   '''<[A-Za-z0-9_-]+>''',
 ]
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Completion evidence stores a one-way source identity digest, not a credential"
+  condition = "AND"
+  regexTarget = "line"
+  paths = ['''^docs/evidence/completion/[^/]+\.json$''']
+  regexes = ['''"source_key_sha256"\s*:\s*"[0-9a-f]{64}"''']

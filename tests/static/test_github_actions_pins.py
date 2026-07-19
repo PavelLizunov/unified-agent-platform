@@ -43,6 +43,14 @@ class GitHubActionsPinsTests(unittest.TestCase):
         self.assertNotIn("secrets.", workflow)
         self.assertNotIn("packages: write", workflow)
 
+    def test_completion_evidence_gitleaks_allowlist_is_narrow(self) -> None:
+        config = (ROOT / ".gitleaks.toml").read_text(encoding="utf-8")
+        self.assertIn('id = "generic-api-key"', config)
+        self.assertIn('condition = "AND"', config)
+        self.assertIn('regexTarget = "line"', config)
+        self.assertIn("^docs/evidence/completion/[^/]+\\.json$", config)
+        self.assertIn(r'"source_key_sha256"\s*:\s*"[0-9a-f]{64}"', config)
+
 
 if __name__ == "__main__":
     unittest.main()
