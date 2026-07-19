@@ -234,6 +234,14 @@ Last updated: 2026-07-19
   accepted ordinary `APPROVE` through Workspace, resumed its same root and completed PR #10 through terminal sequence
   27 and cleanup. Exact evidence: `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md` and
   `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
+- **Missing coordinator state now fails closed on build-1 (2026-07-19).** PR #286 prevents an active or previously
+  executed mission from silently reinitializing as fresh when `delivery-state.json` is absent. Projected execution
+  history, surviving mission-local artifacts and a lost automatic owner-gate checkpoint stop before model/Git/GitHub
+  mutation; only pristine admission and the existing inert generic `waiting_owner` recovery remain valid. The exact
+  merge `4eaa8f9...` is installed, source and installed coordinator hashes match, installer/check/systemd verification
+  passed, and all six enabled timers completed a natural successful tick. This is fail-closed detection, not automatic
+  reconstruction after total state loss. Evidence:
+  `docs/evidence/missing-delivery-state-fail-closed-rollout-2026-07-19.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.

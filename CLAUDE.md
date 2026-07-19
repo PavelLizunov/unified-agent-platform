@@ -241,6 +241,13 @@ Good next tasks that do not require redesign:
    sequence 27. A second Telegram-origin mission accepted its ordinary answer through Workspace and completed PR #10
    through the same terminal/cleanup boundary. Other privileged flags remain fail-closed; complete cross-channel chat
    transcript synchronization is still not claimed.
+   PR #286 fixes the remaining confirmed coordinator-state safety defect: missing `delivery-state.json` no longer
+   silently resets an active mission's base, counters and route decisions. Projected history, local execution artifacts
+   and lost automatic owner-gate checkpoints fail before model/Git/GitHub mutation; pristine admission and the existing
+   inert generic `waiting_owner` recovery remain supported. Exact merge `4eaa8f9...` is installed on build-1, hashes and
+   installer/check/systemd verification match, and all six enabled timers passed a natural tick. This is fail-closed
+   detection rather than total-state-loss recovery. Evidence:
+   `docs/evidence/missing-delivery-state-fail-closed-rollout-2026-07-19.md`.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against

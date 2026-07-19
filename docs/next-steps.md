@@ -321,6 +321,14 @@ not add an application service, workflow engine or mission database.
     same terminal/cleanup boundary. See the
     [same-channel canary](evidence/automatic-owner-question-live-canary-2026-07-19.md) and
     [cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
+14. **Missing delivery-state safety — ✅ DEPLOYED FAIL-CLOSED PASS (2026-07-19).** PR #286 closes the
+    coordinator's unsafe fresh-initialization path after loss of `delivery-state.json`. Any projected execution history,
+    surviving mission-local artifact or lost automatic owner-gate checkpoint now stops before model/Git/GitHub
+    mutation. Pristine admission and the prior inert generic `waiting_owner` recovery remain compatible. Exact merge
+    `4eaa8f9...` is installed on build-1; source/installed hashes, installer plus independent check, systemd verification
+    and a natural successful tick from all six enabled timers passed. This does not reconstruct a mission after total
+    local state loss; it makes that ambiguous condition safe. See the
+    [rollout evidence](evidence/missing-delivery-state-fail-closed-rollout-2026-07-19.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
