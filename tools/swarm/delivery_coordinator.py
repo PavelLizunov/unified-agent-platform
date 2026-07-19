@@ -1628,10 +1628,13 @@ class DeliveryCoordinator:
         }
         self._save(paths, state)
 
-    def _reviewer_unit_is_gone(self, state: dict[str, Any]) -> bool:
+    def _model_unit_is_gone(self, state: dict[str, Any], *, role: str) -> bool:
+        if role not in {"author", "reviewer"}:
+            raise DeliveryError("invalid ambiguous-model role")
         if self.runner is not subprocess.run or os.name != "posix":
             return True
-        unit = f"uap-review-{self._model_attempt_id(state, role='reviewer')[:24]}.service"
+        unit_role = "author" if role == "author" else "review"
+        unit = f"uap-{unit_role}-{self._model_attempt_id(state, role=role)[:24]}.service"
         environment = {
             name: os.environ[name]
             for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
@@ -1674,7 +1677,7 @@ class DeliveryCoordinator:
             not isinstance(candidate, str)
             or not candidate
             or not paths["review"].is_dir()
-            or not self._reviewer_unit_is_gone(state)
+            or not self._model_unit_is_gone(state, role="reviewer")
         ):
             return False
         if self._git(paths["review"], "rev-parse", "HEAD") != candidate:
@@ -1689,6 +1692,49 @@ class DeliveryCoordinator:
         state.pop("model_ambiguous", None)
         self._save(paths, state)
         return True
+
+    def _reconcile_ambiguous_author(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        ambiguous: dict[str, Any],
+    ) -> bool:
+        if ambiguous["role"] != "author" or state.get("phase") not in {"claimed", "needs_fix"}:
+            return False
+        if not paths["author"].is_dir() or not self._model_unit_is_gone(
+            state, role="author"
+        ):
+            return False
+        marker = {
+            "review_cycle": state["review_cycle"],
+            "error": "interrupted author execution was discarded before automatic retry",
+        }
+        pending = state.get("invalid_candidate_cleanup")
+        if pending is not None and pending != marker:
+            raise DeliveryError("ambiguous author cleanup checkpoint changed")
+        state["invalid_candidate_cleanup"] = marker
+        state.pop("model_ambiguous", None)
+        self._save(paths, state)
+        return True
+
+    def _publish_ambiguous_notice(
+        self, state: dict[str, Any], ambiguous: dict[str, Any]
+    ) -> None:
+        role = ambiguous["role"]
+        event = mission_adapter._producer_event(
+            state["mission_id"],
+            "mission.notice",
+            {
+                "code": "execution_reconciling",
+                "message": (
+                    f"Interrupted {role} execution in cycle {state['review_cycle']} is being "
+                    "reconciled; automatic recovery will continue."
+                ),
+                "owner_action_required": False,
+            },
+            {"task_id": state["root_task_id"]},
+        )
+        self.client.publish(state["mission_id"], event)
 
     def _mark_model_timeout(
         self,
@@ -4563,12 +4609,17 @@ class DeliveryCoordinator:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
             self._ensure_route(state, paths)
             ambiguous = self._ambiguous_state(state)
-            if ambiguous is not None and not self._reconcile_ambiguous_reviewer(
-                state, paths, ambiguous
-            ):
-                return {
-                    "action": "reconciling", "mission_id": mission_id, "state": state,
-                }
+            if ambiguous is not None:
+                self._publish_ambiguous_notice(state, ambiguous)
+                recovered = (
+                    self._reconcile_ambiguous_reviewer(state, paths, ambiguous)
+                    if ambiguous["role"] == "reviewer"
+                    else self._reconcile_ambiguous_author(state, paths, ambiguous)
+                )
+                if not recovered:
+                    return {
+                        "action": "reconciling", "mission_id": mission_id, "state": state,
+                    }
             invocation = self._model_invocation_state(state)
             if invocation is not None:
                 self._mark_model_ambiguous(
@@ -4577,6 +4628,10 @@ class DeliveryCoordinator:
                     role=invocation["role"],
                     last_error_sha256=invocation["attempt_id"],
                 )
+                ambiguous = self._ambiguous_state(state)
+                if ambiguous is None:
+                    raise DeliveryError("model invocation did not enter reconciliation")
+                self._publish_ambiguous_notice(state, ambiguous)
                 return {
                     "action": "reconciling", "mission_id": mission_id, "state": state,
                 }

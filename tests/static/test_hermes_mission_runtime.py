@@ -162,6 +162,25 @@ def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
             assert await missions.notify_subscribers(store, stored, sender) == 1
             assert deliveries == [rendered]
 
+            reconciling = {
+                **notice,
+                "correlation": {
+                    **notice["correlation"],
+                    "producer_event_id": "flow:mission-capacity:reconciling",
+                },
+                "payload": {
+                    "code": "execution_reconciling",
+                    "message": "Interrupted author execution is being reconciled automatically.",
+                    "owner_action_required": False,
+                },
+            }
+            store.append_producer("mission-capacity", reconciling)
+            view = store.projection("mission-capacity")
+            assert view["status"] == "active"
+            assert view["question"] is None
+            assert view["notice"] == reconciling["payload"]
+            assert "Owner action required: no" in missions.telegram_text(view)
+
             invalid = {
                 **notice,
                 "correlation": {
