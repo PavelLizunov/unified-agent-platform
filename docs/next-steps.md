@@ -329,17 +329,18 @@ not add an application service, workflow engine or mission database.
     and a natural successful tick from all six enabled timers passed. This does not reconstruct a mission after total
     local state loss; it makes that ambiguous condition safe. See the
     [rollout evidence](evidence/missing-delivery-state-fail-closed-rollout-2026-07-19.md).
-15. **Signed completion evidence — ✅ GITHUB ATTESTATION PASS (2026-07-19).** PR #291 publishes the exact
-    redacted schema-v2 bundle from cross-channel mission `mission-intake-e966529d2686998b2c8f55acd06716a8` and adds a
-    protected-master-only attestation workflow. The job has no top-level permissions and only job-scoped
-    `contents: read`, `id-token: write` and `attestations: write`; both remote actions are exact-SHA pinned. It reran the
-    deterministic semantic verifier, then GitHub issued SLSA provenance for byte digest `509117fb...`, exact merge
-    `1fd06f6...`, `refs/heads/master` and the exact workflow identity on a GitHub-hosted runner. Independent exact-SHA
-    Terra review and both PR/master CI gates passed. This closes signed publication for the existing registered
-    no-deploy delivery/input-lineage bundle. The signed JSON does not yet bind Workspace/Telegram cursor or
-    projection-hash fields, so it is not the final two-channel Product Operating Contract certificate; arbitrary
-    repositories, deploy/release modes and full cross-channel chat history also remain outside the proof. See the
-    [attestation evidence](evidence/signed-completion-attestation-2026-07-19.md).
+15. **Signed two-channel completion evidence — ✅ GITHUB ATTESTATION PASS (2026-07-19).** PR #295 publishes the
+    closed schema-v3 bundle from mission `mission-intake-503332fe3dcba802ded5f3a1bd513026`. The certificate binds
+    ordinary Telegram intake, the ordinary Workspace owner answer, both cursors at 27 and one projection identity,
+    plus the approved Sol/Terra route, exact review/candidate/PR/CI/merge, explicit no-deploy applicability,
+    post-verify and cleanup. Independent exact-SHA Sol read-only review and both PR/master CI gates passed. The
+    protected-master GitHub-hosted workflow re-ran the verifier and issued SLSA provenance for byte digest
+    `92178a9b...`, merge `a127994...`, `refs/heads/master` and the exact signer workflow. PR #296 subsequently restored
+    ordinary Telegram intake to the automatic registered-v4 route; independent review, CI, exact Flux rollout, Ready
+    pod, API 200 and a natural registered timer tick passed. The owner-gate profile remains only for deliberate
+    diagnostics. This closes the exact registered no-deploy two-window certificate, not arbitrary repository/profile
+    discovery, actual deploy/release modes, full cross-channel chat transcripts, HA or a platform-wide GPU/local hard
+    deny. See the [attestation evidence](evidence/signed-completion-attestation-2026-07-19.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

@@ -1,12 +1,13 @@
 # Product Operating Contract
 
-Status: **accepted by the owner on 2026-07-14**. This document defines the target product behaviour of UAP.
-It does not claim that the current deployment already satisfies the contract.
+Status: **accepted by the owner on 2026-07-14**. The current deployment now has a GitHub-attested completion
+certificate for the exact registered no-deploy pilot boundary. This document still defines the wider target product
+behaviour; section 8 records the capabilities not covered by that exact proof.
 
-The registered no-deploy pilot now has one GitHub-attested completion-evidence subject covering an ordinary Telegram
-goal, a hashed owner answer and the autonomous delivery suffix. This closes signed publication for that exact bundle,
-not the final two-channel Product Operating Contract certificate: channel cursor/hash evidence is still separate.
-Section 8 records that and the remaining wider-platform gaps.
+The closed schema-v3 subject binds an ordinary Telegram goal, the required ordinary Workspace answer, both channel
+cursors/projection identities and the autonomous OpenAI delivery suffix. It does not claim arbitrary repository/profile
+discovery, an actual deploy/release target, complete cross-channel chat transcripts, HA or a platform-wide GPU/local
+runtime hard deny.
 
 ## 1. Owner and platform roles
 
@@ -115,9 +116,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    are deployed and passed in-pod component checks. The approved-profile `architecture_change` producer is now live:
    ordinary Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` created one inert root and deterministic
    question before any model, accepted only exact ordinary `APPROVE`, resumed the same root and completed delivery.
-   Telegram-origin mission `mission-intake-e966529d2686998b2c8f55acd06716a8` then accepted its sole ordinary answer
-   through Workspace, resumed the same root and completed PR/CI/merge/post-verify/cleanup. Complete cross-channel chat
-   history remains pending; unsupported privileged capabilities still fail closed.
+   Telegram-origin mission `mission-intake-503332fe3dcba802ded5f3a1bd513026` then accepted its sole ordinary answer
+   through Workspace, resumed the same root, completed PR/CI/merge/post-verify/cleanup and produced a signed schema-v3
+   certificate with both cursors at 27 and one projection identity. Complete cross-channel chat history remains
+   pending; unsupported privileged capabilities still fail closed.
 2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
    passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
    profile later accepted ordinary Workspace goals and delivered non-toy code plus a follow-up documentation repair
@@ -133,8 +135,11 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    history, surviving mission-local artifacts and a lost automatic owner-gate checkpoint now fail before model/Git/
    GitHub mutation. The exact merge is installed and all six timers passed a natural tick. This is safe detection;
    automatic reconstruction after total `delivery-state.json` loss is still not claimed.
-   These campaigns prove both owner entry channels only for exact registered profiles; generic arbitrary-repository intake
-   and route-profile creation from an unconstrained owner goal remain outside that proof.
+   PR #296 restored the server-owned ordinary Telegram mapping to the same automatic registered-v4 profile used by
+   Workspace; exact review, CI, Flux rollout, Ready/API checks and a natural coordinator tick passed. The separate
+   owner-gate profile remains available only for deliberate privileged-flow diagnostics. These campaigns prove both
+   owner entry channels only for exact registered profiles; generic arbitrary-repository intake and route-profile
+   creation from an unconstrained owner goal remain outside that proof.
    The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
    `delivery: not_applicable` evidence instead of treating fresh-main verification as a deploy. Actual `deploy` and
    `release` modes remain fail-closed until their artifact, environment and deployed-revision gates are implemented
@@ -185,13 +190,14 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    mission identity without persisting raw channel identifiers. The owner-gated Telegram canary produced the first
    live v2 artifact; the installed verifier accepted semantic digest `4dbb3b92...`, its systemd invocation chain contains
    five exact unit identities, and Workspace/Telegram both converged at cursor 27. A deployed revision is not applicable
-   to this registered no-deploy target. PR #291 published the later exact closed v2 bundle from cross-channel mission
-   `mission-intake-e966529d2686998b2c8f55acd06716a8` on protected `master`; the master-only GitHub-hosted workflow
-   independently re-ran the semantic verifier and issued SLSA provenance for byte digest `509117fb...`, bound to merge
-   `1fd06f6...`, `refs/heads/master` and the exact workflow identity. This closes signed publication for the existing
-   delivery/input-lineage bundle. The signed JSON still does not contain Workspace/Telegram cursor or projection-hash
-   fields, so the final two-channel Product Operating Contract certificate is not yet claimed. Exact attestation
-   evidence:
+   to this registered no-deploy target. PR #295 published the exact closed schema-v3 bundle from cross-channel mission
+   `mission-intake-503332fe3dcba802ded5f3a1bd513026` on protected `master`. It additionally binds the Workspace and
+   Telegram cursors/projection identities and the answer platform. The master-only GitHub-hosted workflow independently
+   re-ran the semantic verifier and issued SLSA provenance for byte digest `92178a9b...`, bound to merge `a127994...`,
+   `refs/heads/master` and the exact workflow identity. This is the final two-channel certificate for the exact
+   registered owner-gated no-deploy pilot. It is not evidence for arbitrary repository/profile discovery, actual
+   deploy/release modes, complete chat transcripts, HA or a platform-wide GPU/local-runtime hard deny. Exact
+   attestation evidence:
    `docs/evidence/signed-completion-attestation-2026-07-19.md`.
 10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant
     at Central's terminal-authority boundary with a bounded deterministic summary of the accepted goal, changed paths,

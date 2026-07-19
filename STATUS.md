@@ -187,16 +187,18 @@ Last updated: 2026-07-19
   owner-answer hash and five systemd service invocations. Exact evidence:
   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md` and
   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
-- **The registered no-deploy completion evidence is GitHub-attested (2026-07-19).** PR #291 published the exact
-  redacted schema-v2 bundle for cross-channel mission `mission-intake-e966529d2686998b2c8f55acd06716a8` on protected
-  `master`. A master-only GitHub-hosted job re-ran the semantic verifier and used only job-scoped `contents: read`,
-  `id-token: write` and `attestations: write` to issue SLSA provenance. `gh attestation verify` bound certificate byte
-  digest `509117fb...` to merge `1fd06f6...`, `refs/heads/master` and the exact signer workflow, with one verified
-  timestamp. The workflow and Gitleaks exception passed adversarial exact-SHA Terra review and PR/master CI. This closes
-  signed publication for the existing registered no-deploy delivery/input-lineage bundle. The signed JSON does not
-  contain Workspace/Telegram cursor or projection-hash fields, so a final two-channel Product Operating Contract
-  certificate is not claimed; generic repository intake, deploy/release automation and complete cross-channel chat
-  history also remain outside this proof. Exact evidence:
+- **The exact registered no-deploy two-channel completion certificate is GitHub-attested (2026-07-19).** PR #295
+  published the closed schema-v3 bundle for mission `mission-intake-503332fe3dcba802ded5f3a1bd513026`. It binds
+  ordinary Telegram intake, the exact ordinary Workspace owner answer, both channel cursors at sequence 27 and the
+  same projection `bc4fe1095ad47411`, plus Sol/Terra runtime attestations, target PR #11, required multi-platform CI,
+  exact merge/default `290ed192...`, explicit no-deploy applicability, post-verify and cleanup. Independent exact-SHA
+  Sol read-only review and PR/master CI passed. The protected-master workflow re-ran the semantic verifier and issued
+  SLSA provenance for certificate byte digest `92178a9b...`, merge `a127994...`, `refs/heads/master` and the exact
+  GitHub-hosted signer workflow. PR #296 then restored ordinary Telegram intake to the automatic registered-v4 profile;
+  its independent review, PR/master CI, exact Flux rollout, Ready pod, authenticated API 200 and natural registered
+  timer tick passed. The owner-gate profile remains only for deliberate privileged-flow diagnostics. Generic
+  repository/profile discovery, actual deploy/release modes, complete cross-channel chat history, HA and a
+  platform-wide GPU/local-runtime deny remain outside this exact proof. Exact evidence:
   `docs/evidence/signed-completion-attestation-2026-07-19.md`.
 - **Owner terminal result has a live concrete shared result (2026-07-19).** The earlier successful ordinary Telegram
   campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
