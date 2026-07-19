@@ -14,6 +14,7 @@ COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
 LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
 PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
 CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
+PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -358,6 +359,24 @@ def main() -> None:
         current_check = run(clone, "--check")
         assert current_check.returncode == 0
         assert current_check.stdout.count("previous-needs-overlay") == 1
+        assert run(clone).returncode == 0
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
+
+        previous_progress_card = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_PROGRESS_COMMIT}:tools/hermes-workspace/files/"
+                "src/screens/dashboard/components/mission-overview-card.tsx",
+            ],
+            cwd=REPO_ROOT,
+        )
+        vulnerable_card_path.write_bytes(previous_progress_card)
+        assert hashlib.sha256(previous_progress_card).hexdigest() == (
+            "7b244d5739f0fe30f85470e90362c5f2e2ee8dd4bc8fe140ed0aea0cee6b82fa"
+        )
+        previous_progress_check = run(clone, "--check")
+        assert previous_progress_check.returncode == 0
+        assert previous_progress_check.stdout.count("previous-needs-overlay") == 1
         assert run(clone).returncode == 0
         assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
