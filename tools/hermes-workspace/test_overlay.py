@@ -17,6 +17,7 @@ CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
 PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
 PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
 PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
+PREVIOUS_PROJECT_CATALOG_UI_COMMIT = "95343b3ba3891c15dd80d9b911c66c013dcada69"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -154,6 +155,28 @@ def main() -> None:
         assert previous_permissions_upgrade.returncode == 0
         assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
+        previous_project_ui = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_PROJECT_CATALOG_UI_COMMIT}:tools/hermes-workspace/files/"
+                "src/components/settings/project-permissions.tsx",
+            ],
+            cwd=REPO_ROOT,
+        )
+        previous_project_ui_path = (
+            clone / "src/components/settings/project-permissions.tsx"
+        )
+        previous_project_ui_path.write_bytes(previous_project_ui)
+        previous_project_ui_check = run(clone, "--check")
+        assert previous_project_ui_check.returncode == 0
+        assert (
+            "src/components/settings/project-permissions.tsx: previous-needs-overlay"
+            in previous_project_ui_check.stdout
+        )
+        previous_project_ui_upgrade = run(clone)
+        assert previous_project_ui_upgrade.returncode == 0
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
+
         assignees = (clone / "src/routes/api/claude-tasks-assignees.ts").read_text()
         assert "? await gatewayFetch(url" in assignees
         assert ": await dashboardFetch(url" in assignees
@@ -257,6 +280,18 @@ def main() -> None:
         assert "Проверки:" in project_settings
         assert "Control-plane, Proxmox и ops-сервер" in project_settings
         assert "project.status === 'ready'" in project_settings
+        status_position = project_settings.index(
+            "{statusLabels[project.status] || project.status}"
+        )
+        primary_project_position = project_settings.index(
+            "project.category === 'active-maintained'", status_position
+        )
+        test_targets_position = project_settings.index(
+            "{project.test_targets.length", primary_project_position
+        )
+        assert "Основной проект" in project_settings[
+            primary_project_position:test_targets_position
+        ]
         settings_sidebar = (
             clone / "src/components/settings/settings-sidebar.tsx"
         ).read_text()
