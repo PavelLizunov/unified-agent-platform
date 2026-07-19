@@ -25,8 +25,8 @@ platform-wide GPU/local-runtime hard deny.
 - Exact byte digest: `92178a9b679fddb420475fc4e002f42283e0f74048a0f848e2560d7c5e30164c`.
 
 The closed schema contains only server-owned platform labels, one-way source/goal/answer hashes, bounded public
-delivery facts and exact runtime/Git/CI/review/cleanup identities. Raw channel, message and session identifiers are not
-published.
+delivery facts and exact runtime/Git/CI/review/cleanup identities. Raw owner chat/thread/message and Workspace session
+identifiers are not published; Codex author/reviewer session IDs remain explicit runtime-attestation identities.
 
 ## Publication and review
 
