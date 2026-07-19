@@ -30,8 +30,8 @@ ingress and the Central registry remain a separate rollout gate.
 
 Lifecycle is deliberately handled by the existing stores and timer. Central keeps the newest 100 unbound terminal
 missions, skips the current Workspace/Telegram binding and leaves only a payload-free stable-ID tombstone for pruned
-history. Active parent/repair-child chains and a subscribed repair's parent remain retained through terminal-notification
-checkpoint and binding restoration. After Central terminal convergence, the coordinator
+history. Active missions remain retained through terminal-notification checkpoint and binding restoration. After
+Central terminal convergence, the coordinator
 archives the native Kanban task. It runs `hermes kanban gc` (30-day task-event/log defaults) only when the board has no
 nonterminal task, so the board-wide log sweep cannot remove a long-running worker log; the profile timer retries a
 deferred GC. A separate successful idle-board GC at or after the 30-day deadline is required before its retry state
@@ -185,6 +185,11 @@ the failed delivery is projected. Compatible exact v1 route and PR identity rema
 successful initial push, PR create or repair push reconcile only the exact branch/candidate/base identity and converge
 without repeating the successful mutation. New cycles use v2. The coordinator then removes local worktrees and publishes the
 terminal failure contract.
+
+After merge, the coordinator pins the exact merge SHA and the expanded post-verify argv before running any command.
+The first post-verify failure creates a durable retry checkpoint. The next timer tick runs that same command plan once
+against the same detached exact-SHA worktree; success continues to cleanup, while a second failure is terminal and
+preserves the merged PR evidence. This retry never creates an author/reviewer session, commit, PR or merge.
 
 ## 2. Repository guard
 
