@@ -49,6 +49,36 @@ type MissionReplay = {
 }
 
 const activeStatuses = new Set(['active', 'waiting_owner'])
+const stageLabels: Record<string, string> = {
+  accepted: 'Цель принята',
+  planning: 'Планирование',
+  implementing: 'Внесение изменений',
+  testing: 'Автоматические проверки',
+  reviewing: 'Независимая проверка',
+  delivering: 'PR, CI и слияние',
+  verifying: 'Проверка после слияния',
+  complete: 'Готово',
+}
+const statusLabels: Record<string, string> = {
+  active: 'в работе',
+  waiting_owner: 'нужен ваш ответ',
+  completed: 'завершено',
+  failed: 'завершено с ошибкой',
+  cancelled: 'отменено',
+}
+const noticeLabels: Record<string, string> = {
+  capacity_wait: 'Модель OpenAI временно занята. Повтор запланирован автоматически.',
+  capacity_recovered: 'Модель OpenAI снова доступна. Выполнение продолжилось автоматически.',
+  execution_reconciling:
+    'Проверяю прерванный запуск модели. Новый исполнитель не запускается; восстановление продолжится автоматически.',
+}
+
+function ownerQuestionText(question: { question_id: string; text: string }) {
+  if (question.question_id.startsWith('owner-gate:')) {
+    return 'Задача меняет утверждённую архитектурную границу. Чтобы разрешить это изменение только для этой задачи, ответьте: APPROVE.'
+  }
+  return question.text
+}
 
 export function mergeMissionReplay(
   previous: MissionReplay | null,
@@ -109,7 +139,7 @@ export function selectMission(
 }
 
 function rows(items: Array<Item>, primary: string, secondary: string) {
-  if (!items.length) return <span className="text-xs opacity-60">None</span>
+  if (!items.length) return <span className="text-xs opacity-60">Нет</span>
   return (
     <ul className="space-y-1 text-xs">
       {items.map((item, index) => (
@@ -203,7 +233,7 @@ export function MissionOverviewCard() {
       await query.refetch()
       await replayQuery.refetch()
     } catch (error) {
-      setAnswerError(error instanceof Error ? error.message : 'Answer failed')
+      setAnswerError(error instanceof Error ? error.message : 'Не удалось отправить ответ')
     } finally {
       setAnswering(false)
     }
@@ -215,14 +245,14 @@ export function MissionOverviewCard() {
   if (query.isError) {
     return (
       <div className="rounded-xl border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm">
-        Central mission state unavailable: {(query.error as Error).message}
+        Не удалось получить состояние задач: {(query.error as Error).message}
       </div>
     )
   }
   if (!mission) {
     return (
       <div className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3 text-sm opacity-70">
-        No central missions yet.
+        Задач пока нет. Напишите обычным сообщением, что нужно сделать.
       </div>
     )
   }
@@ -236,12 +266,12 @@ export function MissionOverviewCard() {
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{mission.goal || mission.mission_id}</div>
           <div className="text-xs opacity-65">
-            {mission.stage} · {mission.progress_percent}% · {mission.status}
+            Этап: {stageLabels[mission.stage] || mission.stage} · {mission.progress_percent}% · Статус: {statusLabels[mission.status] || mission.status}
           </div>
         </div>
         {missions.length > 1 ? (
           <select
-            aria-label="Mission"
+            aria-label="Задача"
             value={mission.mission_id}
             onChange={(event) => setSelectedId(event.target.value)}
             className="max-w-52 rounded-md border border-[var(--theme-border)] bg-transparent px-2 py-1 text-xs"
@@ -262,10 +292,11 @@ export function MissionOverviewCard() {
       </div>
       {mission.question ? (
         <div className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-sm">
-          <p>Question: {mission.question.text}</p>
+          <p>Нужен ваш ответ: {ownerQuestionText(mission.question)}</p>
           <form className="mt-2 flex gap-2" onSubmit={submitAnswer}>
             <textarea
-              aria-label="Answer"
+              aria-label="Ответ"
+              placeholder="Введите ответ"
               maxLength={4_000}
               rows={2}
               value={
@@ -290,7 +321,7 @@ export function MissionOverviewCard() {
               }
               className="self-end rounded-md border border-[var(--theme-border)] px-3 py-1 text-xs disabled:opacity-50"
             >
-              {answering ? 'Sending…' : 'Answer'}
+              {answering ? 'Отправляю…' : 'Ответить'}
             </button>
           </form>
           {answerError ? <p className="mt-1 text-xs text-red-400">{answerError}</p> : null}
@@ -298,37 +329,39 @@ export function MissionOverviewCard() {
       ) : null}
       {mission.notice ? (
         <div className="mt-3 rounded-md bg-sky-500/10 px-3 py-2 text-sm">
-          <p>{mission.notice.message}</p>
+          <p>{noticeLabels[mission.notice.code] || mission.notice.message}</p>
           {mission.notice.next_attempt_at ? (
             <p className="mt-1 text-xs opacity-70">
-              Next automatic attempt: {mission.notice.next_attempt_at}
+              Следующая автоматическая попытка (UTC): {mission.notice.next_attempt_at}
             </p>
           ) : null}
           <p className="mt-1 text-xs opacity-70">
-            Owner action required: {mission.notice.owner_action_required ? 'yes' : 'no'}
+            {mission.notice.owner_action_required
+              ? 'Требуется ваше действие.'
+              : 'От вас ничего не требуется.'}
           </p>
         </div>
       ) : null}
-      {mission.result ? <p className="mt-3 text-sm">Result: {mission.result}</p> : null}
-      {mission.error ? <p className="mt-3 text-sm text-red-400">{mission.error}</p> : null}
+      {mission.result ? <p className="mt-3 text-sm">Итог: {mission.result}</p> : null}
+      {mission.error ? <p className="mt-3 text-sm text-red-400">Ошибка: {mission.error}</p> : null}
       {replayQuery.isError ? (
         <p className="mt-3 text-xs text-red-400">
-          Mission history unavailable: {(replayQuery.error as Error).message}
+          История задачи временно недоступна: {(replayQuery.error as Error).message}
         </p>
       ) : null}
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer select-none text-xs font-medium opacity-75">
-          Tasks {mission.tasks.length} · Workers {mission.workers.length} · Gates {mission.gates.length} · Changes {mission.changes.length} · Events {missionEvents.length}
+          Задачи {mission.tasks.length} · Исполнители {mission.workers.length} · Проверки {mission.gates.length} · Изменения {mission.changes.length} · События {missionEvents.length}
         </summary>
         <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div><h3 className="mb-1 text-xs font-semibold">Tasks</h3>{rows(mission.tasks, 'title', 'status')}</div>
-          <div><h3 className="mb-1 text-xs font-semibold">Workers</h3>{rows(mission.workers, 'worker_id', 'status')}</div>
-          <div><h3 className="mb-1 text-xs font-semibold">Gates</h3>{rows(mission.gates, 'gate_id', 'status')}</div>
-          <div><h3 className="mb-1 text-xs font-semibold">Changes</h3>{rows(mission.changes, 'path', 'status')}</div>
+          <div><h3 className="mb-1 text-xs font-semibold">Задачи</h3>{rows(mission.tasks, 'title', 'status')}</div>
+          <div><h3 className="mb-1 text-xs font-semibold">Исполнители</h3>{rows(mission.workers, 'worker_id', 'status')}</div>
+          <div><h3 className="mb-1 text-xs font-semibold">Проверки</h3>{rows(mission.gates, 'gate_id', 'status')}</div>
+          <div><h3 className="mb-1 text-xs font-semibold">Изменения</h3>{rows(mission.changes, 'path', 'status')}</div>
         </div>
         {missionEvents.length ? (
           <div className="mt-4">
-            <h3 className="mb-1 text-xs font-semibold">Timeline</h3>
+            <h3 className="mb-1 text-xs font-semibold">Хронология</h3>
             <ol className="max-h-44 space-y-1 overflow-auto text-xs">
               {missionEvents.map((event) => (
                 <li key={event.event_id} className="flex gap-2">
@@ -367,7 +400,7 @@ export function MissionOverviewCard() {
           </div>
         ) : null}
         <div className="mt-3 text-[10px] opacity-45">
-          {mission.mission_id} · event {mission.sequence} · cursor {replayQuery.data?.cursor ?? 0} · state {mission.projection_id}
+          {mission.mission_id} · событие {mission.sequence} · курсор {replayQuery.data?.cursor ?? 0} · состояние {mission.projection_id}
         </div>
       </details>
     </section>

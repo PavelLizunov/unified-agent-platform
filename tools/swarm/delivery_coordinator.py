@@ -63,6 +63,8 @@ _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
 _AUTHOR_CHECKS_RESULT = "author_checks_failed"
 _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
+_EXECUTION_STATE_RESULT = "execution_state_failed"
+_EXECUTION_STATE_SUMMARY = "Interrupted author state was lost; delivery stopped safely"
 _CI_RESULT = "ci_failed"
 _CI_SUMMARY = "Required CI failed after the approved cycle limit"
 _PRE_REVIEW_CI_SUMMARY = (
@@ -1701,10 +1703,17 @@ class DeliveryCoordinator:
     ) -> bool:
         if ambiguous["role"] != "author" or state.get("phase") not in {"claimed", "needs_fix"}:
             return False
-        if not paths["author"].is_dir() or not self._model_unit_is_gone(
-            state, role="author"
-        ):
+        if not self._model_unit_is_gone(state, role="author"):
             return False
+        if not paths["author"].is_dir():
+            state.pop("model_ambiguous", None)
+            state.update(
+                phase="author_checks_failed",
+                failure_kind="execution_state",
+                failure_error="interrupted author worktree disappeared before recovery",
+            )
+            self._save(paths, state)
+            return True
         marker = {
             "review_cycle": state["review_cycle"],
             "error": "interrupted author execution was discarded before automatic retry",
@@ -2454,6 +2463,15 @@ class DeliveryCoordinator:
                 _AUTHOR_CHECKS_SUMMARY,
                 [
                     {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "failed"}},
+                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+                ],
+            )
+        if state.get("failure_kind") == "execution_state":
+            return finish(
+                _EXECUTION_STATE_RESULT,
+                _EXECUTION_STATE_SUMMARY,
+                [
+                    {"type": "gate.upsert", "payload": {"gate_id": "execution", "status": "failed"}},
                     {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
                 ],
             )
@@ -4396,8 +4414,8 @@ class DeliveryCoordinator:
         source = pathlib.Path(self.profile["source_checkout"])
         for name in ("review", "verify", "author"):
             self._remove_worktree(paths[name])
-        self._git(source, "branch", "-D", state["branch"], check=False)
         self._git(source, "worktree", "prune")
+        self._git(source, "branch", "-D", state["branch"], check=False)
         if any(paths[name].exists() for name in ("review", "verify", "author")):
             raise DeliveryError("disposable worktree cleanup did not converge")
         if self._git(source, "branch", "--list", state["branch"]):
@@ -4620,6 +4638,8 @@ class DeliveryCoordinator:
                     return {
                         "action": "reconciling", "mission_id": mission_id, "state": state,
                     }
+                if state.get("phase") == "author_checks_failed":
+                    return self._finish_rejection(state, paths)
             invocation = self._model_invocation_state(state)
             if invocation is not None:
                 self._mark_model_ambiguous(

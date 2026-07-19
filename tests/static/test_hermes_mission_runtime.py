@@ -51,8 +51,9 @@ def test_reconnect_projects_one_canonical_state() -> None:
         assert telegram_view["status"] == "completed"
         assert telegram_view["progress_percent"] == 100
         assert telegram_view["result"] == "Fixture delivered"
-        assert "testing · 60%" not in missions.telegram_text(telegram_view)
-        assert "complete · 100% · completed" in missions.telegram_text(telegram_view)
+        assert "Автоматические проверки · 60%" not in missions.telegram_text(telegram_view)
+        assert "Этап: Готово · 100%" in missions.telegram_text(telegram_view)
+        assert "Статус: завершено" in missions.telegram_text(telegram_view)
         assert len(telegram_view["projection_id"]) == 16
 
 
@@ -89,7 +90,8 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
             assert await missions.notify_subscribers(store, replayed, sender) == 0
             assert len(deliveries) == 1
             assert deliveries[0][0]["chat_id"] == "42"
-            assert "testing · 60% · active" in deliveries[0][1]
+            assert "Этап: Автоматические проверки · 60%" in deliveries[0][1]
+            assert "Статус: в работе" in deliveries[0][1]
             assert accepted["sequence"] == 1 and stored["sequence"] == 2
 
             terminal = {
@@ -116,7 +118,7 @@ def test_producer_retry_and_notification_checkpoint_are_idempotent() -> None:
                 },
             )
             assert await missions.notify_subscribers(store, failed, sender) == 1
-            assert "Error: Delivery failed" in deliveries[-1][1]
+            assert "Ошибка: Delivery failed" in deliveries[-1][1]
 
     asyncio.run(scenario())
 
@@ -151,8 +153,8 @@ def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
             assert view["question"] is None
             assert view["notice"] == notice["payload"]
             rendered = missions.telegram_text(view)
-            assert "Next automatic attempt: 2026-07-18T18:00:00Z" in rendered
-            assert "Owner action required: no" in rendered
+            assert "Следующая автоматическая попытка (UTC): 2026-07-18T18:00:00Z" in rendered
+            assert "От вас ничего не требуется." in rendered
 
             deliveries: list[str] = []
 
@@ -179,7 +181,7 @@ def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
             assert view["status"] == "active"
             assert view["question"] is None
             assert view["notice"] == reconciling["payload"]
-            assert "Owner action required: no" in missions.telegram_text(view)
+            assert "От вас ничего не требуется." in missions.telegram_text(view)
 
             invalid = {
                 **notice,
@@ -1262,12 +1264,12 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert completed[0]["source"] == "central-hermes"
         assert completed[0]["type"] == "mission.completed"
         assert completed[0]["payload"]["result"] == (
-            "Completed: Deliver safely\n"
+            "Выполнено: Deliver safely\n"
             "PR: https://example.invalid/pr/1\n"
-            "Merge: https://example.invalid/commit/1\n"
-            "Checks: tests, review, CI, post-verify, cleanup passed\n"
-            "Delivery: not applicable\n"
-            "Changed files (2): README.md, src/lib.rs"
+            "Merge-коммит: https://example.invalid/commit/1\n"
+            "Проверки: тесты, независимое ревью, CI, post-verify и очистка пройдены\n"
+            "Деплой: не требуется для этого проекта\n"
+            "Изменённые файлы (2): README.md, src/lib.rs"
         )
         verbose = store.projection(mission_id)
         verbose["goal"] = "x" * 8_192
@@ -1488,7 +1490,7 @@ def test_auto_failure_accepts_only_cleaned_exhausted_author_checks() -> None:
         assert failed is not None and failed[1]
         assert failed[0]["type"] == "mission.failed"
         assert failed[0]["payload"] == {
-            "error": "Author checks failed after the approved cycle limit"
+            "error": "Автоматические проверки не прошли после разрешённого числа попыток"
         }
         assert store.projection(mission_id)["status"] == "failed"
 
@@ -1678,7 +1680,7 @@ def test_owner_answer_is_idempotent_and_resumes_the_same_mission() -> None:
             deliveries.append(text)
 
         assert asyncio.run(missions.notify_subscribers(store, answer, send)) == 1
-        assert deliveries and "Answer received: Preserve the current behavior" in deliveries[0]
+        assert deliveries and "Ответ принят: Preserve the current behavior" in deliveries[0]
         assert store.pending_subscriptions(mission_id, answer["sequence"]) == []
         assert missions.completion_ready(resumed)
 
@@ -2268,21 +2270,31 @@ def test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify() ->
             [("tests", "passed"), ("review", "failed"), ("cleanup", "passed")],
             "failed",
         )
-        assert review["payload"]["error"] == "Independent review rejected the candidate"
+        assert review["payload"]["error"] == "Независимое ревью отклонило результат"
         author_checks = fail(
             "mission-author-checks-failed-after-pr",
             [("tests", "failed"), ("cleanup", "passed")],
             "failed",
         )
         assert author_checks["payload"]["error"] == (
-            "Author checks failed after the approved cycle limit"
+            "Автоматические проверки не прошли после разрешённого числа попыток"
+        )
+        execution = fail(
+            "mission-execution-state-failed",
+            [("execution", "failed"), ("cleanup", "passed")],
+            "failed",
+        )
+        assert execution["payload"]["error"] == (
+            "Прерванное выполнение потеряло рабочую копию и безопасно остановлено"
         )
         ci = fail(
             "mission-ci-failed",
             [("tests", "passed"), ("review", "passed"), ("ci", "failed"), ("cleanup", "passed")],
             "failed",
         )
-        assert ci["payload"]["error"] == "Required CI failed after the approved cycle limit"
+        assert ci["payload"]["error"] == (
+            "Обязательный CI не прошёл после разрешённого числа попыток"
+        )
         post_verify = fail(
             "mission-post-verify-failed",
             [
@@ -2292,7 +2304,7 @@ def test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify() ->
             "merged",
         )
         assert post_verify["payload"]["error"] == (
-            "Post-verify failed after the approved repair mission"
+            "Проверка после слияния не прошла после автоматического исправления"
         )
 
 

@@ -284,12 +284,12 @@ def main() -> None:
         assert "previous?.cursor ?? 0" in mission_card
         assert "const missionEvents = replayQuery.data?.events ?? []" in mission_card
         assert "replayRef.current.events" not in mission_card
-        assert "Timeline" in mission_card
-        assert "Owner action required:" in mission_card
-        assert "Next automatic attempt:" in mission_card
+        assert "Хронология" in mission_card
+        assert "От вас ничего не требуется." in mission_card
+        assert "Следующая автоматическая попытка" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
-        assert 'aria-label="Answer"' in mission_card
+        assert 'aria-label="Ответ"' in mission_card
         assert "question_id: question.question_id" in mission_card
 
         previous_added = {

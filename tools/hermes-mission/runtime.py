@@ -96,6 +96,31 @@ _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
     "default_branch": "verified",
 }
+_STAGE_LABELS = {
+    "accepted": "Цель принята",
+    "planning": "Планирование",
+    "implementing": "Внесение изменений",
+    "testing": "Автоматические проверки",
+    "reviewing": "Независимая проверка",
+    "delivering": "PR, CI и слияние",
+    "verifying": "Проверка после слияния",
+    "complete": "Готово",
+}
+_STATUS_LABELS = {
+    "active": "в работе",
+    "waiting_owner": "нужен ваш ответ",
+    "completed": "завершено",
+    "failed": "завершено с ошибкой",
+    "cancelled": "отменено",
+}
+_NOTICE_LABELS = {
+    "capacity_wait": "Модель OpenAI временно занята. Повтор запланирован автоматически.",
+    "capacity_recovered": "Модель OpenAI снова доступна. Выполнение продолжилось автоматически.",
+    "execution_reconciling": (
+        "Проверяю прерванный запуск модели. Новый исполнитель не запускается; "
+        "восстановление продолжится автоматически."
+    ),
+}
 NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
 # ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
 _NOTIFICATION_LEASE_SECONDS = 300
@@ -471,28 +496,37 @@ def telegram_text(view: dict[str, Any]) -> str:
     status = view.get("status") or "unknown"
     stage = view.get("stage") or "unknown"
     lines = [
-        f"Mission {view.get('mission_id') or 'unknown'}",
-        f"{stage} · {view.get('progress_percent', 0)}% · {status}",
+        f"Задача {view.get('mission_id') or 'неизвестна'}",
+        f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
+        f"Статус: {_STATUS_LABELS.get(status, status)}",
     ]
     if view.get("question"):
-        lines.append(f"Question: {view['question']['text']}")
+        question = view["question"]
+        text = question["text"]
+        if str(question.get("question_id", "")).startswith(_OWNER_GATE_QUESTION_PREFIX):
+            text = (
+                "Задача меняет утверждённую архитектурную границу. Чтобы разрешить "
+                "это изменение только для этой задачи, ответьте одним сообщением: APPROVE."
+            )
+        lines.append(f"Нужен ваш ответ: {text}")
     if view.get("answer"):
-        lines.append(f"Answer received: {view['answer']['text']}")
+        lines.append(f"Ответ принят: {view['answer']['text']}")
     if view.get("notice"):
         notice = view["notice"]
-        lines.append(f"Update: {notice['message']}")
+        lines.append(f"Обновление: {_NOTICE_LABELS.get(notice['code'], notice['message'])}")
         if notice.get("next_attempt_at"):
-            lines.append(f"Next automatic attempt: {notice['next_attempt_at']}")
+            lines.append(f"Следующая автоматическая попытка (UTC): {notice['next_attempt_at']}")
         lines.append(
-            "Owner action required: "
-            + ("yes" if notice["owner_action_required"] else "no")
+            "Требуется ваше действие."
+            if notice["owner_action_required"]
+            else "От вас ничего не требуется."
         )
     if view.get("result"):
-        lines.append(f"Result: {view['result']}")
+        lines.append(f"Итог: {view['result']}")
     if view.get("error"):
-        lines.append(f"Error: {view['error']}")
+        lines.append(f"Ошибка: {view['error']}")
     lines.append(
-        "Tasks {tasks} · Workers {workers} · Gates {gates} · Deliveries {deliveries}".format(
+        "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
             tasks=len(view.get("tasks", [])),
             workers=len(view.get("workers", [])),
             gates=len(view.get("gates", [])),
@@ -529,14 +563,14 @@ def _completion_result(view: dict[str, Any]) -> str:
         for item in view.get("deliveries", [])
         if isinstance(item, dict)
     }
-    lines = [f"Completed: {compact(view.get('goal'), 700)}"]
-    for label, kind in (("PR", "pull_request"), ("Merge", "default_branch")):
+    lines = [f"Выполнено: {compact(view.get('goal'), 700)}"]
+    for label, kind in (("PR", "pull_request"), ("Merge-коммит", "default_branch")):
         url = deliveries.get(kind, {}).get("url")
         if isinstance(url, str) and url.strip():
             lines.append(f"{label}: {compact(url, 512)}")
-    lines.append("Checks: tests, review, CI, post-verify, cleanup passed")
+    lines.append("Проверки: тесты, независимое ревью, CI, post-verify и очистка пройдены")
     if view.get("delivery_mode") == "none":
-        lines.append("Delivery: not applicable")
+        lines.append("Деплой: не требуется для этого проекта")
     paths = sorted({
         item.get("path")
         for item in view.get("changes", [])
@@ -545,8 +579,8 @@ def _completion_result(view: dict[str, Any]) -> str:
     if paths:
         visible = ", ".join(compact(path, 120) for path in paths[:8])
         if len(paths) > 8:
-            visible += f", +{len(paths) - 8} more"
-        lines.append(f"Changed files ({len(paths)}): {visible}")
+            visible += f", ещё {len(paths) - 8}"
+        lines.append(f"Изменённые файлы ({len(paths)}): {visible}")
     result = "\n".join(lines)
     return (
         result
@@ -623,6 +657,7 @@ def rejection_ready(view: dict[str, Any]) -> bool:
     if gates in (
         {"tests": "passed", "review": "failed", "cleanup": "passed"},
         {"tests": "failed", "cleanup": "passed"},
+        {"execution": "failed", "cleanup": "passed"},
     ):
         return not deliveries or deliveries == {"pull_request": "failed"}
     if gates == {
@@ -643,20 +678,24 @@ def _rejection_terminal(view: dict[str, Any]) -> tuple[str, dict[str, str]] | No
         for item in view.get("gates", [])
         if isinstance(item, dict)
     }
+    if gates.get("execution") == "failed":
+        return "central:auto-execution-state-failed:v1", {
+            "error": "Прерванное выполнение потеряло рабочую копию и безопасно остановлено",
+        }
     if gates.get("tests") == "failed":
         return "central:auto-author-checks-failed:v1", {
-            "error": "Author checks failed after the approved cycle limit",
+            "error": "Автоматические проверки не прошли после разрешённого числа попыток",
         }
     if gates.get("post-verify") == "failed":
         return "central:auto-post-verify-failed:v1", {
-            "error": "Post-verify failed after the approved repair mission",
+            "error": "Проверка после слияния не прошла после автоматического исправления",
         }
     if gates.get("ci") == "failed":
         return "central:auto-ci-failed:v1", {
-            "error": "Required CI failed after the approved cycle limit",
+            "error": "Обязательный CI не прошёл после разрешённого числа попыток",
         }
     return "central:auto-review-rejected:v1", {
-        "error": "Independent review rejected the candidate",
+        "error": "Независимое ревью отклонило результат",
     }
 
 
