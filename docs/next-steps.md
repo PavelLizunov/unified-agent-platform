@@ -230,9 +230,9 @@ not add an application service, workflow engine or mission database.
    strict sequence/cursor validation and a compact ordered timeline. Its first live render found a null race; PR #257
    fixed it and added an exact vulnerable-asset upgrade regression. The corrected live Dashboard reconstructed the
    same 20-event mission history and cursor 20 after full reload. Ordinary Telegram intake later passed for the same
-   registered profile; the next channel gate is a live cross-channel question/answer, not another fixed-profile
-   delivery canary. See the
-   [reconnect evidence](evidence/workspace-mission-cursor-replay-2026-07-18.md).
+   registered profile, followed by a Telegram-origin question answered through Workspace on the same Central session.
+   See the [reconnect evidence](evidence/workspace-mission-cursor-replay-2026-07-18.md) and the
+   [cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
 6. **Capacity observation — ✅ CONTROLLED LIVE RECOVERY PASS (2026-07-18).** PR #259 added a closed
    `mission.notice` projection for capacity wait/recovery, stable coordinator event identities and the same explicit
    no-owner-action state in Workspace and Telegram. The first Flux reconciliation retained the stale ConfigMap
@@ -257,9 +257,11 @@ not add an application service, workflow engine or mission database.
    `MissionStore`, the existing binding and the existing answer state machine. PR #264 passed CI, Flux rolled the
    exact runtime and a temporary-store scenario passed inside the Ready pod. The owner-gated live canary then rejected
    unrelated `/approve`, stored exact ordinary `APPROVE` once and resumed the same root through terminal completion.
-   It does not prove a Workspace-origin or cross-channel answer. See the
+   A later Telegram-origin mission accepted its ordinary answer through Workspace and completed the same lifecycle.
+   See the
    [rollout evidence](evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md) and
-   [live canary](evidence/automatic-owner-question-live-canary-2026-07-19.md).
+   [same-channel canary](evidence/automatic-owner-question-live-canary-2026-07-19.md) plus the
+   [cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
 9. **Canonical completion evidence — ✅ FIRST LIVE BUNDLE VERIFIED (2026-07-18).** The existing
    coordinator can now write one closed, self-digesting `completion-evidence.json` after terminal convergence,
    cleanup and task archive. The bundle joins mission/goal, canonical profile/policy/runtime hashes, a bounded-size
@@ -280,15 +282,17 @@ not add an application service, workflow engine or mission database.
    the standing systemd unit. Signing remains separate. See the
    [input-lineage rollout](evidence/completion-input-lineage-rollout-2026-07-18.md) and
    [live canary](evidence/automatic-owner-question-live-canary-2026-07-19.md).
-10. **Ordinary Workspace answer — ✅ DEPLOYED COMPONENT PASS; LIVE CROSS-CHANNEL CANARY PENDING (2026-07-18).** The exact Central session
+10. **Ordinary Workspace answer — ✅ LIVE CROSS-CHANNEL PASS (2026-07-19).** The exact Central session
     that accepted a Workspace mission now routes a later ordinary message to its one open mission question through
     the same `MissionStore.ingest_owner_turn()` path. The source message ID is persisted in `mission.answer`; restart,
     delayed replay and changed-text collision are deterministic, and multiple open questions fail closed. The
     structured answer action remains compatible. PR #270 passed CI, Flux applied exact merge `5d95eada...`, mounted
     runtime/overlay hashes matched and an in-pod temporary-store scenario passed. This closes the deployed
-    implementation asymmetry with Telegram without a new service; one real cross-channel question/answer canary remains
-    required. See the
-    [rollout evidence](evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md).
+    implementation asymmetry with Telegram without a new service. Telegram-origin mission
+    `mission-intake-e966529d2686998b2c8f55acd06716a8` then accepted ordinary Workspace `APPROVE` as its sole answer,
+    resumed the same root and completed target PR #10, terminal sequence 27 and cleanup. See the
+    [rollout evidence](evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md) and
+    [live cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
 11. **Concrete owner terminal result — ✅ LIVE PASS (2026-07-19).** The first ordinary Telegram delivery completed correctly,
     but its terminal notification only said `Delivery completed, merged, and verified`. Build a bounded redacted result
     from already projected canonical facts. Current source does this at Central's existing `complete_if_ready()`
@@ -312,9 +316,11 @@ not add an application service, workflow engine or mission database.
     that same root before any model turn. Commit-before-response loss and restart replay the same producer identity.
     Unsupported privileged flags still fail closed. PRs #281-#283 were installed before the owner goal. One ordinary
     Telegram mission then stopped at the question, accepted exact ordinary `APPROVE`, resumed the same root and
-    completed through PR #9, terminal sequence 27 and cleanup with no manual poll/tick/bind. The narrower pending gate
-    is a Telegram-origin question answered through Workspace. See the
-    [live canary](evidence/automatic-owner-question-live-canary-2026-07-19.md).
+    completed through PR #9, terminal sequence 27 and cleanup with no manual poll/tick/bind. A second Telegram-origin
+    mission accepted its ordinary answer through Workspace, resumed the same root, and completed PR #10 through the
+    same terminal/cleanup boundary. See the
+    [same-channel canary](evidence/automatic-owner-question-live-canary-2026-07-19.md) and
+    [cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

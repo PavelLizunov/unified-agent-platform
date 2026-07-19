@@ -110,8 +110,9 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    are deployed and passed in-pod component checks. The approved-profile `architecture_change` producer is now live:
    ordinary Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` created one inert root and deterministic
    question before any model, accepted only exact ordinary `APPROVE`, resumed the same root and completed delivery.
-   A Telegram-origin answer through Workspace and complete cross-channel history remain pending; unsupported
-   privileged capabilities still fail closed.
+   Telegram-origin mission `mission-intake-e966529d2686998b2c8f55acd06716a8` then accepted its sole ordinary answer
+   through Workspace, resumed the same root and completed PR/CI/merge/post-verify/cleanup. Complete cross-channel chat
+   history remains pending; unsupported privileged capabilities still fail closed.
 2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
    passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
    profile later accepted ordinary Workspace goals and delivered non-toy code plus a follow-up documentation repair

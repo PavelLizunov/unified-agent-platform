@@ -228,17 +228,19 @@ Good next tasks that do not require redesign:
    `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
    PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
-   through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the
-   next controlled live canary. See
-   `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
+   through PR #270 and passed its in-pod component check. Telegram-origin mission
+   `mission-intake-e966529d2686998b2c8f55acd06716a8` then accepted ordinary `APPROVE` through Workspace, resumed its
+   same root and completed target PR #10 through terminal sequence 27 and cleanup. See
+   `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
    The answer rollout records are `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
    `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
    The missing producer for the narrow executable owner gate is deployed: an approved-profile
    `architecture_change` first creates one inert sticky-blocked root, publishes a mission/goal/policy-bound question,
    accepts only exact `APPROVE`, and resumes that same root restart-safely before any model turn. PRs #281-#283 and the
    already armed sixth timer passed the live Telegram question/answer/delivery canary through PR #9 and terminal
-   sequence 27. Other privileged flags remain fail-closed; a Telegram-origin answer through Workspace is still the
-   narrower cross-channel evidence gap.
+   sequence 27. A second Telegram-origin mission accepted its ordinary answer through Workspace and completed PR #10
+   through the same terminal/cleanup boundary. Other privileged flags remain fail-closed; complete cross-channel chat
+   transcript synchronization is still not claimed.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
