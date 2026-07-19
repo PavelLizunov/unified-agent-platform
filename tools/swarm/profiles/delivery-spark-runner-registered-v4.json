@@ -1,0 +1,39 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-spark-runner",
+  "author_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--locked", "--all-targets", "--all-features"]
+  ],
+  "branch_prefix": "codex/registered-spark-runner",
+  "ci_timeout_seconds": 5400,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered Spark Runner mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-spark-runner-registered-v4",
+  "max_changed_files": 60,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--locked", "--all-targets", "--all-features"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered Spark Runner mission",
+  "remote": "https://github.com/PavelLizunov/spark-runner.git",
+  "repo": "PavelLizunov/spark-runner",
+  "required_ci_checks": ["validate"],
+  "review_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--locked", "--all-targets", "--all-features", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--locked", "--all-targets", "--all-features"]
+  ],
+  "route_flags": ["concurrency", "durable_state", "protocol_or_schema", "security_boundary"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/spark-runner",
+  "worktree_root": "/home/uap/worktrees/spark-runner-registered-v4"
+}

@@ -3226,6 +3226,24 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "PavelLizunov/VPNRouter",
                 {"test", "grep"},
             ),
+            "delivery-vpnrouter-gateway-registered-v4.json": (
+                "build1-vpnrouter-gateway-registered-v4",
+                "PavelLizunov/vpnrouter-gateway",
+                {"gate", "audit"},
+            ),
+            "delivery-suflyor-registered-v4.json": (
+                "build1-suflyor-registered-v4",
+                "PavelLizunov/suflyor",
+                {
+                    "gate", "gitleaks", "cargo-deny (overlay-backend)",
+                    "cargo-deny (slint-experiment)", "cargo-deny (suflyor-tts)",
+                },
+            ),
+            "delivery-spark-runner-registered-v4.json": (
+                "build1-spark-runner-registered-v4",
+                "PavelLizunov/spark-runner",
+                {"validate"},
+            ),
         }
         for filename, (dispatch_profile, repo, required_ci) in registered_projects.items():
             profile_path = ROOT / "tools/swarm/profiles" / filename

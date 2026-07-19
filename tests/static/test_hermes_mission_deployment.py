@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v58-project-inventory"
+        "v59-project-profiles-batch1"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -119,6 +119,18 @@ def main() -> None:
             "none",
             {"workspace", "telegram"},
         ),
+        "spark-runner": (
+            "PavelLizunov/spark-runner",
+            "build1-spark-runner-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "suflyor": (
+            "PavelLizunov/suflyor",
+            "build1-suflyor-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
         "vpnctl": (
             "PavelLizunov/vpnctl",
             "build1-vpnctl-registered-v4",
@@ -131,8 +143,24 @@ def main() -> None:
             "none",
             {"workspace", "telegram"},
         ),
+        "vpnrouter-gateway": (
+            "PavelLizunov/vpnrouter-gateway",
+            "build1-vpnrouter-gateway-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
     }
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 21
+    installed_profiles = {}
+    for path in (ROOT / "tools/swarm/profiles").glob("delivery-*-registered-v4.json"):
+        profile = json.loads(path.read_text(encoding="utf-8"))
+        installed_profiles[profile["dispatch_profile"]] = profile
+    for project in projects["projects"]:
+        if project["status"] != "ready":
+            continue
+        profile = installed_profiles[project["dispatch_profile"]]
+        assert profile["repo"] == project["repository"]
+        assert profile["delivery_mode"] == project["delivery_mode"]
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 18
     assert sum(project["status"] == "read_only" for project in projects["projects"]) == 2
     assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
     assert next(
@@ -153,7 +181,7 @@ def main() -> None:
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == 3
+        ]) == 6
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)

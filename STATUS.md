@@ -64,15 +64,16 @@ Last updated: 2026-07-19
   evidence: `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`; the earlier recovery evidence remains in
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 - **Registered project intake and full repository inventory are live for Workspace and Telegram (2026-07-19).**
-  PR #302 introduced the exact three-project execution boundary. The follow-up inventory records all 33 owner GitHub
-  repositories: 3 have reviewed autonomous profiles, 21 active repositories require profile setup, 2 are release-only
+  PR #302 introduced the first three-project execution boundary. The follow-up inventory records all 33 owner GitHub
+  repositories: 6 have reviewed autonomous profiles, 18 active repositories require profile setup, 2 are release-only
   and 7 are archived. Workspace shows readiness and intended Linux/Windows/macOS/test-VM targets without exposing
-  commands, credentials or checkout paths. Only `hermes-flow-v2-pilot`, `vpnctl` and `VPNRouter` are currently
+  commands, credentials or checkout paths. `hermes-flow-v2-pilot`, `vpnctl`, `VPNRouter`, `vpnrouter-gateway`,
+  `suflyor` and `spark-runner` are currently
   executable; known-but-unready projects fail before mission acceptance. Workspace has
   `Settings -> Проекты и доступы` with an HttpOnly project-selection cookie. Ordinary
   Telegram text either resolves an exact project alias or durably keeps the original goal while asking for one of the
-  ready projects. Build-1 has persistent one-minute timers for all three registered profiles, and the new
-  `vpnctl`/`VPNRouter` timers completed natural zero-work reconciliation ticks successfully. This is the registered
+  ready projects. Build-1 has persistent one-minute timers for each registered profile; the Linux projects run local
+  checks on build-1, while Suflyor's required build gate runs on GitHub Windows. This is the registered
   no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory; full cross-channel chat transcript
   replication is not claimed. Telegram voice notes enter the same intake only after Hermes STT succeeds; the deployed
   runtime currently has no allowed STT backend/credential, so voice fails closed without creating a mission. Text
