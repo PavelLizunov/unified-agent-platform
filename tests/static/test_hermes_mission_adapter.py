@@ -143,6 +143,93 @@ class MissionAdapterTests(unittest.TestCase):
     def setUpClass(cls):
         cls.document = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
+    def test_terminal_projection_tails_and_chunks_an_oversized_log(self):
+        text = (("界" * 7000) + "\n") * 60
+        events = adapter._terminal_events("mission-log", "task-log", text, terminal=True)
+        retry = adapter._terminal_events("mission-log", "task-log", text, terminal=True)
+
+        self.assertEqual(events, retry)
+        self.assertGreater(events[0]["payload"]["offset"], 0)
+        self.assertLessEqual(
+            sum(len(event["payload"]["text"].encode("utf-8")) for event in events),
+            adapter.MAX_LOG_BYTES,
+        )
+        self.assertTrue(all(
+            len(json.dumps(
+                event, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")) <= adapter.MAX_EVENT_JSON_BYTES
+            for event in events
+        ))
+        last = events[-1]["payload"]
+        self.assertEqual(
+            len(text.encode("utf-8")),
+            last["offset"] + len(last["text"].encode("utf-8")),
+        )
+
+        appended = adapter._terminal_events(
+            "mission-log", "task-log", text + "final line\n", terminal=True
+        )
+        original_ids = {event["correlation"]["producer_event_id"] for event in events}
+        appended_ids = {event["correlation"]["producer_event_id"] for event in appended}
+        self.assertTrue(original_ids & appended_ids)
+
+    def test_terminal_projection_preserves_legacy_line_identity(self):
+        line = ("x" * (16 * 1024 + 1)) + "\n"
+        legacy = adapter._producer_event(
+            "mission-log",
+            "terminal.append",
+            {"stream": "stdout", "text": line, "offset": 0},
+            {"task_id": "task-log"},
+        )
+
+        self.assertEqual(
+            [legacy["correlation"]["producer_event_id"]],
+            [
+                event["correlation"]["producer_event_id"]
+                for event in adapter._terminal_events(
+                    "mission-log", "task-log", line, terminal=True
+                )
+            ],
+        )
+
+    def test_terminal_projection_never_splits_a_secret_across_events(self):
+        token = "sk-" + ("A" * 30)
+        fitting = ("x" * (16 * 1024 - 1)) + token + "\n"
+        fitting_events = adapter._terminal_events(
+            "mission-secret", "task-secret", fitting, terminal=True
+        )
+        self.assertEqual(1, len(fitting_events))
+        self.assertIn(token, fitting_events[0]["payload"]["text"])
+
+        oversized = ("\\" * adapter.MAX_EVENT_JSON_BYTES) + token + "\n"
+        oversized_events = adapter._terminal_events(
+            "mission-secret", "task-secret", oversized, terminal=True
+        )
+        self.assertEqual(1, len(oversized_events))
+        self.assertNotIn(token, oversized_events[0]["payload"]["text"])
+        self.assertEqual(
+            adapter.OVERSIZED_TERMINAL_LINE + "\n",
+            oversized_events[0]["payload"]["text"],
+        )
+        last = oversized_events[0]["payload"]
+        self.assertEqual(
+            len(oversized.encode("utf-8")),
+            last["offset"] + len(last["text"].encode("utf-8")),
+        )
+
+    def test_terminal_projection_counts_blank_source_bytes_in_tail_window(self):
+        text = "old visible\n" + (" " * (adapter.MAX_LOG_BYTES + 1)) + "\n"
+        self.assertEqual(
+            [],
+            adapter._terminal_events("mission-log", "task-log", text, terminal=True),
+        )
+
+    def test_terminal_projection_omits_an_incomplete_nonterminal_tail(self):
+        events = adapter._terminal_events(
+            "mission-log", "task-log", "complete\npartial", terminal=False
+        )
+        self.assertEqual(["complete\n"], [event["payload"]["text"] for event in events])
+
     def test_crash_and_dispatcher_restart_do_not_duplicate_work(self):
         backend = FakeKanban()
         with tempfile.TemporaryDirectory() as directory:

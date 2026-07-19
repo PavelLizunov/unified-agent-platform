@@ -37,6 +37,8 @@ PAYLOAD_FIELDS = {
     "delivery.upsert": {"kind", "status", "url"},
 }
 MAX_LOG_BYTES = 1024 * 1024
+MAX_EVENT_JSON_BYTES = 65_536
+OVERSIZED_TERMINAL_LINE = "[REDACTED: oversized terminal line]"
 
 
 def _latest_sticky_event(events: Any) -> dict[str, Any] | None:
@@ -710,22 +712,52 @@ def _worker_metadata_events(
 
 
 def _terminal_events(mission_id: str, task_id: str, text: str, terminal: bool) -> list[dict[str, Any]]:
-    if len(text.encode("utf-8")) > MAX_LOG_BYTES:
-        raise AdapterError("Kanban task log exceeds the mission event limit")
-    events = []
+    tail: list[tuple[dict[str, Any] | None, int]] = []
+    retained_bytes = 0
     offset = 0
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith(("\n", "\r")) and not terminal:
         lines.pop()
     for line in lines:
-        events.append(_producer_event(
-            mission_id,
-            "terminal.append",
-            {"stream": "stdout", "text": line, "offset": offset},
-            {"task_id": task_id},
-        ))
-        offset += len(line.encode("utf-8"))
-    return events
+        line_bytes = len(line.encode("utf-8"))
+        event = None
+        if line.strip():
+            event = _producer_event(
+                mission_id,
+                "terminal.append",
+                {"stream": "stdout", "text": line, "offset": offset},
+                {"task_id": task_id},
+            )
+            encoded_event = json.dumps(
+                event, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            if len(encoded_event) > MAX_EVENT_JSON_BYTES:
+                ending = (
+                    "\r\n" if line.endswith("\r\n")
+                    else "\n" if line.endswith("\n")
+                    else "\r" if line.endswith("\r")
+                    else ""
+                )
+                replacement = OVERSIZED_TERMINAL_LINE + ending
+                replacement_bytes = len(replacement.encode("utf-8"))
+                event = _producer_event(
+                    mission_id,
+                    "terminal.append",
+                    {
+                        "stream": "stdout",
+                        "text": replacement,
+                        "offset": offset + line_bytes - replacement_bytes,
+                    },
+                    {"task_id": task_id},
+                )
+        offset += line_bytes
+        retained_span = min(line_bytes, MAX_LOG_BYTES)
+        tail.append((event, retained_span))
+        retained_bytes += retained_span
+        while retained_bytes > MAX_LOG_BYTES:
+            retained_bytes -= tail.pop(0)[1]
+
+    return [event for event, _span in tail if event is not None]
 
 
 def project_task_snapshot(

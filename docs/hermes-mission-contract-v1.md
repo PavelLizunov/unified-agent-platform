@@ -144,7 +144,10 @@ blocked and unassigned. Dispatch is possible only when the caller explicitly sup
 assignee and a non-scratch workspace; model/runtime approval remains outside this contract.
 
 The adapter projects `kanban list/show/log` into `task.upsert`, `worker.upsert` and bounded `terminal.append` producer
-events. Worker completion metadata may contribute only `change.upsert`, `gate.upsert` and `delivery.upsert`; a worker
+events. It retains at most the latest 1 MiB of complete source lines. A line whose complete producer event fits the
+Central event limit keeps its legacy identity; a larger line becomes one bounded redacted placeholder instead of
+being split across independently redacted events. Absolute byte offsets keep replay deterministic. Worker completion
+metadata may contribute only `change.upsert`, `gate.upsert` and `delivery.upsert`; a worker
 cannot forge a terminal mission event. Expected metadata shape:
 
 ```json
