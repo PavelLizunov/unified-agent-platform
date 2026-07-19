@@ -27,6 +27,7 @@ resources:
   - hermes-agent-owner.sops.yaml         # Workspace-only owner-answer capability
   - hermes-agent-claude.sops.yaml       # A4 - Claude Max OAuth token for the claude -p coding worker
   - hermes-mission-runtime.yaml          # generated pinned A6 mission overlay
+  - hermes-project-catalog.yaml          # owner-safe repository inventory and readiness
   - hermes-agent-config.yaml
   - hermes-agent.yaml
   - hermes-agent-backup-r2.sops.yaml    # PR B - R2 rclone creds for the DR backup CronJob

@@ -816,6 +816,77 @@ def test_registered_project_selection_is_durable_and_restart_safe() -> None:
                 assert "ambiguous project alias" in str(error)
 
 
+def test_project_inventory_exposes_all_repositories_but_dispatches_only_ready() -> None:
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "ready", "label": "Ready", "repository": "owner/ready",
+                "summary": "Ready project", "aliases": ["готов"],
+                "dispatch_profile": "build1-ready", "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"], "category": "pilot",
+                "status": "ready", "test_targets": ["uap-build-1", "github-linux"],
+            },
+            {
+                "project_id": "later", "label": "Later", "repository": "owner/later",
+                "summary": "Known but not executable", "aliases": ["позже"],
+                "dispatch_profile": None, "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"], "category": "research",
+                "status": "setup_required", "test_targets": ["windows-brat"],
+            },
+            {
+                "project_id": "old", "label": "Old", "repository": "owner/old",
+                "summary": "Archived project", "aliases": ["старый"],
+                "dispatch_profile": None, "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"], "category": "archived",
+                "status": "archived", "test_targets": [],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        public = missions.public_intake_projects("workspace")
+        assert [project["project_id"] for project in public] == ["ready", "later", "old"]
+        assert public[0]["test_targets"] == ["uap-build-1", "github-linux"]
+        assert public[1]["status"] == "setup_required"
+        assert all("dispatch_profile" not in project for project in public)
+
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        try:
+            store.ingest_owner_turn(
+                "Сделай изменение",
+                platform="workspace",
+                source_message_id="inventory-ambiguous",
+                session_id="inventory-session",
+            )
+            raise AssertionError("inventory without a selected ready project was accepted")
+        except missions.MissionProjectRequired as error:
+            assert [project["project_id"] for project in error.projects] == ["ready"]
+
+        try:
+            store.ingest_owner_turn(
+                "Later: сделай изменение",
+                platform="workspace",
+                project_id="later",
+                source_message_id="inventory-unavailable",
+                session_id="inventory-session",
+            )
+            raise AssertionError("project without a reviewed profile was accepted")
+        except missions.MissionProjectUnavailable as error:
+            assert "пока нельзя выполнять автоматически" in str(error)
+        assert store.list(100) == []
+
+        accepted, created = store.ingest_owner_turn(
+            "Ready: сделай изменение",
+            platform="workspace",
+            project_id="ready",
+            source_message_id="inventory-ready",
+            session_id="inventory-session",
+        )
+        assert created and accepted["payload"]["dispatch_profile"] == "build1-ready"
+
+
 def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
     routes = json.dumps({
         "telegram": {

@@ -120,6 +120,8 @@ def main() -> None:
         assert 'CommandDef("help", "Показать короткую справку"' in commands
         assert 'if canonical == "mission"' in gateway
         assert 'if canonical == "projects"' in gateway
+        assert "Проекты в GitHub" in gateway
+        assert "профиль проверок готовится" in gateway
         assert "Hermes сам создаст задачу" in gateway
         assert "К этому чату не привязана задача" in gateway
         assert "У текущей задачи нет открытого вопроса владельцу" in gateway

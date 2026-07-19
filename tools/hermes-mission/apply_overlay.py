@@ -25,7 +25,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "d0d4f335193f976bf633e2e513aa34c85f9ab07d878e3bdf000abcee09a0b592",
+    "gateway/run.py": "8945a0e161fa7e5237cabd110e8c27b5c1c0729ee6956cf21e17c3d341fc8d6d",
     "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
@@ -662,14 +662,24 @@ def connect(
             from hermes_cli.uap_missions import public_intake_projects
 
             projects = public_intake_projects("telegram")
-            lines = ["Разрешённые проекты:"]
-            for project in projects:
-                lines.append(
-                    f"• {project['label']} — {project['repository']}\\n"
-                    f"  {project['summary']}"
-                )
+            status_labels = {
+                "ready": "Готовы к работе",
+                "setup_required": "В реестре, профиль проверок готовится",
+                "read_only": "Только просмотр",
+                "archived": "Архив",
+            }
+            lines = [f"Проекты в GitHub: {len(projects)}"]
+            for status in ("ready", "setup_required", "read_only", "archived"):
+                names = [
+                    project["label"] for project in projects
+                    if project.get("status") == status
+                ]
+                if names:
+                    lines.append(f"\\n{status_labels[status]} ({len(names)}):")
+                    lines.append(" · ".join(names))
             lines.append(
-                "Назовите проект в обычном сообщении с задачей или ответьте его названием, когда бот уточнит выбор."
+                "\\nОбычную задачу можно запускать для проектов из раздела «Готовы к работе». "
+                "Остальные уже известны Hermes, но не получат shell-доступ до установки точного профиля тестов."
             )
             return "\\n".join(lines)
 

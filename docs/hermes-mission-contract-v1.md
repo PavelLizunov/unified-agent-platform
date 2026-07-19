@@ -95,9 +95,12 @@ project route fails before any mission event is stored. The owner branch require
 only the generic API bearer or producer key cannot impersonate owner intake. Producer-authenticated repair/internal
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
-The production catalog currently exposes three repo-owned no-deploy projects to Workspace and Telegram: Mission
-Ledger, `vpnctl` and `VPNRouter`. Workspace's **Projects & permissions** settings view lists only owner-safe catalog
-metadata and stores one selected `project_id`; Central independently validates it. Telegram resolves an exact project
+The production catalog inventory exposes all 33 repositories currently owned by the GitHub account. Each entry has
+an explicit readiness state and intended test targets. Three repo-owned no-deploy projects are currently executable:
+Mission Ledger, `vpnctl` and `VPNRouter`; 21 active repositories require a reviewed build/test profile, two are
+release-only and seven are archived. Merely discovering a GitHub repository never grants shell access. Workspace's
+**Projects & permissions** settings view lists only owner-safe catalog metadata and stores one ready `project_id`;
+Central independently validates it. Telegram resolves an exact ready project
 alias from the goal when possible. Otherwise Central durably stores the redacted goal as an intake draft and asks for
 one project name. The selection resumes the original source message, survives restart and has its own durable replay
 receipt, so a delayed Telegram retry cannot create a second mission. No model is used for repository selection.
@@ -109,6 +112,12 @@ Both handlers call the same `ingest_owner_turn()` primitive and return a determi
 running the generic Hermes chat model. The profile, repository, paths, checks, OpenAI route and commands remain
 server-owned. Removing or corrupting the catalog therefore disables new ordinary intake before mission state or a
 worker is created.
+
+The project inventory may name `uap-build-1`, GitHub-hosted Linux/Windows/macOS runners, `windows-brat`,
+`debian-xfce`, `pavels-mac-mini`, the Android device attached to that Mac, the protected Windows workstation or a
+browser smoke target. These names describe the intended verification boundary; they are not free-form commands.
+Control-plane, Proxmox and ops hosts are deliberately absent from project test targets. A project becomes `ready`
+only when an exact schema-v4 delivery profile and its real runner path have been installed and tested.
 
 `delivery_mode: none` is immutable mission acceptance data, not an inference from the completed checks. Central will
 not complete such a mission until the coordinator publishes `delivery: not_applicable` in addition to PR merge,
