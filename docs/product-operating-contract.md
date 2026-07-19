@@ -124,6 +124,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    while preserving the same durable mission, so a clean all-fixes-preinstalled run remained stronger evidence. A
    later clean owner-gated Telegram mission ran with all fixes preinstalled and completed Sol/Terra delivery, PR #9,
    CI, merge, post-verify, concrete terminal result and cleanup, then produced the first verified schema-v2 artifact.
+   PR #286 also closes unsafe fresh initialization after loss of private coordinator state: projected execution
+   history, surviving mission-local artifacts and a lost automatic owner-gate checkpoint now fail before model/Git/
+   GitHub mutation. The exact merge is installed and all six timers passed a natural tick. This is safe detection;
+   automatic reconstruction after total `delivery-state.json` loss is still not claimed.
    These campaigns prove both owner entry channels only for exact registered profiles; generic arbitrary-repository intake
    and route-profile creation from an unconstrained owner goal remain outside that proof.
    The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
