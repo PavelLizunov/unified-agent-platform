@@ -113,9 +113,21 @@ def main() -> None:
         assert 'CommandDef("mission"' in commands
         assert 'CommandDef("projects"' in commands
         assert 'HERMES_OWNER_COMMANDS' in commands
+        assert 'CommandDef("status", "Показать состояние текущей сессии"' in commands
+        assert 'CommandDef("projects", "Показать разрешённые проекты"' in commands
+        assert 'CommandDef("mission", "Показать текущую автономную задачу"' in commands
+        assert 'CommandDef("stop", "Остановить текущий ответ"' in commands
+        assert 'CommandDef("help", "Показать короткую справку"' in commands
         assert 'if canonical == "mission"' in gateway
         assert 'if canonical == "projects"' in gateway
         assert "Hermes сам создаст задачу" in gateway
+        assert "К этому чату не привязана задача" in gateway
+        assert "У текущей задачи нет открытого вопроса владельцу" in gateway
+        assert "Автономных задач пока нет" in gateway
+        assert "не удалось расшифровать голосовое сообщение" in gateway
+        assert "Не удалось создать задачу" in gateway
+        assert "Mission intake unavailable" not in gateway
+        assert "voice transcription failed" not in gateway
         assert api.count('self._app.router.add_') >= 4
         for route in (
             '"/api/missions"',

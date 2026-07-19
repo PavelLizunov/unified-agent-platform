@@ -21,11 +21,11 @@ FILES = {
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
 }
 PATCHED_FILES = {
-    "hermes_cli/commands.py": "4783ccb17c851b94079c4016e63ad7a676b9c2beb57c7d952f0a8c45410674d4",
+    "hermes_cli/commands.py": "23ba06478a1489c1aba7f61c2b49ce4ea134c1e6713cead2e3224dbe6f1036ae",
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "7b34939a35d5f7ab1301b330ecaa585617e4d60fbf63783820a310932158ef41",
+    "gateway/run.py": "d0d4f335193f976bf633e2e513aa34c85f9ab07d878e3bdf000abcee09a0b592",
     "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
@@ -82,11 +82,23 @@ def transform(relative: str, text: str) -> str:
         text = replace(
             text,
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),',
-            '    CommandDef("status", "Show session, model, token, and context info", "Session"),\n'
-            '    CommandDef("projects", "Show registered UAP projects", "Session", gateway_only=True),\n'
-            '    CommandDef("mission", "Show, bind, or answer one central UAP mission", "Session",\n'
+            '    CommandDef("status", "Показать состояние текущей сессии", "Session"),\n'
+            '    CommandDef("projects", "Показать разрешённые проекты", "Session", gateway_only=True),\n'
+            '    CommandDef("mission", "Показать текущую автономную задачу", "Session",\n'
             '               args_hint="[mission-id | answer <text>]", gateway_only=True),',
             "mission command",
+        )
+        text = replace(
+            text,
+            '    CommandDef("stop", "Kill all running background processes", "Session"),',
+            '    CommandDef("stop", "Остановить текущий ответ", "Session"),',
+            "owner stop description",
+        )
+        text = replace(
+            text,
+            '    CommandDef("help", "Show available commands", "Info"),',
+            '    CommandDef("help", "Показать короткую справку", "Info"),',
+            "owner help description",
         )
         text = replace(
             text,
@@ -618,16 +630,16 @@ def connect(
                 mission_id = store.bound_mission(platform, chat_id, thread_id)
                 answer = requested[len("answer"):].strip()
                 if not mission_id:
-                    return "No mission is bound to this chat. Use /mission <mission-id> first."
+                    return "К этому чату не привязана задача. Сначала укажите /mission <mission-id>."
                 if not answer:
-                    return "Usage: /mission answer <your answer>"
+                    return "Формат: /mission answer <ваш ответ>"
                 try:
                     from agent.redact import redact_sensitive_text
 
                     view = store.projection(mission_id)
                     question = view.get("question")
                     if not isinstance(question, dict):
-                        return "The bound mission has no open owner question."
+                        return "У текущей задачи нет открытого вопроса владельцу."
                     store.answer(
                         mission_id,
                         question["question_id"],
@@ -635,16 +647,16 @@ def connect(
                     )
                     return telegram_text(store.projection(mission_id))
                 except MissionError as error:
-                    return f"Mission unavailable: {error}"
+                    return f"Задача недоступна: {error}"
             mission_id = requested or store.bound_mission(platform, chat_id, thread_id) or store.latest()
             if not mission_id:
-                return "No central missions yet."
+                return "Автономных задач пока нет."
             try:
                 if requested:
                     store.bind(mission_id, platform, chat_id, thread_id)
                 return telegram_text(store.projection(mission_id))
             except MissionError as error:
-                return f"Mission unavailable: {error}"
+                return f"Задача недоступна: {error}"
 
         if canonical == "projects":
             from hermes_cli.uap_missions import public_intake_projects
@@ -712,7 +724,7 @@ def connect(
                     )
                     if not transcripts:
                         raise MissionError(
-                            "voice transcription failed; send the voice message again or use text"
+                            "не удалось расшифровать голосовое сообщение; отправьте его ещё раз или напишите текстом"
                         )
                     goal_text = "\\n".join(transcripts)
                     adapter = self.adapters.get(source.platform)
@@ -763,7 +775,7 @@ def connect(
                     + choices
                 )
             except MissionError as error:
-                return f"Mission intake unavailable: {error}"
+                return f"Не удалось создать задачу: {error}"
 
         # Build session context
         context = build_session_context(source, self.config, session_entry)''',

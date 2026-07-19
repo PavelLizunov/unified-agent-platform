@@ -52,12 +52,12 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   `static-checks` CI a **required/strict** check), so direct push to `master` is **BLOCKED**. Deploys are PR-gated
   (branch → PR → green `static-checks` → merge → Flux reconciles `master`). Human code review stays absent by design —
   the agent's self-test + CI is the gate. See `docs/next-steps.md` → Platform hardening.
-- **A7 lifecycle and configured-profile acceptance are live (2026-07-17):** PRs #235/#236 are installed in Central
-  Hermes and build-1, and the schema-v3 `openai-autonomy-v2` runtime passed the Telegram-bound non-toy acceptance
-  canary through recovery, PR/CI/merge, post-verify and cleanup. See
-  `docs/evidence/a7-lifecycle-rollout-2026-07-17.md` and
-  `docs/evidence/a7-3-clean-telegram-canary-2026-07-17.md`. Generic repository intake and complete cross-channel
-  chat/session history remain outside that proof.
+- **Registered-profile intake and A7 lifecycle are live (2026-07-19):** Workspace and ordinary Telegram text now
+  resolve a closed server-owned catalog for `hermes-flow-v2-pilot`, `vpnctl` and `VPNRouter`, while build-1 persistent
+  timers service the corresponding profiles. The browser/channel never supplies a repository path, model or command;
+  unregistered repositories fail closed. Complete cross-channel chat history is still outside the contract. Telegram
+  voice intake is wired but intentionally fails before mission creation until an allowed STT credential/backend is
+  owner-authorized. See `STATUS.md` and the A7 evidence files for the exact live boundary.
 - **Model process isolation:** reviewer OS isolation is installed and live-proven. Current source reuses that exact
   parent-bound transient user-systemd boundary for author, with only the disposable author worktree plus model/Codex
   homes writable. Do not claim author rollout proof until the build-1 installed-wrapper probe and a real author turn
