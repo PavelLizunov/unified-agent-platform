@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
-    "gateway/platforms/api_server.py": "8b8a780a141d3005598a8cb43cea0ffe22765406aa71f7bb09b26554e34d7fc5",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "438666691b5d858ddfc3fbe0a61ace314767f2d00dabc01afaeecf11812cb897",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -696,13 +696,13 @@ def connect(
                 mission_id = owner_event["mission_id"]
                 if owner_event["type"] == "mission.answer":
                     response_text = (
-                        f"Answer recorded for mission {mission_id}. "
-                        "Delivery resumes automatically."
+                        f"Ответ принят для задачи {mission_id}. "
+                        "Выполнение продолжится автоматически."
                     )
                 else:
                     response_text = (
-                        f"Mission {mission_id} accepted. Delivery continues automatically; "
-                        "no owner action is required."
+                        f"Задача {mission_id} принята. Выполнение начнётся автоматически; "
+                        "от вас ничего не требуется."
                     )
                 database = self._ensure_session_db()
                 receipt = f"workspace:{source_message_id}"

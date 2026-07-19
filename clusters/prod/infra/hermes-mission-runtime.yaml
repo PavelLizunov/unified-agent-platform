@@ -34,7 +34,7 @@ data:
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
-        "gateway/platforms/api_server.py": "8b8a780a141d3005598a8cb43cea0ffe22765406aa71f7bb09b26554e34d7fc5",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "438666691b5d858ddfc3fbe0a61ace314767f2d00dabc01afaeecf11812cb897",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -704,13 +704,13 @@ data:
                     mission_id = owner_event["mission_id"]
                     if owner_event["type"] == "mission.answer":
                         response_text = (
-                            f"Answer recorded for mission {mission_id}. "
-                            "Delivery resumes automatically."
+                            f"Ответ принят для задачи {mission_id}. "
+                            "Выполнение продолжится автоматически."
                         )
                     else:
                         response_text = (
-                            f"Mission {mission_id} accepted. Delivery continues automatically; "
-                            "no owner action is required."
+                            f"Задача {mission_id} принята. Выполнение начнётся автоматически; "
+                            "от вас ничего не требуется."
                         )
                     database = self._ensure_session_db()
                     receipt = f"workspace:{source_message_id}"
@@ -1231,6 +1231,31 @@ data:
         "pull_request": "merged",
         "default_branch": "verified",
     }
+    _STAGE_LABELS = {
+        "accepted": "Цель принята",
+        "planning": "Планирование",
+        "implementing": "Внесение изменений",
+        "testing": "Автоматические проверки",
+        "reviewing": "Независимая проверка",
+        "delivering": "PR, CI и слияние",
+        "verifying": "Проверка после слияния",
+        "complete": "Готово",
+    }
+    _STATUS_LABELS = {
+        "active": "в работе",
+        "waiting_owner": "нужен ваш ответ",
+        "completed": "завершено",
+        "failed": "завершено с ошибкой",
+        "cancelled": "отменено",
+    }
+    _NOTICE_LABELS = {
+        "capacity_wait": "Модель OpenAI временно занята. Повтор запланирован автоматически.",
+        "capacity_recovered": "Модель OpenAI снова доступна. Выполнение продолжилось автоматически.",
+        "execution_reconciling": (
+            "Проверяю прерванный запуск модели. Новый исполнитель не запускается; "
+            "восстановление продолжится автоматически."
+        ),
+    }
     NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
     # ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
     _NOTIFICATION_LEASE_SECONDS = 300
@@ -1606,28 +1631,37 @@ data:
         status = view.get("status") or "unknown"
         stage = view.get("stage") or "unknown"
         lines = [
-            f"Mission {view.get('mission_id') or 'unknown'}",
-            f"{stage} · {view.get('progress_percent', 0)}% · {status}",
+            f"Задача {view.get('mission_id') or 'неизвестна'}",
+            f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
+            f"Статус: {_STATUS_LABELS.get(status, status)}",
         ]
         if view.get("question"):
-            lines.append(f"Question: {view['question']['text']}")
+            question = view["question"]
+            text = question["text"]
+            if str(question.get("question_id", "")).startswith(_OWNER_GATE_QUESTION_PREFIX):
+                text = (
+                    "Задача меняет утверждённую архитектурную границу. Чтобы разрешить "
+                    "это изменение только для этой задачи, ответьте одним сообщением: APPROVE."
+                )
+            lines.append(f"Нужен ваш ответ: {text}")
         if view.get("answer"):
-            lines.append(f"Answer received: {view['answer']['text']}")
+            lines.append(f"Ответ принят: {view['answer']['text']}")
         if view.get("notice"):
             notice = view["notice"]
-            lines.append(f"Update: {notice['message']}")
+            lines.append(f"Обновление: {_NOTICE_LABELS.get(notice['code'], notice['message'])}")
             if notice.get("next_attempt_at"):
-                lines.append(f"Next automatic attempt: {notice['next_attempt_at']}")
+                lines.append(f"Следующая автоматическая попытка (UTC): {notice['next_attempt_at']}")
             lines.append(
-                "Owner action required: "
-                + ("yes" if notice["owner_action_required"] else "no")
+                "Требуется ваше действие."
+                if notice["owner_action_required"]
+                else "От вас ничего не требуется."
             )
         if view.get("result"):
-            lines.append(f"Result: {view['result']}")
+            lines.append(f"Итог: {view['result']}")
         if view.get("error"):
-            lines.append(f"Error: {view['error']}")
+            lines.append(f"Ошибка: {view['error']}")
         lines.append(
-            "Tasks {tasks} · Workers {workers} · Gates {gates} · Deliveries {deliveries}".format(
+            "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
                 tasks=len(view.get("tasks", [])),
                 workers=len(view.get("workers", [])),
                 gates=len(view.get("gates", [])),
@@ -1664,14 +1698,14 @@ data:
             for item in view.get("deliveries", [])
             if isinstance(item, dict)
         }
-        lines = [f"Completed: {compact(view.get('goal'), 700)}"]
-        for label, kind in (("PR", "pull_request"), ("Merge", "default_branch")):
+        lines = [f"Выполнено: {compact(view.get('goal'), 700)}"]
+        for label, kind in (("PR", "pull_request"), ("Merge-коммит", "default_branch")):
             url = deliveries.get(kind, {}).get("url")
             if isinstance(url, str) and url.strip():
                 lines.append(f"{label}: {compact(url, 512)}")
-        lines.append("Checks: tests, review, CI, post-verify, cleanup passed")
+        lines.append("Проверки: тесты, независимое ревью, CI, post-verify и очистка пройдены")
         if view.get("delivery_mode") == "none":
-            lines.append("Delivery: not applicable")
+            lines.append("Деплой: не требуется для этого проекта")
         paths = sorted({
             item.get("path")
             for item in view.get("changes", [])
@@ -1680,8 +1714,8 @@ data:
         if paths:
             visible = ", ".join(compact(path, 120) for path in paths[:8])
             if len(paths) > 8:
-                visible += f", +{len(paths) - 8} more"
-            lines.append(f"Changed files ({len(paths)}): {visible}")
+                visible += f", ещё {len(paths) - 8}"
+            lines.append(f"Изменённые файлы ({len(paths)}): {visible}")
         result = "\n".join(lines)
         return (
             result
@@ -1758,6 +1792,7 @@ data:
         if gates in (
             {"tests": "passed", "review": "failed", "cleanup": "passed"},
             {"tests": "failed", "cleanup": "passed"},
+            {"execution": "failed", "cleanup": "passed"},
         ):
             return not deliveries or deliveries == {"pull_request": "failed"}
         if gates == {
@@ -1778,20 +1813,24 @@ data:
             for item in view.get("gates", [])
             if isinstance(item, dict)
         }
+        if gates.get("execution") == "failed":
+            return "central:auto-execution-state-failed:v1", {
+                "error": "Прерванное выполнение потеряло рабочую копию и безопасно остановлено",
+            }
         if gates.get("tests") == "failed":
             return "central:auto-author-checks-failed:v1", {
-                "error": "Author checks failed after the approved cycle limit",
+                "error": "Автоматические проверки не прошли после разрешённого числа попыток",
             }
         if gates.get("post-verify") == "failed":
             return "central:auto-post-verify-failed:v1", {
-                "error": "Post-verify failed after the approved repair mission",
+                "error": "Проверка после слияния не прошла после автоматического исправления",
             }
         if gates.get("ci") == "failed":
             return "central:auto-ci-failed:v1", {
-                "error": "Required CI failed after the approved cycle limit",
+                "error": "Обязательный CI не прошёл после разрешённого числа попыток",
             }
         return "central:auto-review-rejected:v1", {
-            "error": "Independent review rejected the candidate",
+            "error": "Независимое ревью отклонило результат",
         }
 
 

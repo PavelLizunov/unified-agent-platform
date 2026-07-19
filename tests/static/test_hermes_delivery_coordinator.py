@@ -444,6 +444,7 @@ class RejectionClient(FakeClient):
         if gates in (
             {"tests": "passed", "review": "failed", "cleanup": "passed"},
             {"tests": "failed", "cleanup": "passed"},
+            {"execution": "failed", "cleanup": "passed"},
             {"tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed"},
         ):
             self.mission["status"] = "failed"
@@ -2581,6 +2582,98 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "error": "interrupted author execution was discarded before automatic retry",
                 },
                 state["invalid_candidate_cleanup"],
+            )
+
+    def test_ambiguous_author_with_missing_worktree_stops_safely(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            counters = {
+                "authors": 0,
+                "reviewers": 0,
+                "worktrees": 0,
+                "checks": 0,
+                "pr_creates": 0,
+                "merges": 0,
+                "verifies": 0,
+                "cleanups": 0,
+            }
+            instance = TickReviewCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "crash_injected": True,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            route = instance._ensure_route(state, paths)
+            state["model_ambiguous"] = {
+                "schema_version": 1,
+                "role": "author",
+                "quality_epoch": 0,
+                "route_decision_id": route["decision_id"],
+                "candidate_sha": None,
+                "status": "reconciling",
+                "error_class": "ambiguous_result",
+                "last_error_sha256": "a" * 64,
+            }
+            instance._save(paths, state)
+
+            with mock.patch.object(instance, "_model_unit_is_gone", return_value=True):
+                with self.assertRaises(coordinator.mission_adapter.AdapterError):
+                    instance.tick()
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("execution_state_failed", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual(0, counters["worktrees"])
+            self.assertNotIn("model_ambiguous", result["state"])
+            self.assertEqual(0, result["state"]["prior_author_failures"])
+            self.assertTrue(instance._rejection_persisted(result["state"]))
+
+    def test_cleanup_prunes_missing_worktree_registration_before_branch_delete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("missing-worktree")
+            calls = []
+
+            def git(_checkout, *arguments, **_kwargs):
+                calls.append(arguments)
+                return ""
+
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git", side_effect=git),
+            ):
+                instance._cleanup(
+                    {"branch": "codex/missing-worktree", "root_task_id": "task-1"},
+                    paths,
+                )
+
+            self.assertLess(
+                calls.index(("worktree", "prune")),
+                calls.index(("branch", "-D", "codex/missing-worktree")),
             )
 
     def test_ambiguous_model_waits_until_the_exact_old_unit_is_unloaded(self):
