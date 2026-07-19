@@ -286,7 +286,8 @@ Last updated: 2026-07-19
   merged). Also added (owner-approved): seed-if-absent install of the
   [ponytail](https://github.com/DietrichGebert/ponytail) anti-overengineering coding skill (native Hermes
   plugin, `full` mode) into hermes-agent's boot initContainer — bundled into PR #35 rather than a
-  competing PR on the same file. Dependabot #1-4 (SHA-pin Actions) still open; not yet actioned.
+  competing PR on the same file. Dependabot #1-4 remained open at that checkpoint; exact current-major commit pins
+  and a regression rejecting every mutable remote Action ref were added on 2026-07-19 without a major-version upgrade.
 - **2026-06-30 PR #35/#36 merged + rolled — post-roll verify DONE.** `hermes-agent`: pod 1/1 Running,
   `hermes --version`/`codex --version`/`claude --version` match the pins exactly, dedicated SA +
   `automountServiceAccountToken:false` live, `tests/ops/check-pv-reclaim.ps1 -Require` →
