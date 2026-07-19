@@ -107,9 +107,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
 1. Workspace and Telegram synchronize the mission projection and owner question/answer resume, but not complete
    cross-channel chat/session history. A bound Telegram chat and the exact accepting Workspace session can route an
    ordinary message to their one open mission question with restart-safe source-message replay. Both implementations
-   are deployed and passed in-pod component checks. Source now also produces a deterministic pre-execution question
-   for approved-profile `architecture_change`, accepts only exact `APPROVE` and resumes the same inert root after
-   restart/lost response. Merge, rollout and a real cross-channel question/answer campaign remain pending; unsupported
+   are deployed and passed in-pod component checks. The approved-profile `architecture_change` producer is now live:
+   ordinary Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` created one inert root and deterministic
+   question before any model, accepted only exact ordinary `APPROVE`, resumed the same root and completed delivery.
+   A Telegram-origin answer through Workspace and complete cross-channel history remain pending; unsupported
    privileged capabilities still fail closed.
 2. The profile-bound A7 coordinator and `openai-autonomy-v2` route are installed. The corrected schema-v3 runtime
    passed one Telegram-bound non-toy acceptance canary through timer intake and recovery. A registered schema-v4
@@ -119,8 +120,10 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    ordinary Telegram goal used the same registered profile, survived a controlled exact pre-turn capacity failure,
    completed Sol/Terra delivery and produced terminal sequence 27 plus a verified completion bundle. That was an
    adversarial correction campaign: reviewer recovery and Central capacity-history completion fixes were installed
-   while preserving the same durable mission, so a clean all-fixes-preinstalled run remains stronger evidence. These
-   campaigns prove both owner entry channels only for one exact registered profile; generic arbitrary-repository intake
+   while preserving the same durable mission, so a clean all-fixes-preinstalled run remained stronger evidence. A
+   later clean owner-gated Telegram mission ran with all fixes preinstalled and completed Sol/Terra delivery, PR #9,
+   CI, merge, post-verify, concrete terminal result and cleanup, then produced the first verified schema-v2 artifact.
+   These campaigns prove both owner entry channels only for exact registered profiles; generic arbitrary-repository intake
    and route-profile creation from an unconstrained owner goal remain outside that proof.
    The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
    `delivery: not_applicable` evidence instead of treating fresh-main verification as a deploy. Actual `deploy` and
@@ -160,8 +163,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    exact-SHA read-only. Common credential stores and control-plane environment are hidden from both. Reviewer has live
    mission proof. PR #279 installed the author boundary, its installed adversarial probe passed, and a controlled real
    Sol author completed with rollout-derived OpenAI/model/effort/sandbox attestation while changing only the allowed
-   disposable file. A complete ordinary mission on the exact combined revision and secrets outside the enumerated host
-   stores remain follow-up work.
+   disposable file. The later owner-gated ordinary mission completed Sol authoring and Terra review on the exact
+   combined revision. Secrets outside the enumerated host stores remain follow-up work.
 7. Telegram delivery is at-least-once and has a duplicate window after remote send but before cursor persistence.
 8. The explicit **GPU for UAP** enable gate is a product requirement but is not yet enforced as a platform invariant.
 9. A closed canonical completion-evidence bundle and deterministic semantic verifier are implemented for the
@@ -169,16 +172,17 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    artifact; the installed verifier accepted semantic digest `d05c16b7...`. The initial schema binds delivery
    runtime, Git/PR/CI/review/post-verify/cleanup and Central terminal identities. PR #275 deploys a compatible closed
    v2 schema that binds the server-owned ordinary input platform and hashed source key/message to the deterministic
-   mission identity without persisting raw channel identifiers; exact Central/build-1 component rollout passed, but a
-   new live v2 delivery artifact remains pending. Workspace/Telegram delivery cursors, a deployed revision, a journal
-   proof of timer origin and a
-   signed/GitHub-attested artifact remain absent. Those omissions prevent treating it as the final Product Operating
-   Contract completion certificate.
+   mission identity without persisting raw channel identifiers. The owner-gated Telegram canary produced the first
+   live v2 artifact; the installed verifier accepted semantic digest `4dbb3b92...`, its systemd invocation chain contains
+   five exact unit identities, and Workspace/Telegram both converged at cursor 27. A deployed revision is not applicable
+   to this registered no-deploy target, while signed/GitHub-attested publication remains absent. That omission prevents
+   treating the private bundle as the final Product Operating Contract completion certificate.
 10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant
     at Central's terminal-authority boundary with a bounded deterministic summary of the accepted goal, changed paths,
     PR, verified revision, required gates and delivery applicability. PR #277 passed required CI, exact Flux rollout,
-    mounted-runtime verification and an in-pod Central/Telegram component assertion. A later live terminal message is
-    not yet evidence.
+    mounted-runtime verification and an in-pod Central/Telegram component assertion. The owner-gated live mission later
+    emitted the concrete accepted goal, PR #9, merge, gates, no-deploy applicability and four changed paths through the
+    shared terminal projection.
 
 These gaps drive the post-A6 milestones in `docs/next-steps.md`. Spark Runner remains parked until the UAP mission
 plane is coherent and the owner explicitly resumes it.
