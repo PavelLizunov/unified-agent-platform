@@ -203,6 +203,16 @@ def main() -> None:
     )
     assert boosty["status"] == "read_only"
     assert boosty["dispatch_profile"] is None
+    assert "boosty" not in boosty["aliases"]
+    assert "boosty" in next(
+        project for project in projects["projects"] if project["project_id"] == "vpnctl"
+    )["aliases"]
+    assert all(
+        next(project for project in projects["projects"] if project["project_id"] == project_id)[
+            "category"
+        ] == "active-maintained"
+        for project_id in ("vpnrouter", "suflyor")
+    )
     assert next(
         project for project in projects["projects"] if project["project_id"] == "wgturn-core"
     )["status"] == "setup_required"
