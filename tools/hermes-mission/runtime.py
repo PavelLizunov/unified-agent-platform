@@ -64,7 +64,9 @@ PAYLOAD_FIELDS = {
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
     },
-    "mission.answer": {"question_id", "text", "source_message_id"},
+    "mission.answer": {
+        "question_id", "text", "source_message_id", "source_platform",
+    },
     "task.upsert": {"task_id", "title", "status", "assignee"},
     "worker.upsert": {"worker_id", "status", "run_id", "profile"},
     "terminal.append": {"stream", "text", "offset"},
@@ -77,7 +79,7 @@ PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
-    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "question_id",
+    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "question_id", "source_platform",
     "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -254,6 +256,11 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 raise MissionError("invalid mission notice timestamp")
     if event_type == "mission.answer" and "source_message_id" in payload:
         _require_source_value(payload.get("source_message_id"), "source_message_id")
+    if event_type == "mission.answer" and "source_platform" in payload:
+        if payload.get("source_platform") not in {"workspace", "telegram"}:
+            raise MissionError("invalid owner answer platform")
+        if "source_message_id" not in payload:
+            raise MissionError("owner answer platform requires source message identity")
     if event_type == "mission.accepted" and "dispatch_profile" in payload:
         _require_id(payload.get("dispatch_profile"), "dispatch_profile")
     if event_type == "mission.accepted" and "delivery_mode" in payload:
@@ -809,6 +816,35 @@ class MissionStore:
             "cursor": view["sequence"],
         }
 
+    def channel_evidence(self, mission_id: str) -> dict[str, Any]:
+        """Return privacy-safe authoritative channel convergence state."""
+        view = self.projection(mission_id)
+        with self._db() as connection:
+            rows = connection.execute(
+                """SELECT last_notified_sequence FROM mission_subscriptions
+                   WHERE mission_id = ? AND platform = 'telegram'""",
+                (mission_id,),
+            ).fetchall()
+        telegram_cursor = min(
+            (int(row["last_notified_sequence"]) for row in rows), default=None
+        )
+        telegram_converged = (
+            telegram_cursor is not None and telegram_cursor == view["sequence"]
+        )
+        return {
+            "workspace": {
+                "cursor": view["sequence"],
+                "projection_id": view["projection_id"],
+            },
+            "telegram": {
+                "subscriber_count": len(rows),
+                "cursor": telegram_cursor,
+                "projection_id": (
+                    view["projection_id"] if telegram_converged else None
+                ),
+            },
+        }
+
     def list(self, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 100))
         with self._db() as connection:
@@ -1051,7 +1087,10 @@ class MissionStore:
                 platform, chat_id, thread_id, source_message_id
             )
             if receipt:
-                if receipt["payload"].get("text") != text.strip():
+                if (
+                    receipt["payload"].get("text") != text.strip()
+                    or receipt["payload"].get("source_platform", platform) != platform
+                ):
                     raise MissionError("owner turn idempotency collision")
                 return receipt, False
             mission_id = self.bound_mission(platform, chat_id, thread_id)
@@ -1064,11 +1103,15 @@ class MissionStore:
                         question.get("question_id"),
                         text,
                         source_message_id=source_message_id,
+                        source_platform=platform,
                     )
         elif session_id:
             receipt = self._session_answer_receipt(session_id, source_message_id)
             if receipt:
-                if receipt["payload"].get("text") != text.strip():
+                if (
+                    receipt["payload"].get("text") != text.strip()
+                    or receipt["payload"].get("source_platform", platform) != platform
+                ):
                     raise MissionError("owner turn idempotency collision")
                 return receipt, False
             open_question = self._session_open_question(session_id)
@@ -1079,6 +1122,7 @@ class MissionStore:
                     question.get("question_id"),
                     text,
                     source_message_id=source_message_id,
+                    source_platform=platform,
                 )
         return self.ingest_owner_goal(
             text,
@@ -1420,6 +1464,7 @@ class MissionStore:
         text: str,
         *,
         source_message_id: str | None = None,
+        source_platform: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Record one idempotent owner answer to the currently open question."""
         question_id = _require_id(question_id, "question_id")
@@ -1437,6 +1482,10 @@ class MissionStore:
             payload["source_message_id"] = _require_source_value(
                 source_message_id, "source_message_id"
             )
+        if source_platform is not None:
+            if source_message_id is None or source_platform not in {"workspace", "telegram"}:
+                raise MissionError("invalid owner answer platform")
+            payload["source_platform"] = source_platform
         return self.append_central(
             mission_id,
             {

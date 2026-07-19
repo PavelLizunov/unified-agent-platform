@@ -129,9 +129,11 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         "schema_version", "sha256", "mission", "runtime", "route", "execution",
         "source", "author", "reviewer", "delivery", "gates", "cleanup", "central",
     }
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         top.add("input")
-    if set(value) != top or schema_version not in {1, 2}:
+    if schema_version == 3:
+        top.update({"interaction", "channels"})
+    if set(value) != top or schema_version not in {1, 2, 3}:
         raise ContractError("completion evidence has an invalid schema")
     digest = _required_text(value, "sha256", "completion_evidence")
     unsigned = {key: item for key, item in value.items() if key != "sha256"}
@@ -181,10 +183,13 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         },
         "central": {"status", "sequence", "projection_id", "result"},
     }
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         expected["input"] = {
             "platform", "source_key_sha256", "source_message_sha256",
         }
+    if schema_version == 3:
+        expected["interaction"] = {"owner_answers"}
+        expected["channels"] = {"workspace", "telegram"}
     parts: dict[str, dict[str, Any]] = {}
     for name, fields in expected.items():
         item = value.get(name)
@@ -197,7 +202,7 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     delivery, gates = parts["delivery"], parts["gates"]
     cleanup, central = parts["cleanup"], parts["central"]
     execution = parts["execution"]
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         input_lineage = parts["input"]
         if input_lineage["platform"] not in {"workspace", "telegram"}:
             raise ContractError("completion evidence input platform is invalid")
@@ -253,6 +258,61 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         or len(answers) != len(set(answers))
     ):
         raise ContractError("completion evidence owner answers are invalid")
+    if schema_version == 3:
+        interactions = parts["interaction"]["owner_answers"]
+        if (
+            not isinstance(interactions, list)
+            or not interactions
+            or len(interactions) > 8
+            or any(
+                not isinstance(item, dict)
+                or set(item) != {
+                    "platform", "source_message_sha256", "text_sha256"
+                }
+                or item["platform"] not in {"workspace", "telegram"}
+                or not isinstance(item["source_message_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", item["source_message_sha256"])
+                or not isinstance(item["text_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", item["text_sha256"])
+                for item in interactions
+            )
+            or interactions != sorted(
+                interactions,
+                key=lambda item: (
+                    item["platform"], item["source_message_sha256"], item["text_sha256"]
+                ),
+            )
+            or sorted(item["text_sha256"] for item in interactions) != answers
+            or not any(
+                item["platform"] != input_lineage["platform"]
+                for item in interactions
+            )
+        ):
+            raise ContractError("completion evidence owner-answer channel lineage is invalid")
+
+        channels = parts["channels"]
+        workspace, telegram = channels.get("workspace"), channels.get("telegram")
+        if (
+            not isinstance(workspace, dict)
+            or set(workspace) != {"cursor", "projection_id"}
+            or not isinstance(telegram, dict)
+            or set(telegram) != {"subscriber_count", "cursor", "projection_id"}
+        ):
+            raise ContractError("completion evidence channel convergence has an invalid schema")
+        for channel in (workspace, telegram):
+            if (
+                isinstance(channel.get("cursor"), bool)
+                or not isinstance(channel.get("cursor"), int)
+                or channel["cursor"] != central["sequence"]
+                or channel.get("projection_id") != central["projection_id"]
+            ):
+                raise ContractError("completion evidence channel convergence mismatch")
+        if (
+            isinstance(telegram.get("subscriber_count"), bool)
+            or not isinstance(telegram.get("subscriber_count"), int)
+            or telegram["subscriber_count"] < 1
+        ):
+            raise ContractError("completion evidence Telegram delivery is unproven")
 
     invocations = runtime["invocations"]
     if not isinstance(invocations, dict) or set(invocations) != {

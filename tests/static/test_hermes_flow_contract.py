@@ -227,7 +227,7 @@ def completion_evidence(*, schema_version=1):
             "result": "Delivery completed, merged, and verified",
         },
     }
-    if schema_version == 2:
+    if schema_version in {2, 3}:
         source_key_sha256 = "b" * 64
         value["mission"]["mission_id"] = (
             "mission-intake-" + source_key_sha256[:32]
@@ -236,6 +236,23 @@ def completion_evidence(*, schema_version=1):
             "platform": "telegram",
             "source_key_sha256": source_key_sha256,
             "source_message_sha256": "d" * 64,
+        }
+    if schema_version == 3:
+        value["mission"]["owner_answer_sha256s"] = ["1" * 64]
+        value["interaction"] = {
+            "owner_answers": [{
+                "platform": "workspace",
+                "source_message_sha256": "0" * 64,
+                "text_sha256": "1" * 64,
+            }],
+        }
+        value["channels"] = {
+            "workspace": {"cursor": 22, "projection_id": "e" * 16},
+            "telegram": {
+                "subscriber_count": 1,
+                "cursor": 22,
+                "projection_id": "e" * 16,
+            },
         }
     value["sha256"] = flow.canonical_sha256(value)
     return value
@@ -286,6 +303,44 @@ class FlowContractTests(unittest.TestCase):
         for mutate, message in mutations:
             with self.subTest(message=message):
                 changed = completion_evidence(schema_version=2)
+                mutate(changed)
+                changed["sha256"] = flow.canonical_sha256({
+                    key: item for key, item in changed.items() if key != "sha256"
+                })
+                with self.assertRaisesRegex(flow.ContractError, message):
+                    flow.validate_completion_evidence(changed)
+
+    def test_completion_evidence_v3_binds_cross_channel_convergence(self):
+        value = completion_evidence(schema_version=3)
+        self.assertEqual(value, flow.validate_completion_evidence(value))
+
+        mutations = (
+            (
+                lambda item: item["interaction"]["owner_answers"][0].update(
+                    platform="telegram"
+                ),
+                "channel lineage",
+            ),
+            (
+                lambda item: item["channels"]["workspace"].update(cursor=21),
+                "convergence mismatch",
+            ),
+            (
+                lambda item: item["channels"]["telegram"].update(
+                    projection_id="f" * 16
+                ),
+                "convergence mismatch",
+            ),
+            (
+                lambda item: item["channels"]["telegram"].update(
+                    subscriber_count=0
+                ),
+                "delivery is unproven",
+            ),
+        )
+        for mutate, message in mutations:
+            with self.subTest(message=message):
+                changed = completion_evidence(schema_version=3)
                 mutate(changed)
                 changed["sha256"] = flow.canonical_sha256({
                     key: item for key, item in changed.items() if key != "sha256"

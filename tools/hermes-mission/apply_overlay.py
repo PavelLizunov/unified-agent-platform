@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
-    "gateway/platforms/api_server.py": "f87b41aafab3d93d4c6c7d7d98607357540b28f74f2f19ca3f7449172551e460",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "8b8a780a141d3005598a8cb43cea0ffe22765406aa71f7bb09b26554e34d7fc5",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -871,9 +871,11 @@ def connect(
             return auth_error
         try:
             after = int(request.query.get("after", "0"))
-            return web.json_response(
-                self._missions().workspace_payload(request.match_info["mission_id"], after)
-            )
+            store = self._missions()
+            mission_id = request.match_info["mission_id"]
+            payload = store.workspace_payload(mission_id, after)
+            payload["channels"] = store.channel_evidence(mission_id)
+            return web.json_response(payload)
         except MissionError as error:
             status = 404 if str(error) == "mission not found" else 400
             return web.json_response({"error": str(error)}, status=status)

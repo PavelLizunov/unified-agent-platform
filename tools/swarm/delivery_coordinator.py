@@ -1787,9 +1787,14 @@ class DeliveryCoordinator:
             raise DeliveryError("durable owner-answer history is invalid")
         validated = []
         for answer in answers:
-            if not isinstance(answer, dict) or set(answer) != {
-                "question_id", "text", "sha256"
-            }:
+            base_fields = {"question_id", "text", "sha256"}
+            lineage_fields = {"source_platform", "source_message_sha256"}
+            if (
+                not isinstance(answer, dict)
+                or frozenset(answer) not in {
+                    frozenset(base_fields), frozenset(base_fields | lineage_fields)
+                }
+            ):
                 raise DeliveryError("durable owner-answer checkpoint is invalid")
             question_id, text, digest = (
                 answer.get("question_id"), answer.get("text"), answer.get("sha256")
@@ -1803,6 +1808,12 @@ class DeliveryCoordinator:
                 or len(text) > 4096
                 or not isinstance(digest, str)
                 or hashlib.sha256(text.encode("utf-8")).hexdigest() != digest
+            ):
+                raise DeliveryError("durable owner-answer checkpoint is invalid")
+            if lineage_fields <= set(answer) and (
+                answer.get("source_platform") not in {"workspace", "telegram"}
+                or not isinstance(answer.get("source_message_sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", answer["source_message_sha256"])
             ):
                 raise DeliveryError("durable owner-answer checkpoint is invalid")
             validated.append(dict(answer))
@@ -2056,6 +2067,7 @@ class DeliveryCoordinator:
             or set(answer) not in (
                 {"question_id", "text"},
                 {"question_id", "text", "source_message_id"},
+                {"question_id", "text", "source_message_id", "source_platform"},
             )
             or not isinstance(answer.get("question_id"), str)
             or not answer["question_id"]
@@ -2069,6 +2081,10 @@ class DeliveryCoordinator:
                     or len(answer["source_message_id"]) > 256
                     or re.search(r"[\x00-\x1f\x7f]", answer["source_message_id"])
                 )
+            )
+            or (
+                "source_platform" in answer
+                and answer.get("source_platform") not in {"workspace", "telegram"}
             )
         ):
             raise DeliveryError("owner answer projection is invalid")
@@ -2092,6 +2108,13 @@ class DeliveryCoordinator:
             "text": text,
             "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
         }
+        if "source_platform" in answer:
+            entry.update(
+                source_platform=answer["source_platform"],
+                source_message_sha256=hashlib.sha256(
+                    answer["source_message_id"].encode("utf-8")
+                ).hexdigest(),
+            )
         answers = self._owner_answers(state)
         matches = [item for item in answers if item["question_id"] == entry["question_id"]]
         if matches and matches != [entry]:
@@ -4075,6 +4098,7 @@ class DeliveryCoordinator:
         state: dict[str, Any],
         paths: dict[str, pathlib.Path],
         terminal: dict[str, Any],
+        channels: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if self.profile.get("delivery_mode") != "none":
             raise DeliveryError("completion evidence requires an implemented delivery applicability")
@@ -4125,6 +4149,42 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError("completion evidence has partial input lineage")
         evidence_version = 2 if all(input_lineage.values()) else 1
+        owner_answers = self._owner_answers(state)
+        answer_lineage = [
+            {
+                "platform": item["source_platform"],
+                "source_message_sha256": item["source_message_sha256"],
+                "text_sha256": item["sha256"],
+            }
+            for item in owner_answers
+            if {"source_platform", "source_message_sha256"} <= set(item)
+        ]
+        workspace = channels.get("workspace") if isinstance(channels, dict) else None
+        telegram = channels.get("telegram") if isinstance(channels, dict) else None
+        channel_converged = (
+            isinstance(workspace, dict)
+            and set(workspace) == {"cursor", "projection_id"}
+            and workspace.get("cursor") == terminal.get("sequence")
+            and workspace.get("projection_id") == terminal.get("projection_id")
+            and isinstance(telegram, dict)
+            and set(telegram) == {"subscriber_count", "cursor", "projection_id"}
+            and isinstance(telegram.get("subscriber_count"), int)
+            and not isinstance(telegram.get("subscriber_count"), bool)
+            and telegram["subscriber_count"] > 0
+            and telegram.get("cursor") == terminal.get("sequence")
+            and telegram.get("projection_id") == terminal.get("projection_id")
+        )
+        if (
+            evidence_version == 2
+            and owner_answers
+            and len(answer_lineage) == len(owner_answers)
+            and any(
+                item["platform"] != input_lineage["platform"]
+                for item in answer_lineage
+            )
+            and channel_converged
+        ):
+            evidence_version = 3
         bundle: dict[str, Any] = {
             "schema_version": evidence_version,
             "mission": {
@@ -4132,9 +4192,7 @@ class DeliveryCoordinator:
                 "dispatch_profile": state.get("dispatch_profile"),
                 "goal_sha256": goal_sha256,
                 "parent_mission_id": state.get("parent_mission_id"),
-                "owner_answer_sha256s": sorted(
-                    item["sha256"] for item in self._owner_answers(state)
-                ),
+                "owner_answer_sha256s": sorted(item["sha256"] for item in owner_answers),
             },
             "runtime": {
                 "coordinator_sha256": hashlib.sha256(
@@ -4219,8 +4277,18 @@ class DeliveryCoordinator:
                 "result": terminal.get("result"),
             },
         }
-        if evidence_version == 2:
+        if evidence_version >= 2:
             bundle["input"] = input_lineage
+        if evidence_version == 3:
+            bundle["interaction"] = {
+                "owner_answers": sorted(
+                    answer_lineage,
+                    key=lambda item: (
+                        item["platform"], item["source_message_sha256"], item["text_sha256"]
+                    ),
+                ),
+            }
+            bundle["channels"] = channels
         bundle["sha256"] = flow_contract.canonical_sha256(bundle)
         try:
             return flow_contract.validate_completion_evidence(bundle)
@@ -4235,7 +4303,19 @@ class DeliveryCoordinator:
     ) -> None:
         if not self.profile.get("completion_evidence"):
             return
-        bundle = self._completion_evidence(state, paths, terminal)
+        payload = self.client.get_mission_payload(state["mission_id"])
+        observed = payload.get("mission")
+        if (
+            not isinstance(observed, dict)
+            or any(
+                observed.get(field) != terminal.get(field)
+                for field in ("mission_id", "status", "sequence", "projection_id")
+            )
+        ):
+            raise DeliveryError("completion evidence Central projection changed")
+        bundle = self._completion_evidence(
+            state, paths, terminal, payload.get("channels")
+        )
         mission_adapter._write_json(paths["evidence"], bundle, private_parent=True)
         persisted = mission_adapter._read_json(paths["evidence"])
         flow_contract.validate_completion_evidence(persisted)

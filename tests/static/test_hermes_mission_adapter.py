@@ -1190,6 +1190,33 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertNotIn("api-token", first_request.full_url)
         self.assertNotIn("producer-key", second_request.full_url)
 
+    def test_central_client_preserves_privacy_safe_channel_evidence(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = json.dumps({
+            "mission": {"mission_id": "mission-1", "status": "completed"},
+            "channels": {
+                "workspace": {"cursor": 22, "projection_id": "a" * 16},
+                "telegram": {
+                    "subscriber_count": 1,
+                    "cursor": 22,
+                    "projection_id": "a" * 16,
+                },
+            },
+        }).encode("utf-8")
+        opener = mock.MagicMock()
+        opener.open.return_value = response
+        with mock.patch.object(
+            adapter.urllib.request, "build_opener", return_value=opener
+        ):
+            client = adapter.CentralMissionClient(
+                "http://central.example:30642", "api-token", "producer-key"
+            )
+            payload = client.get_mission_payload("mission-1")
+
+        self.assertEqual("mission-1", payload["mission"]["mission_id"])
+        self.assertEqual(22, payload["channels"]["workspace"]["cursor"])
+        self.assertEqual(1, payload["channels"]["telegram"]["subscriber_count"])
+
 
 if __name__ == "__main__":
     unittest.main()
