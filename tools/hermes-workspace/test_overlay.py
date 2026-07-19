@@ -230,12 +230,16 @@ def main() -> None:
 
         project_api = (clone / "src/routes/api/mission-projects.ts").read_text()
         assert "gatewayFetch('/api/mission-projects?platform=workspace'" in project_api
-        assert "Project is not registered" in project_api
+        assert "Проект не зарегистрирован" in project_api
+        assert "project.status !== 'ready'" in project_api
         assert "HttpOnly; SameSite=Strict" in project_api
         project_settings = (
             clone / "src/components/settings/project-permissions.tsx"
         ).read_text()
         assert "Платформа может менять код" in project_settings
+        assert "Проверки:" in project_settings
+        assert "Control-plane, Proxmox и ops-сервер" in project_settings
+        assert "project.status === 'ready'" in project_settings
         settings_sidebar = (
             clone / "src/components/settings/settings-sidebar.tsx"
         ).read_text()

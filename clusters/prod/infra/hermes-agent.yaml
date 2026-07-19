@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v57-owner-copy"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
+        hermes-agent/config-rev: "v58-project-inventory"   # bump on EVERY ConfigMap change to roll the pod (subPath mounts don't auto-update)
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -206,7 +206,10 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-owner, key: owner-key } }
             - { name: HERMES_OWNER_COMMANDS, value: "projects,mission,status,help,stop" }
             - name: HERMES_MISSION_PROJECTS
-              value: '{"schema_version":1,"projects":[{"project_id":"flow-ledger","label":"Mission Ledger","repository":"PavelLizunov/hermes-flow-v2-pilot","summary":"Dependency-free Rust mission ledger and its CLI.","aliases":["ledger","mission ledger","реестр задач","пилот"],"dispatch_profile":"build1-flow-pilot-registered-v4","delivery_mode":"none","platforms":["workspace","telegram"]},{"project_id":"vpnctl","label":"vpnctl","repository":"PavelLizunov/vpnctl","summary":"Rust control plane for self-hosted VPN infrastructure.","aliases":["vpn ctl","впн контроллер","контроллер vpn"],"dispatch_profile":"build1-vpnctl-registered-v4","delivery_mode":"none","platforms":["workspace","telegram"]},{"project_id":"vpnrouter","label":"VPNRouter","repository":"PavelLizunov/VPNRouter","summary":"Windows VPN router application and automated tests.","aliases":["vpn router","впн роутер","vpn роутер"],"dispatch_profile":"build1-vpnrouter-registered-v4","delivery_mode":"none","platforms":["workspace","telegram"]}]}'
+              valueFrom:
+                configMapKeyRef:
+                  name: hermes-project-catalog
+                  key: projects.json
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }

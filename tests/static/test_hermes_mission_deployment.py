@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 
 import yaml
@@ -44,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v57-owner-copy"
+        "v58-project-inventory"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -84,17 +85,34 @@ def main() -> None:
     assert gateway_env["HERMES_OWNER_COMMANDS"]["value"] == (
         "projects,mission,status,help,stop"
     )
-    projects = json.loads(gateway_env["HERMES_MISSION_PROJECTS"]["value"])
-    assert projects["schema_version"] == 1
-    assert {
+    assert gateway_env["HERMES_MISSION_PROJECTS"] == {
+        "name": "HERMES_MISSION_PROJECTS",
+        "valueFrom": {
+            "configMapKeyRef": {
+                "name": "hermes-project-catalog",
+                "key": "projects.json",
+            }
+        },
+    }
+    catalog_manifest = yaml.safe_load(
+        (ROOT / "clusters/prod/infra/hermes-project-catalog.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert catalog_manifest["kind"] == "ConfigMap"
+    projects = json.loads(catalog_manifest["data"]["projects.json"])
+    assert projects["schema_version"] == 2
+    assert len(projects["projects"]) == 33
+    ready = {
         project["project_id"]: (
             project["repository"],
             project["dispatch_profile"],
             project["delivery_mode"],
             set(project["platforms"]),
         )
-        for project in projects["projects"]
-    } == {
+        for project in projects["projects"] if project["status"] == "ready"
+    }
+    assert ready == {
         "flow-ledger": (
             "PavelLizunov/hermes-flow-v2-pilot",
             "build1-flow-pilot-registered-v4",
@@ -114,6 +132,33 @@ def main() -> None:
             {"workspace", "telegram"},
         ),
     }
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 21
+    assert sum(project["status"] == "read_only" for project in projects["projects"]) == 2
+    assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
+    assert next(
+        project for project in projects["projects"] if project["project_id"] == "vpnrouter"
+    )["test_targets"] == [
+        "uap-build-1", "github-linux", "github-windows", "windows-brat"
+    ]
+    runtime_spec = importlib.util.spec_from_file_location(
+        "uap_mission_catalog_runtime", ROOT / "tools/hermes-mission/runtime.py"
+    )
+    assert runtime_spec and runtime_spec.loader
+    runtime = importlib.util.module_from_spec(runtime_spec)
+    runtime_spec.loader.exec_module(runtime)
+    previous_catalog = os.environ.get("HERMES_MISSION_PROJECTS")
+    try:
+        os.environ["HERMES_MISSION_PROJECTS"] = catalog_manifest["data"]["projects.json"]
+        assert len(runtime.public_intake_projects("workspace")) == 33
+        assert len([
+            project for project in runtime.public_intake_projects("telegram")
+            if project["status"] == "ready"
+        ]) == 3
+    finally:
+        if previous_catalog is None:
+            os.environ.pop("HERMES_MISSION_PROJECTS", None)
+        else:
+            os.environ["HERMES_MISSION_PROJECTS"] = previous_catalog
     assert {
         "name": "HERMES_MISSION_OWNER_KEY",
         "valueFrom": {
@@ -146,6 +191,7 @@ def main() -> None:
 
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
     assert "hermes-mission-runtime.yaml" in resources
+    assert "hermes-project-catalog.yaml" in resources
     assert "hermes-agent-mission.sops.yaml" in resources
     assert "hermes-agent-owner.sops.yaml" in resources
 

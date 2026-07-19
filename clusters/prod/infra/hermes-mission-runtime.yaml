@@ -33,7 +33,7 @@ data:
         "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-        "gateway/run.py": "d0d4f335193f976bf633e2e513aa34c85f9ab07d878e3bdf000abcee09a0b592",
+        "gateway/run.py": "8945a0e161fa7e5237cabd110e8c27b5c1c0729ee6956cf21e17c3d341fc8d6d",
         "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
@@ -670,14 +670,24 @@ data:
                 from hermes_cli.uap_missions import public_intake_projects
 
                 projects = public_intake_projects("telegram")
-                lines = ["Разрешённые проекты:"]
-                for project in projects:
-                    lines.append(
-                        f"• {project['label']} — {project['repository']}\\n"
-                        f"  {project['summary']}"
-                    )
+                status_labels = {
+                    "ready": "Готовы к работе",
+                    "setup_required": "В реестре, профиль проверок готовится",
+                    "read_only": "Только просмотр",
+                    "archived": "Архив",
+                }
+                lines = [f"Проекты в GitHub: {len(projects)}"]
+                for status in ("ready", "setup_required", "read_only", "archived"):
+                    names = [
+                        project["label"] for project in projects
+                        if project.get("status") == status
+                    ]
+                    if names:
+                        lines.append(f"\\n{status_labels[status]} ({len(names)}):")
+                        lines.append(" · ".join(names))
                 lines.append(
-                    "Назовите проект в обычном сообщении с задачей или ответьте его названием, когда бот уточнит выбор."
+                    "\\nОбычную задачу можно запускать для проектов из раздела «Готовы к работе». "
+                    "Остальные уже известны Hermes, но не получат shell-доступ до установки точного профиля тестов."
                 )
                 return "\\n".join(lines)
 
@@ -1416,9 +1426,20 @@ data:
     class MissionProjectRequired(MissionError):
         """The owner must choose one registered project before intake can continue."""
 
-        def __init__(self, projects: list[dict[str, str]]) -> None:
+        def __init__(self, projects: list[dict[str, Any]]) -> None:
             super().__init__("choose a registered project")
             self.projects = projects
+
+
+    class MissionProjectUnavailable(MissionError):
+        """The repository is known, but its reviewed delivery profile is not ready."""
+
+        def __init__(self, project: dict[str, Any]) -> None:
+            super().__init__(
+                f"проект {project['label']} пока нельзя выполнять автоматически: "
+                "для него ещё не установлен проверенный профиль сборки и тестов"
+            )
+            self.project = project
 
 
     def _utc_now() -> str:
@@ -1469,7 +1490,7 @@ data:
         platform = _require_id(platform, "intake platform")
         raw = os.environ.get("HERMES_MISSION_PROJECTS", "").strip()
         if raw:
-            if len(raw.encode("utf-8")) > 32_768:
+            if len(raw.encode("utf-8")) > 65_536:
                 raise MissionError("invalid mission project catalog")
             try:
                 catalog = json.loads(raw, object_pairs_hook=_unique_json_object)
@@ -1478,21 +1499,25 @@ data:
             if (
                 not isinstance(catalog, dict)
                 or set(catalog) != {"schema_version", "projects"}
-                or catalog.get("schema_version") != 1
+                or catalog.get("schema_version") not in {1, 2}
                 or isinstance(catalog.get("schema_version"), bool)
                 or not isinstance(catalog.get("projects"), list)
-                or not 1 <= len(catalog["projects"]) <= 16
+                or not 1 <= len(catalog["projects"]) <= 64
             ):
                 raise MissionError("invalid mission project catalog")
             projects: list[dict[str, Any]] = []
             ids: set[str] = set()
             aliases: set[str] = set()
-            fields = {
+            legacy_fields = {
                 "project_id", "label", "repository", "summary", "aliases",
                 "dispatch_profile", "delivery_mode", "platforms",
             }
+            inventory_fields = legacy_fields | {"category", "status", "test_targets"}
             for item in catalog["projects"]:
-                if not isinstance(item, dict) or set(item) != fields:
+                expected_fields = (
+                    legacy_fields if catalog["schema_version"] == 1 else inventory_fields
+                )
+                if not isinstance(item, dict) or set(item) != expected_fields:
                     raise MissionError("invalid mission project catalog")
                 project_id = _require_id(item.get("project_id"), "project_id")
                 if project_id in ids:
@@ -1507,6 +1532,31 @@ data:
                     raise MissionError("invalid project repository")
                 if item.get("delivery_mode") != "none":
                     raise MissionError("unsupported mission delivery mode")
+                status = item.get("status", "ready")
+                category = item.get("category", "registered")
+                test_targets = item.get("test_targets", [])
+                if (
+                    status not in {"ready", "setup_required", "read_only", "archived"}
+                    or category not in {
+                        "registered", "pilot", "active-maintained", "support-only",
+                        "research", "mirror/fork", "release-only", "archived",
+                    }
+                    or not isinstance(test_targets, list)
+                    or len(test_targets) > 8
+                    or any(
+                        not isinstance(value, str) or not _ID.fullmatch(value)
+                        for value in test_targets
+                    )
+                    or len(set(test_targets)) != len(test_targets)
+                ):
+                    raise MissionError("invalid mission project catalog")
+                dispatch_profile = item.get("dispatch_profile")
+                if status == "ready":
+                    dispatch_profile = _require_id(
+                        dispatch_profile, "dispatch_profile"
+                    )
+                elif dispatch_profile is not None:
+                    raise MissionError("unavailable project has a dispatch profile")
                 item_aliases = item.get("aliases")
                 item_platforms = item.get("platforms")
                 if (
@@ -1537,10 +1587,11 @@ data:
                         "repository": repository,
                         "summary": summary,
                         "aliases": normalized_aliases,
-                        "dispatch_profile": _require_id(
-                            item.get("dispatch_profile"), "dispatch_profile"
-                        ),
+                        "dispatch_profile": dispatch_profile,
                         "delivery_mode": "none",
+                        "category": category,
+                        "status": status,
+                        "test_targets": test_targets,
                     })
             if not projects:
                 raise MissionError("owner channel has no registered delivery route")
@@ -1590,16 +1641,23 @@ data:
             "repository": "registered/default",
             "summary": "Legacy registered delivery profile",
             "aliases": ["default project"],
+            "category": "registered",
+            "status": "ready",
+            "test_targets": [],
             **target,
         }]
 
 
-    def public_intake_projects(platform: str) -> list[dict[str, str]]:
+    def public_intake_projects(platform: str) -> list[dict[str, Any]]:
         """Expose only owner-safe project metadata, never runtime paths or commands."""
         return [
-            {name: str(project[name]) for name in (
-                "project_id", "label", "repository", "summary", "delivery_mode"
-            ) if project.get(name) is not None}
+            {
+                **{name: str(project[name]) for name in (
+                    "project_id", "label", "repository", "summary", "delivery_mode",
+                    "category", "status",
+                ) if project.get(name) is not None},
+                "test_targets": list(project.get("test_targets", [])),
+            }
             for project in registered_intake_projects(platform)
         ]
 
@@ -1623,7 +1681,18 @@ data:
         else:
             matches = []
         if len(matches) != 1:
-            raise MissionProjectRequired(public_intake_projects(platform))
+            ready = [
+                project for project in public_intake_projects(platform)
+                if project.get("status") == "ready"
+            ]
+            raise MissionProjectRequired(ready)
+        if matches[0].get("status") != "ready":
+            raise MissionProjectUnavailable(
+                next(
+                    project for project in public_intake_projects(platform)
+                    if project.get("project_id") == matches[0]["project_id"]
+                )
+            )
         return matches[0]
 
 

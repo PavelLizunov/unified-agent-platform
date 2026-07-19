@@ -39,7 +39,7 @@ export const Route = createFileRoute('/api/mission-projects')({
           return Response.json({
             projects,
             selected_project_id: projects.some(
-              (project) => project.project_id === selected,
+              (project) => project.project_id === selected && project.status === 'ready',
             )
               ? selected
               : null,
@@ -64,8 +64,15 @@ export const Route = createFileRoute('/api/mission-projects')({
         }
         try {
           const projects = await catalog()
-          if (!projects.some((project) => project.project_id === projectId)) {
-            return Response.json({ error: 'Project is not registered' }, { status: 403 })
+          const project = projects.find((item) => item.project_id === projectId)
+          if (!project) {
+            return Response.json({ error: 'Проект не зарегистрирован' }, { status: 403 })
+          }
+          if (project.status !== 'ready') {
+            return Response.json(
+              { error: 'Для проекта ещё не настроен проверенный автономный профиль' },
+              { status: 409 },
+            )
           }
           return Response.json(
             { ok: true, selected_project_id: projectId },
