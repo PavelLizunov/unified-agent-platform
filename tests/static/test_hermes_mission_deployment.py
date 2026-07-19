@@ -43,7 +43,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v53-channel-completion-evidence"
+        "v54-ambiguous-author-recovery"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]

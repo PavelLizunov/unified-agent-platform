@@ -244,7 +244,9 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
         if not isinstance(progress, int) or isinstance(progress, bool) or not 0 <= progress <= 100:
             raise MissionError("invalid mission progress")
     if event_type == "mission.notice":
-        if payload.get("code") not in {"capacity_wait", "capacity_recovered"}:
+        if payload.get("code") not in {
+            "capacity_wait", "capacity_recovered", "execution_reconciling",
+        }:
             raise MissionError("invalid mission notice code")
         next_attempt = payload.get("next_attempt_at")
         if next_attempt is not None:

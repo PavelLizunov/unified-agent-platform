@@ -2488,7 +2488,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             }
             instance._save(paths, state)
 
-            with mock.patch.object(instance, "_reviewer_unit_is_gone", return_value=True):
+            with mock.patch.object(instance, "_model_unit_is_gone", return_value=True):
                 result = instance.tick()
 
             self.assertEqual("complete", result["action"])
@@ -2533,7 +2533,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
                 with (
                     mock.patch.object(
-                        instance, "_reviewer_unit_is_gone",
+                        instance, "_model_unit_is_gone",
                         return_value=observation != "active-unit",
                     ),
                     mock.patch.object(instance, "_git", side_effect=git),
@@ -2548,64 +2548,116 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 branch.assert_not_called()
                 draft.assert_not_called()
 
-    def test_ambiguous_author_remains_fail_closed(self):
+    def test_ambiguous_author_enters_existing_guarded_cleanup_after_unit_exit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             instance = coordinator.DeliveryCoordinator(
                 profile(root), FakeClient(), FakeBackend(), root / "state"
             )
             paths = instance._paths("ambiguous-author")
-            with mock.patch.object(instance, "_reviewer_unit_is_gone") as unit:
-                recovered = instance._reconcile_ambiguous_reviewer(
-                    {"phase": "claimed"}, paths, {"role": "author"}
-                )
-            self.assertFalse(recovered)
-            unit.assert_not_called()
+            paths["author"].mkdir(parents=True)
+            ambiguous = {"role": "author"}
+            state = {
+                "phase": "claimed",
+                "review_cycle": 1,
+                "model_ambiguous": ambiguous,
+            }
+            with (
+                mock.patch.object(instance, "_model_unit_is_gone", return_value=False),
+                mock.patch.object(instance, "_save") as save,
+            ):
+                self.assertFalse(instance._reconcile_ambiguous_author(state, paths, ambiguous))
+                save.assert_not_called()
+            with (
+                mock.patch.object(instance, "_model_unit_is_gone", return_value=True),
+                mock.patch.object(instance, "_save") as save,
+            ):
+                self.assertTrue(instance._reconcile_ambiguous_author(state, paths, ambiguous))
+                save.assert_called_once_with(paths, state)
+            self.assertNotIn("model_ambiguous", state)
+            self.assertEqual(
+                {
+                    "review_cycle": 1,
+                    "error": "interrupted author execution was discarded before automatic retry",
+                },
+                state["invalid_candidate_cleanup"],
+            )
 
-    def test_ambiguous_reviewer_waits_until_the_old_unit_is_unloaded(self):
-        for load_state, active_state, expected in (
-            ("loaded", "active", False),
-            ("loaded", "deactivating", False),
-            ("not-found", "inactive", True),
-        ):
-            with self.subTest(load_state=load_state, active_state=active_state):
-                with tempfile.TemporaryDirectory() as directory:
-                    root = pathlib.Path(directory)
-                    approved = profile(root)
-                    state = {
-                        "mission_id": "reviewer-unit",
-                        "review_cycle": 1,
-                        "candidate_sha": "candidate-sha",
-                        "prior_review_rejections": 0,
-                        "prior_ci_failures": 0,
-                        "prior_author_failures": 0,
-                        "route_decisions": {},
-                        "effective_route_decisions": {},
-                    }
-                    fake_run = mock.Mock(return_value=subprocess.CompletedProcess(
-                        [], 0,
-                        stdout=(
-                            f"LoadState={load_state}\n"
-                            f"ActiveState={active_state}\n"
-                        ),
-                        stderr="",
-                    ))
-                    instance = coordinator.DeliveryCoordinator(
-                        approved, FakeClient(), FakeBackend(), root / "state",
-                        runner=fake_run,
-                    )
-                    instance._ensure_route(state, instance._paths("reviewer-unit"))
-                    with (
-                        mock.patch.object(coordinator.subprocess, "run", fake_run),
-                        mock.patch.object(coordinator.os, "name", "posix"),
-                    ):
-                        gone = instance._reviewer_unit_is_gone(state)
+    def test_ambiguous_model_waits_until_the_exact_old_unit_is_unloaded(self):
+        for role in ("author", "reviewer"):
+            for load_state, active_state, expected in (
+                ("loaded", "active", False),
+                ("loaded", "deactivating", False),
+                ("not-found", "inactive", True),
+            ):
+                with self.subTest(role=role, load_state=load_state, active_state=active_state):
+                    with tempfile.TemporaryDirectory() as directory:
+                        root = pathlib.Path(directory)
+                        approved = profile(root)
+                        state = {
+                            "mission_id": "model-unit",
+                            "review_cycle": 1,
+                            "prior_review_rejections": 0,
+                            "prior_ci_failures": 0,
+                            "prior_author_failures": 0,
+                            "route_decisions": {},
+                            "effective_route_decisions": {},
+                        }
+                        if role == "reviewer":
+                            state["candidate_sha"] = "candidate-sha"
+                        fake_run = mock.Mock(return_value=subprocess.CompletedProcess(
+                            [], 0,
+                            stdout=(
+                                f"LoadState={load_state}\n"
+                                f"ActiveState={active_state}\n"
+                            ),
+                            stderr="",
+                        ))
+                        instance = coordinator.DeliveryCoordinator(
+                            approved, FakeClient(), FakeBackend(), root / "state",
+                            runner=fake_run,
+                        )
+                        instance._ensure_route(state, instance._paths("model-unit"))
+                        with (
+                            mock.patch.object(coordinator.subprocess, "run", fake_run),
+                            mock.patch.object(coordinator.os, "name", "posix"),
+                        ):
+                            gone = instance._model_unit_is_gone(state, role=role)
 
-                    self.assertEqual(expected, gone)
-                    command = fake_run.call_args.args[0]
-                    self.assertEqual("/usr/bin/systemctl", command[0])
-                    self.assertEqual(["--user", "show"], command[1:3])
-                    self.assertRegex(command[3], r"^uap-review-[0-9a-f]{24}\.service$")
+                        self.assertEqual(expected, gone)
+                        command = fake_run.call_args.args[0]
+                        self.assertEqual("/usr/bin/systemctl", command[0])
+                        self.assertEqual(["--user", "show"], command[1:3])
+                        unit_role = "author" if role == "author" else "review"
+                        self.assertRegex(
+                            command[3], rf"^uap-{unit_role}-[0-9a-f]{{24}}\.service$"
+                        )
+
+    def test_ambiguous_notice_is_owner_free_and_restart_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, FakeBackend(), root / "state"
+            )
+            state = {
+                "mission_id": "ambiguous-notice",
+                "root_task_id": "task-1",
+                "review_cycle": 2,
+            }
+
+            instance._publish_ambiguous_notice(state, {"role": "author"})
+            instance._publish_ambiguous_notice(state, {"role": "author"})
+
+            first, second = client.stages
+            self.assertEqual("mission.notice", first["type"])
+            self.assertEqual("execution_reconciling", first["payload"]["code"])
+            self.assertFalse(first["payload"]["owner_action_required"])
+            self.assertIn("automatic recovery", first["payload"]["message"])
+            self.assertEqual(
+                first["correlation"]["producer_event_id"],
+                second["correlation"]["producer_event_id"],
+            )
 
     def test_zero_exit_truncated_reviewer_stream_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
