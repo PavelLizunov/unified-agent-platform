@@ -698,7 +698,30 @@ def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
         assert answer["payload"] == {
             "question_id": "question-1",
             "source_message_id": "telegram-answer-1",
+            "source_platform": "telegram",
             "text": "Yes, preserve it",
+        }
+        behind = store.channel_evidence(mission_id)
+        assert behind["workspace"] == {
+            "cursor": answer["sequence"],
+            "projection_id": store.projection(mission_id)["projection_id"],
+        }
+        assert behind["telegram"] == {
+            "subscriber_count": 1,
+            "cursor": 0,
+            "projection_id": None,
+        }
+        subscription = store.pending_subscriptions(mission_id, answer["sequence"])[0]
+        token = store.claim_notification(subscription, answer["sequence"])
+        assert token
+        store.finish_notification(
+            subscription, answer["sequence"], token, delivered=True
+        )
+        converged = store.channel_evidence(mission_id)
+        assert converged["telegram"] == {
+            "subscriber_count": 1,
+            "cursor": answer["sequence"],
+            "projection_id": converged["workspace"]["projection_id"],
         }
         assert store.projection(mission_id)["status"] == "active"
         assert len(store.list(100)) == 1
@@ -843,6 +866,7 @@ def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None
         assert answer["payload"] == {
             "question_id": "workspace-question-1",
             "source_message_id": "workspace-answer-1",
+            "source_platform": "workspace",
             "text": "Yes, preserve it",
         }
         assert store.projection(mission_id)["status"] == "active"

@@ -135,6 +135,7 @@ def main() -> None:
         assert "unknown owner intake fields" in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
+        assert "payload[\"channels\"] = store.channel_evidence(mission_id)" in api
         assert "_handle_answer_mission" in api
         assert "_handle_finish_mission" in api
         append_handler = api[

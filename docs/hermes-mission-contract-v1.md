@@ -57,7 +57,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
-| `mission.answer` | `question_id`, `text` | records the redacted owner answer, clears that exact question and resumes `active` |
+| `mission.answer` | `question_id`, `text`; ordinary ingress also records `source_message_id`, `source_platform` | records the redacted owner answer and its server-owned channel lineage, clears that exact question and resumes `active` |
 | `task.upsert` | `task_id`, `title`, `status` | creates or replaces one task projection |
 | `worker.upsert` | `worker_id`, `status` | creates or replaces one worker projection |
 | `terminal.append` | `stream`, `text` | appends bounded terminal/tool output |
@@ -228,6 +228,10 @@ service:
   terminal notification on later ticks; the authenticated direct-loopback endpoint is limited to administrative `failed`/`cancelled`;
   forwarded client headers are ignored, and terminal retries with the same status and redacted message are idempotent;
 - the Workspace API proxies the structured central projection and the existing Dashboard polls it every two seconds;
+- the authenticated mission read response also exposes privacy-safe channel evidence: the current authoritative
+  Workspace API cursor/projection and the minimum delivered Telegram subscription cursor. It never exposes raw chat,
+  thread, session or message identifiers; a Telegram projection ID is present only when every bound subscriber has
+  reached the current Central sequence;
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open
   question on that binding. Workspace posts the same closed answer shape through its authenticated mission route, and
   owner-relevant stage/question/answer/terminal events render from the same projection and `projection_id`;

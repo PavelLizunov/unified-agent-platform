@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import hashlib
 import io
@@ -107,6 +108,7 @@ class FakeClient:
         }
         self.stages = []
         self.hide_terminal = False
+        self.channels = None
 
     def list_missions(self, _profile, *, reconcile=False):
         if self.hide_terminal:
@@ -118,6 +120,12 @@ class FakeClient:
 
     def get_mission(self, _mission_id):
         return {**self.mission, "status": "completed"}
+
+    def get_mission_payload(self, mission_id):
+        result = {"mission": self.get_mission(mission_id)}
+        if self.channels is not None:
+            result["channels"] = self.channels
+        return result
 
 
 class FakeBackend:
@@ -670,8 +678,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             root = pathlib.Path(directory)
             approved = reusable_profile(root)
             approved["route_flags"] = ["architecture_change"]
+            client = FakeClient()
             instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), FakeBackend(), root / "state"
+                approved, client, FakeBackend(), root / "state"
             )
             paths = instance._paths("mission-a7-3")
             waiting = {
@@ -3191,8 +3200,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
             approved = coordinator.load_profile(path)
             pathlib.Path(approved["source_checkout"]).mkdir(parents=True)
+            client = FakeClient()
             instance = coordinator.DeliveryCoordinator(
-                approved, FakeClient(), FakeBackend(), root / "state"
+                approved, client, FakeBackend(), root / "state"
             )
             source_key_sha256 = "b" * 64
             mission_id = "mission-intake-" + source_key_sha256[:32]
@@ -3217,7 +3227,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     b"Deliver a verified change"
                 ).hexdigest(),
                 "parent_mission_id": None,
-                "owner_answers": [],
+                "owner_answers": [{
+                    "question_id": "owner-gate:question",
+                    "text": "APPROVE",
+                    "sha256": hashlib.sha256(b"APPROVE").hexdigest(),
+                    "source_platform": "workspace",
+                    "source_message_sha256": "d" * 64,
+                }],
                 "phase": "task_completed",
                 "branch": "codex/a7-3-vpnrouter-evidence",
                 "root_task_id": "task-1",
@@ -3283,13 +3299,23 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 },
             }
             terminal = {
+                "mission_id": mission_id,
                 "status": "completed",
                 "sequence": 22,
                 "projection_id": "a" * 16,
                 "result": "Delivery completed, merged, and verified",
-                "input_platform": "workspace",
+                "input_platform": "telegram",
                 "input_source_key_sha256": source_key_sha256,
                 "input_source_message_sha256": "c" * 64,
+            }
+            client.mission = {"mission_id": mission_id, **terminal}
+            client.channels = {
+                "workspace": {"cursor": 22, "projection_id": "a" * 16},
+                "telegram": {
+                    "subscriber_count": 1,
+                    "cursor": 22,
+                    "projection_id": "a" * 16,
+                },
             }
             with (
                 mock.patch.object(instance, "_validate_review"),
@@ -3304,6 +3330,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     coordinator.DeliveryError, "partial input lineage"
                 ):
                     instance._completion_evidence(state, paths, partial)
+                legacy = instance._completion_evidence(state, paths, terminal)
+                self.assertEqual(2, legacy["schema_version"])
+                same_channel_state = copy.deepcopy(state)
+                same_channel_state["owner_answers"][0]["source_platform"] = "telegram"
+                same_channel = instance._completion_evidence(
+                    same_channel_state, paths, terminal, client.channels
+                )
+                self.assertEqual(2, same_channel["schema_version"])
                 instance._write_completion_evidence(state, paths, terminal)
 
             bundle = coordinator.mission_adapter._read_json(paths["evidence"])
@@ -3313,11 +3347,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(bundle["sha256"], state["completion_evidence_sha256"])
             self.assertEqual([101, 102], bundle["delivery"]["ci_run_ids"])
             self.assertEqual(candidate, bundle["reviewer"]["reviewed_sha"])
-            self.assertEqual(2, bundle["schema_version"])
-            self.assertEqual("workspace", bundle["input"]["platform"])
+            self.assertEqual(3, bundle["schema_version"])
+            self.assertEqual("telegram", bundle["input"]["platform"])
             self.assertEqual(
                 source_key_sha256, bundle["input"]["source_key_sha256"]
             )
+            self.assertEqual("workspace", bundle["interaction"]["owner_answers"][0]["platform"])
+            self.assertEqual(22, bundle["channels"]["telegram"]["cursor"])
             if os.name == "posix":
                 self.assertEqual(0o600, paths["evidence"].stat().st_mode & 0o777)
 

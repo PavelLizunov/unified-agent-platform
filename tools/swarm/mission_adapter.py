@@ -535,14 +535,20 @@ class CentralMissionClient:
             raise AdapterError("central mission list is invalid")
         return missions
 
-    def get_mission(self, mission_id: str) -> dict[str, Any]:
+    def get_mission_payload(self, mission_id: str) -> dict[str, Any]:
         result = self._request(
             "GET", f"/api/missions/{urllib.parse.quote(mission_id, safe='')}"
         )
         mission = result.get("mission")
         if not isinstance(mission, dict):
             raise AdapterError("central mission API returned an invalid projection")
-        return mission
+        channels = result.get("channels")
+        if channels is not None and not isinstance(channels, dict):
+            raise AdapterError("central mission API returned invalid channel evidence")
+        return result
+
+    def get_mission(self, mission_id: str) -> dict[str, Any]:
+        return self.get_mission_payload(mission_id)["mission"]
 
     def accept_mission(
         self,
