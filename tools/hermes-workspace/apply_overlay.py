@@ -78,6 +78,12 @@ LEGACY_ADDED_FILES = {
     "src/screens/dashboard/components/mission-overview-card.tsx": "7ab5ceff84f8b8a6eefd8acf694dfd27047b57ac25d73956707fbf2ea9088c45",
 }
 PREVIOUS_ADDED_FILES = {
+    "src/routes/api/mission-projects.ts": (
+        "e24378c6bd13f6bd4af0da76a7353b192e1c5ebcfb6aa6feb294ef7dea7a053b",
+    ),
+    "src/components/settings/project-permissions.tsx": (
+        "ffb920cb09279eabc136e91131771b26df8d0b47636b11784ae2657aea4ca093",
+    ),
     "src/routes/api/missions.ts": (
         "082ffe7f4d100d8a5a64fbde40893cfba1f98a1774c914acb2495ce1a857a243",
     ),

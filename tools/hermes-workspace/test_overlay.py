@@ -16,6 +16,7 @@ PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
 CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
 PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
 PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
+PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -135,6 +136,22 @@ def main() -> None:
         assert previous_check.stdout.count("previous-needs-overlay") == 2
         previous_upgrade = run(clone)
         assert previous_upgrade.returncode == 0
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
+
+        for relative in (
+            "src/routes/api/mission-projects.ts",
+            "src/components/settings/project-permissions.tsx",
+        ):
+            previous_asset = subprocess.check_output(
+                ["git", "show", f"{PREVIOUS_PERMISSIONS_COMMIT}:tools/hermes-workspace/files/{relative}"],
+                cwd=REPO_ROOT,
+            )
+            (clone / relative).write_bytes(previous_asset)
+        previous_permissions_check = run(clone, "--check")
+        assert previous_permissions_check.returncode == 0
+        assert previous_permissions_check.stdout.count("previous-needs-overlay") == 2
+        previous_permissions_upgrade = run(clone)
+        assert previous_permissions_upgrade.returncode == 0
         assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
         assignees = (clone / "src/routes/api/claude-tasks-assignees.ts").read_text()
