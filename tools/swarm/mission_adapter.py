@@ -37,7 +37,8 @@ PAYLOAD_FIELDS = {
     "delivery.upsert": {"kind", "status", "url"},
 }
 MAX_LOG_BYTES = 1024 * 1024
-MAX_TERMINAL_CHUNK_BYTES = 16 * 1024
+MAX_EVENT_JSON_BYTES = 65_536
+OVERSIZED_TERMINAL_LINE = "[REDACTED: oversized terminal line]"
 
 
 def _latest_sticky_event(events: Any) -> dict[str, Any] | None:
@@ -710,47 +711,53 @@ def _worker_metadata_events(
     return events
 
 
-def _utf8_chunks(text: str) -> list[tuple[str, int]]:
-    encoded = text.encode("utf-8")
-    chunks = []
-    start = 0
-    while start < len(encoded):
-        end = min(start + MAX_TERMINAL_CHUNK_BYTES, len(encoded))
-        while end < len(encoded) and encoded[end] & 0xC0 == 0x80:
-            end -= 1
-        chunk = encoded[start:end].decode("utf-8")
-        chunks.append((chunk, end - start))
-        start = end
-    return chunks
-
-
 def _terminal_events(mission_id: str, task_id: str, text: str, terminal: bool) -> list[dict[str, Any]]:
-    tail: list[tuple[int, str, int]] = []
+    tail: list[tuple[dict[str, Any] | None, int]] = []
     retained_bytes = 0
     offset = 0
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith(("\n", "\r")) and not terminal:
         lines.pop()
     for line in lines:
-        for chunk, chunk_bytes in _utf8_chunks(line):
-            chunk_offset = offset
-            offset += chunk_bytes
-            if not chunk.strip():
-                continue
-            tail.append((chunk_offset, chunk, chunk_bytes))
-            retained_bytes += chunk_bytes
-            while retained_bytes > MAX_LOG_BYTES:
-                retained_bytes -= tail.pop(0)[2]
+        line_bytes = len(line.encode("utf-8"))
+        event = None
+        if line.strip():
+            event = _producer_event(
+                mission_id,
+                "terminal.append",
+                {"stream": "stdout", "text": line, "offset": offset},
+                {"task_id": task_id},
+            )
+            encoded_event = json.dumps(
+                event, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            if len(encoded_event) > MAX_EVENT_JSON_BYTES:
+                ending = (
+                    "\r\n" if line.endswith("\r\n")
+                    else "\n" if line.endswith("\n")
+                    else "\r" if line.endswith("\r")
+                    else ""
+                )
+                replacement = OVERSIZED_TERMINAL_LINE + ending
+                replacement_bytes = len(replacement.encode("utf-8"))
+                event = _producer_event(
+                    mission_id,
+                    "terminal.append",
+                    {
+                        "stream": "stdout",
+                        "text": replacement,
+                        "offset": offset + line_bytes - replacement_bytes,
+                    },
+                    {"task_id": task_id},
+                )
+        offset += line_bytes
+        retained_span = min(line_bytes, MAX_LOG_BYTES)
+        tail.append((event, retained_span))
+        retained_bytes += retained_span
+        while retained_bytes > MAX_LOG_BYTES:
+            retained_bytes -= tail.pop(0)[1]
 
-    events = []
-    for chunk_offset, chunk, _chunk_bytes in tail:
-        events.append(_producer_event(
-            mission_id,
-            "terminal.append",
-            {"stream": "stdout", "text": chunk, "offset": chunk_offset},
-            {"task_id": task_id},
-        ))
-    return events
+    return [event for event, _span in tail if event is not None]
 
 
 def project_task_snapshot(
