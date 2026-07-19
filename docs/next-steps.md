@@ -341,6 +341,13 @@ not add an application service, workflow engine or mission database.
     diagnostics. This closes the exact registered no-deploy two-window certificate, not arbitrary repository/profile
     discovery, actual deploy/release modes, full cross-channel chat transcripts, HA or a platform-wide GPU/local hard
     deny. See the [attestation evidence](evidence/signed-completion-attestation-2026-07-19.md).
+16. **Interrupted-author recovery and Russian progress — ✅ DEPLOYED PASS (2026-07-19).** PR #299 replaces the last
+    permanent `reconciling` edge with the existing bounded rejection/cleanup/archive path when the exact old author
+    unit and its disposable worktree are both gone. It does not start a second author or convert operational loss into
+    quality escalation. Telegram and Workspace now present the same durable stage, retry, owner-question and result
+    state in clearer Russian. PR #300 added the exact prior-card upgrade hash after the first rollout attempt stopped
+    fail-closed. Final Flux revision `97e6fb4...`, mounted/installed hashes, Workspace build/HTTP and six natural timer
+    ticks passed. See the [rollout evidence](evidence/interrupted-author-and-russian-progress-rollout-2026-07-19.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and
