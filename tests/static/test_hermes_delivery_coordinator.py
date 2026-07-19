@@ -584,6 +584,111 @@ class RepairCoordinator(HermeticCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def test_missing_delivery_state_with_projected_task_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            client = FakeClient()
+            client.mission.update(
+                goal="Deliver a reusable mission",
+                tasks=[{"task_id": "task-1", "status": "running"}],
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+
+            with (
+                mock.patch.object(instance, "_ensure_worktree") as ensure_worktree,
+                mock.patch.object(instance, "_author") as author,
+                mock.patch.object(instance, "_git") as git,
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "execution history"
+                ),
+            ):
+                instance.tick()
+
+            ensure_worktree.assert_not_called()
+            author.assert_not_called()
+            git.assert_not_called()
+            self.assertFalse(instance._paths("mission-a7-3")["state"].exists())
+
+    def test_missing_delivery_state_with_local_artifacts_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            client = FakeClient()
+            client.mission["goal"] = "Deliver a reusable mission"
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            paths["author"].mkdir(parents=True)
+            (paths["author"] / "candidate.txt").write_text(
+                "uncheckpointed candidate\n", encoding="utf-8"
+            )
+
+            with (
+                mock.patch.object(instance, "_ensure_worktree") as ensure_worktree,
+                mock.patch.object(instance, "_author") as author,
+                mock.patch.object(instance, "_git") as git,
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "local execution artifacts"
+                ),
+            ):
+                instance.tick()
+
+            ensure_worktree.assert_not_called()
+            author.assert_not_called()
+            git.assert_not_called()
+            self.assertEqual(
+                "uncheckpointed candidate\n",
+                (paths["author"] / "candidate.txt").read_text(encoding="utf-8"),
+            )
+            self.assertFalse(paths["state"].exists())
+
+    def test_missing_delivery_state_initializes_only_pristine_mission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            client = FakeClient()
+            client.mission["goal"] = "Deliver a reusable mission"
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+
+            state = instance._load_state(
+                "mission-a7-3", paths, mission=client.mission
+            )
+
+            self.assertEqual("new", state["phase"])
+            self.assertEqual({}, state["route_decisions"])
+            self.assertFalse(paths["state"].exists())
+
+    def test_missing_automatic_owner_gate_state_does_not_recreate_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved["route_flags"] = ["architecture_change"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            waiting = {
+                "mission_id": "mission-a7-3",
+                "goal": "Deliver a reusable mission",
+                "status": "waiting_owner",
+                "question": {"question_id": "q-owner-gate", "text": "APPROVE?"},
+                "tasks": [{"task_id": "task-1", "status": "blocked", "assignee": None}],
+            }
+
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "execution history"
+            ):
+                instance._load_state("mission-a7-3", paths, mission=waiting)
+
+            self.assertFalse(paths["state"].exists())
+
     def test_owner_question_rejects_nonsticky_blocked_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

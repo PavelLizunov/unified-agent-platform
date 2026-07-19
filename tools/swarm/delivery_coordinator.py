@@ -1808,7 +1808,13 @@ class DeliveryCoordinator:
             validated.append(dict(answer))
         return validated
 
-    def _load_state(self, mission_id: str, paths: dict[str, pathlib.Path]) -> dict[str, Any]:
+    def _load_state(
+        self,
+        mission_id: str,
+        paths: dict[str, pathlib.Path],
+        *,
+        mission: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if paths["state"].is_file():
             state = mission_adapter._read_json(paths["state"])
             if (
@@ -1906,6 +1912,50 @@ class DeliveryCoordinator:
             "owner_answers": [],
             "crash_injected": False,
         }
+        safe_waiting_owner = False
+        if mission is not None:
+            tasks = mission.get("tasks")
+            if not isinstance(tasks, list):
+                raise DeliveryError("mission task projection is invalid")
+            question = mission.get("question")
+            if len(tasks) == 1 and isinstance(tasks[0], dict):
+                task = tasks[0]
+                decision = flow_contract.choose_delivery_route(
+                    self.policy, self._route_signals(state)
+                )
+                safe_waiting_owner = (
+                    mission.get("status") == "waiting_owner"
+                    and isinstance(question, dict)
+                    and task.get("status") == "blocked"
+                    and task.get("assignee") is None
+                    and decision.get("status") == "ready"
+                )
+            if tasks and not safe_waiting_owner:
+                raise DeliveryError(
+                    "delivery state is missing for a mission with execution history"
+                )
+        allowed_state_files = {paths["lock"].name}
+        if paths["repair_context"].is_file():
+            allowed_state_files.add(paths["repair_context"].name)
+        if safe_waiting_owner:
+            allowed_state_files.add("adapter-state.json")
+        directory_artifacts = (
+            [
+                entry
+                for entry in paths["directory"].iterdir()
+                if entry.name not in allowed_state_files
+            ]
+            if paths["directory"].is_dir()
+            else []
+        )
+        worktree_artifacts = [
+            paths[name] for name in ("author", "review", "verify")
+            if paths[name].exists()
+        ]
+        if directory_artifacts or worktree_artifacts:
+            raise DeliveryError(
+                "delivery state is missing for a mission with local execution artifacts"
+            )
         if paths["repair_context"].is_file():
             context = mission_adapter._read_json(paths["repair_context"])
             expected = {
@@ -4387,7 +4437,7 @@ class DeliveryCoordinator:
         mission_id = mission["mission_id"]
         paths = self._paths(mission_id)
         with exclusive_lock(paths["lock"]):
-            state = self._load_state(mission_id, paths)
+            state = self._load_state(mission_id, paths, mission=mission)
             if state.get("phase") != "complete":
                 self._record_systemd_invocation(state, paths)
             self._bind_mission_goal(state, mission, paths)
