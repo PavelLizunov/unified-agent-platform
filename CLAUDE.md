@@ -210,18 +210,22 @@ Good next tasks that do not require redesign:
    canonical completion bundle. The campaign preserved its durable mission while PRs #271–#273 corrected reviewer
    recovery and Central historical-worker completion, so it is adversarial recovery evidence rather than a clean
    frozen-runtime run. Evidence: `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
-   PR #275 introduces and deploys completion-bundle schema v2 for future registered ordinary missions. It
+   PR #275 introduces and deploys completion-bundle schema v2 for registered ordinary missions. It
    binds the server-owned Workspace/Telegram platform and hashed source key/message to deterministic
    `mission-intake-*`, keeps existing v1 bundles valid and stores no raw channel/message identity. Central/build-1
-   exact rollout and component verification passed; one new live artifact remains the evidence gate. Channel cursors
-   and signing remain later fields. Evidence:
-   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
+   exact rollout and component verification passed. Owner-gated mission
+   `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` produced the first live v2 artifact; the installed verifier
+   accepted semantic digest `4dbb3b92...`. Signing remains a later field. Evidence:
+   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md` and
+   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
    The live terminal message exposed a UX gap: it only rendered `Delivery completed, merged, and verified` even though
    PR/check/merge/change facts were durable. Current source fixes the shared Central authority boundary with one
    bounded deterministic result derived from the accepted goal and existing projected delivery facts; Workspace and
    Telegram require no separate formatter and no extra model call. PR #277 passed CI, exact Flux/mounted-runtime and
-   in-pod Central/Telegram component proof; a real terminal message remains pending. Evidence:
-   `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md`.
+   in-pod Central/Telegram component proof. The owner-gated live mission then emitted the concrete goal, PR #9, merge,
+   gates, no-deploy applicability and changed paths. Evidence:
+   `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md` and
+   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
    A bound `waiting_owner` Telegram mission now accepts a normal message as its idempotent source-linked answer;
    PR #264 is deployed and passed an in-pod component check. The equivalent exact-Workspace-session path is deployed
    through PR #270 and passed its in-pod component check. A real cross-channel owner question/resume path remains the
@@ -229,10 +233,12 @@ Good next tasks that do not require redesign:
    `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md`.
    The answer rollout records are `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
    `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
-   Current source closes the missing producer for the narrow executable owner gate: an approved-profile
+   The missing producer for the narrow executable owner gate is deployed: an approved-profile
    `architecture_change` first creates one inert sticky-blocked root, publishes a mission/goal/policy-bound question,
-   accepts only exact `APPROVE`, and resumes that same root restart-safely before any model turn. Other privileged
-   flags remain fail-closed. Merge/deploy and the real Telegram-origin/Workspace-answer canary are next.
+   accepts only exact `APPROVE`, and resumes that same root restart-safely before any model turn. PRs #281-#283 and the
+   already armed sixth timer passed the live Telegram question/answer/delivery canary through PR #9 and terminal
+   sequence 27. Other privileged flags remain fail-closed; a Telegram-origin answer through Workspace is still the
+   narrower cross-channel evidence gap.
 5. ADR-031 replaces per-attempt model approvals. Luna/Sol/Terra selection, reasoning effort, retries, normal tests/VMs,
    PR/CI/merge and repo-defined deploy/post-verify are standing-approved platform duties; ordinary spend is not a
    dangerous operation. Claude, local inference/GPU, a new provider/credential, destructive tests against
@@ -253,10 +259,12 @@ Good next tasks that do not require redesign:
    runtime-attested Terra review of the exact candidate inside the corrected transient unit. Author ambiguity remains
    fail-closed. Evidence: `docs/evidence/reviewer-os-isolation-rollout-2026-07-18.md`.
    PR #279 applies the same installed namespace to author turns with only the disposable author worktree writable in
-   addition to model/Codex homes. Exact source/installed hashes, installed adversarial preflight and all five timers are
+   addition to model/Codex homes. Exact source/installed hashes, installed adversarial preflight and all six standing timers are
    green. A controlled real Sol `xhigh` author changed only its allowed file and passed rollout-derived runtime
-   attestation inside the boundary. A complete ordinary mission on this exact combined revision remains pending.
-   Evidence: `docs/evidence/author-os-isolation-rollout-2026-07-19.md`.
+   attestation inside the boundary. The owner-gated ordinary mission then completed Sol authoring, Terra review, PR #9,
+   CI, merge, post-verify and cleanup on the exact combined revision. Evidence:
+   `docs/evidence/author-os-isolation-rollout-2026-07-19.md` and
+   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
 6. Run `tests/ops/check-ops-node.ps1 -Require` and `tests/ops/check-ops-deploy-path.ps1 -Require` after any ops-node changes.
 7. Import existing Proxmox VMs into OpenTofu state only after reviewing the plan carefully.
 8. Cross-review update: GitHub branch protection/least privilege and the 2026-07-12 cross-node canary Secret

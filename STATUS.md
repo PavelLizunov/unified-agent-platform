@@ -144,8 +144,10 @@ Last updated: 2026-07-19
   hidden. PR #279 passed required CI, exact merge `fd5199d...` is installed, source/installed coordinator hashes match,
   the installed adversarial wrapper probe passed and all five timers resumed. A controlled real Sol `xhigh` author
   changed only its allowed disposable file and passed rollout-derived OpenAI/workspace-write attestation inside the
-  boundary. A complete ordinary mission on this exact revision remains the stronger end-to-end gate. Exact evidence:
-  `docs/evidence/author-os-isolation-rollout-2026-07-19.md`.
+  boundary. Ordinary owner-gated mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` then completed Sol
+  authoring, Terra review, PR #9, CI, merge, post-verify and cleanup on that installed boundary. Exact evidence:
+  `docs/evidence/author-os-isolation-rollout-2026-07-19.md` and
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
   Central dispatch admission also keeps one serial execution lane per exact profile: while a nonterminal mission has
   a projected task, later accepted missions remain durable FIFO candidates but are not handed off. A hermetic
   MissionStore/adapter restart test proves that the successor receives a distinct root only after the predecessor is
@@ -176,32 +178,38 @@ Last updated: 2026-07-19
   schema v1 and therefore does not contain input lineage.
   Exact evidence: `docs/evidence/canonical-completion-evidence-rollout-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
-  PR #275 now deploys closed bundle schema v2 for future registered ordinary intake: Central persists only the
+  PR #275 deploys closed bundle schema v2 for registered ordinary intake: Central persists only the
   server-owned `workspace`/`telegram` platform plus full source-key and source-message SHA-256 values, the verifier
   requires the source-key prefix to match deterministic `mission-intake-*`, and existing v1 bundles remain valid.
-  Flux exact-SHA rollout, in-pod deterministic/replay proof, build-1 exact installation, natural timer success and
-  installed v1/v2 verifier checks passed. A new live v2 bundle is still required; channel delivery cursors,
-  timer-origin proof and signing remain separate gaps. Exact rollout evidence:
-  `docs/evidence/completion-input-lineage-rollout-2026-07-18.md`.
-- **Owner terminal result has a deployed concrete shared formatter (2026-07-19; component PASS).** The successful ordinary Telegram
+  Flux exact-SHA rollout, in-pod deterministic/replay proof, build-1 exact installation and installed v1/v2 verifier
+  checks passed. Owner-gated Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` then produced the
+  first live v2 bundle; the installed verifier accepted semantic digest `4dbb3b92...`. The bundle binds input lineage,
+  owner-answer hash and five systemd service invocations. Signing remains a separate gap. Exact evidence:
+  `docs/evidence/completion-input-lineage-rollout-2026-07-18.md` and
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+- **Owner terminal result has a live concrete shared result (2026-07-19).** The earlier successful ordinary Telegram
   campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
   rendered to the owner: the implemented `summary` behavior, changed API/CLI/tests/README, target PR #8, green
   multi-platform CI and merged revision. Current source replaces the constant at Central's single terminal-authority
   boundary with one bounded deterministic result built from the accepted goal plus projected changed paths, PR,
   verified default revision, required gates and delivery applicability. Workspace and Telegram already render that
   same projection; no new model call or channel-specific state is added. PR #277 passed required CI, Flux applied exact
-  merge `40255f04...`, mounted runtime bytes matched and an in-pod temporary-store assertion proved the full Central and
-  Telegram text. A later live terminal message remains the evidence gate. Exact rollout evidence:
-  `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md`.
-- **Ordinary bound Telegram owner answers are deployed with a live component pass (2026-07-18).** The ordinary Telegram ingress
+  merge `40255f04...`, mounted runtime bytes matched and an in-pod temporary-store assertion passed. Mission
+  `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` later delivered the first live concrete result with its accepted
+  goal, PR #9, merge, gates, delivery applicability and four changed paths. Exact evidence:
+  `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md` and
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+- **Ordinary bound Telegram owner answers passed live (2026-07-19).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message
   ID is persisted in `mission.answer`, so restart/lost-response replay returns the same event and a changed replay
   fails closed. PR #264 passed CI, Flux applied exact merge `4cd2c60f...`, the rolled pod's mounted hashes matched the
   merged runtime and pinned overlay outputs, API health returned 200 and an in-pod temporary-store scenario passed.
-  A real owner-channel question/answer canary is still required. Ordinary Workspace chat answers and complete
-  cross-channel transcript synchronization are not claimed. Exact evidence:
-  `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md`.
+  The owner-gated live canary then rejected unrelated `/approve`, stored exact ordinary `APPROVE` once, resumed the
+  same root and completed delivery. Ordinary Workspace chat answers remain component-proven; complete cross-channel
+  transcript synchronization is not claimed. Exact evidence:
+  `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
 - **Ordinary Workspace owner answers are deployed with a live component pass (2026-07-18).** A later ordinary message in
   the exact Central session that accepted a mission now answers its single open question through
   `MissionStore.ingest_owner_turn()` instead of creating a second goal. The stable source message ID survives restart
@@ -210,13 +218,16 @@ Last updated: 2026-07-19
   `5d95eada...`, the mounted runtime/overlay hashes matched and an in-pod temporary-store scenario returned
   `live-workspace-answer-component-ok`. A real cross-channel owner question/answer canary is still required. Exact
   evidence: `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
-- **Automatic pre-execution owner-question production is implemented in source (2026-07-19).** An approved-profile
+- **Automatic pre-execution owner-question production passed live (2026-07-19).** An approved-profile
   `architecture_change` now creates/reconciles one inert sticky-blocked root before publishing a deterministic
   `mission.question` bound to mission/goal/policy identity. Central accepts only exact `APPROVE`; response loss and
   restart converge on the same question/root, then the durable answer resumes that root and the approved flag is
   removed only from the exact route calculation. Local/GPU, new provider, credentials and destructive flags remain
-  fail-closed. Coordinator and MissionStore regressions pass; merge, rollout and a real Telegram-origin/Workspace-answer
-  canary remain pending.
+  fail-closed. PRs #281-#283 passed CI and were installed through exact Flux/build-1 rollout. Ordinary Telegram mission
+  `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` produced the question before any model, accepted exact ordinary
+  `APPROVE`, resumed the same root and completed PR #9 through terminal and cleanup. A Telegram-origin answer through
+  Workspace remains the narrower pending cross-channel proof. Exact evidence:
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
