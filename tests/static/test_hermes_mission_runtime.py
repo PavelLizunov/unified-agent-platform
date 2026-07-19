@@ -669,6 +669,153 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             assert len(restarted.list(100)) == before
 
 
+def test_registered_project_selection_is_durable_and_restart_safe() -> None:
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnctl",
+                "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl",
+                "summary": "Rust VPN control plane",
+                "aliases": ["vpn ctl", "впн контроллер"],
+                "dispatch_profile": "build1-vpnctl-registered-v4",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnrouter",
+                "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter",
+                "summary": "Windows VPN router",
+                "aliases": ["vpn router", "впн роутер"],
+                "dispatch_profile": "build1-vpnrouter-registered-v4",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        public = missions.public_intake_projects("workspace")
+        assert [item["project_id"] for item in public] == ["vpnctl", "vpnrouter"]
+        assert all("dispatch_profile" not in item for item in public)
+
+        accepted, created = store.ingest_owner_turn(
+            "Add a deterministic status command",
+            platform="workspace",
+            project_id="vpnctl",
+            source_message_id="workspace-project-goal",
+            session_id="workspace-project-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "vpnctl"
+        assert accepted["payload"]["dispatch_profile"] == "build1-vpnctl-registered-v4"
+        assert store.projection(accepted["mission_id"])["project_id"] == "vpnctl"
+
+        try:
+            store.ingest_owner_turn(
+                "Improve status reporting",
+                platform="telegram",
+                source_message_id="telegram-project-goal",
+                session_id="telegram-project-session",
+                chat_id="owner-project-chat",
+            )
+            raise AssertionError("ambiguous Telegram goal was accepted")
+        except missions.MissionProjectRequired as error:
+            assert len(error.projects) == 2
+        assert len(store.list(100)) == 1
+
+        restarted = missions.MissionStore(database)
+        try:
+            restarted.ingest_owner_turn(
+                "Improve status reporting",
+                platform="telegram",
+                source_message_id="telegram-project-goal",
+                session_id="telegram-project-session",
+                chat_id="owner-project-chat",
+            )
+            raise AssertionError("replayed ambiguous goal was accepted")
+        except missions.MissionProjectRequired:
+            pass
+
+        selected, selected_created = restarted.ingest_owner_turn(
+            "vpnctl",
+            platform="telegram",
+            source_message_id="telegram-project-selection",
+            session_id="telegram-project-session",
+            chat_id="owner-project-chat",
+        )
+        assert selected_created
+        assert selected["payload"]["goal"] == "Improve status reporting"
+        assert selected["payload"]["project_id"] == "vpnctl"
+        selection_replay, replay_created = missions.MissionStore(database).ingest_owner_turn(
+            "vpnctl",
+            platform="telegram",
+            source_message_id="telegram-project-selection",
+            session_id="telegram-project-session",
+            chat_id="owner-project-chat",
+        )
+        assert not replay_created and selection_replay == selected
+
+        later, later_created = restarted.ingest_owner_turn(
+            "VPNRouter: add one regression test",
+            platform="telegram",
+            source_message_id="telegram-next-goal",
+            session_id="telegram-project-session",
+            chat_id="owner-project-chat",
+        )
+        assert later_created and later["payload"]["project_id"] == "vpnrouter"
+        delayed_selection_replay, delayed_created = restarted.ingest_owner_turn(
+            "vpnctl",
+            platform="telegram",
+            source_message_id="telegram-project-selection",
+            session_id="telegram-project-session",
+            chat_id="owner-project-chat",
+        )
+        assert not delayed_created and delayed_selection_replay == selected
+        assert len(restarted.list(100)) == 3
+
+        try:
+            store.ingest_owner_turn(
+                "Add a deterministic status command",
+                platform="workspace",
+                project_id="vpnrouter",
+                source_message_id="workspace-project-goal",
+                session_id="workspace-project-session",
+            )
+            raise AssertionError("changed project replay was accepted")
+        except missions.MissionError as error:
+            assert "different parameters" in str(error)
+
+        malformed = json.dumps({
+            "schema_version": 1,
+            "projects": [
+                {
+                    "project_id": "one", "label": "One", "repository": "owner/one",
+                    "summary": "One", "aliases": ["same"], "dispatch_profile": "one",
+                    "delivery_mode": "none", "platforms": ["workspace"],
+                },
+                {
+                    "project_id": "two", "label": "Two", "repository": "owner/two",
+                    "summary": "Two", "aliases": ["same"], "dispatch_profile": "two",
+                    "delivery_mode": "none", "platforms": ["workspace"],
+                },
+            ],
+        })
+        with mock.patch.dict(
+            os.environ, {"HERMES_MISSION_PROJECTS": malformed}, clear=True
+        ):
+            try:
+                missions.registered_intake_projects("workspace")
+                raise AssertionError("ambiguous catalog alias was accepted")
+            except missions.MissionError as error:
+                assert "ambiguous project alias" in str(error)
+
+
 def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
     routes = json.dumps({
         "telegram": {
@@ -2377,6 +2524,7 @@ def main() -> None:
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
     test_registered_owner_intake_is_deterministic_and_fail_closed()
+    test_registered_project_selection_is_durable_and_restart_safe()
     test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
     test_owner_gate_accepts_only_exact_approval_without_clearing_question()
     test_session_ordinary_owner_turn_answers_once_and_survives_restart()

@@ -53,7 +53,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 
 | Type | Required payload | Projection effect |
 |---|---|---|
-| `mission.accepted` | `goal`; optional `dispatch_profile` | status becomes `active`, stage `accepted` |
+| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
@@ -85,21 +85,29 @@ configuration match authorizes handoff. An absent or unknown label does not disp
 
 ### Deterministic ordinary owner intake
 
-The owner-facing `POST /api/missions` primitive has a shape closed to `goal`, channel identity and a stable
-source-message ID. It does not accept a repository, path, command, model or `dispatch_profile`. When enabled, Central
-resolves the exact profile from its server-owned `HERMES_MISSION_INTAKE_ROUTES` registry; the matching build-1 profile
-remains the authority for repository and execution boundaries. An absent, malformed or unknown channel route fails
-before any mission event is stored. The owner branch requires the separate `HERMES_MISSION_OWNER_KEY`; a caller with
+The owner-facing `POST /api/missions` primitive has a shape closed to `goal`, channel identity, an optional registered
+`project_id` selector and a stable source-message ID. It does not accept a repository, path, command, model or
+`dispatch_profile`. Central resolves the exact profile from its closed server-owned `HERMES_MISSION_PROJECTS` catalog;
+the matching build-1 profile remains the authority for repository and execution boundaries. The legacy single-route
+environment remains accepted only as a backward-compatible fallback. An absent, malformed, ambiguous or unknown
+project route fails before any mission event is stored. The owner branch requires the separate
+`HERMES_MISSION_OWNER_KEY`; a caller with
 only the generic API bearer or producer key cannot impersonate owner intake. Producer-authenticated repair/internal
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
-The production manifest maps `workspace` and `telegram` only to the repo-owned
-`build1-flow-pilot-registered-v4` profile and explicitly marks that target `delivery_mode: none`. Workspace forwards
-its existing stable optimistic message identity to the
-Central session stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery.
+The production catalog currently exposes three repo-owned no-deploy projects to Workspace and Telegram: Mission
+Ledger, `vpnctl` and `VPNRouter`. Workspace's **Projects & permissions** settings view lists only owner-safe catalog
+metadata and stores one selected `project_id`; Central independently validates it. Telegram resolves an exact project
+alias from the goal when possible. Otherwise Central durably stores the redacted goal as an intake draft and asks for
+one project name. The selection resumes the original source message, survives restart and has its own durable replay
+receipt, so a delayed Telegram retry cannot create a second mission. No model is used for repository selection.
+
+Workspace forwards its existing stable optimistic message identity and selected project to the Central session
+stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice
+notes reuse Hermes's existing configured STT path before mission intake; failed transcription creates no mission.
 Both handlers call the same `ingest_owner_turn()` primitive and return a deterministic acknowledgement without
 running the generic Hermes chat model. The profile, repository, paths, checks, OpenAI route and commands remain
-server-owned. Removing or corrupting the registry therefore disables new ordinary intake before mission state or a
+server-owned. Removing or corrupting the catalog therefore disables new ordinary intake before mission state or a
 worker is created.
 
 `delivery_mode: none` is immutable mission acceptance data, not an inference from the completed checks. Central will

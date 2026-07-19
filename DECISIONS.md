@@ -576,3 +576,25 @@
   обязан использовать `delivery-route`. Raw CI logs не становятся durable prompt/state: сохраняются только bounded
   check-name/outcome metadata, а author повторно запускает repo-contract gates. ADR-028 superseded только в части
   model routing/review-mode; ADR-030 owner gates уточнены этой ADR.
+
+## ADR-032 — Зарегистрированные проекты и owner-safe выбор репозитория
+
+- **Контекст:** ordinary Workspace/Telegram intake был доказан только для одного заранее выбранного delivery profile.
+  Владелец не мог безопасно выбрать `vpnctl`, `VPNRouter` или другой уже разрешённый репозиторий: передача пути либо
+  `dispatch_profile` из браузера/сообщения разрушила бы server-owned authority, а запуск модели только для определения
+  репозитория добавил бы недетерминированность до durable mission.
+- **Решение:** Central Hermes хранит закрытый `HERMES_MISSION_PROJECTS` catalog. Каждая запись связывает публичные
+  `project_id`/label/repository/aliases с точным server-owned schema-v4 profile и `delivery_mode`. Workspace показывает
+  вкладку **«Проекты и доступы»** и передаёт только выбранный `project_id`; Central заново проверяет его. Telegram
+  выбирает проект по точному зарегистрированному alias либо сохраняет redacted intake draft и задаёт один
+  детерминированный вопрос. Ответ продолжает исходный source message; отдельный durable selection receipt защищает
+  restart и delayed replay. Voice note сначала проходит существующий Hermes STT; при неуспешной транскрибации mission
+  не создаётся.
+- **Граница полномочий:** catalog разрешает обычные code/tests/review/PR/CI/merge операции по repo contract. Он не
+  разрешает произвольный filesystem path, model/provider, shell command, credential, deploy/release либо destructive
+  operation. Добавление проекта или изменение его execution boundary остаётся repo-owned reviewable change.
+- **Инженерная форма:** используются существующие MissionStore SQLite, Hermes handlers, Workspace settings и systemd
+  coordinator templates. Новый service, dashboard, workflow engine, dependency или model classifier не создаётся.
+- **Последствия:** multiple registered projects получают независимые standing timers; одна ordinary goal может быть
+  принята только после exact project resolution. Legacy single-route env остаётся временным backward-compatible
+  fallback. Полная cross-channel chat transcript и arbitrary repository discovery по-прежнему не заявляются.

@@ -24,6 +24,8 @@ FILES = {
 "src/routes/api/conductor-spawn.ts": "cac908c034a5dc21a88330838eb7d84f8ce77033012fe4df0606abb87acc2271",
 "src/screens/chat/chat-screen.tsx": "ba1175ef3d637f2114b1f8ad19e5f299a848d60f607ec3b3166d73f4391d18e5",
 "src/screens/dashboard/dashboard-screen.tsx": "3e562694308922351aee07bc5bbb7908e752d3c9a6211e896e90dec284bcc7c4",
+"src/components/settings/settings-sidebar.tsx": "f6d986201b242e9adbfae4675c6224aa2ee56bb8306c12a0fb0bfe2d68f4c1a2",
+"src/routes/settings/index.tsx": "ba25520be3c3e53b760dd40e77c2fb84d67098a029e274c5c32882244fb540a9",
 }
 PATCHED_FILES = {
 "src/server/gateway-capabilities.ts": "8d37e5895ff40899242200d24f88e2e2e17ea0651f8575581bbc1c2a829c91c7",
@@ -37,26 +39,38 @@ PATCHED_FILES = {
 "src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
-"src/routes/api/send-stream.ts": "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
-"src/server/claude-api.ts": "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned patched SHA-256
+"src/routes/api/send-stream.ts": "ec312e605aadce46748087c392c9a414ff228a5f16c65b2a80d6a71cd40466e2",
+"src/server/claude-api.ts": "039dc37395d4255712403d259d3ee7a2254506e71bcfd3e77548e527af100942",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
 "src/screens/chat/chat-screen.tsx": "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da",
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
+"src/components/settings/settings-sidebar.tsx": "4e8e540d7b5e1a2dd42847249a5431f8372a01fc2d847ae9c962dce98e85300d",
+"src/routes/settings/index.tsx": "3f4ccf742d4cb98adabc563c555cd2fee6b7f42d736b8cd19aa2b57b9712f87b",
 }
 LEGACY_FILES = {
 "src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
 "src/server/profiles-browser.ts": "e5b84d509ad2960f2a0a57d785d3602110fdaf6e4dffa0da4211858d74d86385",
 }
 PREVIOUS_PATCHED_FILES = {
-"src/routes/api/sessions.ts": "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
-"src/routes/api/send-stream.ts": "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
-"src/server/claude-api.ts": "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
+"src/routes/api/sessions.ts": (
+    "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
+),
+"src/routes/api/send-stream.ts": (
+    "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
+    "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
+),
+"src/server/claude-api.ts": (
+    "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned previous patched SHA-256
+    "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
+),
 }
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
+    "src/routes/api/mission-projects.ts": "src/routes/api/mission-projects.ts",
+    "src/components/settings/project-permissions.tsx": "src/components/settings/project-permissions.tsx",
     "src/screens/dashboard/components/mission-overview-card.tsx": "src/screens/dashboard/components/mission-overview-card.tsx",
 }
 LEGACY_ADDED_FILES = {
@@ -416,10 +430,23 @@ function readString""", "send stream central-only flag")
         const thinking =""", """        const message = String(body.message ?? '')
         const sourceMessageId =
           typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+        const projectCookie = (request.headers.get('cookie') || '')
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('uap_mission_project='))
+        const projectId = projectCookie
+          ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
+          : ''
         if (CENTRAL_ONLY && !sourceMessageId) {
           return new Response(
             JSON.stringify({ ok: false, error: 'message identity required' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        if (CENTRAL_ONLY && !projectId) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'Выберите проект в Настройки → Проекты и доступы' }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
           )
         }
         const thinking =""", "ordinary goal identity")
@@ -429,6 +456,7 @@ function readString""", "send stream central-only flag")
         return replace(text, """                  attachments: attachments || undefined,
                 },""", """                  attachments: attachments || undefined,
                   source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
+                  project_id: CENTRAL_ONLY ? projectId : undefined,
                 },""", "ordinary goal forwarding")
     elif rel == "src/server/claude-api.ts":
         text = replace(text, """} from './claude-dashboard-api'
@@ -445,6 +473,7 @@ const _authHeaders""", "central-only session source")
         return replace(text, """    attachments?: Array<Record<string, unknown>>
   },""", """    attachments?: Array<Record<string, unknown>>
     source_message_id?: string
+    project_id?: string
   },""", "ordinary goal request type")
     elif rel == "src/server/kanban-backend.ts":
         text = replace(text, """export type KanbanBackendId = 'local' | 'claude' | 'hermes-proxy'""", """const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
@@ -553,6 +582,45 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
       <MissionOverviewCard />
 
       {/* ── Attention marquee ──""", "mission card placement")
+    elif rel == "src/components/settings/settings-sidebar.tsx":
+        text = replace(
+            text,
+            "  | 'connection'\n  | 'claude'",
+            "  | 'connection'\n  | 'projects'\n  | 'claude'",
+            "project settings navigation type",
+        )
+        text = replace(
+            text,
+            "  { id: 'connection', label: 'Connection' },",
+            "  { id: 'connection', label: 'Connection' },\n"
+            "  { id: 'projects', label: 'Проекты и доступы' },",
+            "project settings navigation item",
+        )
+    elif rel == "src/routes/settings/index.tsx":
+        text = replace(
+            text,
+            "import { usePageTitle } from '@/hooks/use-page-title'",
+            "import { usePageTitle } from '@/hooks/use-page-title'\n"
+            "import { ProjectPermissions } from '@/components/settings/project-permissions'",
+            "project permissions import",
+        )
+        text = replace(
+            text,
+            "          {activeSection === 'connection' && <ConnectionSection />}\n",
+            """          {activeSection === 'connection' && <ConnectionSection />}
+
+          {activeSection === 'projects' && (
+            <SettingsSection
+              title="Проекты и доступы"
+              description="Выберите зарегистрированный репозиторий для новых автономных задач."
+              icon={Link01Icon}
+            >
+              <ProjectPermissions />
+            </SettingsSection>
+          )}
+""",
+            "project permissions section",
+        )
     return text
 
 def upgrade_legacy(rel, text):
@@ -593,7 +661,8 @@ def upgrade_previous(rel, text):
             return json({""", """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
             return json({""", "central session creation upgrade")
     if rel == "src/routes/api/send-stream.ts":
-        return replace(text, """        if (CENTRAL_ONLY && chatMode === 'portable') {
+        if "Central session stream unavailable" in text:
+            text = replace(text, """        if (CENTRAL_ONLY && chatMode === 'portable') {
           return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' },
@@ -601,18 +670,48 @@ def upgrade_previous(rel, text):
         }""", """        if (CENTRAL_ONLY) {
           chatMode = 'enhanced-claude'
         }""", "central-only stream upgrade")
+        text = replace(text, """        const sourceMessageId =
+          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+        if (CENTRAL_ONLY && !sourceMessageId) {""", """        const sourceMessageId =
+          typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+        const projectCookie = (request.headers.get('cookie') || '')
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('uap_mission_project='))
+        const projectId = projectCookie
+          ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
+          : ''
+        if (CENTRAL_ONLY && !sourceMessageId) {""", "project selection cookie upgrade")
+        text = replace(text, """        }
+        const thinking =""", """        }
+        if (CENTRAL_ONLY && !projectId) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'Выберите проект в Настройки → Проекты и доступы' }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+        const thinking =""", "missing project selection upgrade")
+        return replace(text, """                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
+                },""", """                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
+                  project_id: CENTRAL_ONLY ? projectId : undefined,
+                },""", "project selection forwarding upgrade")
     if rel == "src/server/claude-api.ts":
-        text = replace(text, """} from './claude-dashboard-api'
+        if "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" not in text:
+            text = replace(text, """} from './claude-dashboard-api'
 
 const _authHeaders""", """} from './claude-dashboard-api'
 
 const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
 const _authHeaders""", "central-only session source upgrade")
-        return replace(text, """}): Promise<ClaudeSession> {
+            text = replace(text, """}): Promise<ClaudeSession> {
   if (getCapabilities().dashboard.available) {
     const resp = await createDashboardSession(opts || {})""", """}): Promise<ClaudeSession> {
   if (!CENTRAL_ONLY && getCapabilities().dashboard.available) {
     const resp = await createDashboardSession(opts || {})""", "central-only session creation upgrade")
+        return replace(text, """    source_message_id?: string
+  },""", """    source_message_id?: string
+    project_id?: string
+  },""", "project selection request type upgrade")
     raise SystemExit(f"no previous patched upgrade for {rel}")
 
 def main():
@@ -638,7 +737,7 @@ def main():
         elif actual == LEGACY_FILES.get(rel):
             statuses.append(f"{rel}: legacy-needs-overlay")
             source_paths.append((rel, path, True))
-        elif actual == PREVIOUS_PATCHED_FILES.get(rel):
+        elif actual in PREVIOUS_PATCHED_FILES.get(rel, ()):
             statuses.append(f"{rel}: previous-needs-overlay")
             source_paths.append((rel, path, "previous"))
         else:

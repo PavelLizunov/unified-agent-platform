@@ -1,0 +1,53 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-vpnctl",
+  "author_checks": [
+    ["/usr/local/bin/cargo", "check", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "deny", "check"]
+  ],
+  "branch_prefix": "codex/registered-vpnctl",
+  "ci_timeout_seconds": 5400,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered vpnctl mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-vpnctl-registered-v4",
+  "max_changed_files": 60,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/local/bin/cargo", "check", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "deny", "check"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered vpnctl mission",
+  "remote": "https://github.com/PavelLizunov/vpnctl.git",
+  "repo": "PavelLizunov/vpnctl",
+  "required_ci_checks": [
+    "cargo check",
+    "cargo fmt --check",
+    "cargo clippy -D warnings",
+    "cargo test",
+    "cargo deny",
+    "gitleaks",
+    "e2e (testcontainers — Docker required)"
+  ],
+  "review_checks": [
+    ["/usr/local/bin/cargo", "check", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"],
+    ["/usr/local/bin/cargo", "deny", "check"]
+  ],
+  "route_flags": ["durable_state", "multi_platform", "security_boundary"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/vpnctl",
+  "worktree_root": "/home/uap/worktrees/vpnctl-registered-v4"
+}

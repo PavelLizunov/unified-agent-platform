@@ -21,12 +21,12 @@ FILES = {
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
 }
 PATCHED_FILES = {
-    "hermes_cli/commands.py": "05a3e7d121b17984f0bcede0d9b2a20ecf14fa0066d6ac1f711ab8abfe117ab2",
+    "hermes_cli/commands.py": "4783ccb17c851b94079c4016e63ad7a676b9c2beb57c7d952f0a8c45410674d4",
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "e30907ecce05f268773f24263b69de5c07865b5805f4bf6256bd0d0e5f000716",
-    "gateway/platforms/api_server.py": "438666691b5d858ddfc3fbe0a61ace314767f2d00dabc01afaeecf11812cb897",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "7b34939a35d5f7ab1301b330ecaa585617e4d60fbf63783820a310932158ef41",
+    "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -79,13 +79,53 @@ def atomic_write(path: pathlib.Path, text: str) -> None:
 
 def transform(relative: str, text: str) -> str:
     if relative == "hermes_cli/commands.py":
-        return replace(
+        text = replace(
             text,
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),',
             '    CommandDef("status", "Show session, model, token, and context info", "Session"),\n'
+            '    CommandDef("projects", "Show registered UAP projects", "Session", gateway_only=True),\n'
             '    CommandDef("mission", "Show, bind, or answer one central UAP mission", "Session",\n'
             '               args_hint="[mission-id | answer <text>]", gateway_only=True),',
             "mission command",
+        )
+        text = replace(
+            text,
+            '''def gateway_help_lines() -> list[str]:
+    """Generate gateway help text lines from the registry."""
+    overrides = _resolve_config_gates()''',
+            '''def gateway_help_lines() -> list[str]:
+    """Generate gateway help text lines from the registry."""
+    owner_commands = {
+        value.strip() for value in os.environ.get("HERMES_OWNER_COMMANDS", "").split(",")
+        if value.strip()
+    }
+    overrides = _resolve_config_gates()''',
+            "owner help command policy",
+        )
+        text = replace(
+            text,
+            '''    for cmd in COMMAND_REGISTRY:
+        if not _is_gateway_available(cmd, overrides):''',
+            '''    for cmd in COMMAND_REGISTRY:
+        if owner_commands and cmd.name not in owner_commands:
+            continue
+        if not _is_gateway_available(cmd, overrides):''',
+            "owner help command filter",
+        )
+        return replace(
+            text,
+            '''    core_commands = _prioritize_telegram_menu_commands(list(telegram_bot_commands()))
+    reserved_names = {n for n, _ in core_commands}''',
+            '''    owner_commands = {
+        value.strip() for value in os.environ.get("HERMES_OWNER_COMMANDS", "").split(",")
+        if value.strip()
+    }
+    core_commands = _prioritize_telegram_menu_commands(list(telegram_bot_commands()))
+    if owner_commands:
+        core_commands = [entry for entry in core_commands if entry[0] in owner_commands]
+        return core_commands[:max_commands], max(0, len(core_commands) - max_commands)
+    reserved_names = {n for n, _ in core_commands}''',
+            "owner Telegram menu filter",
         )
     if relative == "hermes_cli/kanban.py":
         text = replace(
@@ -527,6 +567,34 @@ def connect(
             "module exit propagation",
         )
     if relative == "gateway/run.py":
+        owner_help = (
+            "Напишите обычным сообщением, что нужно сделать. "
+            "Hermes сам создаст задачу, выберет разрешённые модели и доведёт работу до результата.\n\n"
+            "/projects — разрешённые проекты\n"
+            "/mission — текущая задача\n"
+            "/status — состояние сессии\n"
+            "/stop — остановить текущий ответ"
+        )
+        text = replace(
+            text,
+            '''                if _cmd_def_inner.name == "help":
+                    return await self._handle_help_command(event)''',
+            f'''                if _cmd_def_inner.name == "help":
+                    if os.environ.get("HERMES_OWNER_COMMANDS", "").strip():
+                        return {owner_help!r}
+                    return await self._handle_help_command(event)''',
+            "owner help during active run",
+        )
+        text = replace(
+            text,
+            '''        if canonical == "help":
+            return await self._handle_help_command(event)''',
+            f'''        if canonical == "help":
+            if os.environ.get("HERMES_OWNER_COMMANDS", "").strip():
+                return {owner_help!r}
+            return await self._handle_help_command(event)''',
+            "owner help",
+        )
         text = replace(
             text,
             '''        if canonical == "status":
@@ -537,7 +605,9 @@ def connect(
             return await self._handle_status_command(event)
 
         if canonical == "mission":
-            from hermes_cli.uap_missions import MissionError, MissionStore, telegram_text
+            from hermes_cli.uap_missions import (
+                MissionError, MissionProjectRequired, MissionStore, telegram_text,
+            )
 
             store = MissionStore.default()
             platform = source.platform.value if source.platform else "unknown"
@@ -576,6 +646,21 @@ def connect(
             except MissionError as error:
                 return f"Mission unavailable: {error}"
 
+        if canonical == "projects":
+            from hermes_cli.uap_missions import public_intake_projects
+
+            projects = public_intake_projects("telegram")
+            lines = ["Разрешённые проекты:"]
+            for project in projects:
+                lines.append(
+                    f"• {project['label']} — {project['repository']}\\n"
+                    f"  {project['summary']}"
+                )
+            lines.append(
+                "Назовите проект в обычном сообщении с задачей или ответьте его названием, когда бот уточнит выбор."
+            )
+            return "\\n".join(lines)
+
         if canonical == "agents":''',
             "mission gateway handler",
         )
@@ -605,15 +690,41 @@ def connect(
         context = build_session_context(source, self.config, session_entry)''',
             '''        if getattr(event, "_uap_owner_goal", False):
             from agent.redact import redact_sensitive_text
-            from hermes_cli.uap_missions import MissionError, MissionStore, telegram_text
+            from hermes_cli.uap_missions import (
+                MissionError, MissionProjectRequired, MissionStore, telegram_text,
+            )
 
             try:
                 source_message_id = str(event.message_id or "").strip()
                 if not source_message_id:
                     raise MissionError("mission intake requires a stable source message")
+                goal_text = event.text or ""
+                if event.message_type == MessageType.VOICE:
+                    audio_paths = [
+                        path for index, path in enumerate(event.media_urls or [])
+                        if (
+                            (event.media_types[index] if index < len(event.media_types or []) else "").startswith("audio/")
+                            or event.message_type == MessageType.VOICE
+                        )
+                    ]
+                    _, transcripts = await self._enrich_message_with_transcription(
+                        goal_text, audio_paths,
+                    )
+                    if not transcripts:
+                        raise MissionError(
+                            "voice transcription failed; send the voice message again or use text"
+                        )
+                    goal_text = "\\n".join(transcripts)
+                    adapter = self.adapters.get(source.platform)
+                    if adapter:
+                        await adapter.send(
+                            source.chat_id,
+                            f'🎙️ "{goal_text}"',
+                            metadata={"thread_id": source.thread_id} if source.thread_id else None,
+                        )
                 store = MissionStore.default()
                 accepted, _ = store.ingest_owner_turn(
-                    redact_sensitive_text(event.text, force=True),
+                    redact_sensitive_text(goal_text, force=True),
                     platform="telegram",
                     source_message_id=source_message_id,
                     session_id=session_entry.session_id,
@@ -628,7 +739,7 @@ def connect(
                         session_entry.session_id,
                         {
                             "role": "user",
-                            "content": event.text,
+                            "content": goal_text,
                             "platform_message_id": source_message_id,
                             "timestamp": event.timestamp,
                         },
@@ -642,6 +753,15 @@ def connect(
                         },
                     )
                 return response
+            except MissionProjectRequired as error:
+                choices = "\\n".join(
+                    f"• {project['label']} — {project['repository']}"
+                    for project in error.projects
+                )
+                return (
+                    "Для какого проекта выполнить задачу? Ответьте одним названием:\\n"
+                    + choices
+                )
             except MissionError as error:
                 return f"Mission intake unavailable: {error}"
 
@@ -655,9 +775,9 @@ def connect(
             "from agent.redact import redact_sensitive_text",
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
-            "    MissionError, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
+            "    MissionError, MissionProjectRequired, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
             "    notify_subscribers, owner_key_valid, producer_key_valid,\n"
-            "    sanitize_producer_submission, terminal_request_allowed,\n"
+            "    public_intake_projects, sanitize_producer_submission, terminal_request_allowed,\n"
             ")",
             "mission imports",
         )
@@ -692,6 +812,7 @@ def connect(
                     platform="workspace",
                     source_message_id=source_message_id,
                     session_id=session_id,
+                    project_id=body.get("project_id"),
                 )
                 mission_id = owner_event["mission_id"]
                 if owner_event["type"] == "mission.answer":
@@ -716,6 +837,10 @@ def connect(
                         response_text,
                         platform_message_id=f"{receipt}:mission",
                     )
+            except MissionProjectRequired as error:
+                return web.json_response(
+                    {"error": str(error), "projects": error.projects}, status=409
+                )
             except MissionError as error:
                 return web.json_response(
                     _openai_error(str(error), code="mission_intake_failed"), status=400
@@ -776,6 +901,15 @@ def connect(
         if self._mission_store is None:
             self._mission_store = MissionStore.default()
         return self._mission_store
+
+    async def _handle_mission_projects(self, request: "web.Request") -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        try:
+            platform = request.query.get("platform", "workspace")
+            return web.json_response({"projects": public_intake_projects(platform)})
+        except MissionError as error:
+            return web.json_response({"error": str(error)}, status=400)
 
     async def _handle_list_missions(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
@@ -842,7 +976,7 @@ def connect(
                     )
                 allowed = {
                     "goal", "platform", "source_message_id", "session_id",
-                    "chat_id", "thread_id",
+                    "chat_id", "thread_id", "project_id",
                 }
                 if unknown := set(body) - allowed:
                     raise MissionError(
@@ -858,6 +992,7 @@ def connect(
                     session_id=body.get("session_id"),
                     chat_id=body.get("chat_id"),
                     thread_id=body.get("thread_id"),
+                    project_id=body.get("project_id"),
                 )
             return web.json_response({
                 "created": created,
@@ -1031,6 +1166,7 @@ def connect(
             '''            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
             self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
             '''            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
+            self._app.router.add_get("/api/mission-projects", self._handle_mission_projects)
             self._app.router.add_get("/api/missions", self._handle_list_missions)
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
