@@ -204,7 +204,7 @@ spec:
               valueFrom: { secretKeyRef: { name: hermes-agent-mission, key: producer-key } }
             - name: HERMES_MISSION_OWNER_KEY
               valueFrom: { secretKeyRef: { name: hermes-agent-owner, key: owner-key } }
-            - { name: HERMES_MISSION_INTAKE_ROUTES, value: '{"workspace":{"dispatch_profile":"build1-flow-pilot-registered-v4","delivery_mode":"none"},"telegram":{"dispatch_profile":"build1-flow-pilot-owner-gate-v4","delivery_mode":"none"}}' }
+            - { name: HERMES_MISSION_INTAKE_ROUTES, value: '{"workspace":{"dispatch_profile":"build1-flow-pilot-registered-v4","delivery_mode":"none"},"telegram":{"dispatch_profile":"build1-flow-pilot-registered-v4","delivery_mode":"none"}}' }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }
