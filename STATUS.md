@@ -212,6 +212,14 @@ Last updated: 2026-07-19
   goal, PR #9, merge, gates, delivery applicability and four changed paths. Exact evidence:
   `docs/evidence/concrete-terminal-result-rollout-2026-07-19.md` and
   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+- **Interrupted-author recovery and clearer Russian progress are deployed (2026-07-19).** PR #299 closes the final
+  audit P2 where an ambiguous author unit was gone and its disposable worktree had also disappeared: the mission now
+  follows one restart-safe execution-failure/cleanup/archive path without another author or quality escalation.
+  Telegram and Workspace localize existing stage, notice, question and terminal fields without changing durable
+  protocol identities. The first Workspace upgrade stopped fail-closed on its exact predecessor hash; PR #300 added
+  that single compatibility hash plus a regression. Flux is Ready at `97e6fb4...`, Central and build-1 hashes match,
+  the Workspace production build/HTTP check passed, and all six timers completed a natural successful tick. Exact
+  evidence: `docs/evidence/interrupted-author-and-russian-progress-rollout-2026-07-19.md`.
 - **Ordinary bound Telegram owner answers passed live (2026-07-19).** The ordinary Telegram ingress
   now reuses `MissionStore.ingest_owner_turn()`: when that exact chat/topic is bound to a `waiting_owner` mission, its
   stable platform message becomes the answer to the open question rather than a second mission. The source message
