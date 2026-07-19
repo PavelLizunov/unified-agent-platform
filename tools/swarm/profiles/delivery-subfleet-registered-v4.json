@@ -1,0 +1,39 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-subfleet",
+  "author_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"]
+  ],
+  "branch_prefix": "codex/registered-subfleet",
+  "ci_timeout_seconds": 5400,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered Subfleet mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-subfleet-registered-v4",
+  "max_changed_files": 80,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered Subfleet mission",
+  "remote": "https://github.com/PavelLizunov/subfleet.git",
+  "repo": "PavelLizunov/subfleet",
+  "required_ci_checks": ["rust", "leak-scan", "docker"],
+  "review_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--all", "--", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "--workspace", "--all-targets"]
+  ],
+  "route_flags": ["concurrency", "durable_state", "protocol_or_schema", "security_boundary"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/subfleet",
+  "worktree_root": "/home/uap/worktrees/subfleet-registered-v4"
+}

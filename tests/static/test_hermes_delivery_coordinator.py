@@ -3244,6 +3244,28 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "PavelLizunov/spark-runner",
                 {"validate"},
             ),
+            "delivery-subfleet-registered-v4.json": (
+                "build1-subfleet-registered-v4",
+                "PavelLizunov/subfleet",
+                {"rust", "leak-scan", "docker"},
+            ),
+            "delivery-slipstream-rust-registered-v4.json": (
+                "build1-slipstream-rust-registered-v4",
+                "PavelLizunov/slipstream-rust",
+                {
+                    "Rust Tests", "Cargo Audit", "Rust Clippy (features)",
+                    "Build Binaries (macos-arm64)",
+                    "Build Binaries (macos-x86_64)",
+                    "Build Binaries (linux-x86_64)",
+                    "Build Binaries (linux-arm64)",
+                    "Build Binaries (windows-x86_64)",
+                    "Build Binaries (windows-arm64)",
+                    "Interop (rust-rust)",
+                    "Interop (rust-rust-multi-domain)",
+                    "Bench (rust-rust)", "Bench (rust-rust-auth)",
+                    "Bench (rust-rust-mixed)", "Bench Memory (rust-rust)",
+                },
+            ),
         }
         for filename, (dispatch_profile, repo, required_ci) in registered_projects.items():
             profile_path = ROOT / "tools/swarm/profiles" / filename
