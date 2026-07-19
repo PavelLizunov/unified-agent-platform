@@ -206,18 +206,23 @@ Last updated: 2026-07-19
   fails closed. PR #264 passed CI, Flux applied exact merge `4cd2c60f...`, the rolled pod's mounted hashes matched the
   merged runtime and pinned overlay outputs, API health returned 200 and an in-pod temporary-store scenario passed.
   The owner-gated live canary then rejected unrelated `/approve`, stored exact ordinary `APPROVE` once, resumed the
-  same root and completed delivery. Ordinary Workspace chat answers remain component-proven; complete cross-channel
-  transcript synchronization is not claimed. Exact evidence:
+  same root and completed delivery. A later Telegram-origin mission accepted its ordinary answer through Workspace and
+  completed the same delivery lifecycle; complete cross-channel transcript synchronization is not claimed. Exact
+  evidence:
   `docs/evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md` and
-  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
-- **Ordinary Workspace owner answers are deployed with a live component pass (2026-07-18).** A later ordinary message in
+  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md` and
+  `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
+- **Ordinary Workspace owner answers passed a live cross-channel canary (2026-07-19).** A later ordinary message in
   the exact Central session that accepted a mission now answers its single open question through
   `MissionStore.ingest_owner_turn()` instead of creating a second goal. The stable source message ID survives restart
   and delayed replay, changed text collides fail-closed, and multiple open questions are rejected rather than guessed.
   The existing structured answer action remains compatible. PR #270 passed CI, Flux applied exact merge
   `5d95eada...`, the mounted runtime/overlay hashes matched and an in-pod temporary-store scenario returned
-  `live-workspace-answer-component-ok`. A real cross-channel owner question/answer canary is still required. Exact
-  evidence: `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md`.
+  `live-workspace-answer-component-ok`. Telegram-origin mission
+  `mission-intake-e966529d2686998b2c8f55acd06716a8` then stored one ordinary Workspace `APPROVE` as event 4, resumed
+  root `t_a68746e4`, and completed target PR #10, terminal sequence 27 and cleanup. Exact evidence:
+  `docs/evidence/ordinary-workspace-owner-answer-rollout-2026-07-18.md` and
+  `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
 - **Automatic pre-execution owner-question production passed live (2026-07-19).** An approved-profile
   `architecture_change` now creates/reconciles one inert sticky-blocked root before publishing a deterministic
   `mission.question` bound to mission/goal/policy identity. Central accepts only exact `APPROVE`; response loss and
@@ -225,9 +230,10 @@ Last updated: 2026-07-19
   removed only from the exact route calculation. Local/GPU, new provider, credentials and destructive flags remain
   fail-closed. PRs #281-#283 passed CI and were installed through exact Flux/build-1 rollout. Ordinary Telegram mission
   `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` produced the question before any model, accepted exact ordinary
-  `APPROVE`, resumed the same root and completed PR #9 through terminal and cleanup. A Telegram-origin answer through
-  Workspace remains the narrower pending cross-channel proof. Exact evidence:
-  `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+  `APPROVE`, resumed the same root and completed PR #9 through terminal and cleanup. A second Telegram-origin mission
+  accepted ordinary `APPROVE` through Workspace, resumed its same root and completed PR #10 through terminal sequence
+  27 and cleanup. Exact evidence: `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md` and
+  `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
 - HA status: **not HA ready and deferred indefinitely by owner decision (2026-07-12)**. Two local k3s VMs
   (one server/control-plane, one agent) = a single etcd member. The active strategy is one control-plane,
   R2 backups, and the verified restore drill; adding a third server is not an active owner action.
@@ -576,9 +582,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   exposed a null first-render race; the failure is preserved, PR #257 fixed it and added an exact vulnerable-asset
   upgrade regression. After the exact hotfix merge was built and restarted on build-1, mission
   `mission-intake-f53871c022ce187501a0e9d9021b8823` rendered the same ordered 20 events, cursor 20 and single terminal
-  event before and after a browser reload. This closes Workspace mission-event reconnect, not a live cross-channel
-  owner question/answer leg or complete cross-channel chat/session history. Exact evidence:
-  `docs/evidence/workspace-mission-cursor-replay-2026-07-18.md`.
+  event before and after a browser reload. That run closes Workspace mission-event reconnect; the later live
+  cross-channel owner question/answer leg passed separately, while complete cross-channel chat/session history remains
+  outside the claim. Exact evidence: `docs/evidence/workspace-mission-cursor-replay-2026-07-18.md` and
+  `docs/evidence/cross-channel-owner-answer-live-canary-2026-07-19.md`.
 - **A6 live boundary:** the canonical event contract, central-only fail-closed overlays, central runtime and build-1
   adapter are installed. Synchronized Workspace/Telegram projection and deterministic producer replay passed one
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.
