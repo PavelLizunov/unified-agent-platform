@@ -29,4 +29,4 @@ id = "generic-api-key"
   condition = "AND"
   regexTarget = "line"
   paths = ['''^docs/evidence/completion/[^/]+\.json$''']
-  regexes = ['''"source_key_sha256"\s*:\s*"[0-9a-f]{64}"''']
+  regexes = ['''^\s*"source_key_sha256"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$''']
