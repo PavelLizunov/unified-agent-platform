@@ -3214,6 +3214,21 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             coordinator.load_profile(path)
 
         registered_projects = {
+            "delivery-uap-registered-v4.json": (
+                "build1-uap-registered-v4",
+                "PavelLizunov/unified-agent-platform",
+                {"static-checks"},
+            ),
+            "delivery-gs-ninitux-registered-v4.json": (
+                "build1-gs-ninitux-registered-v4",
+                "PavelLizunov/gs-ninitux",
+                {"test"},
+            ),
+            "delivery-ninitux-landing-registered-v4.json": (
+                "build1-ninitux-landing-registered-v4",
+                "PavelLizunov/ninitux-landing",
+                {"site"},
+            ),
             "delivery-vpnctl-registered-v4.json": (
                 "build1-vpnctl-registered-v4",
                 "PavelLizunov/vpnctl",

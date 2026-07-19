@@ -1,0 +1,51 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-uap",
+  "author_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "tests/static/secret_scan.py", "."],
+    ["/usr/bin/python3", "tests/static/validate_iac.py", "."],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "hermes/tests", "-p", "test_*.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_flow_contract.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_delivery_coordinator.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_mission_deployment.py"]
+  ],
+  "branch_prefix": "codex/registered-uap",
+  "ci_timeout_seconds": 7200,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered UAP mission",
+  "completion_evidence": true,
+  "default_branch": "master",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-uap-registered-v4",
+  "max_changed_files": 100,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/bin/git", "-C", "{verify_worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "tests/static/secret_scan.py", "."],
+    ["/usr/bin/python3", "tests/static/validate_iac.py", "."],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "hermes/tests", "-p", "test_*.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_flow_contract.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_delivery_coordinator.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_mission_deployment.py"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered UAP mission",
+  "remote": "https://github.com/PavelLizunov/unified-agent-platform.git",
+  "repo": "PavelLizunov/unified-agent-platform",
+  "required_ci_checks": ["static-checks"],
+  "review_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "tests/static/secret_scan.py", "."],
+    ["/usr/bin/python3", "tests/static/validate_iac.py", "."],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "hermes/tests", "-p", "test_*.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_flow_contract.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_delivery_coordinator.py"],
+    ["/usr/bin/python3", "tests/static/test_hermes_mission_deployment.py"]
+  ],
+  "route_flags": ["durable_state", "multi_platform", "protocol_or_schema", "security_boundary"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/unified-agent-platform",
+  "worktree_root": "/home/uap/worktrees/uap-registered-v4"
+}
