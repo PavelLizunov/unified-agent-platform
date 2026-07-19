@@ -27,6 +27,22 @@ class GitHubActionsPinsTests(unittest.TestCase):
                 self.assertEqual(len(revision), 40, f"action ref is not an exact commit in {path}: {target}")
         self.assertTrue(remote_refs, "no remote GitHub Actions refs were inspected")
 
+    def test_completion_attestation_has_only_approved_write_permissions(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "attest-completion-evidence.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("permissions: {}", workflow)
+        self.assertIn(
+            "    permissions:\n"
+            "      contents: read\n"
+            "      id-token: write\n"
+            "      attestations: write\n",
+            workflow,
+        )
+        self.assertEqual(1, workflow.count("id-token: write"))
+        self.assertNotIn("secrets.", workflow)
+        self.assertNotIn("packages: write", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
