@@ -55,14 +55,17 @@ lineage, distinct approved OpenAI author/reviewer sessions, CI run identities an
 cleanup and Central terminal state. Each natural coordinator restart is folded into a constant-size systemd invocation
 hash-chain, so long capacity waits do not grow state without bound. `UAP_COORDINATOR_UNIT` and the user-systemd
 `InvocationID` prove the service execution boundary; they do not distinguish a timer start from an operator invoking
-the same service. The initial bundle is therefore a delivery-kernel artifact, not yet a signed final two-channel
-Product Operating Contract certificate.
+the same service. The schema-v2 registered-pilot bundle is now published on protected `master` and GitHub-attested by
+the master-only workflow after the same semantic verifier passes. Verify the public subject with the exact repository,
+workflow, source digest and source ref shown in
+`docs/evidence/signed-completion-attestation-2026-07-19.md`.
 
 For a new registered ordinary Workspace/Telegram mission, bundle schema v2 also binds the server-owned input platform,
 full source-key SHA-256 and source-message SHA-256 to the deterministic `mission-intake-*` identity. Raw chat, session
 and message identifiers are not copied into the bundle. The verifier still accepts the closed v1 schema for completed
-missions and in-flight missions accepted before the v2 runtime. Channel delivery cursors and signed artifact
-attestation remain separate unfinished evidence.
+missions and in-flight missions accepted before the v2 runtime. The signed registered-pilot subject records the
+server-owned input platform and hashed source identity, but not Workspace/Telegram cursor or projection-hash fields.
+Those remain separate runtime evidence, and complete cross-channel chat transcripts remain outside this certificate.
 
 Successful Central completion renders one bounded owner result from the already validated mission projection: accepted
 goal, changed paths, merged PR, verified default revision, passed gates and delivery applicability. Workspace and
