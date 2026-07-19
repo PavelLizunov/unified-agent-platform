@@ -119,8 +119,13 @@ export function ProjectPermissions() {
               <span className="block text-sm font-semibold text-primary-900">{project.label}</span>
               <span className="block break-all text-xs text-primary-600">{project.repository}</span>
               <span className="mt-1 block text-sm text-primary-700">{project.summary}</span>
-              <span className="mt-2 block text-xs font-medium text-primary-700">
-                {statusLabels[project.status] || project.status}
+              <span className="mt-2 flex flex-wrap items-center gap-2 text-xs font-medium text-primary-700">
+                <span>{statusLabels[project.status] || project.status}</span>
+                {project.category === 'active-maintained' ? (
+                  <span className="rounded-full border border-primary-200 px-2 py-0.5">
+                    Основной проект
+                  </span>
+                ) : null}
               </span>
               {project.test_targets.length ? (
                 <span className="mt-1 block text-xs text-primary-600">
