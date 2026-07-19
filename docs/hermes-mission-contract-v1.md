@@ -96,8 +96,9 @@ only the generic API bearer or producer key cannot impersonate owner intake. Pro
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
 The production catalog inventory exposes all 33 repositories currently owned by the GitHub account. Each entry has
-an explicit readiness state and intended test targets. Six repo-owned no-deploy projects are currently executable:
-Mission Ledger, `vpnctl`, `VPNRouter`, `vpnrouter-gateway`, `suflyor` and `spark-runner`; 18 active repositories require a reviewed build/test profile, two are
+an explicit readiness state and intended test targets. Eight repo-owned no-deploy projects are currently executable:
+Mission Ledger, `vpnctl`, `VPNRouter`, `vpnrouter-gateway`, `suflyor`, `spark-runner`, `subfleet` and
+`slipstream-rust`; 16 active repositories require a reviewed build/test profile, two are
 release-only and seven are archived. Merely discovering a GitHub repository never grants shell access. Workspace's
 **Projects & permissions** settings view lists only owner-safe catalog metadata and stores one ready `project_id`;
 Central independently validates it. Telegram resolves an exact ready project

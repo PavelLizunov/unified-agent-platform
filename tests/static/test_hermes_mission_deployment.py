@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v59-project-profiles-batch1"
+        "v60-project-profiles-batch2"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
@@ -131,6 +131,18 @@ def main() -> None:
             "none",
             {"workspace", "telegram"},
         ),
+        "subfleet": (
+            "PavelLizunov/subfleet",
+            "build1-subfleet-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "slipstream-rust": (
+            "PavelLizunov/slipstream-rust",
+            "build1-slipstream-rust-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
         "vpnctl": (
             "PavelLizunov/vpnctl",
             "build1-vpnctl-registered-v4",
@@ -160,7 +172,7 @@ def main() -> None:
         profile = installed_profiles[project["dispatch_profile"]]
         assert profile["repo"] == project["repository"]
         assert profile["delivery_mode"] == project["delivery_mode"]
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 18
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 16
     assert sum(project["status"] == "read_only" for project in projects["projects"]) == 2
     assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
     assert next(
@@ -181,7 +193,7 @@ def main() -> None:
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == 6
+        ]) == 8
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)

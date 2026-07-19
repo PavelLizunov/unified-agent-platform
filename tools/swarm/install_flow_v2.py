@@ -46,6 +46,12 @@ FILES = {
     "profiles/delivery-spark-runner-registered-v4.json": pathlib.Path(
         ".config/uap/delivery-spark-runner-registered-v4.json"
     ),
+    "profiles/delivery-subfleet-registered-v4.json": pathlib.Path(
+        ".config/uap/delivery-subfleet-registered-v4.json"
+    ),
+    "profiles/delivery-slipstream-rust-registered-v4.json": pathlib.Path(
+        ".config/uap/delivery-slipstream-rust-registered-v4.json"
+    ),
 }
 _PRIVATE_TARGETS = {
     pathlib.Path(".config/uap/delivery-flow-pilot-registered-v4.json"),
@@ -55,6 +61,8 @@ _PRIVATE_TARGETS = {
     pathlib.Path(".config/uap/delivery-vpnrouter-gateway-registered-v4.json"),
     pathlib.Path(".config/uap/delivery-suflyor-registered-v4.json"),
     pathlib.Path(".config/uap/delivery-spark-runner-registered-v4.json"),
+    pathlib.Path(".config/uap/delivery-subfleet-registered-v4.json"),
+    pathlib.Path(".config/uap/delivery-slipstream-rust-registered-v4.json"),
 }
 _LEGACY_MODEL_FIELDS = {
     "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",

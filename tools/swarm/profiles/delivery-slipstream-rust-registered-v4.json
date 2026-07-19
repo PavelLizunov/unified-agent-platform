@@ -1,0 +1,61 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-slipstream-rust",
+  "author_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "-p", "slipstream-dns"],
+    ["/usr/local/bin/cargo", "test"],
+    ["./scripts/verify_ipv4_listener.sh"]
+  ],
+  "branch_prefix": "codex/registered-slipstream-rust",
+  "ci_timeout_seconds": 14400,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered Slipstream Rust mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-slipstream-rust-registered-v4",
+  "max_changed_files": 100,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "-p", "slipstream-dns"],
+    ["/usr/local/bin/cargo", "test"],
+    ["./scripts/verify_ipv4_listener.sh"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered Slipstream Rust mission",
+  "remote": "https://github.com/PavelLizunov/slipstream-rust.git",
+  "repo": "PavelLizunov/slipstream-rust",
+  "required_ci_checks": [
+    "Rust Tests",
+    "Cargo Audit",
+    "Rust Clippy (features)",
+    "Build Binaries (macos-arm64)",
+    "Build Binaries (macos-x86_64)",
+    "Build Binaries (linux-x86_64)",
+    "Build Binaries (linux-arm64)",
+    "Build Binaries (windows-x86_64)",
+    "Build Binaries (windows-arm64)",
+    "Interop (rust-rust)",
+    "Interop (rust-rust-multi-domain)",
+    "Bench (rust-rust)",
+    "Bench (rust-rust-auth)",
+    "Bench (rust-rust-mixed)",
+    "Bench Memory (rust-rust)"
+  ],
+  "review_checks": [
+    ["/usr/local/bin/cargo", "fmt", "--check"],
+    ["/usr/local/bin/cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"],
+    ["/usr/local/bin/cargo", "test", "-p", "slipstream-dns"],
+    ["/usr/local/bin/cargo", "test"],
+    ["./scripts/verify_ipv4_listener.sh"]
+  ],
+  "route_flags": ["concurrency", "cross_process", "multi_platform", "protocol_or_schema", "security_boundary"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/slipstream-rust",
+  "worktree_root": "/home/uap/worktrees/slipstream-rust-registered-v4"
+}
