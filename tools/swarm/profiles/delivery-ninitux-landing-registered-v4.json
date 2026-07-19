@@ -1,0 +1,36 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-ninitux-landing",
+  "author_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "scripts/check_site.py"]
+  ],
+  "branch_prefix": "codex/registered-ninitux-landing",
+  "ci_timeout_seconds": 3600,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 1800,
+  "commit_message": "feat: deliver registered NiniTux landing mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-ninitux-landing-registered-v4",
+  "max_changed_files": 40,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/bin/git", "-C", "{verify_worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "scripts/check_site.py"]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered NiniTux landing mission",
+  "remote": "https://github.com/PavelLizunov/ninitux-landing.git",
+  "repo": "PavelLizunov/ninitux-landing",
+  "required_ci_checks": ["site"],
+  "review_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "scripts/check_site.py"]
+  ],
+  "route_flags": [],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/ninitux-landing",
+  "worktree_root": "/home/uap/worktrees/ninitux-landing-registered-v4"
+}

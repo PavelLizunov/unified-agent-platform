@@ -113,6 +113,18 @@ def main() -> None:
         for project in projects["projects"] if project["status"] == "ready"
     }
     assert ready == {
+        "uap": (
+            "PavelLizunov/unified-agent-platform",
+            "build1-uap-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "gs-ninitux": (
+            "PavelLizunov/gs-ninitux",
+            "build1-gs-ninitux-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
         "flow-ledger": (
             "PavelLizunov/hermes-flow-v2-pilot",
             "build1-flow-pilot-registered-v4",
@@ -140,6 +152,12 @@ def main() -> None:
         "slipstream-rust": (
             "PavelLizunov/slipstream-rust",
             "build1-slipstream-rust-registered-v4",
+            "none",
+            {"workspace", "telegram"},
+        ),
+        "ninitux-landing": (
+            "PavelLizunov/ninitux-landing",
+            "build1-ninitux-landing-registered-v4",
             "none",
             {"workspace", "telegram"},
         ),
@@ -172,14 +190,22 @@ def main() -> None:
         profile = installed_profiles[project["dispatch_profile"]]
         assert profile["repo"] == project["repository"]
         assert profile["delivery_mode"] == project["delivery_mode"]
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 16
-    assert sum(project["status"] == "read_only" for project in projects["projects"]) == 2
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 12
+    assert sum(project["status"] == "read_only" for project in projects["projects"]) == 3
     assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
     assert next(
         project for project in projects["projects"] if project["project_id"] == "vpnrouter"
     )["test_targets"] == [
         "uap-build-1", "github-linux", "github-windows", "windows-brat"
     ]
+    boosty = next(
+        project for project in projects["projects"] if project["project_id"] == "boosty-api-rs"
+    )
+    assert boosty["status"] == "read_only"
+    assert boosty["dispatch_profile"] is None
+    assert next(
+        project for project in projects["projects"] if project["project_id"] == "wgturn-core"
+    )["status"] == "setup_required"
     runtime_spec = importlib.util.spec_from_file_location(
         "uap_mission_catalog_runtime", ROOT / "tools/hermes-mission/runtime.py"
     )
@@ -193,7 +219,7 @@ def main() -> None:
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == 8
+        ]) == 11
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)

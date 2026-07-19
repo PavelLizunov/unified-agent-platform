@@ -65,17 +65,19 @@ Last updated: 2026-07-19
   `docs/evidence/a7-3-activation-delivery-canary-2026-07-15.md`.
 - **Registered project intake and full repository inventory are live for Workspace and Telegram (2026-07-19).**
   PR #302 introduced the first three-project execution boundary. The follow-up inventory records all 33 owner GitHub
-  repositories: 8 have reviewed autonomous profiles, 16 active repositories require profile setup, 2 are release-only
+  repositories: 11 have reviewed autonomous profiles, 12 active repositories require profile setup, 3 are read-only
   and 7 are archived. Workspace shows readiness and intended Linux/Windows/macOS/test-VM targets without exposing
   commands, credentials or checkout paths. `hermes-flow-v2-pilot`, `vpnctl`, `VPNRouter`, `vpnrouter-gateway`,
-  `suflyor`, `spark-runner`, `subfleet` and `slipstream-rust` are currently
+  `suflyor`, `spark-runner`, `subfleet`, `slipstream-rust`, `unified-agent-platform`, `gs-ninitux` and
+  `ninitux-landing` are currently
   executable; known-but-unready projects fail before mission acceptance. Workspace has
   `Settings -> Проекты и доступы` with an HttpOnly project-selection cookie. Ordinary
   Telegram text either resolves an exact project alias or durably keeps the original goal while asking for one of the
   ready projects. Build-1 has persistent one-minute timers for each registered profile; the Linux projects run local
   checks on build-1, while Suflyor's required build gate runs on GitHub Windows and Slipstream's required CI builds
   Linux x86/ARM, Windows x86/ARM and macOS Intel/ARM artifacts. This is the registered
-  no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory; full cross-channel chat transcript
+  no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory. The historical
+  standalone `boosty_api_rs` entry is read-only because its active implementation is part of `vpnctl`; full cross-channel chat transcript
   replication is not claimed. Telegram voice notes enter the same intake only after Hermes STT succeeds; the deployed
   runtime currently has no allowed STT backend/credential, so voice fails closed without creating a mission. Text
   intake and project selection are live; voice transcription still requires an owner-authorized STT credential.
