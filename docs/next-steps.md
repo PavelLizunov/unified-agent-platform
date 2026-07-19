@@ -26,7 +26,7 @@
 - **Model+agent backend is fully in GitOps** (Track B0 DONE).
 - **Registered project intake is live.** Workspace and Telegram inventory all 33 owner repositories with readiness and
   intended test targets. Durable missions currently execute only for the reviewed
-  `hermes-flow-v2-pilot`/`vpnctl`/`VPNRouter` profiles; the remaining active repositories stay visible but fail closed
+  `hermes-flow-v2-pilot`/`vpnctl`/`VPNRouter`/`vpnrouter-gateway`/`suflyor`/`spark-runner` profiles; the remaining active repositories stay visible but fail closed
   until their exact checks and runner paths are installed. Telegram voice intake is wired to Hermes STT but remains blocked until
   an allowed STT credential/backend is owner-authorized; text intake is the proven production path.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
