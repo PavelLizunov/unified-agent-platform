@@ -215,9 +215,12 @@ Good next tasks that do not require redesign:
    `mission-intake-*`, keeps existing v1 bundles valid and stores no raw channel/message identity. Central/build-1
    exact rollout and component verification passed. Owner-gated mission
    `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` produced the first live v2 artifact; the installed verifier
-   accepted semantic digest `4dbb3b92...`. Signing remains a later field. Evidence:
+   accepted semantic digest `4dbb3b92...`. PR #291 subsequently published the exact cross-channel v2 bundle on
+   protected master; a master-only GitHub-hosted workflow re-verified it and issued SLSA provenance for byte digest
+   `509117fb...`, exact merge `1fd06f6...`, master ref and signer-workflow identity. Evidence:
    `docs/evidence/completion-input-lineage-rollout-2026-07-18.md` and
-   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md` and
+   `docs/evidence/signed-completion-attestation-2026-07-19.md`.
    The live terminal message exposed a UX gap: it only rendered `Delivery completed, merged, and verified` even though
    PR/check/merge/change facts were durable. Current source fixes the shared Central authority boundary with one
    bounded deterministic result derived from the accepted goal and existing projected delivery facts; Workspace and

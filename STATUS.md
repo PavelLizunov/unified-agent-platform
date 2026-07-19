@@ -184,9 +184,20 @@ Last updated: 2026-07-19
   Flux exact-SHA rollout, in-pod deterministic/replay proof, build-1 exact installation and installed v1/v2 verifier
   checks passed. Owner-gated Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` then produced the
   first live v2 bundle; the installed verifier accepted semantic digest `4dbb3b92...`. The bundle binds input lineage,
-  owner-answer hash and five systemd service invocations. Signing remains a separate gap. Exact evidence:
+  owner-answer hash and five systemd service invocations. Exact evidence:
   `docs/evidence/completion-input-lineage-rollout-2026-07-18.md` and
   `docs/evidence/automatic-owner-question-live-canary-2026-07-19.md`.
+- **The registered no-deploy completion evidence is GitHub-attested (2026-07-19).** PR #291 published the exact
+  redacted schema-v2 bundle for cross-channel mission `mission-intake-e966529d2686998b2c8f55acd06716a8` on protected
+  `master`. A master-only GitHub-hosted job re-ran the semantic verifier and used only job-scoped `contents: read`,
+  `id-token: write` and `attestations: write` to issue SLSA provenance. `gh attestation verify` bound certificate byte
+  digest `509117fb...` to merge `1fd06f6...`, `refs/heads/master` and the exact signer workflow, with one verified
+  timestamp. The workflow and Gitleaks exception passed adversarial exact-SHA Terra review and PR/master CI. This closes
+  signed publication for the existing registered no-deploy delivery/input-lineage bundle. The signed JSON does not
+  contain Workspace/Telegram cursor or projection-hash fields, so a final two-channel Product Operating Contract
+  certificate is not claimed; generic repository intake, deploy/release automation and complete cross-channel chat
+  history also remain outside this proof. Exact evidence:
+  `docs/evidence/signed-completion-attestation-2026-07-19.md`.
 - **Owner terminal result has a live concrete shared result (2026-07-19).** The earlier successful ordinary Telegram
   campaign ended with `Delivery completed, merged, and verified`, while the useful facts existed durably but were not
   rendered to the owner: the implemented `summary` behavior, changed API/CLI/tests/README, target PR #8, green

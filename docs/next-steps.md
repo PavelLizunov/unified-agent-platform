@@ -262,7 +262,7 @@ not add an application service, workflow engine or mission database.
    [rollout evidence](evidence/ordinary-bound-telegram-answer-rollout-2026-07-18.md) and
    [same-channel canary](evidence/automatic-owner-question-live-canary-2026-07-19.md) plus the
    [cross-channel canary](evidence/cross-channel-owner-answer-live-canary-2026-07-19.md).
-9. **Canonical completion evidence — ✅ FIRST LIVE BUNDLE VERIFIED (2026-07-18).** The existing
+9. **Canonical completion evidence — ✅ LIVE BUNDLE VERIFIED AND SIGNED (2026-07-19).** The existing
    coordinator can now write one closed, self-digesting `completion-evidence.json` after terminal convergence,
    cleanup and task archive. The bundle joins mission/goal, canonical profile/policy/runtime hashes, a bounded-size
    systemd invocation chain, exact Git/PR/CI/review/post-verify identities, cleanup and the Central projection. The
@@ -271,15 +271,15 @@ not add an application service, workflow engine or mission database.
    replacing it. PR #268 passed required CI; exact merged source is installed on build-1, source/installed hashes
    match. Ordinary Telegram mission `mission-intake-0c72cde02b5ef62972a30bc998f316b9` produced the first private live
    bundle after terminal sequence 27; the installed verifier accepted semantic digest `d05c16b7...`. A systemd service
-   identity is not proof of timer origin; channel origin/source message, channel cursors and signed artifact
-   attestation remain later evidence fields. See the
+   identity is not proof of timer origin; channel origin/source message and channel cursors were added in the later v2
+   certificate. See the
    [rollout evidence](evidence/canonical-completion-evidence-rollout-2026-07-18.md) and
    [live campaign](evidence/ordinary-telegram-capacity-recovery-2026-07-18.md).
    PR #275 deploys backward-compatible closed schema v2: registered ordinary missions bind the server-owned
    input platform and hashed source key/message to deterministic `mission-intake-*`, while existing v1 bundles still
    verify. Owner-gated Telegram mission `mission-intake-ae5dcea53ec9e8419aa15ca01b0228fd` produced the first live v2
    artifact; the installed verifier accepted semantic digest `4dbb3b92...`, and its five recorded invocations all bind
-   the standing systemd unit. Signing remains separate. See the
+   the standing systemd unit. See the
    [input-lineage rollout](evidence/completion-input-lineage-rollout-2026-07-18.md) and
    [live canary](evidence/automatic-owner-question-live-canary-2026-07-19.md).
 10. **Ordinary Workspace answer — ✅ LIVE CROSS-CHANNEL PASS (2026-07-19).** The exact Central session
@@ -329,6 +329,17 @@ not add an application service, workflow engine or mission database.
     and a natural successful tick from all six enabled timers passed. This does not reconstruct a mission after total
     local state loss; it makes that ambiguous condition safe. See the
     [rollout evidence](evidence/missing-delivery-state-fail-closed-rollout-2026-07-19.md).
+15. **Signed completion evidence — ✅ GITHUB ATTESTATION PASS (2026-07-19).** PR #291 publishes the exact
+    redacted schema-v2 bundle from cross-channel mission `mission-intake-e966529d2686998b2c8f55acd06716a8` and adds a
+    protected-master-only attestation workflow. The job has no top-level permissions and only job-scoped
+    `contents: read`, `id-token: write` and `attestations: write`; both remote actions are exact-SHA pinned. It reran the
+    deterministic semantic verifier, then GitHub issued SLSA provenance for byte digest `509117fb...`, exact merge
+    `1fd06f6...`, `refs/heads/master` and the exact workflow identity on a GitHub-hosted runner. Independent exact-SHA
+    Terra review and both PR/master CI gates passed. This closes signed publication for the existing registered
+    no-deploy delivery/input-lineage bundle. The signed JSON does not yet bind Workspace/Telegram cursor or
+    projection-hash fields, so it is not the final two-channel Product Operating Contract certificate; arbitrary
+    repositories, deploy/release modes and full cross-channel chat history also remain outside the proof. See the
+    [attestation evidence](evidence/signed-completion-attestation-2026-07-19.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

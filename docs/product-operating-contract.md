@@ -3,6 +3,11 @@
 Status: **accepted by the owner on 2026-07-14**. This document defines the target product behaviour of UAP.
 It does not claim that the current deployment already satisfies the contract.
 
+The registered no-deploy pilot now has one GitHub-attested completion-evidence subject covering an ordinary Telegram
+goal, a hashed owner answer and the autonomous delivery suffix. This closes signed publication for that exact bundle,
+not the final two-channel Product Operating Contract certificate: channel cursor/hash evidence is still separate.
+Section 8 records that and the remaining wider-platform gaps.
+
 ## 1. Owner and platform roles
 
 - The owner provides a goal and may discuss material product, performance or technology trade-offs.
@@ -180,8 +185,14 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    mission identity without persisting raw channel identifiers. The owner-gated Telegram canary produced the first
    live v2 artifact; the installed verifier accepted semantic digest `4dbb3b92...`, its systemd invocation chain contains
    five exact unit identities, and Workspace/Telegram both converged at cursor 27. A deployed revision is not applicable
-   to this registered no-deploy target, while signed/GitHub-attested publication remains absent. That omission prevents
-   treating the private bundle as the final Product Operating Contract completion certificate.
+   to this registered no-deploy target. PR #291 published the later exact closed v2 bundle from cross-channel mission
+   `mission-intake-e966529d2686998b2c8f55acd06716a8` on protected `master`; the master-only GitHub-hosted workflow
+   independently re-ran the semantic verifier and issued SLSA provenance for byte digest `509117fb...`, bound to merge
+   `1fd06f6...`, `refs/heads/master` and the exact workflow identity. This closes signed publication for the existing
+   delivery/input-lineage bundle. The signed JSON still does not contain Workspace/Telegram cursor or projection-hash
+   fields, so the final two-channel Product Operating Contract certificate is not yet claimed. Exact attestation
+   evidence:
+   `docs/evidence/signed-completion-attestation-2026-07-19.md`.
 10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant
     at Central's terminal-authority boundary with a bounded deterministic summary of the accepted goal, changed paths,
     PR, verified revision, required gates and delivery applicability. PR #277 passed required CI, exact Flux rollout,
