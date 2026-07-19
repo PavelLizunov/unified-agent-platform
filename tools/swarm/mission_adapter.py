@@ -37,6 +37,7 @@ PAYLOAD_FIELDS = {
     "delivery.upsert": {"kind", "status", "url"},
 }
 MAX_LOG_BYTES = 1024 * 1024
+MAX_TERMINAL_CHUNK_BYTES = 16 * 1024
 
 
 def _latest_sticky_event(events: Any) -> dict[str, Any] | None:
@@ -709,22 +710,46 @@ def _worker_metadata_events(
     return events
 
 
+def _utf8_chunks(text: str) -> list[tuple[str, int]]:
+    encoded = text.encode("utf-8")
+    chunks = []
+    start = 0
+    while start < len(encoded):
+        end = min(start + MAX_TERMINAL_CHUNK_BYTES, len(encoded))
+        while end < len(encoded) and encoded[end] & 0xC0 == 0x80:
+            end -= 1
+        chunk = encoded[start:end].decode("utf-8")
+        chunks.append((chunk, end - start))
+        start = end
+    return chunks
+
+
 def _terminal_events(mission_id: str, task_id: str, text: str, terminal: bool) -> list[dict[str, Any]]:
-    if len(text.encode("utf-8")) > MAX_LOG_BYTES:
-        raise AdapterError("Kanban task log exceeds the mission event limit")
-    events = []
+    tail: list[tuple[int, str, int]] = []
+    retained_bytes = 0
     offset = 0
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith(("\n", "\r")) and not terminal:
         lines.pop()
     for line in lines:
+        for chunk, chunk_bytes in _utf8_chunks(line):
+            chunk_offset = offset
+            offset += chunk_bytes
+            if not chunk.strip():
+                continue
+            tail.append((chunk_offset, chunk, chunk_bytes))
+            retained_bytes += chunk_bytes
+            while retained_bytes > MAX_LOG_BYTES:
+                retained_bytes -= tail.pop(0)[2]
+
+    events = []
+    for chunk_offset, chunk, _chunk_bytes in tail:
         events.append(_producer_event(
             mission_id,
             "terminal.append",
-            {"stream": "stdout", "text": line, "offset": offset},
+            {"stream": "stdout", "text": chunk, "offset": chunk_offset},
             {"task_id": task_id},
         ))
-        offset += len(line.encode("utf-8"))
     return events
 
 

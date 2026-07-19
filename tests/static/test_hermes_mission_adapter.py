@@ -143,6 +143,45 @@ class MissionAdapterTests(unittest.TestCase):
     def setUpClass(cls):
         cls.document = json.loads(FIXTURE.read_text(encoding="utf-8"))
 
+    def test_terminal_projection_tails_and_chunks_an_oversized_log(self):
+        text = (("界" * 7000) + "\n") * 60
+        events = adapter._terminal_events("mission-log", "task-log", text, terminal=True)
+        retry = adapter._terminal_events("mission-log", "task-log", text, terminal=True)
+
+        self.assertEqual(events, retry)
+        self.assertGreater(events[0]["payload"]["offset"], 0)
+        self.assertLessEqual(
+            sum(len(event["payload"]["text"].encode("utf-8")) for event in events),
+            adapter.MAX_LOG_BYTES,
+        )
+        self.assertTrue(all(
+            len(event["payload"]["text"].encode("utf-8"))
+            <= adapter.MAX_TERMINAL_CHUNK_BYTES
+            for event in events
+        ))
+        self.assertTrue(all(
+            len(json.dumps(event, ensure_ascii=False).encode("utf-8")) < 65_536
+            for event in events
+        ))
+        last = events[-1]["payload"]
+        self.assertEqual(
+            len(text.encode("utf-8")),
+            last["offset"] + len(last["text"].encode("utf-8")),
+        )
+
+        appended = adapter._terminal_events(
+            "mission-log", "task-log", text + "final line\n", terminal=True
+        )
+        original_ids = {event["correlation"]["producer_event_id"] for event in events}
+        appended_ids = {event["correlation"]["producer_event_id"] for event in appended}
+        self.assertTrue(original_ids & appended_ids)
+
+    def test_terminal_projection_omits_an_incomplete_nonterminal_tail(self):
+        events = adapter._terminal_events(
+            "mission-log", "task-log", "complete\npartial", terminal=False
+        )
+        self.assertEqual(["complete\n"], [event["payload"]["text"] for event in events])
+
     def test_crash_and_dispatcher_restart_do_not_duplicate_work(self):
         backend = FakeKanban()
         with tempfile.TemporaryDirectory() as directory:
