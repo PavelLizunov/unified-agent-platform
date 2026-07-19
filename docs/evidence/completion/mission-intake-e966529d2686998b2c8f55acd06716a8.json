@@ -1,0 +1,168 @@
+{
+  "author": {
+    "head_sha": "9f4339bea4a2120a234a7ecbaae857bbe1073b2e",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "route_decision_id": "8192442f2a83f214ce9c25e61d8041e2737ecd25f5f989a77dd21a8310990e33",
+    "sandbox": "workspace-write",
+    "session_id": "019f78e4-d51b-79d1-84f4-3850d33d9cfa",
+    "tree_sha": "baccad4b5784d7583a8daf1067bd355c3ce2130b"
+  },
+  "central": {
+    "projection_id": "ba842d57391bbfc9",
+    "result": "Completed: Расширь dependency-free Rust mission ledger: добавь read-only команду inspect, которая выводит committed_records, missions и torn_tail в стабильном порядке. Добавь публичный библиотечный API, CLI, tests и README; malformed committed data должна оставаться ошибкой, ledger нельзя изменять, зависимости не добавляй.\nPR: https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/10\nMerge: https://github.com/PavelLizunov/hermes-flow-v2-pilot/commit/39591bf35687451786d39014ddf23c3a949765fa\nChecks: tests, review, CI, post-verify, cleanup passed\nDelivery: not applicable\nChanged files (4): README.md, src/lib.rs, src/main.rs, tests/journal.rs",
+    "sequence": 27,
+    "status": "completed"
+  },
+  "cleanup": {
+    "kanban_gc_ran": true,
+    "local_branch_deleted": true,
+    "remote_branch_deleted": true,
+    "task_archived": true,
+    "worktrees_removed": true
+  },
+  "delivery": {
+    "applicability": "not_applicable",
+    "ci_run_ids": [
+      29675326240
+    ],
+    "mode": "none",
+    "pr_base_branch": "main",
+    "pr_head_sha": "9f4339bea4a2120a234a7ecbaae857bbe1073b2e",
+    "pr_number": 10,
+    "pr_url": "https://github.com/PavelLizunov/hermes-flow-v2-pilot/pull/10"
+  },
+  "execution": {
+    "root_task_id": "t_a68746e4",
+    "run_id": "44"
+  },
+  "gates": {
+    "ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-linux",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-windows",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-python",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "post_verify_checks": [
+      {
+        "command": "/usr/local/bin/cargo test --all-targets --locked",
+        "exit_code": 0
+      },
+      {
+        "command": "/usr/bin/python3 -m unittest -v",
+        "exit_code": 0
+      }
+    ],
+    "pre_review_ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-linux",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-windows",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-python",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "required_ci_checks": [
+      "test-linux",
+      "test-macos",
+      "test-python",
+      "test-windows"
+    ]
+  },
+  "input": {
+    "platform": "telegram",
+    "source_key_sha256": "e966529d2686998b2c8f55acd06716a85bdc52c921448a40867ba5d4c86e6a0d",
+    "source_message_sha256": "1be00341082e25c4e251ca6713e767f7131a2823b0052caf9c9b006ec512f6cb"
+  },
+  "mission": {
+    "dispatch_profile": "build1-flow-pilot-owner-gate-v4",
+    "goal_sha256": "e3c73fd6356ab2679e1397e552cec5fa147c2bfd9a6f812b3bb5c527d31fe896",
+    "mission_id": "mission-intake-e966529d2686998b2c8f55acd06716a8",
+    "owner_answer_sha256s": [
+      "cc2c8cf33925246ead8572f76f99b710f52dba7154aad26a230b9a8021005673"
+    ],
+    "parent_mission_id": null
+  },
+  "reviewer": {
+    "head_sha": "9f4339bea4a2120a234a7ecbaae857bbe1073b2e",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "xhigh",
+    "reviewed_sha": "9f4339bea4a2120a234a7ecbaae857bbe1073b2e",
+    "route_decision_id": "8192442f2a83f214ce9c25e61d8041e2737ecd25f5f989a77dd21a8310990e33",
+    "sandbox": "read-only",
+    "session_id": "019f78e8-ed99-7c71-b84c-9a1144960dcd",
+    "source_attestation_sha256": "7cb5d1bb27810df0b9799fa70ab0108ebd8a3d8feb39a4779ef3c6f4ba3464a0",
+    "tree_sha": "baccad4b5784d7583a8daf1067bd355c3ce2130b"
+  },
+  "route": {
+    "author_model": "gpt-5.6-sol",
+    "decision_id": "8192442f2a83f214ce9c25e61d8041e2737ecd25f5f989a77dd21a8310990e33",
+    "policy_id": "openai-autonomy-v2",
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "reviewer_model": "gpt-5.6-terra",
+    "route": "complex"
+  },
+  "runtime": {
+    "coordinator_sha256": "bd7f2fbb9fecf134963c0590e66d75bc070e161288cd76995695647936a085eb",
+    "invocations": {
+      "chain_sha256": "1d407c8759c0a14681c880ad7fe5f2f00813373007871262a0e5e29a9a1696cc",
+      "count": 3,
+      "first": {
+        "invocation_id": "93bd8b170a0447adb077954e925be3eb",
+        "unit": "hermes-delivery-coordinator@flow-pilot-owner-gate-v4.service"
+      },
+      "last": {
+        "invocation_id": "30760220637e4b81810d8bf6d6e26edb",
+        "unit": "hermes-delivery-coordinator@flow-pilot-owner-gate-v4.service"
+      }
+    },
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "profile_sha256": "0023a0fde1a1c730e885246fd4cf4f87b6bf6d99585da48ca809d864ba48e491"
+  },
+  "schema_version": 2,
+  "sha256": "70fe43b78444d85b0bfb63f801abb80ed052e65a7437e749f868fe45009a764d",
+  "source": {
+    "base_sha": "c24aed910e36a7bcded4da270b50c11503a38613",
+    "candidate_ancestor_of_merge": true,
+    "candidate_files": [
+      "README.md",
+      "src/lib.rs",
+      "src/main.rs",
+      "tests/journal.rs"
+    ],
+    "candidate_sha": "9f4339bea4a2120a234a7ecbaae857bbe1073b2e",
+    "default_sha": "39591bf35687451786d39014ddf23c3a949765fa",
+    "merge_ancestor_of_default": true,
+    "merge_sha": "39591bf35687451786d39014ddf23c3a949765fa",
+    "repo": "PavelLizunov/hermes-flow-v2-pilot"
+  }
+}
