@@ -1,0 +1,927 @@
+#!/usr/bin/env python3
+"""Advance one ADR-035 project onboarding request per systemd tick."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
+
+
+OWNER = "PavelLizunov"
+UAP_REPOSITORY = f"{OWNER}/unified-agent-platform"
+UAP_REMOTE = f"https://github.com/{UAP_REPOSITORY}.git"
+CHECKPOINTS = (
+    "requested",
+    "repository_ready",
+    "runtime_ready",
+    "canary_passed",
+    "ready",
+)
+PRESETS = {"rust", "go", "python", "web"}
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_REVISION = re.compile(r'hermes-agent/config-rev: "[^"]+"')
+
+
+class RetryLater(RuntimeError):
+    """A transient or still-pending external condition needs another tick."""
+
+
+class PermanentError(RuntimeError):
+    """A deterministic safety violation terminates this onboarding request."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+def _json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _atomic_write(path: pathlib.Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.onboarding-{os.getpid()}")
+    try:
+        temporary.write_text(text, encoding="utf-8", newline="\n")
+        if os.name != "nt":
+            temporary.chmod(0o600)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _validate_request(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RetryLater("invalid Central onboarding response")
+    required = {
+        "request_id", "project_id", "repository", "name", "description",
+        "preset", "checkpoint", "created_at",
+    }
+    if not required <= value.keys():
+        raise RetryLater("incomplete Central onboarding response")
+    for field in required:
+        if not isinstance(value[field], str):
+            raise RetryLater("invalid Central onboarding response")
+    if (
+        not _ID.fullmatch(value["request_id"])
+        or not _ID.fullmatch(value["project_id"])
+        or value["repository"] != f"{OWNER}/{value['name']}"
+        or value["project_id"] != value["name"].casefold()
+        or value["preset"] not in PRESETS
+        or value["checkpoint"] not in {*CHECKPOINTS, "failed"}
+    ):
+        raise RetryLater("invalid Central onboarding identity")
+    return value
+
+
+def profile_name(request: dict[str, Any]) -> str:
+    return f"delivery-{request['project_id']}-registered-v4.json"
+
+
+def profile_instance(request: dict[str, Any]) -> str:
+    return f"{request['project_id']}-registered-v4"
+
+
+def dispatch_profile(request: dict[str, Any]) -> str:
+    return f"build1-{request['project_id']}-registered-v4"
+
+
+def canary_mission_id(request: dict[str, Any]) -> str:
+    digest = hashlib.sha256(request["request_id"].encode("utf-8")).hexdigest()[:32]
+    return f"project-canary-{digest}"
+
+
+def canary_goal(request: dict[str, Any]) -> str:
+    language = {
+        "rust": "Rust",
+        "go": "Go",
+        "python": "Python",
+        "web": "JavaScript",
+    }[request["preset"]]
+    return (
+        f"Extend this dependency-free {language} starter project: add a public "
+        "project_status API that returns exactly ready, expose it in the existing "
+        "user-facing output, and update tests plus README. Do not add dependencies."
+    )
+
+
+def _workflow(test_command: str) -> str:
+    return f"""name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Test
+        run: {test_command}
+"""
+
+
+def bootstrap_files(request: dict[str, Any]) -> dict[str, str]:
+    name = request["name"]
+    description = request["description"] or f"{name} project"
+    common = {
+        ".gitignore": "target/\n__pycache__/\n*.pyc\n",
+    }
+    if request["preset"] == "rust":
+        return common | {
+            "Cargo.toml": """[package]
+name = "uap_project"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+""",
+            "README.md": f"# {name}\n\n{description}\n\n## Test\n\n```sh\ncargo test --all-targets\n```\n",
+            "src/lib.rs": """pub fn greeting() -> &'static str {
+    "hello"
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn greeting_is_stable() {
+        assert_eq!(super::greeting(), "hello");
+    }
+}
+""",
+            "src/main.rs": "fn main() { println!(\"{}\", uap_project::greeting()); }\n",
+            ".github/workflows/ci.yml": _workflow("cargo test --all-targets"),
+        }
+    if request["preset"] == "go":
+        return common | {
+            "go.mod": f"module github.com/{OWNER}/{name}\n\ngo 1.22\n",
+            "README.md": f"# {name}\n\n{description}\n\n## Test\n\n```sh\ngo test ./...\n```\n",
+            "project.go": """package project
+
+func Greeting() string { return "hello" }
+""",
+            "project_test.go": """package project
+
+import "testing"
+
+func TestGreeting(t *testing.T) {
+	if Greeting() != "hello" { t.Fatal("unexpected greeting") }
+}
+""",
+            ".github/workflows/ci.yml": _workflow("go test ./..."),
+        }
+    if request["preset"] == "python":
+        return common | {
+            "README.md": f"# {name}\n\n{description}\n\n## Test\n\n```sh\npython3 -m unittest discover -s tests\n```\n",
+            "project.py": "def greeting() -> str:\n    return \"hello\"\n",
+            "main.py": "from project import greeting\n\nprint(greeting())\n",
+            "tests/test_project.py": """import unittest
+
+from project import greeting
+
+
+class ProjectTest(unittest.TestCase):
+    def test_greeting(self) -> None:
+        self.assertEqual(greeting(), "hello")
+
+
+if __name__ == "__main__":
+    unittest.main()
+""",
+            ".github/workflows/ci.yml": _workflow(
+                "python3 -m unittest discover -s tests"
+            ),
+        }
+    return common | {
+        "README.md": f"# {name}\n\n{description}\n\n## Test\n\n```sh\nnode --test\n```\n",
+        "index.html": """<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <title>Starter</title>
+  <body><main id="app">hello</main><script type="module" src="./app.js"></script></body>
+</html>
+""",
+        "app.js": "export function greeting() { return \"hello\"; }\n",
+        "package.json": _json({"name": "uap-project", "private": True, "type": "module"}) + "\n",
+        "tests/app.test.js": """import test from "node:test";
+import assert from "node:assert/strict";
+import { greeting } from "../app.js";
+
+test("greeting is stable", () => assert.equal(greeting(), "hello"));
+""",
+        ".github/workflows/ci.yml": _workflow("node --test"),
+    }
+
+
+def render_profile(request: dict[str, Any]) -> dict[str, Any]:
+    checks = {
+        "rust": [["/usr/local/bin/cargo", "test", "--all-targets"]],
+        "go": [["/usr/local/bin/go", "test", "./..."]],
+        "python": [[
+            "/usr/bin/python3", "-m", "unittest", "discover", "-s", "tests",
+        ]],
+        "web": [["/usr/bin/node", "--test"]],
+    }[request["preset"]]
+    slug = request["project_id"]
+    return {
+        "allowed_path_prefixes": ["."],
+        "assignee": f"coordinator-codex-auto-{slug}",
+        "author_checks": checks,
+        "branch_prefix": f"codex/registered-{slug}",
+        "ci_timeout_seconds": 3600,
+        "claim_ttl_seconds": 36000,
+        "command_timeout_seconds": 3600,
+        "commit_message": f"feat: deliver registered {slug} mission",
+        "completion_evidence": True,
+        "default_branch": "main",
+        "delivery_mode": "none",
+        "dispatch_profile": dispatch_profile(request),
+        "max_changed_files": 40,
+        "max_review_cycles": 7,
+        "post_verify_checks": checks,
+        "pull_request_body": (
+            "Implements one registered owner mission through the autonomous UAP "
+            "delivery contract."
+        ),
+        "pull_request_title": f"feat: deliver registered {slug} mission",
+        "remote": f"https://github.com/{request['repository']}.git",
+        "repo": request["repository"],
+        "required_ci_checks": ["test-macos"],
+        "review_checks": checks,
+        "route_flags": ["multi_platform"],
+        "schema_version": 4,
+        "source_checkout": f"/home/uap/{slug}",
+        "worktree_root": f"/home/uap/worktrees/{slug}-registered-v4",
+    }
+
+
+def catalog_entry(request: dict[str, Any], *, ready: bool) -> dict[str, Any]:
+    return {
+        "project_id": request["project_id"],
+        "label": request["name"],
+        "repository": request["repository"],
+        "summary": request["description"] or f"{request['name']} project",
+        "aliases": [f"repo {request['project_id']}"],
+        "dispatch_profile": dispatch_profile(request) if ready else None,
+        "delivery_mode": "none",
+        "platforms": ["workspace", "telegram"],
+        "category": "registered",
+        "status": "ready" if ready else "setup_required",
+        "test_targets": ["github-macos"],
+    }
+
+
+def update_catalog(path: pathlib.Path, request: dict[str, Any], *, ready: bool) -> None:
+    text = path.read_text(encoding="utf-8")
+    marker = "  projects.json: |-\n"
+    if text.count(marker) != 1:
+        raise PermanentError("uap-catalog-format-changed")
+    prefix, block = text.split(marker, 1)
+    lines = block.splitlines()
+    if not lines or any(line and not line.startswith("    ") for line in lines):
+        raise PermanentError("uap-catalog-format-changed")
+    try:
+        document = json.loads("\n".join(line[4:] for line in lines))
+    except json.JSONDecodeError as error:
+        raise PermanentError("uap-catalog-invalid") from error
+    if not isinstance(document, dict) or set(document) != {"schema_version", "projects"}:
+        raise PermanentError("uap-catalog-invalid")
+    projects = document.get("projects")
+    if not isinstance(projects, list):
+        raise PermanentError("uap-catalog-invalid")
+    expected_setup = catalog_entry(request, ready=False)
+    expected = catalog_entry(request, ready=ready)
+    matches = [
+        item for item in projects
+        if isinstance(item, dict) and item.get("project_id") == request["project_id"]
+    ]
+    if len(matches) > 1:
+        raise PermanentError("uap-project-catalog-collision")
+    if not matches:
+        if ready:
+            raise PermanentError("uap-project-setup-missing")
+        projects.append(expected)
+    elif matches[0] == expected:
+        pass
+    elif ready and matches[0] == expected_setup:
+        projects[projects.index(matches[0])] = expected
+    else:
+        raise PermanentError("uap-project-catalog-collision")
+    compact = [
+        '{"schema_version":2,"projects":[',
+        *[
+            "  "
+            + json.dumps(item, ensure_ascii=False, separators=(",", ":"))
+            + ("," if index + 1 < len(projects) else "")
+            for index, item in enumerate(projects)
+        ],
+        "]}",
+    ]
+    rendered = prefix + marker + "\n".join(f"    {line}" for line in compact) + "\n"
+    _atomic_write(path, rendered)
+
+
+def bump_runtime_revision(root: pathlib.Path, request: dict[str, Any], *, ready: bool) -> None:
+    suffix = "ready" if ready else "setup"
+    revision = f"onboard-{request['request_id'][-16:]}-{suffix}"
+    manifest = root / "clusters/prod/infra/hermes-agent.yaml"
+    text = manifest.read_text(encoding="utf-8")
+    if len(_REVISION.findall(text)) != 1:
+        raise PermanentError("uap-runtime-revision-format-changed")
+    _atomic_write(manifest, _REVISION.sub(f'hermes-agent/config-rev: "{revision}"', text))
+    test = root / "tests/static/test_hermes_mission_deployment.py"
+    text = test.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'(hermes-agent/config-rev"\] == \(\n\s+")[^"]+("\n\s*\))'
+    )
+    if len(pattern.findall(text)) != 1:
+        raise PermanentError("uap-runtime-revision-test-format-changed")
+    _atomic_write(test, pattern.sub(rf"\g<1>{revision}\g<2>", text))
+
+
+class CentralClient:
+    def __init__(self, base_url: str, api_token: str, producer_key: str):
+        parsed = urllib.parse.urlsplit(base_url.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise RetryLater("invalid Central URL")
+        if not api_token.strip() or not producer_key.strip():
+            raise RetryLater("Central credentials unavailable")
+        self.base_url = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path.rstrip("/"), "", "")
+        )
+        self.api_token = api_token.strip()
+        self.producer_key = producer_key.strip()
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def request(
+        self, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        data = None if body is None else _json(body).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "X-Hermes-Mission-Producer-Key": self.producer_key,
+        }
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(
+            f"{self.base_url}{path}", data=data, headers=headers, method=method
+        )
+        try:
+            with self.opener.open(request, timeout=15) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if error.code in {401, 403}:
+                raise PermanentError("central-capability-invalid") from error
+            raise RetryLater("Central HTTP failure") from error
+        except (urllib.error.URLError, TimeoutError, UnicodeError, json.JSONDecodeError) as error:
+            raise RetryLater("Central request failed") from error
+        if not isinstance(result, dict):
+            raise RetryLater("Central returned invalid JSON")
+        return result
+
+    def pending(self) -> dict[str, Any] | None:
+        value = self.request("GET", "/api/project-onboarding/pending").get("onboarding")
+        return None if value is None else _validate_request(value)
+
+    def advance(
+        self,
+        request: dict[str, Any],
+        checkpoint: str,
+        *,
+        error_code: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "expected_checkpoint": request["checkpoint"],
+            "checkpoint": checkpoint,
+        }
+        if error_code is not None:
+            body["error_code"] = error_code
+        value = self.request(
+            "POST",
+            "/api/project-onboarding/"
+            + urllib.parse.quote(request["request_id"], safe="")
+            + "/advance",
+            body,
+        ).get("onboarding")
+        return _validate_request(value)
+
+    def projects(self) -> list[dict[str, Any]]:
+        result = self.request("GET", "/api/mission-projects?platform=workspace")
+        projects = result.get("projects")
+        if not isinstance(projects, list) or not all(isinstance(item, dict) for item in projects):
+            raise RetryLater("Central project catalog response is invalid")
+        return projects
+
+    def accept_canary(self, request: dict[str, Any]) -> dict[str, Any]:
+        result = self.request("POST", "/api/missions", {
+            "mission_id": canary_mission_id(request),
+            "goal": canary_goal(request),
+            "dispatch_profile": dispatch_profile(request),
+        })
+        mission = result.get("mission")
+        if not isinstance(mission, dict):
+            raise RetryLater("Central canary acceptance is invalid")
+        return mission
+
+    def mission(self, mission_id: str) -> dict[str, Any]:
+        result = self.request(
+            "GET", "/api/missions/" + urllib.parse.quote(mission_id, safe="")
+        )
+        mission = result.get("mission")
+        if not isinstance(mission, dict):
+            raise RetryLater("Central canary projection is invalid")
+        return mission
+
+
+class Driver:
+    def __init__(
+        self,
+        central: CentralClient,
+        *,
+        home: pathlib.Path,
+        runner=subprocess.run,
+    ):
+        self.central = central
+        self.home = home.resolve()
+        self.state_root = self.home / ".local/state/uap/project-onboarding"
+        self.runner = runner
+
+    def run(
+        self,
+        command: list[str],
+        *,
+        cwd: pathlib.Path | None = None,
+        env: dict[str, str] | None = None,
+        check: bool = True,
+        timeout: int = 120,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            result = self.runner(
+                command,
+                cwd=cwd,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RetryLater("external command unavailable") from error
+        if check and result.returncode:
+            raise RetryLater("external command failed")
+        return result
+
+    def run_json(self, command: list[str], **kwargs: Any) -> Any:
+        result = self.run(command, **kwargs)
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RetryLater("external command returned invalid JSON") from error
+
+    def tick(self) -> bool:
+        request = self.central.pending()
+        if request is None:
+            return False
+        try:
+            checkpoint = request["checkpoint"]
+            if checkpoint == "requested":
+                self.ensure_repository(request)
+                self.central.advance(request, "repository_ready")
+            elif checkpoint == "repository_ready":
+                if self.ensure_runtime(request):
+                    self.central.advance(request, "runtime_ready")
+            elif checkpoint == "runtime_ready":
+                if self.ensure_canary(request):
+                    self.central.advance(request, "canary_passed")
+            elif checkpoint == "canary_passed":
+                if self.ensure_ready(request):
+                    self.central.advance(request, "ready")
+            else:
+                raise PermanentError("unsupported-onboarding-checkpoint")
+        except PermanentError as error:
+            self.central.advance(request, "failed", error_code=error.code)
+        return True
+
+    def _request_root(self, request: dict[str, Any]) -> pathlib.Path:
+        root = (self.state_root / request["request_id"]).resolve()
+        try:
+            root.relative_to(self.state_root.resolve())
+        except ValueError as error:
+            raise PermanentError("invalid-onboarding-state-path") from error
+        return root
+
+    def _bootstrap_checkout(self, request: dict[str, Any]) -> tuple[pathlib.Path, str]:
+        root = self._request_root(request) / "bootstrap"
+        files = bootstrap_files(request)
+        if not (root / ".git").is_dir():
+            if root.exists() and any(root.iterdir()):
+                raise PermanentError("bootstrap-state-collision")
+            root.mkdir(parents=True, exist_ok=True)
+            for relative, content in files.items():
+                _atomic_write(root / relative, content)
+            self.run(["git", "init", "-b", "main"], cwd=root)
+            self.run(["git", "config", "user.name", "UAP Onboarding"], cwd=root)
+            self.run(["git", "config", "user.email", "slovnmi@gmail.com"], cwd=root)
+            self.run(["git", "add", "--", *sorted(files)], cwd=root)
+            env = os.environ.copy()
+            env.update(
+                GIT_AUTHOR_DATE=request["created_at"],
+                GIT_COMMITTER_DATE=request["created_at"],
+            )
+            self.run(
+                [
+                    "git", "-c", "commit.gpgsign=false", "commit", "-m",
+                    f"chore: bootstrap {request['request_id']}",
+                ],
+                cwd=root,
+                env=env,
+            )
+        tracked = self.run(["git", "ls-files"], cwd=root).stdout.splitlines()
+        if tracked != sorted(files):
+            raise PermanentError("bootstrap-state-collision")
+        for relative, content in files.items():
+            path = root / relative
+            if not path.is_file() or path.read_text(encoding="utf-8") != content:
+                raise PermanentError("bootstrap-state-collision")
+        if self.run(["git", "status", "--porcelain"], cwd=root).stdout.strip():
+            raise PermanentError("bootstrap-state-dirty")
+        sha = self.run(["git", "rev-parse", "HEAD"], cwd=root).stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise PermanentError("bootstrap-commit-invalid")
+        return root, sha
+
+    def _github_repository(self, repository: str) -> dict[str, Any] | None:
+        result = self.run(
+            ["gh", "api", f"repos/{repository}"], check=False
+        )
+        if result.returncode:
+            if "HTTP 404" in (result.stderr or result.stdout):
+                return None
+            if "HTTP 401" in (result.stderr or result.stdout) or "HTTP 403" in (
+                result.stderr or result.stdout
+            ):
+                raise PermanentError("github-capability-missing")
+            raise RetryLater("GitHub repository lookup failed")
+        try:
+            value = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RetryLater("GitHub repository response is invalid") from error
+        if not isinstance(value, dict):
+            raise RetryLater("GitHub repository response is invalid")
+        return value
+
+    def ensure_repository(self, request: dict[str, Any]) -> None:
+        root, expected_sha = self._bootstrap_checkout(request)
+        marker = f"{request['description']} [uap:{request['request_id']}]".strip()
+        repository = self._github_repository(request["repository"])
+        if repository is None:
+            result = self.run(
+                [
+                    "gh", "repo", "create", request["repository"], "--private",
+                    "--disable-issues", "--disable-wiki", "--description", marker,
+                    "--source", str(root), "--remote", "origin", "--push",
+                ],
+                check=False,
+                timeout=180,
+            )
+            if result.returncode:
+                repository = self._github_repository(request["repository"])
+                if repository is None:
+                    if "HTTP 401" in result.stderr or "HTTP 403" in result.stderr:
+                        raise PermanentError("github-capability-missing")
+                    raise RetryLater("GitHub repository creation failed")
+            else:
+                repository = self._github_repository(request["repository"])
+        if repository is None:
+            raise RetryLater("GitHub repository is not visible yet")
+        if (
+            repository.get("full_name", "").casefold()
+            != request["repository"].casefold()
+            or repository.get("owner", {}).get("login", "").casefold()
+            != OWNER.casefold()
+            or repository.get("private") is not True
+            or repository.get("description") not in {marker, request["description"] or None}
+        ):
+            raise PermanentError("github-repository-collision")
+        remote = f"https://github.com/{request['repository']}.git"
+        refs = self.run(
+            ["git", "ls-remote", remote, "refs/heads/main"], check=False
+        )
+        if refs.returncode:
+            raise RetryLater("GitHub main lookup failed")
+        remote_sha = refs.stdout.split()[0] if refs.stdout.strip() else None
+        if remote_sha is None:
+            if repository.get("description") != marker:
+                raise PermanentError("github-repository-collision")
+            current = self.run(
+                ["git", "remote", "get-url", "origin"], cwd=root, check=False
+            )
+            if current.returncode:
+                self.run(["git", "remote", "add", "origin", remote], cwd=root)
+            elif current.stdout.strip().casefold() != remote.casefold():
+                raise PermanentError("bootstrap-remote-collision")
+            self.run(["git", "push", "-u", "origin", "main"], cwd=root, timeout=180)
+            remote_sha = self.run(
+                ["git", "ls-remote", remote, "refs/heads/main"]
+            ).stdout.split()[0]
+        if remote_sha != expected_sha:
+            raise PermanentError("github-bootstrap-sha-collision")
+        if repository.get("description") == marker:
+            self.run([
+                "gh", "api", "--method", "PATCH", f"repos/{request['repository']}",
+                "-f", f"description={request['description']}",
+            ])
+
+    def _uap_branch(self, request: dict[str, Any], *, ready: bool) -> str:
+        suffix = "ready" if ready else "setup"
+        return f"codex/onboard-{request['request_id'][-16:]}-{suffix}"
+
+    def _uap_pr(self, branch: str) -> dict[str, Any] | None:
+        values = self.run_json([
+            "gh", "pr", "list", "--repo", UAP_REPOSITORY, "--head", branch,
+            "--state", "all", "--limit", "2", "--json",
+            "number,state,mergeCommit,mergeStateStatus,headRefName",
+        ])
+        if not isinstance(values, list) or len(values) > 1:
+            raise PermanentError("uap-onboarding-pr-collision")
+        return values[0] if values else None
+
+    def _render_uap_change(
+        self, root: pathlib.Path, request: dict[str, Any], *, ready: bool
+    ) -> list[str]:
+        changed = [
+            "clusters/prod/infra/hermes-agent.yaml",
+            "clusters/prod/infra/hermes-project-catalog.yaml",
+            "tests/static/test_hermes_mission_deployment.py",
+        ]
+        update_catalog(
+            root / "clusters/prod/infra/hermes-project-catalog.yaml",
+            request,
+            ready=ready,
+        )
+        bump_runtime_revision(root, request, ready=ready)
+        if not ready:
+            relative = f"tools/swarm/profiles/{profile_name(request)}"
+            _atomic_write(
+                root / relative,
+                json.dumps(render_profile(request), ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n",
+            )
+            changed.append(relative)
+        return sorted(changed)
+
+    def _checkout_merged_uap(
+        self, root: pathlib.Path, merge_sha: str
+    ) -> None:
+        """Restore the disposable setup checkout from GitHub after local state loss."""
+        if root.exists() and not (root / ".git").is_dir():
+            raise PermanentError("uap-onboarding-worktree-collision")
+        if not root.exists():
+            self.run(["git", "clone", UAP_REMOTE, str(root)], timeout=180)
+        if (
+            self.run(["git", "remote", "get-url", "origin"], cwd=root)
+            .stdout.strip().casefold() != UAP_REMOTE.casefold()
+            or self.run(["git", "status", "--porcelain"], cwd=root).stdout.strip()
+        ):
+            raise PermanentError("uap-onboarding-worktree-collision")
+        self.run(["git", "fetch", "origin", "master"], cwd=root, timeout=180)
+        self.run(["git", "checkout", "--detach", merge_sha], cwd=root)
+        if self.run(["git", "rev-parse", "HEAD"], cwd=root).stdout.strip() != merge_sha:
+            raise PermanentError("uap-onboarding-merge-sha-mismatch")
+
+    def _ensure_uap_pr(self, request: dict[str, Any], *, ready: bool) -> str | None:
+        branch = self._uap_branch(request, ready=ready)
+        pr = self._uap_pr(branch)
+        if pr:
+            if pr.get("headRefName") != branch:
+                raise PermanentError("uap-onboarding-pr-collision")
+            if pr.get("state") == "MERGED":
+                oid = (pr.get("mergeCommit") or {}).get("oid")
+                if not isinstance(oid, str) or not re.fullmatch(r"[0-9a-f]{40}", oid):
+                    raise RetryLater("merged UAP PR has no exact SHA")
+                return oid
+            if pr.get("state") != "OPEN":
+                raise PermanentError("uap-onboarding-pr-closed")
+            if pr.get("mergeStateStatus") == "DIRTY":
+                raise PermanentError("uap-onboarding-pr-conflict")
+            self.run([
+                "gh", "pr", "merge", "--repo", UAP_REPOSITORY,
+                "--auto", "--squash", str(pr["number"]),
+            ])
+            return None
+
+        root = self._request_root(request) / ("uap-ready" if ready else "uap-setup")
+        remote_branch = self.run(
+            ["git", "ls-remote", UAP_REMOTE, f"refs/heads/{branch}"], check=False
+        )
+        if remote_branch.returncode:
+            raise RetryLater("UAP branch lookup failed")
+        existed = bool(remote_branch.stdout.strip())
+        if not root.exists():
+            command = ["git", "clone"]
+            if existed:
+                command += ["--branch", branch, "--single-branch"]
+            command += [UAP_REMOTE, str(root)]
+            self.run(command, timeout=180)
+            if not existed:
+                self.run(["git", "checkout", "-b", branch], cwd=root)
+        if (
+            self.run(["git", "remote", "get-url", "origin"], cwd=root).stdout.strip()
+            .casefold() != UAP_REMOTE.casefold()
+            or self.run(["git", "branch", "--show-current"], cwd=root).stdout.strip()
+            != branch
+        ):
+            raise PermanentError("uap-onboarding-worktree-collision")
+        changed = self._render_uap_change(root, request, ready=ready)
+        status = self.run(["git", "status", "--porcelain"], cwd=root).stdout.splitlines()
+        actual = sorted(line[3:] for line in status)
+        if existed:
+            if actual:
+                raise PermanentError("uap-onboarding-branch-collision")
+        else:
+            if actual:
+                if actual != changed:
+                    raise PermanentError("uap-onboarding-change-set-collision")
+                self.run(["python3", "tests/static/test_hermes_mission_deployment.py"], cwd=root)
+                if not ready:
+                    self.run(["python3", "tests/static/test_hermes_flow_contract.py"], cwd=root)
+                self.run(["git", "diff", "--check"], cwd=root)
+                self.run(["git", "add", "--", *changed], cwd=root)
+                self.run([
+                    "git", "-c", "commit.gpgsign=false", "commit", "-m",
+                    f"chore(projects): {'activate' if ready else 'prepare'} {request['project_id']}",
+                    "-m", f"Onboarding-Request: {request['request_id']}",
+                    "-m", "Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>",
+                ], cwd=root)
+            else:
+                committed = sorted(
+                    self.run([
+                        "git", "diff", "--name-only", "origin/master...HEAD",
+                    ], cwd=root).stdout.splitlines()
+                )
+                message = self.run(
+                    ["git", "log", "-1", "--format=%B"], cwd=root
+                ).stdout
+                if committed != changed or (
+                    f"Onboarding-Request: {request['request_id']}" not in message
+                ):
+                    raise PermanentError("uap-onboarding-branch-collision")
+            self.run(["git", "push", "-u", "origin", branch], cwd=root, timeout=180)
+        title = f"chore(projects): {'activate' if ready else 'prepare'} {request['project_id']}"
+        self.run([
+            "gh", "pr", "create", "--repo", UAP_REPOSITORY, "--base", "master",
+            "--head", branch, "--title", title, "--body",
+            f"Mechanical ADR-035 onboarding checkpoint for `{request['request_id']}`.",
+        ])
+        pr = self._uap_pr(branch)
+        if not pr:
+            raise RetryLater("UAP onboarding PR is not visible yet")
+        self.run([
+            "gh", "pr", "merge", "--repo", UAP_REPOSITORY,
+            "--auto", "--squash", str(pr["number"]),
+        ])
+        return None
+
+    def _live_project(self, request: dict[str, Any]) -> dict[str, Any] | None:
+        matches = [
+            item for item in self.central.projects()
+            if item.get("project_id") == request["project_id"]
+        ]
+        if len(matches) > 1:
+            raise PermanentError("live-project-catalog-collision")
+        return matches[0] if matches else None
+
+    def ensure_runtime(self, request: dict[str, Any]) -> bool:
+        merge_sha = self._ensure_uap_pr(request, ready=False)
+        if merge_sha is None:
+            return False
+        project = self._live_project(request)
+        if project is None or project.get("status") != "setup_required":
+            return False
+        root = self._request_root(request) / "uap-setup"
+        self._checkout_merged_uap(root, merge_sha)
+        installer = root / "tools/swarm/install_flow_v2.py"
+        profile = root / "tools/swarm/profiles" / profile_name(request)
+        try:
+            loaded_profile = json.loads(profile.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise PermanentError("uap-onboarding-profile-missing") from error
+        if loaded_profile != render_profile(request):
+            raise PermanentError("uap-onboarding-profile-collision")
+        self.run([
+            "python3", str(installer), "--home", str(self.home),
+            "--install-profile", profile_name(request),
+        ])
+        checkout = self.home / request["project_id"]
+        remote = f"https://github.com/{request['repository']}.git"
+        if not checkout.exists():
+            self.run([
+                "git", "clone", "--branch", "main", "--single-branch",
+                remote, str(checkout),
+            ], timeout=180)
+        elif (
+            self.run(["git", "-C", str(checkout), "rev-parse", "--show-toplevel"])
+            .stdout.strip() != str(checkout)
+            or self.run(["git", "-C", str(checkout), "remote", "get-url", "origin"])
+            .stdout.strip().casefold() != remote.casefold()
+        ):
+            raise PermanentError("source-checkout-collision")
+        self.run(["systemctl", "--user", "daemon-reload"])
+        self.run([
+            "systemctl", "--user", "enable", "--now",
+            f"hermes-delivery-coordinator@{profile_instance(request)}.timer",
+        ])
+        active = self.run([
+            "systemctl", "--user", "is-active",
+            f"hermes-delivery-coordinator@{profile_instance(request)}.timer",
+        ]).stdout.strip()
+        return active == "active"
+
+    def ensure_canary(self, request: dict[str, Any]) -> bool:
+        mission_id = canary_mission_id(request)
+        try:
+            mission = self.central.mission(mission_id)
+        except RetryLater:
+            mission = self.central.accept_canary(request)
+        if (
+            mission.get("mission_id") != mission_id
+            or mission.get("goal") != canary_goal(request)
+            or mission.get("dispatch_profile") != dispatch_profile(request)
+        ):
+            raise PermanentError("canary-mission-collision")
+        status = mission.get("status")
+        if status in {"failed", "cancelled"}:
+            raise PermanentError("canary-delivery-failed")
+        if status != "completed":
+            return False
+        if mission.get("progress_percent") != 100 or not mission.get("result"):
+            raise PermanentError("canary-completion-invalid")
+        return True
+
+    def ensure_ready(self, request: dict[str, Any]) -> bool:
+        if self._ensure_uap_pr(request, ready=True) is None:
+            return False
+        project = self._live_project(request)
+        return bool(
+            project
+            and project.get("status") == "ready"
+            and project.get("repository", "").casefold()
+            == request["repository"].casefold()
+        )
+
+
+def _producer_key(home: pathlib.Path) -> str:
+    path = home / ".config/mission-producer-key"
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise RetryLater("mission producer key unavailable") from error
+    if not value:
+        raise RetryLater("mission producer key unavailable")
+    if os.name != "nt" and path.resolve().stat().st_mode & 0o077:
+        raise PermanentError("mission-producer-key-insecure")
+    return value
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--home", type=pathlib.Path, default=pathlib.Path.home())
+    args = parser.parse_args()
+    home = args.home.expanduser().resolve()
+    try:
+        central = CentralClient(
+            os.environ.get("HERMES_API_URL", ""),
+            os.environ.get("HERMES_API_TOKEN", ""),
+            _producer_key(home),
+        )
+        changed = Driver(central, home=home).tick()
+    except RetryLater:
+        print("project-onboarding-wait")
+        return 75
+    except PermanentError as error:
+        print(f"project-onboarding-error: {error.code}", file=sys.stderr)
+        return 1
+    except Exception:
+        print("project-onboarding-error: unexpected failure", file=sys.stderr)
+        return 1
+    print("project-onboarding-advanced" if changed else "project-onboarding-idle")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
