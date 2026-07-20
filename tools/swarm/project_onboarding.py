@@ -273,14 +273,18 @@ def render_profile(request: dict[str, Any]) -> dict[str, Any]:
         "branch_prefix": f"codex/registered-{slug}",
         "ci_timeout_seconds": 3600,
         "claim_ttl_seconds": 36000,
+        "codex_bin": "/home/uap/.local/bin/codex",
+        "codex_home": "/home/uap/.codex",
         "command_timeout_seconds": 3600,
         "commit_message": f"feat: deliver registered {slug} mission",
         "completion_evidence": True,
+        "crash_after_author_commit_once": False,
         "default_branch": "main",
         "delivery_mode": "none",
         "dispatch_profile": dispatch_profile(request),
         "max_changed_files": 40,
         "max_review_cycles": 7,
+        "gh_bin": "gh",
         "post_verify_checks": checks,
         "pull_request_body": (
             "Implements one registered owner mission through the autonomous UAP "

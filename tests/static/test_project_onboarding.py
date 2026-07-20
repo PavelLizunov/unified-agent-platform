@@ -51,6 +51,18 @@ def request(preset: str = "rust", checkpoint: str = "requested") -> dict:
 
 
 class ProjectOnboardingTests(unittest.TestCase):
+    def test_rendered_profile_hash_matches_coordinator_runtime_profile(self):
+        value = request()
+        rendered = driver.render_profile(value)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "profile.json"
+            path.write_text(json.dumps(rendered), encoding="utf-8")
+            loaded = coordinator.load_profile(path)
+        self.assertEqual(
+            driver.flow_contract.canonical_sha256(rendered),
+            driver.flow_contract.canonical_sha256(loaded),
+        )
+
     def test_presets_are_dependency_free_and_require_macos_ci(self):
         expected = {
             "rust": "cargo test --all-targets",
