@@ -121,6 +121,7 @@ _NOTICE_LABELS = {
         "восстановление продолжится автоматически."
     ),
 }
+_INTAKE_CANCEL_ALIASES = {"cancel", "отмена", "отменить"}
 NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
 # ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
 _NOTIFICATION_LEASE_SECONDS = 300
@@ -136,6 +137,13 @@ class MissionProjectRequired(MissionError):
     def __init__(self, projects: list[dict[str, Any]]) -> None:
         super().__init__("choose a registered project")
         self.projects = projects
+
+
+class MissionIntakeCancelled(MissionError):
+    """An uncommitted Telegram project-selection draft was cancelled."""
+
+    def __init__(self) -> None:
+        super().__init__("выбор проекта отменён")
 
 
 class MissionProjectUnavailable(MissionError):
@@ -1015,6 +1023,14 @@ class MissionStore:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (platform, scope_key, source_message_id)
                 );
+                CREATE TABLE IF NOT EXISTS mission_intake_cancel_receipts (
+                    platform TEXT NOT NULL,
+                    scope_key TEXT NOT NULL,
+                    source_message_id TEXT NOT NULL,
+                    source_text_sha256 TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (platform, scope_key, source_message_id)
+                );
                 """
             )
             columns = {
@@ -1349,6 +1365,59 @@ class MissionStore:
             ).fetchone()
         return dict(row) if row else None
 
+    def _intake_cancel_receipt(
+        self, platform: str, scope_key: str, source_message_id: str
+    ) -> dict[str, Any] | None:
+        with self._db() as connection:
+            row = connection.execute(
+                """SELECT * FROM mission_intake_cancel_receipts
+                   WHERE platform = ? AND scope_key = ? AND source_message_id = ?""",
+                (platform, scope_key, source_message_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def _cancel_intake_draft(
+        self,
+        *,
+        platform: str,
+        scope_key: str,
+        source_message_id: str,
+        text: str,
+    ) -> None:
+        digest = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                """SELECT * FROM mission_intake_cancel_receipts
+                   WHERE platform = ? AND scope_key = ? AND source_message_id = ?""",
+                (platform, scope_key, source_message_id),
+            ).fetchone()
+            if previous:
+                if previous["source_text_sha256"] != digest:
+                    raise MissionError("owner turn idempotency collision")
+                return
+            draft = connection.execute(
+                "SELECT * FROM mission_intake_drafts WHERE platform = ? AND scope_key = ?",
+                (platform, scope_key),
+            ).fetchone()
+            if (
+                not draft
+                or draft["mission_id"]
+                or draft["selection_message_id"]
+            ):
+                raise MissionError("выбор проекта уже завершён")
+            connection.execute(
+                """INSERT INTO mission_intake_cancel_receipts(
+                       platform, scope_key, source_message_id,
+                       source_text_sha256, created_at
+                   ) VALUES (?, ?, ?, ?, ?)""",
+                (platform, scope_key, source_message_id, digest, _utc_now()),
+            )
+            connection.execute(
+                "DELETE FROM mission_intake_drafts WHERE platform = ? AND scope_key = ?",
+                (platform, scope_key),
+            )
+
     def _save_intake_draft(
         self,
         *,
@@ -1408,6 +1477,35 @@ class MissionStore:
         if len(matches) != 1:
             raise MissionProjectRequired(public_intake_projects(platform))
         target = matches[0]
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM mission_intake_drafts WHERE platform = ? AND scope_key = ?",
+                (platform, scope_key),
+            ).fetchone()
+            if not current:
+                raise MissionError("выбор проекта уже отменён")
+            if current["mission_id"]:
+                raise MissionError("выбор проекта уже завершён")
+            if current["selection_message_id"]:
+                if (
+                    current["selection_message_id"] != selection_message_id
+                    or current["selected_project_id"] != target["project_id"]
+                ):
+                    raise MissionError("выбор проекта уже выполняется")
+            else:
+                updated = connection.execute(
+                    """UPDATE mission_intake_drafts
+                       SET selected_project_id = ?, selection_message_id = ?
+                       WHERE platform = ? AND scope_key = ?
+                         AND mission_id IS NULL AND selection_message_id IS NULL""",
+                    (
+                        target["project_id"], selection_message_id,
+                        platform, scope_key,
+                    ),
+                )
+                if updated.rowcount != 1:
+                    raise MissionError("выбор проекта уже изменён")
         accepted, created = self.ingest_owner_goal(
             draft["goal"],
             platform=platform,
@@ -1442,15 +1540,24 @@ class MissionStore:
                         accepted["mission_id"], _utc_now(),
                     ),
                 )
-            connection.execute(
+            updated = connection.execute(
                 """UPDATE mission_intake_drafts
-                   SET selected_project_id = ?, selection_message_id = ?, mission_id = ?
-                   WHERE platform = ? AND scope_key = ?""",
+                   SET mission_id = ?
+                   WHERE platform = ? AND scope_key = ?
+                     AND selected_project_id = ? AND selection_message_id = ?
+                     AND mission_id IS NULL""",
                 (
-                    target["project_id"], selection_message_id,
                     accepted["mission_id"], platform, scope_key,
+                    target["project_id"], selection_message_id,
                 ),
             )
+            if updated.rowcount != 1:
+                current = connection.execute(
+                    "SELECT mission_id FROM mission_intake_drafts WHERE platform = ? AND scope_key = ?",
+                    (platform, scope_key),
+                ).fetchone()
+                if not current or current["mission_id"] != accepted["mission_id"]:
+                    raise MissionError("project selection checkpoint collision")
         return accepted, created
 
     def ingest_owner_turn(
@@ -1490,6 +1597,14 @@ class MissionStore:
             if selection_receipt["source_text_sha256"] != digest:
                 raise MissionError("owner turn idempotency collision")
             return self.events(selection_receipt["mission_id"])[0], False
+        cancel_receipt = self._intake_cancel_receipt(
+            platform, scope_key, source_message_id
+        )
+        if cancel_receipt:
+            digest = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+            if cancel_receipt["source_text_sha256"] != digest:
+                raise MissionError("owner turn idempotency collision")
+            raise MissionIntakeCancelled()
         if chat_id:
             receipt = self._bound_answer_receipt(
                 platform, chat_id, thread_id, source_message_id
@@ -1534,6 +1649,14 @@ class MissionStore:
                 )
         draft = self._intake_draft(platform, scope_key)
         if draft:
+            if platform == "telegram" and _project_alias(text) in _INTAKE_CANCEL_ALIASES:
+                self._cancel_intake_draft(
+                    platform=platform,
+                    scope_key=scope_key,
+                    source_message_id=source_message_id,
+                    text=text,
+                )
+                raise MissionIntakeCancelled()
             resolved = self._resolve_intake_draft(
                 draft,
                 platform=platform,
@@ -1543,6 +1666,8 @@ class MissionStore:
             )
             if resolved is not None:
                 return resolved
+        elif platform == "telegram" and _project_alias(text) in _INTAKE_CANCEL_ALIASES:
+            raise MissionError("нет ожидающего выбора проекта")
         try:
             target = registered_intake_target(
                 platform, project_id=project_id, goal=text

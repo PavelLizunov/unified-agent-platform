@@ -193,7 +193,12 @@ def main() -> None:
         assert "store.ingest_owner_turn(" in gateway
         assert "_enrich_message_with_transcription(" in gateway
         assert "MissionProjectRequired" in gateway
+        assert "MissionIntakeCancelled" in gateway
+        assert 'canonical == "cancel"' in gateway
+        assert 'event.text = "отмена"' in gateway
         assert "Для какого проекта выполнить задачу?" in gateway
+        assert "или напишите «отмена»" in gateway
+        assert "Выбор проекта отменён." in gateway
         assert 'reason="owner-intake"' in (clone / "hermes_cli/uap_missions.py").read_text(
             encoding="utf-8"
         )
