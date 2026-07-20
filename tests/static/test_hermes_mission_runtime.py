@@ -58,6 +58,7 @@ def test_project_onboarding_is_idempotent_restart_safe_and_forward_only() -> Non
         assert requested["repository"] == "PavelLizunov/mac-ledger"
         assert requested["project_id"] == "mac-ledger"
         assert requested["checkpoint"] == "requested"
+        assert requested["invocations"] is None
         assert requested["progress_percent"] == 0
         assert requested["error_code"] is None
 
@@ -67,6 +68,34 @@ def test_project_onboarding_is_idempotent_restart_safe_and_forward_only() -> Non
         )
         assert not replay_created and replayed == requested
         assert restarted.pending_project_onboarding() == requested
+
+        first_invocation = {
+            "unit": "hermes-project-onboarding.service",
+            "invocation_id": "1" * 32,
+        }
+        invoked, recorded = restarted.record_project_onboarding_invocation(
+            requested["request_id"], first_invocation
+        )
+        assert recorded and invoked["invocations"]["count"] == 1
+        replayed_invocation, recorded = missions.MissionStore(
+            database
+        ).record_project_onboarding_invocation(
+            requested["request_id"], first_invocation
+        )
+        assert not recorded and replayed_invocation == invoked
+        second_invocation = {
+            "unit": "hermes-project-onboarding.service",
+            "invocation_id": "2" * 32,
+        }
+        invoked, recorded = missions.MissionStore(
+            database
+        ).record_project_onboarding_invocation(
+            requested["request_id"], second_invocation
+        )
+        assert recorded
+        assert invoked["invocations"]["count"] == 2
+        assert invoked["invocations"]["first"] == first_invocation
+        assert invoked["invocations"]["last"] == second_invocation
 
         try:
             restarted.request_project_onboarding(
@@ -105,6 +134,13 @@ def test_project_onboarding_is_idempotent_restart_safe_and_forward_only() -> Non
         assert current["checkpoint"] == "ready"
         assert current["progress_percent"] == 100
         assert missions.MissionStore(database).pending_project_onboarding() is None
+        try:
+            restarted.record_project_onboarding_invocation(
+                requested["request_id"], second_invocation
+            )
+            raise AssertionError("terminal onboarding accepted an invocation")
+        except missions.MissionError as error:
+            assert "terminal" in str(error)
 
         failed_request, _ = restarted.request_project_onboarding(
             "failed-project", "Expected failure path", "python"

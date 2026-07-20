@@ -35,7 +35,8 @@ CORE_FILES = {
 }
 ONBOARDING_FILES = {
     name: target for name, target in CORE_FILES.items()
-    if name == "project_onboarding.py" or "hermes-project-onboarding" in name
+    if name in {"flow_contract.py", "project_onboarding.py"}
+    or "hermes-project-onboarding" in name
 }
 EXECUTABLES = (
     "flow_contract.py", "mission_adapter.py", "delivery_coordinator.py",

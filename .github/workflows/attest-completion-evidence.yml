@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'docs/evidence/completion/*.json'
+      - 'docs/evidence/onboarding/*.json'
 
 permissions: {}
 
@@ -22,7 +23,13 @@ jobs:
           for bundle in docs/evidence/completion/*.json; do
             python3 tools/swarm/flow_contract.py verify-completion-evidence --bundle "$bundle"
           done
+          for bundle in docs/evidence/onboarding/*.json; do
+            python3 tools/swarm/flow_contract.py verify-project-onboarding-evidence \
+              --bundle "$bundle" --completion-root docs/evidence/completion
+          done
       - name: Attest completion evidence
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6  # v4
         with:
-          subject-path: 'docs/evidence/completion/*.json'
+          subject-path: |
+            docs/evidence/completion/*.json
+            docs/evidence/onboarding/*.json

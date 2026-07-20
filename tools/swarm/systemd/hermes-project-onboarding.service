@@ -8,6 +8,7 @@ ConditionPathExists=%h/.config/mission-producer-key
 Type=oneshot
 WorkingDirectory=%h
 EnvironmentFile=%h/.config/uap/delivery-coordinator.env
+Environment=UAP_ONBOARDING_UNIT=hermes-project-onboarding.service
 UnsetEnvironment=HERMES_MISSION_OWNER_KEY
 ExecStart=/usr/bin/python3 %h/swarm-bin/project_onboarding.py
 SuccessExitStatus=75

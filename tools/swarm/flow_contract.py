@@ -122,6 +122,39 @@ def canonical_sha256(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def validate_systemd_invocations(
+    value: Any, *, unit_pattern: str, where: str
+) -> dict[str, Any]:
+    """Validate the bounded endpoint summary of one systemd invocation chain."""
+    if not isinstance(value, dict) or set(value) != {
+        "count", "first", "last", "chain_sha256",
+    }:
+        raise ContractError(f"{where} requires systemd invocation identity")
+    count = value["count"]
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ContractError(f"{where} invocation count is invalid")
+    for invocation in (value["first"], value["last"]):
+        if (
+            not isinstance(invocation, dict)
+            or set(invocation) != {"unit", "invocation_id"}
+            or not re.fullmatch(unit_pattern, str(invocation.get("unit") or ""))
+            or not re.fullmatch(
+                r"[0-9a-f]{32}", str(invocation.get("invocation_id") or "")
+            )
+        ):
+            raise ContractError(f"{where} systemd invocation is invalid")
+    if count == 1 and value["first"] != value["last"]:
+        raise ContractError(f"{where} invocation endpoints disagree")
+    chain = value["chain_sha256"]
+    if not isinstance(chain, str) or not re.fullmatch(r"[0-9a-f]{64}", chain):
+        raise ContractError(f"{where} invocation chain is invalid")
+    if count == 1 and chain != canonical_sha256({
+        "previous": None, **value["first"],
+    }):
+        raise ContractError(f"{where} invocation chain does not verify")
+    return value
+
+
 def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     """Validate one closed, self-digesting successful-delivery evidence bundle."""
     schema_version = value.get("schema_version")
@@ -314,34 +347,11 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         ):
             raise ContractError("completion evidence Telegram delivery is unproven")
 
-    invocations = runtime["invocations"]
-    if not isinstance(invocations, dict) or set(invocations) != {
-        "count", "first", "last", "chain_sha256",
-    }:
-        raise ContractError("completion evidence requires systemd invocation identity")
-    count = invocations["count"]
-    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
-        raise ContractError("completion evidence invocation count is invalid")
-    for invocation in (invocations["first"], invocations["last"]):
-        if (
-            not isinstance(invocation, dict)
-            or set(invocation) != {"unit", "invocation_id"}
-            or not re.fullmatch(
-                r"hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service",
-                str(invocation.get("unit") or ""),
-            )
-            or not re.fullmatch(r"[0-9a-f]{32}", str(invocation.get("invocation_id") or ""))
-        ):
-            raise ContractError("completion evidence systemd invocation is invalid")
-    if count == 1 and invocations["first"] != invocations["last"]:
-        raise ContractError("completion evidence invocation endpoints disagree")
-    chain = invocations["chain_sha256"]
-    if not isinstance(chain, str) or not re.fullmatch(r"[0-9a-f]{64}", chain):
-        raise ContractError("completion evidence invocation chain is invalid")
-    if count == 1 and chain != canonical_sha256({
-        "previous": None, **invocations["first"],
-    }):
-        raise ContractError("completion evidence invocation chain does not verify")
+    validate_systemd_invocations(
+        runtime["invocations"],
+        unit_pattern=r"hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service",
+        where="completion evidence",
+    )
 
     git_sha_fields = (
         (source, "base_sha"), (source, "candidate_sha"), (source, "merge_sha"),
@@ -498,6 +508,156 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     ):
         raise ContractError("completion evidence Central terminal state is invalid")
     return value
+
+
+def validate_project_onboarding_evidence(value: dict[str, Any]) -> dict[str, Any]:
+    """Validate one closed, self-digesting ADR-035 onboarding certificate."""
+    fields = {
+        "schema_version", "sha256", "request", "driver", "repository", "uap",
+        "runtime", "canary", "catalog",
+    }
+    if value.get("schema_version") != 1 or set(value) != fields:
+        raise ContractError("project onboarding evidence has an invalid schema")
+    digest = _required_text(value, "sha256", "project onboarding evidence")
+    unsigned = {key: item for key, item in value.items() if key != "sha256"}
+    try:
+        computed = canonical_sha256(unsigned)
+    except (TypeError, ValueError) as error:
+        raise ContractError("project onboarding evidence is not canonical JSON") from error
+    if not re.fullmatch(r"[0-9a-f]{64}", digest) or digest != computed:
+        raise ContractError("project onboarding evidence digest mismatch")
+
+    expected = {
+        "request": {
+            "request_id", "project_id", "repository", "name", "description_sha256",
+            "preset", "created_at", "checkpoint",
+        },
+        "driver": {"sha256", "invocations"},
+        "repository": {"private", "default_branch", "bootstrap_sha"},
+        "uap": {"setup_pr", "activation_pr"},
+        "runtime": {"dispatch_profile", "profile_sha256", "timer_unit"},
+        "canary": {
+            "mission_id", "completion_evidence_path", "completion_evidence_sha256",
+            "completion_evidence_byte_sha256",
+        },
+        "catalog": {"status", "delivery_mode", "test_targets"},
+    }
+    parts: dict[str, dict[str, Any]] = {}
+    for name, part_fields in expected.items():
+        part = value.get(name)
+        if not isinstance(part, dict) or set(part) != part_fields:
+            raise ContractError(f"project onboarding evidence {name} has an invalid schema")
+        parts[name] = part
+
+    request = parts["request"]
+    for field in ("request_id", "project_id", "repository", "name", "created_at"):
+        _required_text(request, field, "project onboarding evidence request")
+    project_id = request["project_id"]
+    if (
+        project_id != request["name"].casefold()
+        or request["repository"] != f"PavelLizunov/{request['name']}"
+        or request["request_id"] != "project-onboarding-" + hashlib.sha256(
+            f"pavellizunov\0{project_id}".encode("utf-8")
+        ).hexdigest()[:32]
+        or request["preset"] not in {"rust", "go", "python", "web"}
+        or request["checkpoint"] != "ready"
+        or not re.fullmatch(r"[0-9a-f]{64}", str(request["description_sha256"]))
+    ):
+        raise ContractError("project onboarding evidence request identity is invalid")
+
+    driver = parts["driver"]
+    if not re.fullmatch(r"[0-9a-f]{64}", str(driver.get("sha256") or "")):
+        raise ContractError("project onboarding evidence driver identity is invalid")
+    validate_systemd_invocations(
+        driver["invocations"],
+        unit_pattern=r"hermes-project-onboarding\.service",
+        where="project onboarding evidence",
+    )
+
+    repository = parts["repository"]
+    if (
+        repository["private"] is not True
+        or repository["default_branch"] != "main"
+        or not re.fullmatch(r"[0-9a-f]{40}", str(repository["bootstrap_sha"] or ""))
+    ):
+        raise ContractError("project onboarding repository identity is invalid")
+
+    for label, pr in parts["uap"].items():
+        if (
+            not isinstance(pr, dict)
+            or set(pr) != {"number", "url", "head_sha", "merge_sha"}
+            or isinstance(pr["number"], bool)
+            or not isinstance(pr["number"], int)
+            or pr["number"] <= 0
+            or pr["url"] != (
+                f"https://github.com/PavelLizunov/unified-agent-platform/pull/{pr['number']}"
+            )
+            or not re.fullmatch(r"[0-9a-f]{40}", str(pr["head_sha"] or ""))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(pr["merge_sha"] or ""))
+        ):
+            raise ContractError(f"project onboarding evidence {label} identity is invalid")
+
+    runtime = parts["runtime"]
+    instance = f"{project_id}-registered-v4"
+    if (
+        runtime["dispatch_profile"] != f"build1-{instance}"
+        or runtime["timer_unit"] != f"hermes-delivery-coordinator@{instance}.timer"
+        or not re.fullmatch(r"[0-9a-f]{64}", str(runtime["profile_sha256"] or ""))
+    ):
+        raise ContractError("project onboarding evidence runtime identity is invalid")
+
+    canary = parts["canary"]
+    mission_id = "project-canary-" + hashlib.sha256(
+        f"{request['request_id']}:delivery-none-v2".encode("utf-8")
+    ).hexdigest()[:32]
+    if (
+        canary["mission_id"] != mission_id
+        or canary["completion_evidence_path"]
+        != f"docs/evidence/completion/{mission_id}.json"
+        or any(
+            not re.fullmatch(r"[0-9a-f]{64}", str(canary[field] or ""))
+            for field in (
+                "completion_evidence_sha256", "completion_evidence_byte_sha256"
+            )
+        )
+    ):
+        raise ContractError("project onboarding evidence canary identity is invalid")
+
+    catalog = parts["catalog"]
+    if (
+        catalog["status"] != "ready"
+        or catalog["delivery_mode"] != "none"
+        or catalog["test_targets"] != ["github-macos"]
+    ):
+        raise ContractError("project onboarding evidence catalog state is invalid")
+    return value
+
+
+def validate_project_onboarding_completion_link(
+    value: dict[str, Any], completion_root: str | pathlib.Path
+) -> dict[str, Any]:
+    """Verify the signed onboarding certificate's referenced delivery bundle."""
+    evidence = validate_project_onboarding_evidence(value)
+    mission_id = evidence["canary"]["mission_id"]
+    path = pathlib.Path(completion_root) / f"{mission_id}.json"
+    try:
+        raw = path.read_bytes()
+        completion = validate_completion_evidence(json.loads(raw.decode("utf-8")))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ContractError("project onboarding completion evidence is unavailable") from error
+    if (
+        hashlib.sha256(raw).hexdigest()
+        != evidence["canary"]["completion_evidence_byte_sha256"]
+        or completion["sha256"]
+        != evidence["canary"]["completion_evidence_sha256"]
+        or completion["mission"]["mission_id"] != mission_id
+        or completion["mission"]["dispatch_profile"]
+        != evidence["runtime"]["dispatch_profile"]
+        or completion["source"]["repo"] != evidence["request"]["repository"]
+        or completion["delivery"]["mode"] != evidence["catalog"]["delivery_mode"]
+    ):
+        raise ContractError("project onboarding completion evidence link mismatch")
+    return evidence
 
 
 def _required_text(obj: dict[str, Any], key: str, where: str) -> str:
@@ -1472,6 +1632,11 @@ def main(argv: list[str] | None = None) -> int:
     evidence.add_argument("--bundle", required=True)
     evidence.add_argument("--expected-sha256")
 
+    onboarding_evidence = sub.add_parser("verify-project-onboarding-evidence")
+    onboarding_evidence.add_argument("--bundle", required=True)
+    onboarding_evidence.add_argument("--expected-sha256")
+    onboarding_evidence.add_argument("--completion-root")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "delivery-route":
@@ -1522,6 +1687,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.expected_sha256 is not None and result["sha256"] != args.expected_sha256:
                 raise ContractError("completion evidence does not match the expected digest")
             print(f"hermes-flow-completion-evidence-ok {result['sha256']}")
+            return 0
+        if args.command == "verify-project-onboarding-evidence":
+            result = validate_project_onboarding_evidence(load_json(args.bundle))
+            if args.completion_root is not None:
+                validate_project_onboarding_completion_link(result, args.completion_root)
+            if args.expected_sha256 is not None and result["sha256"] != args.expected_sha256:
+                raise ContractError("project onboarding evidence does not match the expected digest")
+            print(f"hermes-flow-project-onboarding-evidence-ok {result['sha256']}")
             return 0
     except (ContractError, OSError, json.JSONDecodeError) as error:
         print(f"hermes-flow-error: {_safe_error(error)}", file=sys.stderr)

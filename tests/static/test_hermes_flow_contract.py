@@ -258,7 +258,154 @@ def completion_evidence(*, schema_version=1):
     return value
 
 
+def project_onboarding_evidence():
+    project_id = "mac-ledger"
+    request_id = "project-onboarding-" + hashlib.sha256(
+        f"pavellizunov\0{project_id}".encode("utf-8")
+    ).hexdigest()[:32]
+    mission_id = "project-canary-" + hashlib.sha256(
+        f"{request_id}:delivery-none-v2".encode("utf-8")
+    ).hexdigest()[:32]
+    invocation = {
+        "unit": "hermes-project-onboarding.service",
+        "invocation_id": "6" * 32,
+    }
+    value = {
+        "schema_version": 1,
+        "request": {
+            "request_id": request_id,
+            "project_id": project_id,
+            "repository": "PavelLizunov/mac-ledger",
+            "name": "mac-ledger",
+            "description_sha256": "1" * 64,
+            "preset": "rust",
+            "created_at": "2026-07-20T12:00:00.000Z",
+            "checkpoint": "ready",
+        },
+        "driver": {
+            "sha256": "2" * 64,
+            "invocations": {
+                "count": 1,
+                "first": invocation,
+                "last": invocation,
+                "chain_sha256": flow.canonical_sha256({
+                    "previous": None, **invocation,
+                }),
+            },
+        },
+        "repository": {
+            "private": True,
+            "default_branch": "main",
+            "bootstrap_sha": "3" * 40,
+        },
+        "uap": {
+            "setup_pr": {
+                "number": 10,
+                "url": "https://github.com/PavelLizunov/unified-agent-platform/pull/10",
+                "head_sha": "4" * 40,
+                "merge_sha": "5" * 40,
+            },
+            "activation_pr": {
+                "number": 11,
+                "url": "https://github.com/PavelLizunov/unified-agent-platform/pull/11",
+                "head_sha": "7" * 40,
+                "merge_sha": "8" * 40,
+            },
+        },
+        "runtime": {
+            "dispatch_profile": "build1-mac-ledger-registered-v4",
+            "profile_sha256": "9" * 64,
+            "timer_unit": "hermes-delivery-coordinator@mac-ledger-registered-v4.timer",
+        },
+        "canary": {
+            "mission_id": mission_id,
+            "completion_evidence_path": f"docs/evidence/completion/{mission_id}.json",
+            "completion_evidence_sha256": "a" * 64,
+            "completion_evidence_byte_sha256": "b" * 64,
+        },
+        "catalog": {
+            "status": "ready",
+            "delivery_mode": "none",
+            "test_targets": ["github-macos"],
+        },
+    }
+    value["sha256"] = flow.canonical_sha256(value)
+    return value
+
+
 class FlowContractTests(unittest.TestCase):
+    def test_project_onboarding_evidence_is_closed_and_self_digesting(self):
+        value = project_onboarding_evidence()
+        self.assertEqual(value, flow.validate_project_onboarding_evidence(value))
+
+        changed = json.loads(json.dumps(value))
+        changed["driver"]["invocations"]["last"]["invocation_id"] = "7" * 32
+        with self.assertRaisesRegex(flow.ContractError, "digest mismatch"):
+            flow.validate_project_onboarding_evidence(changed)
+        changed["sha256"] = flow.canonical_sha256({
+            key: item for key, item in changed.items() if key != "sha256"
+        })
+        with self.assertRaisesRegex(flow.ContractError, "endpoints disagree"):
+            flow.validate_project_onboarding_evidence(changed)
+
+    def test_project_onboarding_evidence_cli_verifies_expected_digest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "onboarding.json"
+            value = project_onboarding_evidence()
+            path.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(0, flow.main([
+                "verify-project-onboarding-evidence", "--bundle", str(path),
+                "--expected-sha256", value["sha256"],
+            ]))
+            self.assertEqual(2, flow.main([
+                "verify-project-onboarding-evidence", "--bundle", str(path),
+                "--expected-sha256", "0" * 64,
+            ]))
+
+    def test_project_onboarding_evidence_binds_exact_completion_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            evidence = project_onboarding_evidence()
+            mission_id = evidence["canary"]["mission_id"]
+            completion = completion_evidence()
+            completion["mission"]["mission_id"] = mission_id
+            completion["mission"]["dispatch_profile"] = evidence[
+                "runtime"
+            ]["dispatch_profile"]
+            completion["source"]["repo"] = evidence["request"]["repository"]
+            completion["delivery"]["pr_url"] = (
+                f"https://github.com/{evidence['request']['repository']}/pull/42"
+            )
+            completion["sha256"] = flow.canonical_sha256({
+                key: item for key, item in completion.items() if key != "sha256"
+            })
+            completion_root = root / "completion"
+            completion_root.mkdir()
+            completion_path = completion_root / f"{mission_id}.json"
+            raw = (
+                json.dumps(completion, ensure_ascii=False, indent=2, sort_keys=True)
+                + "\n"
+            ).encode("utf-8")
+            completion_path.write_bytes(raw)
+            evidence["canary"]["completion_evidence_sha256"] = completion["sha256"]
+            evidence["canary"]["completion_evidence_byte_sha256"] = hashlib.sha256(
+                raw
+            ).hexdigest()
+            evidence["sha256"] = flow.canonical_sha256({
+                key: item for key, item in evidence.items() if key != "sha256"
+            })
+            self.assertEqual(
+                evidence,
+                flow.validate_project_onboarding_completion_link(
+                    evidence, completion_root
+                ),
+            )
+            completion_path.write_bytes(raw + b"\n")
+            with self.assertRaisesRegex(flow.ContractError, "link mismatch"):
+                flow.validate_project_onboarding_completion_link(
+                    evidence, completion_root
+                )
+
     def test_completion_evidence_is_self_digesting_and_semantically_closed(self):
         value = completion_evidence()
         self.assertEqual(value, flow.validate_completion_evidence(value))
@@ -1331,6 +1478,10 @@ class FlowContractTests(unittest.TestCase):
             self.assertEqual(
                 (source / "project_onboarding.py").read_bytes(),
                 installed["project_onboarding.py"].read_bytes(),
+            )
+            self.assertEqual(
+                (source / "flow_contract.py").read_bytes(),
+                installed["flow_contract.py"].read_bytes(),
             )
             installer.install_onboarding(source, home, check_only=True)
             installed["project_onboarding.py"].write_text("drift", encoding="utf-8")
