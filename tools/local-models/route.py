@@ -17,6 +17,10 @@ BACKENDS = {
     "ornith": (os.environ.get("ORNITH_URL", "http://100.116.97.112:8080"), "mlx-community/Ornith-1.0-9B-4bit"),
 }
 KEY = os.environ.get("ROUTER_KEY", "")  # if set, require "Authorization: Bearer <KEY>"
+STT_URL = os.environ.get("STT_URL", "http://100.116.97.112:8091/v1/audio/transcriptions")
+STT_PATH = "/v1/audio/transcriptions"
+MAX_STT_BYTES = 25 * 16_000 * 2
+MAX_STT_RESPONSE_BYTES = 4_096 * 4
 MODELS = [{"id": "qwen-35b", "object": "model", "owned_by": "local-desktop"},
           {"id": "ornith-9b", "object": "model", "owned_by": "local-mac"}]
 
@@ -46,6 +50,8 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._auth_ok():
             self.send_error(401, "bad router key"); return
+        if self.path == STT_PATH:
+            self._proxy_stt(); return
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
         url = BACKENDS["qwen"][0]
         try:
@@ -82,6 +88,44 @@ class H(BaseHTTPRequestHandler):
             try: self.send_error(502, "backend error: %s" % e)
             except Exception: pass
 
+    def _proxy_stt(self):
+        if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/octet-stream":
+            self.send_error(415, "unsupported media type"); return
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            length = 0
+        if not 0 < length <= MAX_STT_BYTES or length % 2:
+            self.send_error(413, "invalid audio size"); return
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            self.send_error(400, "incomplete audio"); return
+        target = urllib.parse.urlsplit(STT_URL)
+        if target.scheme != "http" or not target.hostname or target.username or target.password:
+            self.send_error(502, "STT backend configuration error"); return
+        try:
+            conn = http.client.HTTPConnection(target.hostname, target.port or 80, timeout=8)
+            conn.request("POST", target.path or STT_PATH, body=raw, headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(raw)),
+            })
+            resp = conn.getresponse()
+            body = resp.read(MAX_STT_RESPONSE_BYTES + 1)
+            if resp.status != 200 or len(body) > MAX_STT_RESPONSE_BYTES:
+                self.send_error(502, "STT backend failed"); return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            try: self.send_error(502, "STT backend unavailable")
+            except Exception: pass
+        finally:
+            try: conn.close()
+            except Exception: pass
+
     def log_message(self, *a):
         return  # quiet
 
@@ -92,8 +136,10 @@ if __name__ == "__main__":
         assert pick("Ornith-1.0-9B-4bit") == "ornith"
         assert pick("qwen-35b") == "qwen"
         assert pick("") == "qwen" and pick(None) == "qwen"   # default = general model
+        assert MAX_STT_BYTES == 800_000
+        assert urllib.parse.urlsplit(STT_PATH).path == STT_PATH
         print("selfcheck ok"); sys.exit(0)
     port = int(os.environ.get("ROUTER_PORT", "8090"))
-    print("local-model router on :%d  ->  qwen=%s  ornith=%s" %
-          (port, BACKENDS["qwen"][0], BACKENDS["ornith"][0]))
+    print("local-model router on :%d  ->  qwen=%s  ornith=%s  stt=%s" %
+          (port, BACKENDS["qwen"][0], BACKENDS["ornith"][0], STT_URL))
     ThreadingHTTPServer(("0.0.0.0", port), H).serve_forever()

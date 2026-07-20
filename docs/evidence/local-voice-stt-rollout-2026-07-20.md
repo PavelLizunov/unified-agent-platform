@@ -2,9 +2,10 @@
 
 ## Verdict
 
-**PASS for the bounded local media-preprocessing seam and exactly-once Central intake.** Telegram voice/audio can use
-the existing Hermes ingress without an external STT API, new service, workflow engine or GPU. STT returns untrusted
-owner text only; it has no author, reviewer, tool, project or model-routing authority.
+**PASS for the bounded local media-preprocessing seam and exactly-once Central intake.** Telegram voice/audio uses
+the existing Hermes ingress without an external STT API, new cluster service or workflow engine. A bounded launchd
+worker uses the always-on Mac GPU; checksum-pinned Linux CPU RNNT remains the automatic fallback. STT returns
+untrusted owner text only; it has no author, reviewer, tool, project or model-routing authority.
 
 Workspace projects the resulting Central mission, but it does not currently expose a binary voice-upload control.
 This evidence therefore does not claim a Workspace voice recorder or an owner-sent Telegram UI canary. It combines
@@ -97,10 +98,39 @@ only harmless transcript text, hashes and aggregate resource numbers are recorde
 ## Resource ceiling and allowed claims
 
 The production boundary is 8 MiB, 25 seconds, checked container format, local-file-only FFmpeg protocols, one decode
-thread, two inference threads, 12-second decode timeout, 40 CPU seconds, 1.5 GiB address space, 64 file descriptors,
-45-second outer timeout and a five-second exclusive-model wait. The pod retains its 4 GiB memory limit. Q8 and GPU
-were not advanced after Q4 passed on the real no-GPU worker.
+thread, 12-second decode timeout, 800,000-byte signed-16 PCM body, eight-second remote timeout, serialized Metal CTC,
+64 Mac file descriptors, 45-second outer timeout and a five-second CPU-fallback model wait. CPU fallback retains two
+inference threads, 40 CPU seconds and 1.5 GiB address space; the pod retains its 4 GiB memory limit. Q8 was not
+advanced after Q4 passed on both real workers.
 
-It is correct to claim local CPU Russian Telegram voice/audio preprocessing and exactly-once Central acceptance at
-the deployed seam. It is not yet correct to claim long-form/VAD beyond 25 seconds, verified timestamp accuracy,
+It is correct to claim local Mac Metal Russian Telegram voice/audio preprocessing, automatic Linux CPU fallback and
+exactly-once Central acceptance at the deployed seam. It is not yet correct to claim long-form/VAD beyond 25 seconds, verified timestamp accuracy,
 arbitrary languages, a Workspace voice-upload UI or an owner-sent Telegram client transport canary.
+
+## Mac CTC acceleration follow-up
+
+The follow-up selects `gigaam-v3-e2e-ctc-Q4_K_M.gguf` at repository commit
+`075dff81f843cf23d22b4ce943ffdc4dd8650cd7`, 182,497,888 bytes, SHA-256
+`35581e11e048eef785657cff07e5fced794bba6d9c75143257f6452c8aeea655`. The M4 worker binds only
+`100.116.97.112:8091`, validates the model hash before load, accepts at most 25 seconds / 800,000 bytes of mono
+16 kHz signed-16 PCM, serializes inference and is kept alive by `com.uap.local-stt`. The existing ops-1
+`local-model-router` proxies only the exact bounded transcription path and does not log bodies or transcripts.
+
+A 19.178-second harmless Russian OGG/Opus note passed the updated Hermes wrapper from the live pod:
+
+```json
+{"chars":314,"returncode":0,"stderr":"","transcript_sha256":"43f74dbb6dff9a77eb88e6de92e674ba21826c6559ed51f8f12d2754a316f796","wall_seconds":1.334}
+```
+
+The transcript then entered the live Central store and replayed through a newly opened store:
+
+```json
+{"event_count":1,"first_created":true,"mission_id":"mission-intake-11807b9d61c3f804b09c6d3ba2116fe4","replay_created":false,"replay_same_mission":true,"source_message_id":"uap-mac-stt-canary-20260720-v1","types":["mission.accepted"]}
+```
+
+Three warm 19.178-second calls through ops-1 measured 1.618, 0.767 and 1.182 seconds (median 1.182 seconds); the
+resident worker used 267,648 KiB RSS. All canary audio and transient scripts were deleted from the workstation,
+ops-1, pod and Mac immediately after the run. Linux CPU fallback, failure-before-mission and replay remain covered by
+`tools/hermes-mission/test_local_stt.py`.
+
+The acceleration PR and exact rollout identity are appended after the protected-branch deployment.

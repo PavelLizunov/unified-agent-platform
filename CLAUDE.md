@@ -56,8 +56,9 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   resolve a closed server-owned catalog for `hermes-flow-v2-pilot`, `vpnctl` and `VPNRouter`, while build-1 persistent
   timers service the corresponding profiles. The browser/channel never supplies a repository path, model or command;
   unregistered repositories fail closed. Complete cross-channel chat history is still outside the contract. Telegram
-  voice/audio now uses the checksum-pinned local GigaAM Q4 CPU preprocessor inside the existing Hermes pod; a deployed
-  OGG canary and stable-source replay produced exactly one Central mission. Failure remains before mission creation.
+  voice/audio now uses checksum-pinned GigaAM CTC Q4 on the always-on M4 Mac through ops-1, with the original in-pod
+  RNNT Q4 CPU preprocessor as automatic fallback; a 19.178-second OGG canary completed in 1.334 seconds and
+  stable-source replay produced exactly one Central mission. Failure remains before mission creation.
   Workspace projects the resulting mission but still has no binary voice-upload control. See `STATUS.md` and
   `docs/evidence/local-voice-stt-rollout-2026-07-20.md` for the exact live boundary.
 - **Controlled owner research is live-proven (2026-07-20):** PR #323 / ADR-033 installed the bounded,

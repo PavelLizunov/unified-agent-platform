@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.uap.local-stt</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/slovn/.uap-stt/mac_stt_server.py</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONPATH</key>
+    <string>/Users/slovn/.uap-stt/python</string>
+    <key>TRANSCRIBE_LIBRARY</key>
+    <string>/Users/slovn/.uap-stt/native/libtranscribe.dylib</string>
+    <key>DYLD_LIBRARY_PATH</key>
+    <string>/Users/slovn/.uap-stt/native</string>
+    <key>UAP_STT_MODEL</key>
+    <string>/Users/slovn/.uap-stt/gigaam-v3-e2e-ctc-Q4_K_M.gguf</string>
+    <key>UAP_STT_MODEL_SHA256</key>
+    <string>35581e11e048eef785657cff07e5fced794bba6d9c75143257f6452c8aeea655</string>
+    <key>UAP_STT_BIND</key>
+    <string>100.116.97.112</string>
+    <key>UAP_STT_PORT</key>
+    <string>8091</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>3</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>HardResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>64</integer>
+  </dict>
+  <key>SoftResourceLimits</key>
+  <dict>
+    <key>NumberOfFiles</key>
+    <integer>64</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/slovn/Library/Logs/uap-local-stt.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/slovn/Library/Logs/uap-local-stt.log</string>
+</dict>
+</plist>

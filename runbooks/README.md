@@ -30,7 +30,7 @@ Some runbooks are Russian, some English — the platform docs are bilingual; the
 | [litellm-tailnet.md](litellm-tailnet.md) | Expose LiteLLM (`:4000`) to tailnet devices via host `tailscale serve` on uap-home-1. | Reaching LiteLLM from a laptop/phone. |
 | [llm-egress-vless.md](llm-egress-vless.md) | Cloud-LLM egress from Russia (ADR-018): keep Tailscale and VLESS planes separate, tunnel only LLM traffic. | Configuring cloud-LLM reachability from RU. |
 | [local-fc-model.md](local-fc-model.md) | Local native-function-calling brain on the RTX (Track A1, Ollama + `gpt-oss:20b`) at ≥64k context. | Standing up a no-egress FC brain for hermes-agent. |
-| [local-models-router.md](local-models-router.md) | One OpenAI endpoint over `qwen-35b` (desktop RTX) + `ornith-9b` (Mac) for when paid limits are exhausted. | Running the fully-local fallback brain / coder. |
+| [local-models-router.md](local-models-router.md) | Ops-1 route for manual local LLMs plus bounded Mac GigaAM CTC voice preprocessing. | Running the fully-local fallback brain/coder or diagnosing Telegram STT. |
 | [local-offload.md](local-offload.md) | Route token-heavy, quote-verifiable reads to the free local model (quote-gate) to save paid tokens. | Extracting facts from a big log/doc/corpus without burning context. |
 | [offsite-backups.md](offsite-backups.md) | The backup layer beyond local k3s snapshots (etcd→R2 done; Proxmox VM backups pending). | Planning or checking offsite DR coverage. |
 | [proxmox-local-bootstrap.md](proxmox-local-bootstrap.md) | Local Proxmox bootstrap path to reproducible Linux nodes before a remote quorum member. | Provisioning cluster VMs on Proxmox. |

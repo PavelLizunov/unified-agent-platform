@@ -45,7 +45,7 @@ shown intermittent resets (see [CLAUDE.md](../CLAUDE.md)).
 | `uap-ops-1` | `100.82.241.121` | Debian 12 | 2 vCPU / 2 GB (no swap) / no GPU | operator / deploy VM — **not** a k3s node; git `origin` + push key, `kubectl`; hosts the **`local-models-router`** fallback endpoint `:8090` | **Yes** |
 | `uap-build-1` | `100.85.56.31` | Ubuntu 22.04 | 8 vCPU / 16 GB / no GPU | always-on build/dev VM — **not** a k3s node, **not** in GitOps; runs the knowledge system, the Hermes Kanban swarm, ai-search, and the hermes-workspace webcenter (`:3000`) — all systemd | **Yes** |
 | `desktop-m922ij2` | `100.114.172.40` | Windows 11 | 32 cores / 32 GB / **RTX 5060 Ti 16 GB** | workstation + GPU host; can serve the manual **`qwen-35b`** fallback (llama.cpp) | **No** |
-| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | can serve the manual **`ornith-9b`** fallback (mlx) | **Yes** |
+| `pavels-mac-mini` | `100.116.97.112` | macOS (Apple Silicon, M4) | M4 / 16 GB / Apple GPU | serves bounded **GigaAM CTC STT** on tailnet `:8091`; can also serve manual `ornith-9b` fallback | **Yes** |
 
 Notes:
 - The k3s nodes (`uap-home-1`, `uap-home-2`) and `uap-ops-1` have **no GPU**. The only **discrete/CUDA**

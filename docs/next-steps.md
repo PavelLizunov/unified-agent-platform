@@ -28,8 +28,8 @@
   intended test targets. Durable missions currently execute only for the reviewed
   `hermes-flow-v2-pilot`/`vpnctl`/`VPNRouter`/`vpnrouter-gateway`/`suflyor`/`spark-runner`/`subfleet`/`slipstream-rust`
   profiles; the remaining active repositories stay visible but fail closed
-  until their exact checks and runner paths are installed. Telegram voice/audio uses the deployed local GigaAM Q4 CPU
-  preprocessor and the same idempotent intake receipt as text; failure is still pre-mission. Workspace has no binary
+  until their exact checks and runner paths are installed. Telegram voice/audio uses the deployed local GigaAM CTC Q4
+  M4 worker with checksum-pinned RNNT Q4 CPU fallback and the same idempotent intake receipt as text; failure is still pre-mission. Workspace has no binary
   voice-upload control, so Telegram is the live voice transport.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.

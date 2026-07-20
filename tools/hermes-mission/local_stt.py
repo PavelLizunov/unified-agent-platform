@@ -7,6 +7,7 @@ import argparse
 import array
 import contextlib
 import fcntl
+import http.client
 import json
 import os
 import pathlib
@@ -17,16 +18,18 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.parse
 
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
 MAX_DURATION_SECONDS = 25.0
-MAX_PCM_BYTES = int(MAX_DURATION_SECONDS * 16_000 * 4)
+MAX_PCM_BYTES = int(MAX_DURATION_SECONDS * 16_000 * 2)
 MAX_TRANSCRIPT_CHARS = 4_096
 DECODE_TIMEOUT_SECONDS = 12
 CPU_SECONDS = 40
 ADDRESS_SPACE_BYTES = 1_500 * 1024 * 1024
 LOCK_WAIT_SECONDS = 5
+REMOTE_TIMEOUT_SECONDS = 8
 ALLOWED_SUFFIXES = {
     ".aac", ".aif", ".aiff", ".flac", ".m4a", ".mp3", ".mp4",
     ".ogg", ".opus", ".wav", ".webm",
@@ -98,7 +101,7 @@ def _decode(path: pathlib.Path, target: pathlib.Path) -> None:
         "-i", str(path),
         "-map_metadata", "-1", "-vn", "-sn", "-dn",
         "-t", str(MAX_DURATION_SECONDS),
-        "-ac", "1", "-ar", "16000", "-f", "f32le",
+        "-ac", "1", "-ar", "16000", "-f", "s16le",
         "-fs", str(MAX_PCM_BYTES),
         str(target),
     ]
@@ -116,12 +119,12 @@ def _decode(path: pathlib.Path, target: pathlib.Path) -> None:
         size = target.stat().st_size
     except OSError:
         raise STTFailure("safe audio decode produced no output") from None
-    if size == 0 or size > MAX_PCM_BYTES or size % 4:
+    if size == 0 or size > MAX_PCM_BYTES or size % 2:
         raise STTFailure("safe audio decode produced invalid PCM")
 
 
 def _pcm(path: pathlib.Path) -> array.array[float]:
-    samples = array.array("f")
+    samples = array.array("h")
     try:
         with path.open("rb") as handle:
             samples.fromfile(handle, path.stat().st_size // samples.itemsize)
@@ -129,7 +132,7 @@ def _pcm(path: pathlib.Path) -> array.array[float]:
         raise STTFailure("failed to read decoded audio") from None
     if sys.byteorder != "little":
         samples.byteswap()
-    return samples
+    return array.array("f", (sample / 32768.0 for sample in samples))
 
 
 def _normalize_transcript(value: object) -> str:
@@ -140,6 +143,52 @@ def _normalize_transcript(value: object) -> str:
     if not value or len(value) > MAX_TRANSCRIPT_CHARS:
         raise STTFailure("local model returned invalid text")
     return value
+
+
+def _remote_transcribe(path: pathlib.Path, endpoint: str) -> str:
+    parsed = urllib.parse.urlsplit(endpoint)
+    if (
+        parsed.scheme != "http"
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise STTFailure("remote transcriber configuration is invalid")
+    try:
+        body = path.read_bytes()
+    except OSError:
+        raise STTFailure("failed to read decoded audio") from None
+    if not 0 < len(body) <= MAX_PCM_BYTES:
+        raise STTFailure("decoded audio is outside the remote limit")
+    connection = http.client.HTTPConnection(
+        parsed.hostname,
+        parsed.port or 80,
+        timeout=REMOTE_TIMEOUT_SECONDS,
+    )
+    try:
+        connection.request(
+            "POST",
+            parsed.path or "/",
+            body=body,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(body)),
+            },
+        )
+        response = connection.getresponse()
+        raw = response.read(MAX_TRANSCRIPT_CHARS * 4 + 1)
+        if response.status != 200 or len(raw) > MAX_TRANSCRIPT_CHARS * 4:
+            raise STTFailure("remote transcriber failed")
+        try:
+            return _normalize_transcript(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            raise STTFailure("remote transcriber returned invalid text") from None
+    except (OSError, http.client.HTTPException):
+        raise STTFailure("remote transcriber unavailable") from None
+    finally:
+        connection.close()
 
 
 @contextlib.contextmanager
@@ -175,8 +224,14 @@ def transcribe(input_path: pathlib.Path, model_path: pathlib.Path) -> str:
 
     _probe(input_path)
     with tempfile.TemporaryDirectory(prefix="uap-stt-") as temporary:
-        pcm_path = pathlib.Path(temporary) / "audio.f32"
+        pcm_path = pathlib.Path(temporary) / "audio.s16"
         _decode(input_path, pcm_path)
+        remote_endpoint = os.environ.get("UAP_STT_REMOTE_URL", "").strip()
+        if remote_endpoint:
+            try:
+                return _remote_transcribe(pcm_path, remote_endpoint)
+            except STTFailure:
+                pass
         samples = _pcm(pcm_path)
         with _exclusive_model(model_path):
             try:
