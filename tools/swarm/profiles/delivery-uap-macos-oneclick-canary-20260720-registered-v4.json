@@ -1,6 +1,7 @@
 {
   "allowed_path_prefixes": [
-    "."
+    "README.md",
+    "src"
   ],
   "assignee": "coordinator-codex-auto-uap-macos-oneclick-canary-20260720",
   "author_checks": [
