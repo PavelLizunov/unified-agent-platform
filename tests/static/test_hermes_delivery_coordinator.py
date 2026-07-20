@@ -3976,6 +3976,189 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             self.assertEqual(pending, raised.exception.checks)
 
+    def test_first_exact_head_ci_failure_schedules_one_durable_failed_job_rerun(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            calls = []
+
+            def runner(command, **_kwargs):
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "candidate_sha": "candidate-sha",
+            }
+            checks = [
+                {
+                    "name": "workflow:CI", "status": "COMPLETED",
+                    "conclusion": "FAILURE", "run_id": 70, "run_attempt": 1,
+                },
+                {
+                    "name": "test", "status": "COMPLETED",
+                    "conclusion": "FAILURE", "run_id": 70, "run_attempt": 1,
+                },
+            ]
+            waiting = instance._retry_failed_ci_once(
+                state, paths, coordinator.CIFailed("required CI failed", checks),
+                pre_review=False,
+            )
+
+            self.assertTrue(waiting)
+            self.assertNotIn("prior_ci_failures", state)
+            self.assertEqual("requested", state["ci_retry"]["status"])
+            self.assertEqual([70], state["ci_retry"]["run_ids"])
+            self.assertEqual([70], state["ci_retry"]["requested_run_ids"])
+            self.assertEqual({"70": 1}, state["ci_retry"]["baseline_attempts"])
+            self.assertEqual(
+                [
+                    approved["gh_bin"], "api", "--method", "POST",
+                    f"repos/{approved['repo']}/actions/runs/70/rerun-failed-jobs",
+                ],
+                calls[-1],
+            )
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual(state["ci_retry"], persisted["ci_retry"])
+
+    def test_repeated_failure_is_quality_only_after_same_run_attempt_advances(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "candidate_sha": "candidate-sha",
+                "ci_retry": {
+                    "schema_version": 1,
+                    "gate": "pr",
+                    "candidate_sha": "candidate-sha",
+                    "run_ids": [70],
+                    "baseline_attempts": {"70": 1},
+                    "requested_run_ids": [70],
+                    "status": "requested",
+                    "not_before": 0,
+                },
+            }
+            checks = [{
+                "name": "test", "status": "COMPLETED", "conclusion": "FAILURE",
+                "run_id": 70, "run_attempt": 2,
+            }]
+
+            self.assertFalse(instance._retry_failed_ci_once(
+                state, paths, coordinator.CIFailed("required CI failed again", checks),
+                pre_review=False,
+            ))
+            self.assertNotIn("ci_retry", state)
+
+    def test_ci_rerun_request_503_keeps_prepared_restart_safe_checkpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+
+            def unavailable(command, **_kwargs):
+                return subprocess.CompletedProcess(
+                    command, 1, stdout="", stderr="HTTP 503: unavailable"
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                runner=unavailable,
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "candidate_sha": "candidate-sha",
+            }
+            checks = [{
+                "name": "test", "status": "COMPLETED", "conclusion": "FAILURE",
+                "run_id": 70, "run_attempt": 1,
+            }]
+
+            with self.assertRaisesRegex(coordinator.DeliveryError, "HTTP 503"):
+                instance._retry_failed_ci_once(
+                    state, paths, coordinator.CIFailed("required CI failed", checks),
+                    pre_review=False,
+                )
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("prepared", persisted["ci_retry"]["status"])
+            self.assertEqual([], persisted["ci_retry"]["requested_run_ids"])
+            self.assertEqual(0, persisted.get("prior_ci_failures", 0))
+
+    def test_multi_workflow_ci_rerun_resumes_after_partial_request_prefix(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            failed_once = True
+            calls = []
+
+            def runner(command, **_kwargs):
+                nonlocal failed_once
+                run_id = int(command[4].split("/")[-2])
+                calls.append(run_id)
+                if run_id == 71 and failed_once:
+                    failed_once = False
+                    return subprocess.CompletedProcess(
+                        command, 1, stdout="", stderr="HTTP 503: unavailable"
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "candidate_sha": "candidate-sha",
+            }
+            checks = [
+                {
+                    "name": name, "status": "COMPLETED", "conclusion": "FAILURE",
+                    "run_id": run_id, "run_attempt": 1,
+                }
+                for name, run_id in (("linux", 70), ("windows", 71))
+            ]
+            failure = coordinator.CIFailed("required CI failed", checks)
+
+            with self.assertRaisesRegex(coordinator.DeliveryError, "HTTP 503"):
+                instance._retry_failed_ci_once(
+                    state, paths, failure, pre_review=False
+                )
+            self.assertEqual([70], state["ci_retry"]["requested_run_ids"])
+
+            self.assertTrue(instance._retry_failed_ci_once(
+                state, paths, failure, pre_review=False
+            ))
+            self.assertEqual([70], state["ci_retry"]["requested_run_ids"])
+            self.assertEqual([70, 71], calls)
+
+            retry_after = state["ci_retry"]["not_before"] + 1
+            with mock.patch.object(coordinator.time, "time", return_value=retry_after):
+                self.assertTrue(instance._retry_failed_ci_once(
+                    state, paths, failure, pre_review=False
+                ))
+            self.assertEqual([70, 71], state["ci_retry"]["requested_run_ids"])
+            self.assertEqual([70, 71, 71], calls)
+
     def test_candidate_draft_pr_ci_ignores_push_runs_and_checkpoints_exact_sha(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -5515,6 +5698,63 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("gpt-5.6-sol", decision["author"]["model"])
             self.assertEqual("gpt-5.6-terra", decision["reviewer"]["model"])
             self.assertEqual(decision, recovered["route_decisions"]["1"])
+
+    def test_tick_first_exact_head_ci_failure_waits_without_starting_author(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                required_files=["Cli.cs"], gh_bin="gh",
+                codex_home=str(root / "codex"),
+            )
+            client = FakeClient()
+            client.mission["tasks"] = [{"task_id": "task-1"}]
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            state_root = root / "state"
+
+            def runner(command, **_kwargs):
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            instance = HermeticCoordinator(
+                approved, client, backend, state_root, counters=counters, runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pr_open",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "route_decisions": {},
+                "crash_injected": True,
+                "candidate_sha": "candidate-sha",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+                "pr_url": "https://example.invalid/pr/39",
+                "pr_head_sha": "candidate-sha",
+            })
+            checks = [{
+                "name": "test", "status": "COMPLETED", "conclusion": "FAILURE",
+                "run_id": 70, "run_attempt": 1,
+            }]
+            with mock.patch.object(
+                instance, "_wait_ci",
+                side_effect=coordinator.CIFailed("required CI failed", checks),
+            ):
+                result = instance.tick()
+
+            self.assertEqual("ci_retry_wait", result["action"])
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("pr_open", persisted["phase"])
+            self.assertEqual(0, persisted["prior_ci_failures"])
+            self.assertEqual("requested", persisted["ci_retry"]["status"])
+            self.assertEqual(0, counters["authors"])
 
     def test_final_ci_failure_preserves_pr_and_converges_to_terminal_failure(self):
         with tempfile.TemporaryDirectory() as directory:
