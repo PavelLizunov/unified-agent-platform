@@ -792,13 +792,16 @@ class Driver:
                     raise PermanentError("uap-onboarding-branch-collision")
             self.run(["git", "push", "-u", "origin", branch], cwd=root, timeout=180)
         title = f"chore(projects): {'activate' if ready else 'prepare'} {request['project_id']}"
-        self.run([
-            "gh", "pr", "create", "--repo", UAP_REPOSITORY, "--base", "master",
-            "--head", branch, "--title", title, "--body",
-            f"Mechanical ADR-035 onboarding checkpoint for `{request['request_id']}`.",
-        ])
+        created = self.run([
+            "gh", "api", "--method", "POST", f"repos/{UAP_REPOSITORY}/pulls",
+            "-f", f"title={title}", "-f", f"head={branch}", "-f", "base=master",
+            "-f", f"body=Mechanical ADR-035 onboarding checkpoint for "
+            f"`{request['request_id']}`.",
+        ], check=False)
         pr = self._uap_pr(branch)
         if not pr:
+            if "HTTP 401" in created.stderr or "HTTP 403" in created.stderr:
+                raise PermanentError("github-capability-missing")
             raise RetryLater("UAP onboarding PR is not visible yet")
         self.run([
             "gh", "pr", "merge", "--repo", UAP_REPOSITORY,
