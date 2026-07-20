@@ -31,6 +31,20 @@ def submission(event: dict) -> dict:
     }
 
 
+def test_research_only_goal_bypasses_coding_mission_intake() -> None:
+    assert missions.is_controlled_research_goal(
+        "Look up the latest Codex web search documentation"
+    )
+    assert missions.is_controlled_research_goal(
+        "Поищи актуальную документацию Brave Search API"
+    )
+    assert not missions.is_controlled_research_goal(
+        "Research the API, implement the integration, and open a PR"
+    )
+    assert not missions.is_controlled_research_goal("Fix the search component test")
+    assert not missions.is_controlled_research_goal(None)
+
+
 def test_reconnect_projects_one_canonical_state() -> None:
     document = json.loads(FIXTURE.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as temp:
@@ -2806,6 +2820,7 @@ def test_failure_terminal_commits_before_telegram_and_retries_delivery() -> None
 
 
 def main() -> None:
+    test_research_only_goal_bypasses_coding_mission_intake()
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()

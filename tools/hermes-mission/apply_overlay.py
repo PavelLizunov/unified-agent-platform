@@ -25,8 +25,8 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "c563583eea8b7a9d4ec47017aa2b9a844f25fa1c5c9fb2d54b9efa500820b4a0",
-    "gateway/platforms/api_server.py": "be5bb4c1a09a287d2c5fe64f52a78f5a452d674d66cbd48062e84bd0117193f6",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
+    "gateway/platforms/api_server.py": "6e09e807205e38c100ddff9574322c812d28e0836e3a44863407697197339601",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -713,7 +713,9 @@ def connect(
             and source.platform
             and source.platform.value == "telegram"
         ):
-            event._uap_owner_goal = True
+            from hermes_cli.uap_missions import is_controlled_research_goal
+
+            event._uap_owner_goal = not is_controlled_research_goal(event.text or "")
 
         if self._draining:''',
             "ordinary Telegram mission intake marker",
@@ -862,7 +864,7 @@ def connect(
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
             "    MissionError, MissionProjectRequired, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-            "    notify_subscribers, owner_key_valid, producer_key_valid,\n"
+            "    is_controlled_research_goal, notify_subscribers, owner_key_valid, producer_key_valid,\n"
             "    public_intake_projects, sanitize_producer_submission, terminal_request_allowed,\n"
             ")",
             "mission imports",
@@ -888,7 +890,7 @@ def connect(
         if err is not None:
             return err
         source_message_id = body.get("source_message_id")
-        if source_message_id is not None:
+        if source_message_id is not None and not is_controlled_research_goal(user_message):
             try:
                 if not isinstance(user_message, str):
                     raise MissionError("mission intake requires a text goal")
