@@ -639,6 +639,10 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
+- **Controlled owner research (source-ready, not yet live-proven, 2026-07-20)** — ADR-033 adds a bounded,
+  idempotent `research_session` MCP facade over a separate read-only Codex native-search run. It introduces no new
+  provider/key or coding-worker egress. Offline component and kustomize gates pass; live Workspace + Telegram
+  canaries remain required after the PR is merged and Flux rolls config revision `v63-controlled-research`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through
   the new pipeline (also summarised in the "Egress ops hardening — DONE 2026-07-10" bullet under Phase).
 - **Proxy-mode spec (#112)** — the vpnrouter-gateway proxy-mode handoff spec (`docs/research/`).
