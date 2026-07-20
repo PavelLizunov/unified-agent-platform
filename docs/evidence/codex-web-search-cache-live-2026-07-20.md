@@ -22,8 +22,8 @@ The tool did not produce a normalized research result, so the successful-result 
 ## Locally corroborated behavior
 
 The installed `codex-cli 0.144.6` help identifies `--search` as enabling **live** native Responses `web_search`.
-Current Codex documentation describes the normal restricted mode as using cached search and live search as the mode
-selected by `--search` or `web_search = "live"`; full network access also defaults search to live. These official
+Current Codex documentation describes `web_search` as cached by default and live when selected by `--search` or
+`web_search = "live"`; it also defaults to live in a full-access sandbox, such as `--yolo`. These official
 documentation targets are recorded for a future successful bounded retry, not represented as citations returned by
 the failed call:
 
