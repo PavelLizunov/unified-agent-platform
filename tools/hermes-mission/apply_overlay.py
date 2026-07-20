@@ -25,8 +25,8 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "6e3c2c01ce1bc2bac799eba95dde2f3affeda372be6fa119693c2b69ec89aaf5",
-    "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "c563583eea8b7a9d4ec47017aa2b9a844f25fa1c5c9fb2d54b9efa500820b4a0",
+    "gateway/platforms/api_server.py": "be5bb4c1a09a287d2c5fe64f52a78f5a452d674d66cbd48062e84bd0117193f6",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -45,6 +45,8 @@ LEGACY_BUILD1_PATCHED_FILES = {
 }
 RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
 RUNTIME_TARGET = "hermes_cli/uap_missions.py"
+MEDIA_SOURCE = pathlib.Path(__file__).with_name("media.py")
+MEDIA_TARGET = "hermes_cli/uap_media.py"
 
 
 def sha(path: pathlib.Path) -> str:
@@ -724,14 +726,22 @@ def connect(
             from agent.redact import redact_sensitive_text
             from hermes_cli.uap_missions import (
                 MissionError, MissionIntakeCancelled, MissionProjectRequired,
-                MissionStore, telegram_text,
+                MissionStore, notify_subscribers, telegram_text,
             )
+            from hermes_cli.uap_media import execute_media_mission
 
             try:
                 source_message_id = str(event.message_id or "").strip()
                 if not source_message_id:
                     raise MissionError("mission intake requires a stable source message")
                 goal_text = event.text or ""
+                if any(
+                    str(media_type).startswith("image/")
+                    for media_type in (event.media_types or [])
+                ):
+                    raise MissionError(
+                        "subscription image editing is unavailable: the production Codex adapter does not pass source images"
+                    )
                 if event.message_type in (MessageType.VOICE, MessageType.AUDIO):
                     audio_paths = [
                         path for index, path in enumerate(event.media_urls or [])
@@ -776,7 +786,32 @@ def connect(
                     chat_id=str(source.chat_id or ""),
                     thread_id=str(source.thread_id or ""),
                 )
-                response = telegram_text(store.projection(accepted["mission_id"]))
+                view = store.projection(accepted["mission_id"])
+                if view.get("capability") == "media.image.generate":
+                    view = await asyncio.to_thread(
+                        execute_media_mission, store, accepted["mission_id"]
+                    )
+                response = telegram_text(view)
+                artifact = store.media_artifact(accepted["mission_id"])
+                if view.get("status") == "completed" and artifact:
+                    terminal = store.events(accepted["mission_id"])[-1]
+
+                    async def send_media(subscription, _text):
+                        adapter = self.adapters.get(source.platform)
+                        if adapter is None:
+                            raise RuntimeError("Telegram adapter unavailable")
+                        metadata = (
+                            {"thread_id": subscription["thread_id"]}
+                            if subscription["thread_id"] else None
+                        )
+                        result = await adapter.send_image_file(
+                            subscription["chat_id"], artifact["path"],
+                            caption="Изображение готово", metadata=metadata,
+                        )
+                        if result is not None and getattr(result, "success", True) is False:
+                            raise RuntimeError(getattr(result, "error", "image delivery failed"))
+
+                    await notify_subscribers(store, terminal, send_media)
                 if not self.session_store.has_platform_message_id(
                     session_entry.session_id, source_message_id
                 ):
@@ -866,10 +901,20 @@ def connect(
                     project_id=body.get("project_id"),
                 )
                 mission_id = owner_event["mission_id"]
+                view = store.projection(mission_id)
+                if view.get("capability") == "media.image.generate":
+                    from hermes_cli.uap_media import execute_media_mission
+                    view = await asyncio.to_thread(execute_media_mission, store, mission_id)
                 if owner_event["type"] == "mission.answer":
                     response_text = (
                         f"Ответ принят для задачи {mission_id}. "
                         "Выполнение продолжится автоматически."
+                    )
+                elif view.get("status") == "completed" and view.get("artifacts"):
+                    artifact = view["artifacts"][0]
+                    response_text = (
+                        f"Изображение готово для задачи {mission_id}: {artifact['name']}. "
+                        "Оно сохранено в Central mission."
                     )
                 else:
                     response_text = (
@@ -1068,6 +1113,26 @@ def connect(
         except (TypeError, ValueError) as error:
             return web.json_response({"error": str(error)}, status=400)
 
+    async def _handle_get_mission_artifact(self, request: "web.Request") -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        try:
+            path, artifact = self._missions().media_artifact_file(
+                request.match_info["mission_id"], request.match_info["artifact_id"]
+            )
+            return web.FileResponse(
+                path,
+                headers={
+                    "Content-Type": artifact["media_type"],
+                    "Content-Disposition": f'inline; filename="{artifact["name"]}"',
+                    "Cache-Control": "private, max-age=31536000, immutable",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+        except MissionError as error:
+            status = 404 if str(error) == "artifact not found" else 400
+            return web.json_response({"error": str(error)}, status=status)
+
     async def _notify_mission(
         self, store: MissionStore, event: Dict[str, Any], *, defer: bool = True
     ) -> None:
@@ -1093,6 +1158,19 @@ def connect(
             )
             if result is not None and getattr(result, "success", True) is False:
                 raise RuntimeError(getattr(result, "error", "mission notification failed"))
+            if event.get("type") == "mission.completed":
+                artifact = store.media_artifact(event["mission_id"])
+                if artifact:
+                    media = await asyncio.wait_for(
+                        adapter.send_image_file(
+                            subscription["chat_id"], artifact["path"],
+                            caption="Изображение готово",
+                            metadata=metadata,
+                        ),
+                        timeout=NOTIFICATION_SEND_TIMEOUT_SECONDS,
+                    )
+                    if media is not None and getattr(media, "success", True) is False:
+                        raise RuntimeError(getattr(media, "error", "mission image delivery failed"))
 
         try:
             await notify_subscribers(store, event, send)
@@ -1221,6 +1299,7 @@ def connect(
             self._app.router.add_get("/api/missions", self._handle_list_missions)
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
+            self._app.router.add_get("/api/missions/{mission_id}/artifacts/{artifact_id}", self._handle_get_mission_artifact)
             self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
             self._app.router.add_post("/api/missions/{mission_id}/answer", self._handle_answer_mission)
             self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
@@ -1258,8 +1337,10 @@ def main() -> None:
             print(f'{relative}={hashlib.sha256(transform(relative, path.read_text()).encode()).hexdigest()}')
         return
 
-    runtime_hash = sha(RUNTIME_SOURCE)
-    target = root / RUNTIME_TARGET
+    assets = {
+        RUNTIME_TARGET: RUNTIME_SOURCE,
+        MEDIA_TARGET: MEDIA_SOURCE,
+    }
     statuses: list[str] = []
     source_paths: list[tuple[str, pathlib.Path, str]] = []
     for relative, expected in selected_files.items():
@@ -1285,14 +1366,17 @@ def main() -> None:
             source_paths.append((relative, path, pristine))
         else:
             raise SystemExit(f"upstream fingerprint mismatch: {relative}")
-    runtime_missing = not args.build1_runtime and not target.exists()
+    missing_assets: list[tuple[pathlib.Path, pathlib.Path]] = []
     if not args.build1_runtime:
-        if runtime_missing:
-            statuses.append(f"{RUNTIME_TARGET}: source-needs-overlay")
-        elif sha(target) == runtime_hash:
-            statuses.append(f"{RUNTIME_TARGET}: exact-patched")
-        else:
-            raise SystemExit(f"upstream fingerprint mismatch: {RUNTIME_TARGET}")
+        for relative, source in assets.items():
+            target = root / relative
+            if not target.exists():
+                statuses.append(f"{relative}: source-needs-overlay")
+                missing_assets.append((target, source))
+            elif sha(target) == sha(source):
+                statuses.append(f"{relative}: exact-patched")
+            else:
+                raise SystemExit(f"upstream fingerprint mismatch: {relative}")
 
     if args.check:
         print("\n".join(statuses))
@@ -1302,11 +1386,10 @@ def main() -> None:
         atomic_write(path, transform(relative, source_text))
         if sha(path) != PATCHED_FILES[relative]:
             raise SystemExit(f"overlay output fingerprint mismatch: {relative}")
-    if not args.build1_runtime:
+    for target, source in missing_assets:
         target.parent.mkdir(parents=True, exist_ok=True)
-        if runtime_missing:
-            atomic_write(target, RUNTIME_SOURCE.read_text(encoding="utf-8"))
-    print("overlay applied" if source_paths or runtime_missing else "overlay already applied")
+        atomic_write(target, source.read_text(encoding="utf-8"))
+    print("overlay applied" if source_paths or missing_assets else "overlay already applied")
 
 
 if __name__ == "__main__":

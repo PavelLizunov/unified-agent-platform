@@ -102,7 +102,7 @@ def main() -> None:
         second = run(clone)
         assert second.returncode == 0 and "overlay already applied" in second.stdout, second.stderr
         checked = run(clone, "--check")
-        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 7, checked.stderr
+        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 8, checked.stderr
 
         commands = (clone / "hermes_cli/commands.py").read_text(encoding="utf-8")
         gateway = (clone / "gateway/run.py").read_text(encoding="utf-8")
@@ -635,7 +635,7 @@ def main() -> None:
         image_apply = run(image_root, "--source-commit", COMMIT)
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
-        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 7
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 8
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")

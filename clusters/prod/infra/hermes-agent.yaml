@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v66-research-codex-home"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v67-central-imagegen"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -171,6 +171,7 @@ spec:
               cp /mission-runtime/root/hermes_cli/kanban_db.py /mission-runtime/kanban_db.py
               cp /mission-runtime/root/hermes_cli/main.py /mission-runtime/main.py
               cp /mission-runtime/root/hermes_cli/uap_missions.py /mission-runtime/uap_missions.py
+              cp /mission-runtime/root/hermes_cli/uap_media.py /mission-runtime/uap_media.py
               cp /mission-runtime/root/gateway/run.py /mission-runtime/gateway_run.py
               cp /mission-runtime/root/gateway/platforms/api_server.py /mission-runtime/api_server.py
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
@@ -299,6 +300,7 @@ spec:
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban_db.py, subPath: kanban_db.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/main.py, subPath: main.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_missions.py, subPath: uap_missions.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_media.py, subPath: uap_media.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/platforms/api_server.py, subPath: api_server.py, readOnly: true }
             - { name: stt-runtime, mountPath: /opt/uap-stt, readOnly: true }

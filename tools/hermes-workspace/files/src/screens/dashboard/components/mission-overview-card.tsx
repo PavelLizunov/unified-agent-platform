@@ -27,6 +27,14 @@ export type MissionView = {
   changes: Array<Item>
   gates: Array<Item>
   deliveries: Array<Item>
+  artifacts?: Array<{
+    artifact_id: string
+    name: string
+    kind: string
+    media_type: string
+    size_bytes: number
+    sha256: string
+  }>
 }
 
 type MissionResponse = { missions?: Array<MissionView>; error?: string }
@@ -343,6 +351,19 @@ export function MissionOverviewCard() {
         </div>
       ) : null}
       {mission.result ? <p className="mt-3 text-sm">Итог: {mission.result}</p> : null}
+      {mission.artifacts?.map((artifact) => (
+        <figure key={artifact.artifact_id} className="mt-3">
+          <img
+            src={`/api/missions?mission_id=${encodeURIComponent(mission.mission_id)}&artifact_id=${encodeURIComponent(artifact.artifact_id)}`}
+            alt={artifact.name}
+            className="max-h-96 rounded-md border border-[var(--theme-border)] object-contain"
+            loading="lazy"
+          />
+          <figcaption className="mt-1 text-xs opacity-60">
+            {artifact.name} · {artifact.media_type} · {artifact.size_bytes} bytes
+          </figcaption>
+        </figure>
+      ))}
       {mission.error ? <p className="mt-3 text-sm text-red-400">Ошибка: {mission.error}</p> : null}
       {replayQuery.isError ? (
         <p className="mt-3 text-xs text-red-400">

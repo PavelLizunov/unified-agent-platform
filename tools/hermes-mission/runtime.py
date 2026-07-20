@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -51,6 +52,9 @@ REQUIRED_PAYLOAD = {
     "change.upsert": {"path", "status"},
     "gate.upsert": {"gate_id", "status"},
     "delivery.upsert": {"kind", "status"},
+    "artifact.upsert": {
+        "artifact_id", "kind", "name", "media_type", "size_bytes", "sha256",
+    },
     "mission.completed": {"result"},
     "mission.failed": {"error"},
     "mission.cancelled": {"reason"},
@@ -59,6 +63,7 @@ PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
     "mission.accepted": {
         "goal", "project_id", "dispatch_profile", "delivery_mode", "parent_mission_id",
+        "capability",
         "input_platform", "input_source_key_sha256", "input_source_message_sha256",
     },
     "mission.notice": {
@@ -71,15 +76,18 @@ PAYLOAD_FIELDS = {
     "worker.upsert": {"worker_id", "status", "run_id", "profile"},
     "terminal.append": {"stream", "text", "offset"},
     "delivery.upsert": {"kind", "status", "url"},
+    "artifact.upsert": {
+        "artifact_id", "kind", "name", "media_type", "size_bytes", "sha256",
+    },
 }
 CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
 PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
-    "mission.accepted", "mission.answer", *TERMINAL_TYPES,
+    "mission.accepted", "mission.answer", "artifact.upsert", *TERMINAL_TYPES,
 }
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
-    "assignee", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
+    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
     "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -88,6 +96,10 @@ _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
 _MAX_OWNER_ANSWER_CHARS = 4_000
 _MAX_COMPLETION_RESULT_CHARS = 3_000
+_MAX_MEDIA_BYTES = 25 * 1024 * 1024
+_MEDIA_CAPABILITY = "media.image.generate"
+_MEDIA_DISPATCH_PROFILE = "central-imagegen"
+_MEDIA_LEASE_SECONDS = 600
 _OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
 _OWNER_GATE_APPROVAL = "APPROVE"
 _MAX_RETAINED_TERMINAL_MISSIONS = 100
@@ -196,6 +208,32 @@ def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _project_alias(value: str) -> str:
     return " ".join(re.findall(r"[\w]+", value.casefold(), flags=re.UNICODE))
+
+
+def image_generation_prompt(value: str) -> str | None:
+    """Return a conservative text-to-image prompt, never guess edit intent."""
+    text = str(value or "").strip()
+    explicit = re.match(r"^(?:\$imagegen|/image|/imagine)\s*[:\-]?\s*(.+)$", text, re.I | re.S)
+    if explicit:
+        return explicit.group(1).strip() or None
+    natural = re.match(
+        r"^(?:(?:создай|сгенерируй|нарисуй)\s+(?:мне\s+)?(?:изображение|картинку|иллюстрацию|фото)|"
+        r"(?:create|generate|draw|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|illustration|photo))"
+        r"\s*[:\-]?\s*(.+)$",
+        text,
+        re.I | re.S,
+    )
+    return natural.group(1).strip() if natural and natural.group(1).strip() else None
+
+
+def image_edit_requested(value: str) -> bool:
+    text = str(value or "").strip()
+    return bool(re.search(
+        r"(?:^|\s)(?:отредактируй|измени|замени|удали|добавь|edit|modify|replace|remove)"
+        r"(?:\s+\S+){0,5}\s+(?:изображени\w*|картин\w*|фото\w*|image|picture|photo)\b",
+        text,
+        re.I,
+    ))
 
 
 def registered_intake_projects(platform: str) -> list[dict[str, Any]]:
@@ -455,6 +493,14 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             continue
         if name == "progress_percent":
             continue
+        if name == "size_bytes":
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 0 < value <= _MAX_MEDIA_BYTES
+            ):
+                raise MissionError("invalid payload.size_bytes")
+            continue
         if name == "offset":
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise MissionError("invalid payload.offset")
@@ -494,6 +540,9 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.accepted" and "delivery_mode" in payload:
         if payload.get("delivery_mode") != "none":
             raise MissionError("invalid mission delivery mode")
+    if event_type == "mission.accepted" and "capability" in payload:
+        if payload.get("capability") != _MEDIA_CAPABILITY:
+            raise MissionError("invalid mission capability")
     if event_type == "mission.accepted":
         input_fields = (
             payload.get("input_platform"),
@@ -521,6 +570,14 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 raise MissionError("not-applicable delivery must not have a URL")
         elif "url" not in payload:
             raise MissionError("delivery URL is required")
+    if event_type == "artifact.upsert":
+        if (
+            payload.get("kind") != "image"
+            or payload.get("media_type") not in {"image/png", "image/jpeg", "image/webp"}
+            or not re.fullmatch(r"[0-9a-f]{64}", payload.get("sha256", ""))
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", payload.get("name", ""))
+        ):
+            raise MissionError("invalid image artifact metadata")
     normalized = {
         "schema_version": SCHEMA_VERSION,
         "mission_id": mission_id,
@@ -575,6 +632,7 @@ def empty_projection() -> dict[str, Any]:
         "goal": None,
         "project_id": None,
         "dispatch_profile": None,
+        "capability": None,
         "delivery_mode": None,
         "parent_mission_id": None,
         "input_platform": None,
@@ -590,6 +648,7 @@ def empty_projection() -> dict[str, Any]:
         "changes": [],
         "gates": [],
         "deliveries": [],
+        "artifacts": [],
     }
 
 
@@ -601,6 +660,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
     changes: OrderedDict[str, dict[str, Any]] = OrderedDict()
     gates: OrderedDict[str, dict[str, Any]] = OrderedDict()
     deliveries: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    artifacts: OrderedDict[str, dict[str, Any]] = OrderedDict()
     terminal: list[dict[str, Any]] = []
     expected = 1
     terminal_chars = 0
@@ -621,6 +681,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 goal=payload["goal"],
                 project_id=payload.get("project_id"),
                 dispatch_profile=payload.get("dispatch_profile"),
+                capability=payload.get("capability"),
                 delivery_mode=payload.get("delivery_mode"),
                 parent_mission_id=payload.get("parent_mission_id"),
                 input_platform=payload.get("input_platform"),
@@ -671,6 +732,8 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             gates[str(payload["gate_id"])] = dict(payload)
         elif kind == "delivery.upsert":
             deliveries[str(payload["kind"])] = dict(payload)
+        elif kind == "artifact.upsert":
+            artifacts[str(payload["artifact_id"])] = dict(payload)
         elif kind == "mission.completed":
             view.update(
                 status="completed", stage="complete", progress_percent=100,
@@ -688,6 +751,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
         changes=list(changes.values()),
         gates=list(gates.values()),
         deliveries=list(deliveries.values()),
+        artifacts=list(artifacts.values()),
     )
     stable = {key: value for key, value in view.items() if key != "projection_id"}
     view["projection_id"] = hashlib.sha256(_json(stable).encode("utf-8")).hexdigest()[:16]
@@ -1031,6 +1095,15 @@ class MissionStore:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (platform, scope_key, source_message_id)
                 );
+                CREATE TABLE IF NOT EXISTS mission_media_jobs (
+                    mission_id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    lease_until REAL NOT NULL,
+                    thread_id TEXT,
+                    artifact_json TEXT,
+                    error TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {
@@ -1082,6 +1155,205 @@ class MissionStore:
         if not events:
             raise MissionError("mission not found")
         return project(events)
+
+    def claim_media_job(self, mission_id: str) -> dict[str, Any]:
+        """Claim one media generation; an expired active claim never retries."""
+        mission_id = _require_id(mission_id, "mission_id")
+        view = self.projection(mission_id)
+        if view.get("capability") != _MEDIA_CAPABILITY:
+            raise MissionError("mission is not an image generation task")
+        now = time.time()
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM mission_media_jobs WHERE mission_id = ?", (mission_id,)
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """INSERT INTO mission_media_jobs(
+                           mission_id, state, lease_until, updated_at
+                       ) VALUES (?, 'running', ?, ?)""",
+                    (mission_id, now + _MEDIA_LEASE_SECONDS, _utc_now()),
+                )
+                return {"state": "claimed"}
+            current = dict(row)
+            if current["state"] == "running" and current["lease_until"] <= now:
+                error = (
+                    "Предыдущий image-generation turn был прерван с неоднозначным результатом; "
+                    "автоматический повтор отключён, чтобы не создать второе изображение."
+                )
+                connection.execute(
+                    """UPDATE mission_media_jobs
+                       SET state = 'failed', error = ?, updated_at = ?
+                       WHERE mission_id = ? AND state = 'running'""",
+                    (error, _utc_now(), mission_id),
+                )
+                current.update(state="failed", error=error)
+            return current
+
+    def set_media_thread(self, mission_id: str, thread_id: str) -> None:
+        thread_id = _require_id(thread_id, "media thread_id")
+        with self._db() as connection:
+            updated = connection.execute(
+                """UPDATE mission_media_jobs
+                   SET thread_id = ?, updated_at = ?
+                   WHERE mission_id = ? AND state = 'running' AND thread_id IS NULL""",
+                (thread_id, _utc_now(), mission_id),
+            )
+            if updated.rowcount != 1:
+                raise MissionError("media generation claim is no longer active")
+
+    def record_media_success(self, mission_id: str, artifact: dict[str, Any]) -> None:
+        public = {
+            key: artifact.get(key)
+            for key in (
+                "artifact_id", "name", "media_type", "size_bytes", "sha256",
+                "model", "provider", "thread_id", "path",
+            )
+        }
+        if not all(public.values()):
+            raise MissionError("incomplete media artifact")
+        with self._db() as connection:
+            updated = connection.execute(
+                """UPDATE mission_media_jobs
+                   SET state = 'succeeded', lease_until = 0, thread_id = ?,
+                       artifact_json = ?, error = NULL, updated_at = ?
+                   WHERE mission_id = ? AND state = 'running'""",
+                (
+                    public["thread_id"], _json(public), _utc_now(), mission_id,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise MissionError("media generation claim is no longer active")
+
+    def record_media_failure(self, mission_id: str, error: str) -> None:
+        message = " ".join(str(error or "image generation failed").split())[:3_000]
+        with self._db() as connection:
+            connection.execute(
+                """UPDATE mission_media_jobs
+                   SET state = 'failed', lease_until = 0, error = ?, updated_at = ?
+                   WHERE mission_id = ? AND state = 'running'""",
+                (message, _utc_now(), mission_id),
+            )
+
+    def media_artifact(self, mission_id: str) -> dict[str, Any] | None:
+        with self._db() as connection:
+            row = connection.execute(
+                "SELECT artifact_json FROM mission_media_jobs WHERE mission_id = ?",
+                (_require_id(mission_id, "mission_id"),),
+            ).fetchone()
+        return json.loads(row["artifact_json"]) if row and row["artifact_json"] else None
+
+    def media_artifact_file(
+        self, mission_id: str, artifact_id: str
+    ) -> tuple[Path, dict[str, Any]]:
+        artifact_id = _require_id(artifact_id, "artifact_id")
+        artifact = self.media_artifact(mission_id)
+        if not artifact or artifact.get("artifact_id") != artifact_id:
+            raise MissionError("artifact not found")
+        home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").resolve()
+        root = (home / "media-artifacts" / _require_id(mission_id, "mission_id")).resolve()
+        path = Path(str(artifact.get("path") or "")).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as error:
+            raise MissionError("invalid artifact path") from error
+        if (
+            not path.is_file()
+            or path.stat().st_size != artifact.get("size_bytes")
+            or hashlib.sha256(path.read_bytes()).hexdigest() != artifact.get("sha256")
+        ):
+            raise MissionError("artifact integrity check failed")
+        return path, artifact
+
+    def finalize_media_job(self, mission_id: str) -> dict[str, Any]:
+        """Project one stored media outcome idempotently into the mission log."""
+        with self._db() as connection:
+            row = connection.execute(
+                "SELECT * FROM mission_media_jobs WHERE mission_id = ?",
+                (_require_id(mission_id, "mission_id"),),
+            ).fetchone()
+        if row is None or row["state"] == "running":
+            return self.projection(mission_id)
+
+        def append(event_type: str, suffix: str, payload: dict[str, Any]) -> None:
+            submission = {
+                "schema_version": SCHEMA_VERSION,
+                "mission_id": mission_id,
+                "type": event_type,
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": f"central:media:{suffix}:v1"},
+                "payload": payload,
+            }
+            if event_type == "mission.completed":
+                self._append(mission_id, submission)
+            else:
+                self.append_central(mission_id, submission)
+
+        if row["state"] == "succeeded":
+            artifact = json.loads(row["artifact_json"])
+            append("mission.stage", "stage", {"stage": "verifying", "progress_percent": 90})
+            append("artifact.upsert", "artifact", {
+                "artifact_id": artifact["artifact_id"],
+                "kind": "image",
+                "name": artifact["name"],
+                "media_type": artifact["media_type"],
+                "size_bytes": artifact["size_bytes"],
+                "sha256": artifact["sha256"],
+            })
+            append("task.upsert", "task-done", {
+                "task_id": "media-image", "title": "Generate image", "status": "done",
+            })
+            append("worker.upsert", "worker-done", {
+                "worker_id": "codex-imagegen", "status": "completed",
+                "run_id": artifact["thread_id"], "profile": "gpt-image-2",
+            })
+            append("mission.completed", "complete", {
+                "result": f"Изображение готово: {artifact['name']} ({artifact['media_type']}, {artifact['size_bytes']} bytes).",
+            })
+        else:
+            append("task.upsert", "task-failed", {
+                "task_id": "media-image", "title": "Generate image", "status": "failed",
+            })
+            append("worker.upsert", "worker-failed", {
+                "worker_id": "codex-imagegen", "status": "failed",
+                "run_id": row["thread_id"] or "unknown", "profile": "gpt-image-2",
+            })
+            append("mission.failed", "failed", {"error": row["error"] or "Image generation failed"})
+        return self.projection(mission_id)
+
+    def start_media_projection(self, mission_id: str) -> None:
+        for event_type, suffix, payload in (
+            ("mission.stage", "planning", {"stage": "planning", "progress_percent": 10}),
+            ("task.upsert", "task-running", {
+                "task_id": "media-image", "title": "Generate image", "status": "running",
+            }),
+            ("worker.upsert", "worker-scheduled", {
+                "worker_id": "codex-imagegen", "status": "scheduled", "profile": "gpt-image-2",
+            }),
+        ):
+            self.append_central(mission_id, {
+                "schema_version": SCHEMA_VERSION,
+                "mission_id": mission_id,
+                "type": event_type,
+                "source": "central-hermes",
+                "correlation": {"producer_event_id": f"central:media:{suffix}:v1"},
+                "payload": payload,
+            })
+
+    def media_thread_started(self, mission_id: str, thread_id: str) -> None:
+        self.set_media_thread(mission_id, thread_id)
+        self.append_central(mission_id, {
+            "schema_version": SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "type": "worker.upsert",
+            "source": "central-hermes",
+            "correlation": {"producer_event_id": "central:media:worker-running:v1"},
+            "payload": {
+                "worker_id": "codex-imagegen", "status": "running",
+                "run_id": thread_id, "profile": "gpt-image-2",
+            },
+        })
 
     def workspace_payload(self, mission_id: str, after: int = 0) -> dict[str, Any]:
         view = self.projection(mission_id)
@@ -1577,7 +1849,6 @@ class MissionStore:
         if not text.strip() or len(text) > 8_192:
             raise MissionError("invalid owner turn")
         platform = _require_id(platform, "intake platform")
-        registered_intake_projects(platform)
         source_message_id = _require_source_value(
             source_message_id, "source_message_id"
         )
@@ -1668,6 +1939,21 @@ class MissionStore:
                 return resolved
         elif platform == "telegram" and _project_alias(text) in _INTAKE_CANCEL_ALIASES:
             raise MissionError("нет ожидающего выбора проекта")
+        if image_edit_requested(text):
+            raise MissionError(
+                "subscription image editing is unavailable: the production Codex adapter does not pass source images"
+            )
+        media_prompt = image_generation_prompt(text)
+        if media_prompt is not None:
+            return self.ingest_media_goal(
+                media_prompt,
+                platform=platform,
+                source_message_id=source_message_id,
+                session_id=session_id or None,
+                chat_id=chat_id or None,
+                thread_id=thread_id or None,
+            )
+        registered_intake_projects(platform)
         try:
             target = registered_intake_target(
                 platform, project_id=project_id, goal=text
@@ -1693,6 +1979,59 @@ class MissionStore:
             chat_id=chat_id or None,
             thread_id=thread_id or None,
         )
+
+    def ingest_media_goal(
+        self,
+        prompt: str,
+        *,
+        platform: str,
+        source_message_id: str,
+        session_id: str | None = None,
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Accept one deterministic text-to-image mission without a repo route."""
+        prompt = str(prompt or "").strip()
+        if not prompt or len(prompt) > 8_192:
+            raise MissionError("invalid image prompt")
+        platform = _require_id(platform, "intake platform")
+        if platform not in {"workspace", "telegram"}:
+            raise MissionError("invalid intake platform")
+        source_message_id = _require_source_value(source_message_id, "source_message_id")
+        session_id = _require_source_value(session_id, "session_id", optional=True)
+        chat_id = _require_source_value(chat_id, "chat_id", optional=True)
+        thread_id = _require_source_value(thread_id, "thread_id", optional=True)
+        if not session_id and not chat_id:
+            raise MissionError("mission intake requires a channel identity")
+        source_key = _json({
+            "platform": platform,
+            "session_id": session_id,
+            "chat_id": chat_id,
+            "thread_id": thread_id,
+            "source_message_id": source_message_id,
+        })
+        digest = hashlib.sha256(source_key.encode("utf-8")).hexdigest()
+        mission_id = "mission-intake-" + digest[:32]
+        arguments = {
+            "mission_id": mission_id,
+            "session_id": session_id or None,
+            "dispatch_profile": _MEDIA_DISPATCH_PROFILE,
+            "capability": _MEDIA_CAPABILITY,
+            "input_platform": platform,
+            "input_source_key_sha256": digest,
+            "input_source_message_sha256": hashlib.sha256(
+                source_message_id.encode("utf-8")
+            ).hexdigest(),
+        }
+        try:
+            result = self.accept(prompt, **arguments)
+        except MissionError as error:
+            if str(error) != "mission already accepted":
+                raise
+            result = self.accept(prompt, **arguments)
+        if chat_id:
+            self.bind(mission_id, platform, chat_id, thread_id, reason="owner-intake")
+        return result
 
     def ingest_owner_goal(
         self,
@@ -1776,6 +2115,7 @@ class MissionStore:
         run_id: str | None = None,
         dispatch_profile: str | None = None,
         delivery_mode: str | None = None,
+        capability: str | None = None,
         project_id: str | None = None,
         parent_mission_id: str | None = None,
         input_platform: str | None = None,
@@ -1792,6 +2132,8 @@ class MissionStore:
             project_id = _require_id(project_id, "project_id")
         if delivery_mode is not None and delivery_mode != "none":
             raise MissionError("invalid mission delivery mode")
+        if capability is not None and capability != _MEDIA_CAPABILITY:
+            raise MissionError("invalid mission capability")
         if parent_mission_id is not None:
             parent_mission_id = _require_id(parent_mission_id, "parent_mission_id")
             if parent_mission_id == mission_id:
@@ -1841,6 +2183,7 @@ class MissionStore:
                 and first["payload"].get("goal") == goal
                 and first["payload"].get("dispatch_profile") == dispatch_profile
                 and first["payload"].get("delivery_mode") == delivery_mode
+                and first["payload"].get("capability") == capability
                 and first["payload"].get("project_id") == project_id
                 and first["payload"].get("parent_mission_id") == parent_mission_id
                 and (exact_input or legacy_input)
@@ -1860,6 +2203,8 @@ class MissionStore:
             payload["dispatch_profile"] = dispatch_profile
         if delivery_mode is not None:
             payload["delivery_mode"] = delivery_mode
+        if capability is not None:
+            payload["capability"] = capability
         if parent_mission_id is not None:
             payload["parent_mission_id"] = parent_mission_id
         if input_source_key_sha256 is not None:

@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v66-research-codex-home"
+        "v67-central-imagegen"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -69,6 +69,10 @@ def main() -> None:
     assert (
         "cp /mission-runtime/root/hermes_cli/kanban.py "
         "/mission-runtime/kanban.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/hermes_cli/uap_media.py "
+        "/mission-runtime/uap_media.py"
     ) in bootstrap_script
     assert (
         "cp /opt/hermes/hermes_cli/kanban_db.py "
