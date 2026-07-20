@@ -32,6 +32,11 @@
   M4 worker with deterministic 20-second chunking up to a 15-minute emergency ceiling, checksum-pinned RNNT Q4 CPU
   fallback for one-chunk recordings and the same idempotent intake receipt as text; failure is still pre-mission. Workspace has no binary
   voice-upload control, so Telegram is the live voice transport.
+- **One-click Rust project onboarding is live-proven.** Workspace now accepts only a bounded name, preset and
+  description, while the existing timer driver creates a private repository, protected setup/activation PRs, an exact
+  server-owned profile, a real OpenAI-only canary, independent review and GitHub macOS CI. The final project is exposed
+  only after Flux applies the ready catalog entry. Other presets remain hermetic-only, and this does not grant access
+  to the owner's Mac mini or infer arbitrary existing repositories.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
 - **Image capability (live green):** PRs #327/#329 and the `v68-imagegen-completion` Workspace canary prove built-in
@@ -358,6 +363,14 @@ not add an application service, workflow engine or mission database.
     state in clearer Russian. PR #300 added the exact prior-card upgrade hash after the first rollout attempt stopped
     fail-closed. Final Flux revision `97e6fb4...`, mounted/installed hashes, Workspace build/HTTP and six natural timer
     ticks passed. See the [rollout evidence](evidence/interrupted-author-and-russian-progress-rollout-2026-07-19.md).
+17. **One-click new-project onboarding — ✅ LIVE RUST/MACOS PASS (2026-07-20).** ADR-035 reuses Central,
+    project catalog, the existing schema-v4 installer/coordinator and Flux. One Workspace form action created a private
+    Rust repository and protected setup PR, installed the profile/timer, then ran a non-toy canary through Sol author,
+    a Terra rejection, automatic repair, a new exact-SHA Terra acceptance, repeated GitHub macOS CI, target PR #1,
+    merge, fresh-main post-verify and cleanup. Protected activation PR #359 and exact Flux convergence made the project
+    ready and selected at 100%. No owner approval or manual delivery command occurred after submission. Go/Python/Web
+    presets and concurrent onboarding remain outside live proof. See the
+    [exact evidence](evidence/one-click-project-onboarding-live-canary-2026-07-20.md).
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

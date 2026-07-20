@@ -53,14 +53,18 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   (branch → PR → green `static-checks` → merge → Flux reconciles `master`). Human code review stays absent by design —
   the agent's self-test + CI is the gate. See `docs/next-steps.md` → Platform hardening.
 - **Registered-profile intake and A7 lifecycle are live (2026-07-19):** Workspace and ordinary Telegram text now
-  resolve a closed server-owned catalog for `hermes-flow-v2-pilot`, `vpnctl` and `VPNRouter`, while build-1 persistent
-  timers service the corresponding profiles. The browser/channel never supplies a repository path, model or command;
-  unregistered repositories fail closed. Complete cross-channel chat history is still outside the contract. Telegram
+  resolve a closed server-owned catalog; the live catalog currently contains 36 records, including 12 ready profiles,
+  while build-1 persistent timers service the executable projects. The browser/channel never supplies a repository
+  path, model or command; unregistered repositories fail closed. Workspace one-click onboarding is now live-proven for
+  the Rust/GitHub-macOS/no-deploy preset: request `project-onboarding-170ac9b31190f8b6d4eb263cac3bf35d`
+  autonomously reached protected setup/activation PRs, Sol/Terra review-repair delivery and catalog `ready` at 100%.
+  Other presets remain hermetic-only. Complete cross-channel chat history is still outside the contract. Telegram
   voice/audio now uses checksum-pinned GigaAM CTC Q4 on the always-on M4 Mac through ops-1, with the original in-pod
   RNNT Q4 CPU preprocessor as automatic fallback; a 19.178-second OGG canary completed in 1.334 seconds and
   stable-source replay produced exactly one Central mission. Failure remains before mission creation.
-  Workspace projects the resulting mission but still has no binary voice-upload control. See `STATUS.md` and
-  `docs/evidence/local-voice-stt-rollout-2026-07-20.md` for the exact live boundary.
+  Workspace projects the resulting mission but still has no binary voice-upload control. See `STATUS.md`,
+  `docs/evidence/local-voice-stt-rollout-2026-07-20.md` and
+  `docs/evidence/one-click-project-onboarding-live-canary-2026-07-20.md` for the exact live boundaries.
 - **Controlled owner research is live-proven (2026-07-20):** PR #323 / ADR-033 installed the bounded,
   restart-safe `research_session` facade over a separate read-only Codex native-search run. PR #325 rotated the bearer
   exposed by a faulty diagnostic; PRs #328/#332/#333 closed MCP home, channel-routing and egress gaps. Flux exact merge
