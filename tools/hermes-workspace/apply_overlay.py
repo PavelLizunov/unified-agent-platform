@@ -79,6 +79,9 @@ LEGACY_ADDED_FILES = {
     "src/screens/dashboard/components/mission-overview-card.tsx": "7ab5ceff84f8b8a6eefd8acf694dfd27047b57ac25d73956707fbf2ea9088c45",
 }
 PREVIOUS_ADDED_FILES = {
+    "src/routes/api/project-onboarding.ts": (
+        "d727dfa55ac2eb266bff72cb87ea8d4c4c5b3482447fcf5fc14cb2a519de2977",
+    ),
     "src/routes/api/mission-projects.ts": (
         "e24378c6bd13f6bd4af0da76a7353b192e1c5ebcfb6aa6feb294ef7dea7a053b",
     ),
