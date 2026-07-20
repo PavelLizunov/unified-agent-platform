@@ -70,6 +70,7 @@ PREVIOUS_PATCHED_FILES = {
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
     "src/routes/api/mission-projects.ts": "src/routes/api/mission-projects.ts",
+    "src/routes/api/project-onboarding.ts": "src/routes/api/project-onboarding.ts",
     "src/components/settings/project-permissions.tsx": "src/components/settings/project-permissions.tsx",
     "src/screens/dashboard/components/mission-overview-card.tsx": "src/screens/dashboard/components/mission-overview-card.tsx",
 }
@@ -84,6 +85,7 @@ PREVIOUS_ADDED_FILES = {
     "src/components/settings/project-permissions.tsx": (
         "ffb920cb09279eabc136e91131771b26df8d0b47636b11784ae2657aea4ca093",
         "c9399af7536897389786c80b2710d01ed4670d4683fd62268b5255a090296877",
+        "22b99cd0f61079d631d821b45817a37d35fe474166269408b7bc417b72f10f9a",
     ),
     "src/routes/api/missions.ts": (
         "082ffe7f4d100d8a5a64fbde40893cfba1f98a1774c914acb2495ce1a857a243",
