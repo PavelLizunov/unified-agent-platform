@@ -45,6 +45,87 @@ def test_research_only_goal_bypasses_coding_mission_intake() -> None:
     assert not missions.is_controlled_research_goal(None)
 
 
+def test_project_onboarding_is_idempotent_restart_safe_and_forward_only() -> None:
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": ""}
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        requested, created = store.request_project_onboarding(
+            "mac-ledger", "Dependency-free ledger for macOS", "rust"
+        )
+        assert created
+        assert requested["repository"] == "PavelLizunov/mac-ledger"
+        assert requested["project_id"] == "mac-ledger"
+        assert requested["checkpoint"] == "requested"
+        assert requested["progress_percent"] == 0
+        assert requested["error_code"] is None
+
+        restarted = missions.MissionStore(database)
+        replayed, replay_created = restarted.request_project_onboarding(
+            "mac-ledger", "Dependency-free ledger for macOS", "rust"
+        )
+        assert not replay_created and replayed == requested
+        assert restarted.pending_project_onboarding() == requested
+
+        try:
+            restarted.request_project_onboarding(
+                "mac-ledger", "Different payload", "rust"
+            )
+            raise AssertionError("onboarding idempotency collision was accepted")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+
+        repository_ready, advanced = restarted.advance_project_onboarding(
+            requested["request_id"], "requested", "repository_ready"
+        )
+        assert advanced and repository_ready["progress_percent"] == 25
+        replayed_transition, replay_advanced = restarted.advance_project_onboarding(
+            requested["request_id"], "requested", "repository_ready"
+        )
+        assert not replay_advanced and replayed_transition == repository_ready
+        try:
+            restarted.advance_project_onboarding(
+                requested["request_id"], "repository_ready", "canary_passed"
+            )
+            raise AssertionError("onboarding checkpoint skip was accepted")
+        except missions.MissionError as error:
+            assert "forward-only" in str(error)
+
+        current = repository_ready
+        for expected, checkpoint in (
+            ("repository_ready", "runtime_ready"),
+            ("runtime_ready", "canary_passed"),
+            ("canary_passed", "ready"),
+        ):
+            current, advanced = missions.MissionStore(database).advance_project_onboarding(
+                requested["request_id"], expected, checkpoint
+            )
+            assert advanced
+        assert current["checkpoint"] == "ready"
+        assert current["progress_percent"] == 100
+        assert missions.MissionStore(database).pending_project_onboarding() is None
+
+        failed_request, _ = restarted.request_project_onboarding(
+            "failed-project", "Expected failure path", "python"
+        )
+        failed, advanced = restarted.advance_project_onboarding(
+            failed_request["request_id"], "requested", "failed",
+            error_code="github-capability-missing",
+        )
+        assert advanced
+        assert failed["checkpoint"] == "failed"
+        assert failed["error_code"] == "github-capability-missing"
+        assert restarted.pending_project_onboarding() is None
+
+        for name, preset in (("bad/name", "rust"), ("valid-name", "custom")):
+            try:
+                restarted.request_project_onboarding(name, "description", preset)
+                raise AssertionError("invalid onboarding request was accepted")
+            except missions.MissionError:
+                pass
+
+
 def test_reconnect_projects_one_canonical_state() -> None:
     document = json.loads(FIXTURE.read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as temp:
@@ -2821,6 +2902,7 @@ def test_failure_terminal_commits_before_telegram_and_retries_delivery() -> None
 
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
+    test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_notification_can_repeat_after_delivery_before_checkpoint()

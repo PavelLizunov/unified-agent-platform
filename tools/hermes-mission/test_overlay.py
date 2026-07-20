@@ -134,6 +134,10 @@ def main() -> None:
         for route in (
             '"/api/missions"',
             '"/api/mission-projects"',
+            '"/api/project-onboarding"',
+            '"/api/project-onboarding/pending"',
+            '"/api/project-onboarding/{request_id}"',
+            '"/api/project-onboarding/{request_id}/advance"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
             '"/api/missions/{mission_id}/answer"',
@@ -153,6 +157,10 @@ def main() -> None:
         assert '"goal", "platform", "source_message_id", "session_id"' in api
         assert '"chat_id", "thread_id", "project_id"' in api
         assert "unknown owner intake fields" in api
+        assert "request_project_onboarding(" in api
+        assert "pending_project_onboarding()" in api
+        assert "advance_project_onboarding(" in api
+        assert "project onboarding request must contain name, description and preset" in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api
         assert "payload[\"channels\"] = store.channel_evidence(mission_id)" in api

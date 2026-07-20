@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
-    "gateway/platforms/api_server.py": "6e09e807205e38c100ddff9574322c812d28e0836e3a44863407697197339601",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "58edd96de25922f5d26a1651062c0c325f436454ae235a6e366caa11bb88fd96",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -1009,6 +1009,101 @@ def connect(
         except MissionError as error:
             return web.json_response({"error": str(error)}, status=400)
 
+    async def _handle_create_project_onboarding(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        if not owner_key_valid(request.headers.get("X-Hermes-Mission-Owner-Key")):
+            return web.json_response({"error": "Invalid mission owner key"}, status=401)
+        if request.headers.get("X-Hermes-Mission-Producer-Key") is not None:
+            return web.json_response(
+                {"error": "Ambiguous mission capability"}, status=401
+            )
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {
+                "name", "description", "preset",
+            }:
+                raise MissionError(
+                    "project onboarding request must contain name, description and preset"
+                )
+            if any(
+                not isinstance(body[field], str)
+                for field in ("name", "description", "preset")
+            ):
+                raise MissionError("project onboarding fields must be strings")
+            onboarding, created = self._missions().request_project_onboarding(
+                body["name"],
+                redact_sensitive_text(body["description"], force=True),
+                body["preset"],
+            )
+            return web.json_response(
+                {"created": created, "onboarding": onboarding},
+                status=201 if created else 200,
+            )
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            return web.json_response({"error": str(error)}, status=400)
+
+    async def _handle_get_project_onboarding(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        try:
+            onboarding = self._missions().project_onboarding(
+                request.match_info["request_id"]
+            )
+            return web.json_response({"onboarding": onboarding})
+        except MissionError as error:
+            status = 404 if str(error) == "project onboarding request not found" else 400
+            return web.json_response({"error": str(error)}, status=status)
+
+    async def _handle_pending_project_onboarding(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        if not producer_key_valid(
+            request.headers.get("X-Hermes-Mission-Producer-Key")
+        ):
+            return web.json_response({"error": "Invalid mission producer key"}, status=401)
+        return web.json_response(
+            {"onboarding": self._missions().pending_project_onboarding()}
+        )
+
+    async def _handle_advance_project_onboarding(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        if not producer_key_valid(
+            request.headers.get("X-Hermes-Mission-Producer-Key")
+        ):
+            return web.json_response({"error": "Invalid mission producer key"}, status=401)
+        try:
+            body = await request.json()
+            if (
+                not isinstance(body, dict)
+                or not {"expected_checkpoint", "checkpoint"} <= set(body)
+                or set(body) - {
+                    "expected_checkpoint", "checkpoint", "error_code",
+                }
+            ):
+                raise MissionError("invalid project onboarding transition")
+            onboarding, advanced = self._missions().advance_project_onboarding(
+                request.match_info["request_id"],
+                body.get("expected_checkpoint"),
+                body.get("checkpoint"),
+                error_code=body.get("error_code"),
+            )
+            return web.json_response(
+                {"advanced": advanced, "onboarding": onboarding}
+            )
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            status = 404 if str(error) == "project onboarding request not found" else 400
+            return web.json_response({"error": str(error)}, status=status)
+
     async def _handle_list_missions(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
             return auth_error
@@ -1298,6 +1393,10 @@ def connect(
             self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
             '''            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
             self._app.router.add_get("/api/mission-projects", self._handle_mission_projects)
+            self._app.router.add_post("/api/project-onboarding", self._handle_create_project_onboarding)
+            self._app.router.add_get("/api/project-onboarding/pending", self._handle_pending_project_onboarding)
+            self._app.router.add_get("/api/project-onboarding/{request_id}", self._handle_get_project_onboarding)
+            self._app.router.add_post("/api/project-onboarding/{request_id}/advance", self._handle_advance_project_onboarding)
             self._app.router.add_get("/api/missions", self._handle_list_missions)
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
