@@ -3953,6 +3953,76 @@ class DeliveryCoordinator:
         self._save(paths, state)
         return True
 
+    def _recover_stale_pre_review_ci(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> str | None:
+        """Recover a same-SHA legacy CI failure without starting another author."""
+        stored_checks = state.get("pre_review_ci_checks")
+        if (
+            state.get("phase") != "needs_fix"
+            or state.get("review_verification") is not None
+            or not isinstance(state.get("prior_ci_failures"), int)
+            or isinstance(state.get("prior_ci_failures"), bool)
+            or state["prior_ci_failures"] <= 0
+            or state.get("review_findings")
+            != ["author candidate scope rejected: candidate changed no files"]
+            or not isinstance(stored_checks, list)
+            or not any(
+                isinstance(item, dict)
+                and item.get("name") in self.profile["required_ci_checks"]
+                and isinstance(item.get("outcome"), str)
+                and item.get("outcome") not in {"SUCCESS", "NEUTRAL", "SKIPPED"}
+                for item in stored_checks
+            )
+        ):
+            return None
+        candidate = state.get("candidate_sha")
+        if (
+            not isinstance(candidate, str)
+            or not candidate
+            or state.get("candidate_push_sha") != candidate
+            or state.get("pr_head_sha") != candidate
+            or isinstance(state.get("pr_number"), bool)
+            or not isinstance(state.get("pr_number"), int)
+        ):
+            raise DeliveryError("stale pre-review CI recovery has no exact candidate identity")
+        self._assert_claim(state)
+        self._assert_candidate_branch(state)
+        self._require_draft_pr(state)
+        checks = self._candidate_ci_rollup(state)
+        decision = _ci_decision(checks, self.profile["required_ci_checks"])
+        if decision == "pending":
+            return "waiting"
+        if decision == "failed":
+            if self._retry_failed_ci_once(
+                state,
+                paths,
+                CIFailed("stale pre-review CI still fails", checks),
+                pre_review=True,
+            ):
+                return "waiting"
+            return None
+
+        recovered_ci = state["prior_ci_failures"]
+        recovered_author = min(state.get("prior_author_failures", 0), 1)
+        state["prior_ci_failures"] = 0
+        state["prior_author_failures"] = (
+            state.get("prior_author_failures", 0) - recovered_author
+        )
+        state["review_cycle"] = max(
+            1, state["review_cycle"] - recovered_ci - recovered_author
+        )
+        state.pop("ci_retry", None)
+        state.update(
+            phase="pre_review_ci_green",
+            pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
+            pre_review_ci_checks=_ci_summaries(checks),
+            pre_review_ci_run_ids=_ci_run_ids(checks),
+            review_findings=[],
+        )
+        self._save(paths, state)
+        return "recovered"
+
     def _finalize_failed_pr(self, state: dict[str, Any]) -> bool:
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -4865,6 +4935,13 @@ class DeliveryCoordinator:
                 self._finish_invalid_candidate_cleanup(state, paths)
                 return {
                     "action": state["phase"], "mission_id": mission_id, "state": state,
+                }
+
+            stale_ci = self._recover_stale_pre_review_ci(state, paths)
+            if stale_ci == "waiting":
+                return {
+                    "action": "ci_retry_wait", "mission_id": mission_id,
+                    "state": state,
                 }
 
             if state["phase"] in {"claimed", "needs_fix"}:

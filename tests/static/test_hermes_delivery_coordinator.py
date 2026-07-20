@@ -4159,6 +4159,121 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual([70, 71], state["ci_retry"]["requested_run_ids"])
             self.assertEqual([70, 71, 71], calls)
 
+    def test_same_sha_green_ci_recovers_legacy_no_change_author_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_ci_checks"] = ["gitleaks"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "needs_fix",
+                "candidate_sha": "candidate-sha",
+                "candidate_push_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_number": 39,
+                "review_cycle": 4,
+                "prior_author_failures": 1,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 2,
+                "review_findings": [
+                    "author candidate scope rejected: candidate changed no files"
+                ],
+                "pre_review_ci_checks": [
+                    {"name": "gitleaks", "outcome": "FAILURE"}
+                ],
+            }
+            current = [{
+                "name": "gitleaks", "status": "COMPLETED",
+                "conclusion": "SUCCESS", "run_id": 70, "run_attempt": 3,
+            }]
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_candidate_branch"),
+                mock.patch.object(instance, "_require_draft_pr"),
+                mock.patch.object(instance, "_candidate_ci_rollup", return_value=current),
+            ):
+                result = instance._recover_stale_pre_review_ci(state, paths)
+
+            self.assertEqual("recovered", result)
+            self.assertEqual("pre_review_ci_green", state["phase"])
+            self.assertEqual(0, state["prior_ci_failures"])
+            self.assertEqual(0, state["prior_author_failures"])
+            self.assertEqual(1, state["review_cycle"])
+            self.assertEqual([], state["review_findings"])
+            self.assertEqual([70], state["pre_review_ci_run_ids"])
+            self.assertEqual(
+                [{"name": "gitleaks", "outcome": "SUCCESS"}],
+                state["pre_review_ci_checks"],
+            )
+
+    def test_stale_pre_review_ci_waits_without_starting_author(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_ci_checks"] = ["gitleaks"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "phase": "needs_fix",
+                "candidate_sha": "candidate-sha",
+                "candidate_push_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_number": 39,
+                "review_cycle": 2,
+                "prior_author_failures": 1,
+                "prior_ci_failures": 1,
+                "review_findings": [
+                    "author candidate scope rejected: candidate changed no files"
+                ],
+                "pre_review_ci_checks": [
+                    {"name": "gitleaks", "outcome": "FAILURE"}
+                ],
+            }
+            pending = [{
+                "name": "gitleaks", "status": "IN_PROGRESS",
+                "conclusion": None, "run_id": 70, "run_attempt": 2,
+            }]
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_candidate_branch"),
+                mock.patch.object(instance, "_require_draft_pr"),
+                mock.patch.object(instance, "_candidate_ci_rollup", return_value=pending),
+            ):
+                result = instance._recover_stale_pre_review_ci(state, paths)
+
+            self.assertEqual("waiting", result)
+            self.assertEqual("needs_fix", state["phase"])
+            self.assertEqual(1, state["prior_ci_failures"])
+
+    def test_stale_ci_recovery_does_not_bypass_other_correction_findings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            state = {
+                "phase": "needs_fix",
+                "prior_ci_failures": 1,
+                "review_findings": ["reviewer requested a correctness fix"],
+                "pre_review_ci_checks": [
+                    {"name": "test", "outcome": "FAILURE"}
+                ],
+            }
+            with mock.patch.object(instance, "_candidate_ci_rollup") as rollup:
+                self.assertIsNone(instance._recover_stale_pre_review_ci(
+                    state, instance._paths("mission-a7-3")
+                ))
+            rollup.assert_not_called()
+
     def test_candidate_draft_pr_ci_ignores_push_runs_and_checkpoints_exact_sha(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
