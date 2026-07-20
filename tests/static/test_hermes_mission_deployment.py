@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v72-project-onboarding-central"
+        "v73-long-voice-stt"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -324,7 +324,7 @@ def main() -> None:
                 "model": "/opt/data/.cache/uap-stt/gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
                 "language": "ru",
                 "format": "txt",
-                "timeout": 45,
+                "timeout": 90,
             }
         },
     }
