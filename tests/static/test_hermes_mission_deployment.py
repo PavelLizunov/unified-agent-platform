@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v64-local-stt"
+        "v65-api-credential-rotation"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
