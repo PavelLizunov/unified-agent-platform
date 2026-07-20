@@ -66,11 +66,12 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   Central API bearer in process diagnostics; finish `v65-api-credential-rotation`, reject the old token, then run the
   Workspace + Telegram replay canary in `runbooks/controlled-research.md`. Brave remains inactive under its default
   retention terms. See `docs/evidence/controlled-research-rollout-2026-07-20.md`.
-- **Image generation change pending rollout (2026-07-20):** ADR-034 and the current branch add a separate Central
-  text-to-image mission using production `openai-codex`/`codex_app_server` and built-in `$imagegen`. The read-only
-  live probe proved `imageGeneration: true`; the component replay gate proves no second generation. Do not run a live
-  generation canary until PR CI is green and Flux has installed the exact merge revision. Image editing remains
-  fail-closed because the pinned subscription adapter does not carry source image bytes.
+- **Subscription image generation is live-proven (2026-07-20):** PRs #327/#329 / ADR-034 installed a separate
+  Central text-to-image mission using production `openai-codex`/`codex_app_server` and built-in `$imagegen`.
+  Workspace canary, bounded artifact download and stable-source replay passed on `v68-imagegen-completion`; build-1
+  Workspace was rebuilt with exact overlay hashes. Telegram delivery is source-installed but lacks a live send
+  canary. Image editing remains fail-closed because the pinned subscription adapter does not carry source image bytes.
+  See `docs/evidence/subscription-imagegen-rollout-2026-07-20.md`.
 - **Model process isolation:** reviewer OS isolation is installed and live-proven. Current source reuses that exact
   parent-bound transient user-systemd boundary for author, with only the disposable author worktree plus model/Codex
   homes writable. Do not claim author rollout proof until the build-1 installed-wrapper probe and a real author turn
