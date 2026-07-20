@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "onboard-cf7ec685610e8f56-setup"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "onboard-cf7ec685610e8f56-ready"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
