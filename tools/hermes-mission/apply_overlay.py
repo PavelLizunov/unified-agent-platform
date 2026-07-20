@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
-    "gateway/platforms/api_server.py": "58edd96de25922f5d26a1651062c0c325f436454ae235a6e366caa11bb88fd96",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "b5df24c0f4fe4c564453c08871dc6d27465f582069cd78f2a2edaa61f84fac17",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -1160,6 +1160,7 @@ def connect(
                     session_id=body.get("session_id"),
                     run_id=body.get("run_id"),
                     dispatch_profile=body.get("dispatch_profile"),
+                    delivery_mode=body.get("delivery_mode"),
                     parent_mission_id=body.get("parent_mission_id"),
                 )
             else:
