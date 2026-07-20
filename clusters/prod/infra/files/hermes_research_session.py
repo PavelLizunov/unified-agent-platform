@@ -25,6 +25,8 @@ DEFAULT_SOURCES = 5
 SESSION_TIMEOUT_SECONDS = 180
 STATE_SCHEMA_VERSION = 1
 DEFAULT_CODEX_HOME = "/opt/data/.codex"
+DEFAULT_PROXY = "http://singbox-egress-ha.uap-system.svc:12080"
+DEFAULT_NO_PROXY = ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10"
 
 
 def _utc_now() -> str:
@@ -322,6 +324,9 @@ def run_research_session(
                     for key, value in os.environ.items()
                     if key in {"PATH", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
                 }
+                env.setdefault("HTTPS_PROXY", DEFAULT_PROXY)
+                env.setdefault("HTTP_PROXY", DEFAULT_PROXY)
+                env.setdefault("NO_PROXY", DEFAULT_NO_PROXY)
                 env.update(HOME=str(tmp_path), CODEX_HOME=str(child_codex_home))
                 completed = runner(
                     [

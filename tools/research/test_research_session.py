@@ -87,7 +87,7 @@ def main() -> None:
         auth_home = Path(state) / "deployment-codex"
         auth_home.mkdir()
         (auth_home / "auth.json").write_text("{}", encoding="utf-8")
-        with mock.patch.dict("os.environ", {"CODEX_HOME": ""}), mock.patch.object(
+        with mock.patch.dict("os.environ", {"CODEX_HOME": ""}, clear=True), mock.patch.object(
             MODULE, "DEFAULT_CODEX_HOME", str(auth_home)
         ):
             fallback = MODULE.run_research_session(
@@ -98,6 +98,10 @@ def main() -> None:
                 runner=success_runner,
             )
         assert fallback["status"] == "complete"
+        fallback_env = calls[-1][1]["env"]
+        assert fallback_env["HTTPS_PROXY"] == MODULE.DEFAULT_PROXY
+        assert fallback_env["HTTP_PROXY"] == MODULE.DEFAULT_PROXY
+        assert fallback_env["NO_PROXY"] == MODULE.DEFAULT_NO_PROXY
 
     invalid = MODULE.run_research_session(
         "goal", ["https://example.com/private"], 5, state_root="unused"
