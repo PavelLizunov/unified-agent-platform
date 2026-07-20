@@ -17,15 +17,30 @@ CORE_FILES = {
     "flow_contract.py": pathlib.Path("swarm-bin/flow_contract.py"),
     "mission_adapter.py": pathlib.Path("swarm-bin/mission_adapter.py"),
     "delivery_coordinator.py": pathlib.Path("swarm-bin/delivery_coordinator.py"),
+    "project_onboarding.py": pathlib.Path("swarm-bin/project_onboarding.py"),
     "systemd/hermes-delivery-coordinator@.service": pathlib.Path(
         ".config/systemd/user/hermes-delivery-coordinator@.service"
     ),
     "systemd/hermes-delivery-coordinator@.timer": pathlib.Path(
         ".config/systemd/user/hermes-delivery-coordinator@.timer"
     ),
+    "systemd/hermes-project-onboarding.service": pathlib.Path(
+        ".config/systemd/user/hermes-project-onboarding.service"
+    ),
+    "systemd/hermes-project-onboarding.timer": pathlib.Path(
+        ".config/systemd/user/hermes-project-onboarding.timer"
+    ),
     "flow-policy.json": pathlib.Path("swarm-bin/flow-policy.json"),
     "hermes-flow-v2/SKILL.md": pathlib.Path(".hermes/skills/hermes-flow-v2/SKILL.md"),
 }
+ONBOARDING_FILES = {
+    name: target for name, target in CORE_FILES.items()
+    if name == "project_onboarding.py" or "hermes-project-onboarding" in name
+}
+EXECUTABLES = (
+    "flow_contract.py", "mission_adapter.py", "delivery_coordinator.py",
+    "project_onboarding.py",
+)
 _LEGACY_MODEL_FIELDS = {
     "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",
 }
@@ -112,7 +127,7 @@ def install(
         src = source / relative_source
         dst = home / relative_target
         _copy(src, dst, private=_is_private_target(relative_target))
-    for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
+    for executable in EXECUTABLES:
         (home / files[executable]).chmod(0o755)
 
 
@@ -131,7 +146,7 @@ def check(
             if dst.stat().st_mode & 0o777 != 0o600:
                 raise SystemExit(f"flow-v2-install-error: insecure profile mode {dst}")
     if os.name != "nt":
-        for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
+        for executable in EXECUTABLES:
             if not (home / files[executable]).stat().st_mode & 0o111:
                 raise SystemExit(f"flow-v2-install-error: {executable} is not executable")
     if hermes_root is not None:
@@ -202,6 +217,24 @@ def install_profile(
     _copy(profile, target, private=True)
 
 
+def install_onboarding(
+    source: pathlib.Path, home: pathlib.Path, *, check_only: bool = False
+) -> None:
+    for relative_source, relative_target in ONBOARDING_FILES.items():
+        src = source / relative_source
+        dst = home / relative_target
+        if check_only:
+            if not dst.is_file() or dst.read_bytes() != src.read_bytes():
+                raise SystemExit(f"flow-v2-install-error: stale or missing {dst}")
+            continue
+        _copy(src, dst, private=False)
+    driver = home / ONBOARDING_FILES["project_onboarding.py"]
+    if not check_only:
+        driver.chmod(0o755)
+    elif os.name != "nt" and not driver.stat().st_mode & 0o111:
+        raise SystemExit("flow-v2-install-error: project_onboarding.py is not executable")
+
+
 def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
     """Validate a current profile or atomically migrate stopped schema 1/2 to v3."""
     path = path.expanduser().resolve()
@@ -255,12 +288,15 @@ def main() -> int:
     )
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--install-profile")
+    parser.add_argument("--install-onboarding", action="store_true")
     parser.add_argument("--migrate-profile", type=pathlib.Path)
     args = parser.parse_args()
     if args.check and args.migrate_profile:
         parser.error("--check cannot mutate --migrate-profile")
     if args.install_profile and args.migrate_profile:
         parser.error("--install-profile cannot be combined with --migrate-profile")
+    if args.install_onboarding and (args.install_profile or args.migrate_profile):
+        parser.error("--install-onboarding cannot be combined with profile operations")
     source = pathlib.Path(__file__).resolve().parent
     home = args.home.expanduser().resolve()
     hermes_root = args.hermes_root.expanduser().resolve()
@@ -272,6 +308,14 @@ def main() -> int:
             "hermes-flow-v2-profile-check-ok"
             if args.check
             else "hermes-flow-v2-profile-installed"
+        )
+        return 0
+    if args.install_onboarding:
+        install_onboarding(source, home, check_only=args.check)
+        print(
+            "hermes-project-onboarding-check-ok"
+            if args.check
+            else "hermes-project-onboarding-installed"
         )
         return 0
     _require_all_profile_units_inactive(home)

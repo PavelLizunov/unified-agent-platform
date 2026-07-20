@@ -1,0 +1,17 @@
+[Unit]
+Description=UAP one-click project onboarding driver
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=%h/.config/mission-producer-key
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+EnvironmentFile=%h/.config/uap/delivery-coordinator.env
+UnsetEnvironment=HERMES_MISSION_OWNER_KEY
+ExecStart=/usr/bin/python3 %h/swarm-bin/project_onboarding.py
+SuccessExitStatus=75
+TimeoutStartSec=30min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

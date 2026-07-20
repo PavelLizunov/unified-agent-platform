@@ -1306,6 +1306,25 @@ class FlowContractTests(unittest.TestCase):
                 )
             self.assertFalse((home / ".config/uap" / name).exists())
 
+    def test_installer_targets_the_standing_onboarding_driver(self):
+        source = ROOT / "tools" / "swarm"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            installer.install_onboarding(source, home)
+            installed = {
+                relative: home / target
+                for relative, target in installer.ONBOARDING_FILES.items()
+            }
+            self.assertTrue(all(path.is_file() for path in installed.values()))
+            self.assertEqual(
+                (source / "project_onboarding.py").read_bytes(),
+                installed["project_onboarding.py"].read_bytes(),
+            )
+            installer.install_onboarding(source, home, check_only=True)
+            installed["project_onboarding.py"].write_text("drift", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "stale or missing"):
+                installer.install_onboarding(source, home, check_only=True)
+
     def test_installer_applies_and_verifies_build1_runtime_overlay(self):
         source = ROOT / "tools" / "swarm"
         hermes_root = pathlib.Path("/pinned/hermes")
