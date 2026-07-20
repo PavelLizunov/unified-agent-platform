@@ -307,6 +307,92 @@ class ProjectOnboardingTests(unittest.TestCase):
                 home=pathlib.Path.cwd(),
             ).ensure_canary(value)
 
+    def test_uap_pr_creation_reconciles_ambiguous_api_result(self):
+        value = request(checkpoint="repository_ready")
+
+        class RecordingDriver(driver.Driver):
+            def __init__(self, home):
+                super().__init__(None, home=home)
+                self.commands = []
+                self.pr_reads = 0
+
+            def _uap_pr(self, _branch):
+                self.pr_reads += 1
+                if self.pr_reads == 1:
+                    return None
+                return {
+                    "number": 42,
+                    "state": "OPEN",
+                    "mergeCommit": None,
+                    "mergeStateStatus": "BLOCKED",
+                    "headRefName": self._uap_branch(value, ready=False),
+                }
+
+            def _render_uap_change(self, _root, _request, *, ready):
+                if ready:
+                    raise AssertionError("unexpected ready path")
+                return []
+
+            def run(self, command, **_kwargs):
+                self.commands.append(command)
+                if command[:2] == ["git", "ls-remote"]:
+                    return subprocess.CompletedProcess(command, 0, "a" * 40 + "\tref\n", "")
+                if command[:4] == ["git", "remote", "get-url", "origin"]:
+                    return subprocess.CompletedProcess(command, 0, driver.UAP_REMOTE + "\n", "")
+                if command[:3] == ["git", "branch", "--show-current"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, self._uap_branch(value, ready=False) + "\n", ""
+                    )
+                if command[:3] == ["git", "status", "--porcelain"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[:3] == ["gh", "api", "--method"]:
+                    return subprocess.CompletedProcess(command, 1, "", "transport failed")
+                if command[:3] == ["gh", "pr", "merge"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                raise AssertionError(command)
+
+        with tempfile.TemporaryDirectory() as directory:
+            instance = RecordingDriver(pathlib.Path(directory))
+            root = instance._request_root(value) / "uap-setup"
+            root.mkdir(parents=True)
+            self.assertIsNone(instance._ensure_uap_pr(value, ready=False))
+        api = next(command for command in instance.commands if command[:2] == ["gh", "api"])
+        self.assertIn(f"repos/{driver.UAP_REPOSITORY}/pulls", api)
+        self.assertIn(f"head={instance._uap_branch(value, ready=False)}", api)
+        self.assertFalse(any(command[:3] == ["gh", "pr", "create"] for command in instance.commands))
+
+    def test_behind_uap_pr_updates_base_without_operator(self):
+        value = request(checkpoint="repository_ready")
+
+        class BehindDriver(driver.Driver):
+            def __init__(self):
+                super().__init__(None, home=pathlib.Path.cwd())
+                self.commands = []
+
+            def _uap_pr(self, branch):
+                return {
+                    "number": 42,
+                    "state": "OPEN",
+                    "mergeCommit": None,
+                    "mergeStateStatus": "BEHIND",
+                    "headRefName": branch,
+                }
+
+            def run(self, command, **_kwargs):
+                self.commands.append(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+        instance = BehindDriver()
+        self.assertIsNone(instance._ensure_uap_pr(value, ready=False))
+        self.assertEqual(
+            [
+                "gh", "api", "--method", "PUT",
+                f"repos/{driver.UAP_REPOSITORY}/pulls/42/update-branch",
+            ],
+            instance.commands[0],
+        )
+        self.assertFalse(any(command[:3] == ["gh", "pr", "merge"] for command in instance.commands))
+
     def test_standing_unit_is_bounded_and_receives_no_owner_key(self):
         service = (ROOT / "tools/swarm/systemd/hermes-project-onboarding.service").read_text(
             encoding="utf-8"
