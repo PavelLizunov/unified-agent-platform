@@ -92,9 +92,12 @@ Last updated: 2026-07-20
   fallback for recordings that fit one chunk. A
   19.178-second OGG/Opus canary completed safe decode plus remote inference in 1.334 seconds at about 268 MiB worker
   RSS; its transcript created one Central mission and stable-source replay returned the same receipt after a new
-  `MissionStore` instance. Decode/STT failure still creates no mission. Workspace displays the Central result but
+  `MissionStore` instance. After long-note chunking deployed, a 99.833-second Russian canary completed in 5.168
+  seconds (RTF 0.052), created exactly one Central mission and replayed to the same receipt. Decode/STT failure still
+  creates no mission. Workspace displays the Central result but
   does not yet provide a binary voice-upload control. Exact proof and allowed claims:
-  `docs/evidence/local-voice-stt-rollout-2026-07-20.md`.
+  `docs/evidence/local-voice-stt-rollout-2026-07-20.md` and
+  `docs/evidence/local-voice-stt-long-notes-2026-07-20.md`.
 - **A7 observation and lifecycle baseline implemented (2026-07-17).** Workspace owns the separate owner-answer
   capability and resumes the same durable mission/root; coordinator processes explicitly lack that key. Central keeps
   the latest 100 unbound terminal mission histories while protecting the currently bound mission; payload-free
