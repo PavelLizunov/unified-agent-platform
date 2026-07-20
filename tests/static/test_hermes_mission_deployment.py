@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v61-api-token-rotation"
+        "v62-intake-draft-cancel"
     )
     bootstrap = next(
         container for container in template["spec"]["initContainers"]

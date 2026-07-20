@@ -816,6 +816,224 @@ def test_registered_project_selection_is_durable_and_restart_safe() -> None:
                 assert "ambiguous project alias" in str(error)
 
 
+def test_telegram_project_selection_draft_can_be_cancelled_and_replayed() -> None:
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        try:
+            store.ingest_owner_turn(
+                "отмена", platform="telegram", source_message_id="cancel-empty",
+                session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("cancellation without a draft was accepted")
+        except missions.MissionError as error:
+            assert str(error) == "нет ожидающего выбора проекта"
+        assert store.list(100) == []
+
+        try:
+            store.ingest_owner_turn(
+                "Добавь краткий статус", platform="telegram",
+                source_message_id="goal-1", session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("ambiguous goal was accepted")
+        except missions.MissionProjectRequired:
+            pass
+
+        for current in (store, missions.MissionStore(database)):
+            try:
+                current.ingest_owner_turn(
+                    "/cancel", platform="telegram", source_message_id="cancel-1",
+                    session_id="session-1", chat_id="chat-1",
+                )
+                raise AssertionError("cancelled draft returned a mission event")
+            except missions.MissionIntakeCancelled:
+                pass
+        assert store.list(100) == []
+
+        try:
+            store.ingest_owner_turn(
+                "vpnctl", platform="telegram", source_message_id="cancel-1",
+                session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("changed cancellation replay was accepted")
+        except missions.MissionError as error:
+            assert "idempotency collision" in str(error)
+
+        try:
+            store.ingest_owner_turn(
+                "Добавь краткий статус", platform="telegram",
+                source_message_id="goal-2", session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("second ambiguous goal was accepted")
+        except missions.MissionProjectRequired:
+            pass
+        accepted, created = store.ingest_owner_turn(
+            "vpnctl", platform="telegram", source_message_id="selection-2",
+            session_id="session-1", chat_id="chat-1",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+
+def test_telegram_project_selection_and_cancel_are_serialized() -> None:
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        try:
+            store.ingest_owner_turn(
+                "Добавь краткий статус", platform="telegram",
+                source_message_id="goal-1", session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("ambiguous goal was accepted")
+        except missions.MissionProjectRequired:
+            pass
+
+        selection_started = threading.Event()
+        release_selection = threading.Event()
+        original_ingest = store.ingest_owner_goal
+
+        def delayed_ingest(*args, **kwargs):
+            selection_started.set()
+            assert release_selection.wait(5)
+            return original_ingest(*args, **kwargs)
+
+        outcome: dict[str, object] = {}
+
+        def select_project() -> None:
+            try:
+                outcome["selected"] = store.ingest_owner_turn(
+                    "vpnctl", platform="telegram", source_message_id="selection-1",
+                    session_id="session-1", chat_id="chat-1",
+                )
+            except BaseException as error:
+                outcome["selection_error"] = error
+
+        with mock.patch.object(store, "ingest_owner_goal", delayed_ingest):
+            selector = threading.Thread(target=select_project)
+            selector.start()
+            assert selection_started.wait(5)
+            try:
+                store.ingest_owner_turn(
+                    "/cancel", platform="telegram", source_message_id="cancel-1",
+                    session_id="session-1", chat_id="chat-1",
+                )
+                raise AssertionError("in-flight project selection was cancelled")
+            except missions.MissionError as error:
+                assert "завершён" in str(error)
+            finally:
+                release_selection.set()
+            selector.join(5)
+
+        assert not selector.is_alive()
+        assert "selection_error" not in outcome
+        selected, created = outcome["selected"]
+        assert created and selected["payload"]["project_id"] == "vpnctl"
+        assert len(store.list(100)) == 1
+
+
+def test_telegram_project_selection_claim_resumes_after_crash() -> None:
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        try:
+            store.ingest_owner_turn(
+                "Добавь краткий статус", platform="telegram",
+                source_message_id="goal-1", session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("ambiguous goal was accepted")
+        except missions.MissionProjectRequired:
+            pass
+
+        with mock.patch.object(
+            store, "ingest_owner_goal", side_effect=RuntimeError("injected crash")
+        ):
+            try:
+                store.ingest_owner_turn(
+                    "vpnctl", platform="telegram", source_message_id="selection-1",
+                    session_id="session-1", chat_id="chat-1",
+                )
+                raise AssertionError("crashing selection returned")
+            except RuntimeError as error:
+                assert str(error) == "injected crash"
+
+        restarted = missions.MissionStore(database)
+        try:
+            restarted.ingest_owner_turn(
+                "vpnrouter", platform="telegram", source_message_id="selection-2",
+                session_id="session-1", chat_id="chat-1",
+            )
+            raise AssertionError("a competing selection replaced the durable claim")
+        except missions.MissionError as error:
+            assert "уже выполняется" in str(error)
+
+        accepted, created = restarted.ingest_owner_turn(
+            "vpnctl", platform="telegram", source_message_id="selection-1",
+            session_id="session-1", chat_id="chat-1",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+        replay, replay_created = missions.MissionStore(database).ingest_owner_turn(
+            "vpnctl", platform="telegram", source_message_id="selection-1",
+            session_id="session-1", chat_id="chat-1",
+        )
+        assert not replay_created and replay == accepted
+        assert len(restarted.list(100)) == 1
+
+
 def test_project_inventory_exposes_all_repositories_but_dispatches_only_ready() -> None:
     catalog = json.dumps({
         "schema_version": 2,

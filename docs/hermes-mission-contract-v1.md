@@ -104,7 +104,9 @@ release-only and seven are archived. Merely discovering a GitHub repository neve
 Central independently validates it. Telegram resolves an exact ready project
 alias from the goal when possible. Otherwise Central durably stores the redacted goal as an intake draft and asks for
 one project name. The selection resumes the original source message, survives restart and has its own durable replay
-receipt, so a delayed Telegram retry cannot create a second mission. No model is used for repository selection.
+receipt, so a delayed Telegram retry cannot create a second mission. Before a project is selected, `отмена`,
+`отменить` or `/cancel` durably discard only that uncommitted draft; replay is idempotent and no mission is created.
+No model is used for repository selection.
 
 Workspace forwards its existing stable optimistic message identity and selected project to the Central session
 stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice
