@@ -56,6 +56,12 @@ class ProjectOnboardingTests(unittest.TestCase):
             "python": "python3 -m unittest discover -s tests",
             "web": "node --test",
         }
+        expected_paths = {
+            "rust": ["README.md", "src"],
+            "go": ["README.md", "project.go", "project_test.go"],
+            "python": ["README.md", "main.py", "project.py", "tests"],
+            "web": ["README.md", "app.js", "index.html", "tests"],
+        }
         for preset, command in expected.items():
             value = request(preset)
             files = driver.bootstrap_files(value)
@@ -67,6 +73,7 @@ class ProjectOnboardingTests(unittest.TestCase):
             self.assertNotIn("cargo install", workflow)
             profile = driver.render_profile(value)
             self.assertEqual(["test-macos"], profile["required_ci_checks"])
+            self.assertEqual(expected_paths[preset], profile["allowed_path_prefixes"])
             self.assertEqual("none", profile["delivery_mode"])
             self.assertEqual(["multi_platform"], profile["route_flags"])
             with tempfile.TemporaryDirectory() as directory:
@@ -260,6 +267,18 @@ class ProjectOnboardingTests(unittest.TestCase):
     def test_canary_requires_exact_identity_and_authoritative_completion(self):
         value = request(checkpoint="runtime_ready")
 
+        class RecordingCentral(driver.CentralClient):
+            def __init__(self):
+                self.body = None
+
+            def request(self, method, path, body=None):
+                self.body = body
+                return {"mission": body}
+
+        recording = RecordingCentral()
+        self.assertEqual("none", recording.accept_canary(value)["delivery_mode"])
+        self.assertEqual("none", recording.body["delivery_mode"])
+
         class Central:
             def __init__(self, mission):
                 self.value = mission
@@ -271,6 +290,7 @@ class ProjectOnboardingTests(unittest.TestCase):
             "mission_id": driver.canary_mission_id(value),
             "goal": driver.canary_goal(value),
             "dispatch_profile": driver.dispatch_profile(value),
+            "delivery_mode": "none",
             "status": "completed",
             "progress_percent": 100,
             "result": "merged and verified",
@@ -279,6 +299,11 @@ class ProjectOnboardingTests(unittest.TestCase):
         with self.assertRaisesRegex(driver.PermanentError, "canary-mission-collision"):
             driver.Driver(
                 Central({**complete, "dispatch_profile": "unexpected"}),
+                home=pathlib.Path.cwd(),
+            ).ensure_canary(value)
+        with self.assertRaisesRegex(driver.PermanentError, "canary-mission-collision"):
+            driver.Driver(
+                Central({**complete, "delivery_mode": None}),
                 home=pathlib.Path.cwd(),
             ).ensure_canary(value)
 

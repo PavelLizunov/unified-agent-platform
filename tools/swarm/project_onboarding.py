@@ -97,7 +97,9 @@ def dispatch_profile(request: dict[str, Any]) -> str:
 
 
 def canary_mission_id(request: dict[str, Any]) -> str:
-    digest = hashlib.sha256(request["request_id"].encode("utf-8")).hexdigest()[:32]
+    digest = hashlib.sha256(
+        f"{request['request_id']}:delivery-none-v2".encode("utf-8")
+    ).hexdigest()[:32]
     return f"project-canary-{digest}"
 
 
@@ -237,9 +239,15 @@ def render_profile(request: dict[str, Any]) -> dict[str, Any]:
         ]],
         "web": [["/usr/bin/node", "--test"]],
     }[request["preset"]]
+    allowed_paths = {
+        "rust": ["README.md", "src"],
+        "go": ["README.md", "project.go", "project_test.go"],
+        "python": ["README.md", "main.py", "project.py", "tests"],
+        "web": ["README.md", "app.js", "index.html", "tests"],
+    }[request["preset"]]
     slug = request["project_id"]
     return {
-        "allowed_path_prefixes": ["."],
+        "allowed_path_prefixes": allowed_paths,
         "assignee": f"coordinator-codex-auto-{slug}",
         "author_checks": checks,
         "branch_prefix": f"codex/registered-{slug}",
@@ -432,6 +440,7 @@ class CentralClient:
             "mission_id": canary_mission_id(request),
             "goal": canary_goal(request),
             "dispatch_profile": dispatch_profile(request),
+            "delivery_mode": "none",
         })
         mission = result.get("mission")
         if not isinstance(mission, dict):
@@ -862,6 +871,7 @@ class Driver:
             mission.get("mission_id") != mission_id
             or mission.get("goal") != canary_goal(request)
             or mission.get("dispatch_profile") != dispatch_profile(request)
+            or mission.get("delivery_mode") != "none"
         ):
             raise PermanentError("canary-mission-collision")
         status = mission.get("status")
