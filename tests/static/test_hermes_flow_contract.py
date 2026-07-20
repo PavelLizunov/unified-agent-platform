@@ -1269,6 +1269,43 @@ class FlowContractTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 installer.check(ROOT / "tools" / "swarm", home)
 
+    def test_installer_targets_one_inactive_profile(self):
+        source = ROOT / "tools" / "swarm"
+        name = "delivery-ninitux-landing-registered-v4.json"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            inactive = lambda _unit: "inactive"
+            installer.install_profile(source, home, name, unit_state=inactive)
+            target = home / ".config/uap" / name
+            self.assertEqual(
+                (source / "profiles" / name).read_bytes(), target.read_bytes()
+            )
+            self.assertEqual([target], list((home / ".config/uap").glob("*.json")))
+            installer.install_profile(
+                source, home, name, check_only=True, unit_state=inactive
+            )
+            target.write_text("{}", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "stale or missing"):
+                installer.install_profile(
+                    source, home, name, check_only=True, unit_state=inactive
+                )
+
+    def test_targeted_profile_install_refuses_active_unit(self):
+        source = ROOT / "tools" / "swarm"
+        name = "delivery-ninitux-landing-registered-v4.json"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            with self.assertRaisesRegex(SystemExit, "timer.*must be inactive"):
+                installer.install_profile(
+                    source,
+                    home,
+                    name,
+                    unit_state=lambda unit: (
+                        "active" if unit.endswith(".timer") else "inactive"
+                    ),
+                )
+            self.assertFalse((home / ".config/uap" / name).exists())
+
     def test_installer_applies_and_verifies_build1_runtime_overlay(self):
         source = ROOT / "tools" / "swarm"
         hermes_root = pathlib.Path("/pinned/hermes")

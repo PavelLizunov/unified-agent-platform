@@ -292,7 +292,10 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     ):
         raise DeliveryError("profile.branch_prefix is invalid")
     for name in ("source_checkout", "worktree_root"):
-        if not pathlib.Path(profile[name]).is_absolute():
+        if not (
+            pathlib.Path(profile[name]).is_absolute()
+            or pathlib.PurePosixPath(profile[name]).is_absolute()
+        ):
             raise DeliveryError(f"profile.{name}: absolute path required")
     profile.setdefault("codex_bin", "/home/uap/.local/bin/codex")
     profile.setdefault("gh_bin", "gh")

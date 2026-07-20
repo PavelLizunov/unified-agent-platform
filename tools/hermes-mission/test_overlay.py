@@ -77,7 +77,7 @@ def main() -> None:
             build1_home = pathlib.Path(temp) / "build1-home"
             installer.install(INSTALLER.parent, build1_home, clone)
             installer.check(INSTALLER.parent, build1_home, clone)
-            for installed in installer.FILES.values():
+            for installed in installer._files(INSTALLER.parent).values():
                 assert (build1_home / installed).is_file()
         else:
             build1_apply = run(
