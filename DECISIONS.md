@@ -644,6 +644,14 @@
 - **Отвергнуто:** отдельный media service/workflow engine; переиспользование coding author/reviewer; прямой вызов
   private ChatGPT HTTP endpoint из Hermes plugin; автоматический повтор неоднозначной генерации; выбор провайдера
   моделью.
+- **Поправка (2026-07-21, topology):** владелец утвердил один bot + один private forum supergroup с двумя topics
+  (Code и Images). Точный server-owned allowlist `HERMES_MISSION_MEDIA_TOPICS` содержит пары
+  `{"chat_id","thread_id"}` (Telegram `message_thread_id` уникален только внутри chat). Обычный текст/голос в
+  настроенной паре детерминированно создаёт `media.image.generate` без `$imagegen` и без выбора проекта; модель
+  не угадывает capability. Пустой/отсутствующий allowlist = маршрутизация отключена (fail-closed); malformed
+  конфигурация блокирует owner turn. Явный `$imagegen`/`/image`/`/imagine` продолжает работать в любом topic.
+  Fallback два bot — только если live topic canary не пройдёт; для него потребуется явная bot/account identity
+  в channel scope и отдельное решение.
 
 ## ADR-035 — One-click onboarding нового проекта через детерминированный checkpoint driver
 
