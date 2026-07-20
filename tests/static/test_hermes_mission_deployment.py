@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "onboard-61136feb2ec6d5b7-ready"
+        "v69-media-topic-routing"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -122,6 +122,10 @@ def main() -> None:
                 "key": "projects.json",
             }
         },
+    }
+    assert gateway_env["HERMES_MISSION_MEDIA_TOPICS"] == {
+        "name": "HERMES_MISSION_MEDIA_TOPICS",
+        "value": "[]",
     }
     catalog_manifest = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-project-catalog.yaml").read_text(
