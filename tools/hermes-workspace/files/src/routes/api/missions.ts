@@ -11,9 +11,28 @@ export const Route = createFileRoute('/api/missions')({
         }
         const url = new URL(request.url)
         const missionId = url.searchParams.get('mission_id')
+        const artifactId = url.searchParams.get('artifact_id')
         const limit = url.searchParams.get('limit') || '20'
         try {
           if (missionId !== null) {
+            if (artifactId !== null) {
+              if (!missionId.trim() || !artifactId.trim() || artifactId.length > 128) {
+                return Response.json({ error: 'Invalid mission artifact request' }, { status: 400 })
+              }
+              const response = await gatewayFetch(
+                `/api/missions/${encodeURIComponent(missionId)}/artifacts/${encodeURIComponent(artifactId)}`,
+                { signal: AbortSignal.timeout(30_000) },
+              )
+              return new Response(response.body, {
+                status: response.status,
+                headers: {
+                  'Content-Type': response.headers.get('Content-Type') || 'application/octet-stream',
+                  'Content-Disposition': response.headers.get('Content-Disposition') || 'inline',
+                  'Cache-Control': 'private, max-age=31536000, immutable',
+                  'X-Content-Type-Options': 'nosniff',
+                },
+              })
+            }
             const after = Number(url.searchParams.get('after') || '0')
             if (
               !missionId.trim() ||

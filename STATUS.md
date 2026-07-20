@@ -1,8 +1,16 @@
 # Current Status
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Phase
+
+- **Codex subscription image capability implemented offline (2026-07-20; ADR-034).** The deployed worker was
+  verified read-only: Codex CLI `0.142.0`, stable `image_generation`, installed `$imagegen`, authenticated
+  app-server capability `imageGeneration: true`, and a typed result containing `status`, `result` and `savedPath`.
+  Central now has a separate text-to-image media mission, durable bounded artifact metadata, Telegram native image
+  delivery and authenticated Workspace rendering. The component/replay gate is green; live generation remains
+  intentionally pending PR/CI/merge/deploy. Subscription-auth image editing remains fail-closed because the pinned
+  adapter does not pass image inputs and its Codex backend advertises text-only capability.
 
 - Current phase: **post-Stage 0P** — infra bootstrap done; the **model + agent layers are LIVE** in `uap-system`
   (see "Model & Agent Layer" below). Active direction (2026-06-22/23 **pivot**): **vibe-coding** — adopt the

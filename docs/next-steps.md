@@ -8,7 +8,7 @@
 > Context: [docs/infrastructure.md](infrastructure.md). Decisions: [DECISIONS.md](../DECISIONS.md).
 > This doc **references** [BUILD-PLAN.md](../BUILD-PLAN.md) and [REVIEW-CODEX.md](../REVIEW-CODEX.md)
 > rather than restating their detail. Product contract: [product-operating-contract.md](product-operating-contract.md).
-> Last reviewed: 2026-07-19.
+> Last reviewed: 2026-07-20.
 
 ---
 
@@ -33,6 +33,10 @@
   voice-upload control, so Telegram is the live voice transport.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
+- **Image capability (offline green, live canary pending PR/CI):** production Codex OAuth reports built-in image
+  generation available. ADR-034 adds a separate Central text-to-image mission and durable artifact delivery without
+  a new service or paid API. Editing stays unavailable until the subscription app-server accepts and preserves real
+  image input; do not silently fall back to Claude/local/GPU or a paid backend.
 
 ---
 

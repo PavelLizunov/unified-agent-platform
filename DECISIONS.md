@@ -620,3 +620,26 @@
   в originating Workspace или Telegram; одинаковый request из второго канала idempotently получает тот же result.
   Brave остаётся исследованным, но неактивным кандидатом; его включение требует отдельного owner-provided credential
   и письменного retention права/Order Form, после чего эта ADR пересматривается. Текущий путь не требует нового setup.
+
+## ADR-034 — Отдельная Central media mission через Codex subscription image generation
+
+- **Контекст:** обычная image goal не является coding delivery и не должна попадать в author/reviewer Flow. На live
+  worker Codex CLI `0.142.0` реально сообщает `image_generation=stable`, системный `$imagegen`,
+  `modelProvider/capabilities/read.imageGeneration=true` под текущим ChatGPT OAuth и типизированный
+  `imageGeneration` result с `savedPath`.
+- **Решение:** консервативно распознанная text-to-image goal создаёт отдельную capability
+  `media.image.generate` и отдельный app-server thread внутри существующего Central Hermes process. Разрешён только
+  `openai-codex` + `codex_app_server` + встроенный `$imagegen`/`gpt-image-2`; Claude, local/GPU, FAL, OpenRouter и
+  платный Image API не являются fallback. Central хранит bounded artifact metadata в том же mission log, а bytes —
+  owner-only под `$HERMES_HOME/media-artifacts/<mission-id>/`. Telegram получает local image через существующий
+  adapter, Workspace — через authenticated Central artifact route.
+- **Надёжность:** один source message создаёт один mission и один media claim. После начала turn повторный запрос не
+  генерирует заново; истёкший/неоднозначный claim завершается явной ошибкой. При успехе принимается ровно один
+  completed image item, только PNG/JPEG/WebP до 25 MiB, с SHA-256 и проверкой перед каждым download.
+- **Граница:** subscription-auth image editing пока **не заявляется**. Pinned Hermes app-server adapter превращает
+  attached image в текстовый marker, а его `openai-codex` image backend объявляет text-only и
+  `max_reference_images: 0`. Edit goal должна fail closed до появления проверенного subscription path с реальным
+  image input; платный API не подключается автоматически.
+- **Отвергнуто:** отдельный media service/workflow engine; переиспользование coding author/reviewer; прямой вызов
+  private ChatGPT HTTP endpoint из Hermes plugin; автоматический повтор неоднозначной генерации; выбор провайдера
+  моделью.

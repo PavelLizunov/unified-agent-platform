@@ -64,6 +64,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 | `change.upsert` | `path`, `status` | records a changed artifact |
 | `gate.upsert` | `gate_id`, `status` | records test, review, CI or verification state |
 | `delivery.upsert` | `kind`, `status`, `url` | records PR, deploy or release evidence |
+| `artifact.upsert` | `artifact_id`, `kind`, `name`, `media_type`, `size_bytes`, `sha256` | records bounded Central-owned media metadata; build-1 producers cannot publish it |
 | `mission.completed` | `result` | terminal success; stage `complete`, progress 100 |
 | `mission.failed` | `error` | terminal failure |
 | `mission.cancelled` | `reason` | terminal cancellation |
@@ -72,6 +73,21 @@ Stages are `accepted`, `planning`, `implementing`, `testing`, `reviewing`, `deli
 Progress is an integer from 0 through 100 and may not decrease. Terminal events are final; later events are invalid.
 `dispatch_profile` is an immutable, opaque label. Central Hermes stores and projects it; only an exact build-1
 configuration match authorizes handoff. An absent or unknown label does not dispatch.
+
+### Text-to-image media capability
+
+An explicit `$imagegen`/`/image` goal or a conservative text-to-image phrase bypasses repository selection and
+accepts `capability: media.image.generate` with fixed `dispatch_profile: central-imagegen`. It is not a coding
+profile: Central starts one separate Codex app-server thread and requires the authenticated provider capability
+`imageGeneration=true`. Exactly one completed `imageGeneration` item may become an artifact. Central accepts only
+PNG, JPEG or WebP up to 25 MiB, records SHA-256/size/type/name, keeps the path private, and verifies integrity when
+serving the authenticated Workspace route or sending through the existing Telegram adapter.
+
+The durable media claim is the retry boundary. Replaying a completed source message returns the same artifact; an
+active claim is never dispatched twice, and an expired ambiguous claim fails explicitly instead of spending another
+generation. Safe included-subscription use requires no owner approval. Image editing is not part of this version:
+the pinned adapter does not pass image content to `turn/start`, so edit requests must fail closed rather than produce
+an unrelated text-to-image result or select another provider.
 
 ## Authority rules
 
