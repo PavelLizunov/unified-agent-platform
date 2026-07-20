@@ -103,6 +103,20 @@ _MEDIA_LEASE_SECONDS = 600
 _OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
 _OWNER_GATE_APPROVAL = "APPROVE"
 _MAX_RETAINED_TERMINAL_MISSIONS = 100
+_RESEARCH_INTENT = re.compile(
+    r"\b(?:research(?:_session)?|look\s+up|web\s+search|search\s+the\s+web|"
+    r"find\s+(?:the\s+)?(?:current|latest)|(?:current|latest)\s+documentation)\b|"
+    r"(?:исслед\w*|поищ\w*|веб[- ]?поиск\w*|поиск\s+(?:в\s+)?(?:интернете|сети)|"
+    r"найд\w*\s+(?:актуальн\w*|в\s+интернете|в\s+сети|документац\w*))",
+    re.IGNORECASE,
+)
+_MUTATION_INTENT = re.compile(
+    r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
+    r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
+    r"реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
+    r"собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+    re.IGNORECASE,
+)
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -137,6 +151,16 @@ _INTAKE_CANCEL_ALIASES = {"cancel", "отмена", "отменить"}
 NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
 # ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
 _NOTIFICATION_LEASE_SECONDS = 300
+
+
+def is_controlled_research_goal(text: object) -> bool:
+    """Route research-only owner turns to the bounded Central search tool."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())[:4_000]
+    return bool(_RESEARCH_INTENT.search(normalized)) and not _MUTATION_INTENT.search(
+        normalized
+    )
 
 
 class MissionError(ValueError):
