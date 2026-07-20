@@ -36,7 +36,15 @@ class GitHubActionsPinsTests(unittest.TestCase):
         )
         workflow = yaml.load(workflow_text, Loader=yaml.BaseLoader)
         self.assertEqual(
-            {"push": {"branches": ["master"], "paths": ["docs/evidence/completion/*.json"]}},
+            {
+                "push": {
+                    "branches": ["master"],
+                    "paths": [
+                        "docs/evidence/completion/*.json",
+                        "docs/evidence/onboarding/*.json",
+                    ],
+                }
+            },
             workflow["on"],
         )
         self.assertEqual({}, workflow["permissions"])
