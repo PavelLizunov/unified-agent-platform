@@ -192,6 +192,11 @@ def main() -> None:
         assert 'source_message_id = str(event.message_id or "").strip()' in gateway
         assert "store.ingest_owner_turn(" in gateway
         assert "_enrich_message_with_transcription(" in gateway
+        assert "event.message_type in (MessageType.VOICE, MessageType.AUDIO)" in gateway
+        assert "candidate.parent == audio_cache" in gateway
+        assert "candidate.unlink()" in gateway
+        assert "len(transcripts) != len(audio_paths)" in gateway
+        assert "goal_text = redact_sensitive_text(goal_text, force=True)" in gateway
         assert "MissionProjectRequired" in gateway
         assert "MissionIntakeCancelled" in gateway
         assert 'canonical == "cancel"' in gateway

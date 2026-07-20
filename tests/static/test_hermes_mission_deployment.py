@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v63-controlled-research"
+        "v64-local-stt"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -86,6 +86,14 @@ def main() -> None:
         "cp /mission-runtime/root/hermes_cli/main.py "
         "/mission-runtime/main.py"
     ) in bootstrap_script
+    for pinned in (
+        "f719d70812344f4d0fb8c11c0887b190501a7465",
+        "7d69952fb431a8d7800ed9910dc61fea37d8406bfe96d10bf24c8bd4b7c68623",
+        "5e150c7862748d33dc2f559a38274bcb46d06ba63f8f5d1247f8196569e02797",
+        "736f366beb8093eebd1a2ea694de48b6f87a34c6e5eb332384ba96fe3f4fceb3",
+        "cp /mission-overlay/local_stt.py /stt-runtime/local_stt.py",
+    ):
+        assert pinned in bootstrap_script, pinned
     gateway = next(
         container for container in template["spec"]["containers"]
         if container["name"] == "gateway"
@@ -274,6 +282,40 @@ def main() -> None:
         if volume["name"] == "mission-runtime"
     )
     assert mission_runtime == {"name": "mission-runtime", "emptyDir": {}}
+    assert {
+        "name": "stt-runtime",
+        "mountPath": "/opt/uap-stt",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
+    assert next(
+        volume for volume in template["spec"]["volumes"]
+        if volume["name"] == "stt-runtime"
+    ) == {"name": "stt-runtime", "emptyDir": {}}
+
+    config_map = yaml.safe_load(
+        (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(encoding="utf-8")
+    )
+    managed = yaml.safe_load(config_map["data"]["managed-config"])
+    assert managed["stt"] == {
+        "enabled": True,
+        "provider": "uap_local",
+        "providers": {
+            "uap_local": {
+                "type": "command",
+                "command": (
+                    "env PYTHONPATH=/opt/uap-stt/python "
+                    "TRANSCRIBE_LIBRARY=/opt/uap-stt/native/libtranscribe.so "
+                    "LD_LIBRARY_PATH=/opt/uap-stt/native "
+                    "/opt/hermes/.venv/bin/python /opt/uap-stt/local_stt.py "
+                    "{input_path} {output_path} --model {model}"
+                ),
+                "model": "/opt/data/.cache/uap-stt/gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
+                "language": "ru",
+                "format": "txt",
+                "timeout": 45,
+            }
+        },
+    }
 
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
     assert "hermes-mission-runtime.yaml" in resources

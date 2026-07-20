@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v63-controlled-research"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v64-local-stt"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -64,6 +64,10 @@ spec:
       initContainers:
         - name: bootstrap
           image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
+          env:
+            - { name: HTTPS_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
+            - { name: HTTP_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
+            - { name: NO_PROXY, value: ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10" }
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -79,6 +83,42 @@ spec:
               if [ ! -x /opt/data/.local/bin/claude ]; then
                 npm i -g @anthropic-ai/claude-code@2.1.193
               fi
+              # Local voice-note STT: cache only checksum-pinned artifacts on the PVC, then
+              # unpack the tiny runtime into this pod's emptyDir. Audio never enters this cache.
+              stt_cache=/opt/data/.cache/uap-stt
+              mkdir -p "$stt_cache" /stt-runtime/python /stt-runtime/native
+              fetch_stt_asset() {
+                stt_url=$1
+                stt_sha256=$2
+                stt_destination=$3
+                if [ -f "$stt_destination" ] && printf '%s  %s\n' "$stt_sha256" "$stt_destination" | sha256sum -c - >/dev/null 2>&1; then
+                  return
+                fi
+                stt_partial="${stt_destination}.part"
+                rm -f "$stt_partial"
+                curl --fail --location --silent --show-error --retry 3 \
+                  --connect-timeout 15 --max-time 300 --output "$stt_partial" "$stt_url"
+                printf '%s  %s\n' "$stt_sha256" "$stt_partial" | sha256sum -c - >/dev/null
+                mv "$stt_partial" "$stt_destination"
+              }
+              fetch_stt_asset \
+                https://github.com/handy-computer/transcribe.cpp/releases/download/v0.1.3/transcribe_cpp-0.1.3-py3-none-any.whl \
+                736f366beb8093eebd1a2ea694de48b6f87a34c6e5eb332384ba96fe3f4fceb3 \
+                "$stt_cache/transcribe_cpp-0.1.3.whl"
+              fetch_stt_asset \
+                https://github.com/handy-computer/transcribe.cpp/releases/download/v0.1.3/transcribe-native-0.1.3-linux-x86_64-cpu-vulkan.tar.gz \
+                5e150c7862748d33dc2f559a38274bcb46d06ba63f8f5d1247f8196569e02797 \
+                "$stt_cache/transcribe-native-0.1.3-linux-x86_64-cpu-vulkan.tar.gz"
+              fetch_stt_asset \
+                'https://huggingface.co/handy-computer/gigaam-v3-e2e-rnnt-gguf/resolve/f719d70812344f4d0fb8c11c0887b190501a7465/gigaam-v3-e2e-rnnt-Q4_K_M.gguf?download=true' \
+                7d69952fb431a8d7800ed9910dc61fea37d8406bfe96d10bf24c8bd4b7c68623 \
+                "$stt_cache/gigaam-v3-e2e-rnnt-Q4_K_M.gguf"
+              /opt/hermes/.venv/bin/python -m zipfile -e \
+                "$stt_cache/transcribe_cpp-0.1.3.whl" /stt-runtime/python
+              tar -xzf "$stt_cache/transcribe-native-0.1.3-linux-x86_64-cpu-vulkan.tar.gz" \
+                -C /stt-runtime/native --strip-components=1
+              cp /mission-overlay/local_stt.py /stt-runtime/local_stt.py
+              chmod 0555 /stt-runtime/local_stt.py
               # 2) Soft config + codex sandbox config from the ConfigMap, SEED-IF-ABSENT so the
               #    dashboard/CLI can own them on the PVC across restarts. The BRAIN is pinned
               #    separately by the managed overlay /etc/hermes/config.yaml, which always wins.
@@ -174,6 +214,7 @@ spec:
             - { name: runtime-compat, mountPath: /runtime-compat }
             - { name: mission-overlay, mountPath: /mission-overlay, readOnly: true }
             - { name: mission-runtime, mountPath: /mission-runtime }
+            - { name: stt-runtime, mountPath: /stt-runtime }
       containers:
         - name: gateway
           image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
@@ -260,6 +301,7 @@ spec:
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_missions.py, subPath: uap_missions.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/platforms/api_server.py, subPath: api_server.py, readOnly: true }
+            - { name: stt-runtime, mountPath: /opt/uap-stt, readOnly: true }
           resources:
             # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod
             # fits (agent ~1.1GB + chromium ~2GB) instead of OOM-killing the gateway. Norm is still heavy->build-1.
@@ -283,6 +325,8 @@ spec:
         - name: runtime-compat
           emptyDir: {}
         - name: mission-runtime
+          emptyDir: {}
+        - name: stt-runtime
           emptyDir: {}
         - name: mission-overlay
           configMap:
