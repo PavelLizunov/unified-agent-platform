@@ -56,7 +56,8 @@ class FakeSession:
             "params": {"item": {
                 "id": "image-1",
                 "type": "imageGeneration",
-                "status": "completed",
+                # Codex 0.142.0 keeps this value even on item/completed.
+                "status": "generating",
                 "result": "ignored-base64",
                 "savedPath": str(generated),
             }},

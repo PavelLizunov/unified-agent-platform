@@ -108,9 +108,11 @@ def generate_image(
     finally:
         session.close()
 
+    # The notification is terminal; Codex 0.142.0 may still preserve
+    # status="generating" on its completed image item.
     successful = [
         item for item in completed
-        if str(item.get("status", "")).lower() in {"completed", "success", "succeeded"}
+        if str(item.get("status", "")).lower() not in {"failed", "cancelled", "canceled"}
         and item.get("savedPath")
     ]
     if len(successful) != 1:
