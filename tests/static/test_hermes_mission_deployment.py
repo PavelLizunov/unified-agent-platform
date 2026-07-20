@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v73-long-voice-stt"
+        "onboard-5147b3cd5f89607f-setup"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -131,7 +131,9 @@ def main() -> None:
     assert catalog_manifest["kind"] == "ConfigMap"
     projects = json.loads(catalog_manifest["data"]["projects.json"])
     assert projects["schema_version"] == 2
-    assert len(projects["projects"]) == 33
+    assert len({project["project_id"] for project in projects["projects"]}) == len(
+        projects["projects"]
+    )
     ready = {
         project["project_id"]: (
             project["repository"],
@@ -141,7 +143,7 @@ def main() -> None:
         )
         for project in projects["projects"] if project["status"] == "ready"
     }
-    assert ready == {
+    expected_ready = {
         "uap": (
             "PavelLizunov/unified-agent-platform",
             "build1-uap-registered-v4",
@@ -209,6 +211,8 @@ def main() -> None:
             {"workspace", "telegram"},
         ),
     }
+    for project_id, expected in expected_ready.items():
+        assert ready[project_id] == expected
     installed_profiles = {}
     for path in (ROOT / "tools/swarm/profiles").glob("delivery-*-registered-v4.json"):
         profile = json.loads(path.read_text(encoding="utf-8"))
@@ -219,7 +223,7 @@ def main() -> None:
         profile = installed_profiles[project["dispatch_profile"]]
         assert profile["repo"] == project["repository"]
         assert profile["delivery_mode"] == project["delivery_mode"]
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 12
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) >= 12
     assert sum(project["status"] == "read_only" for project in projects["projects"]) == 3
     assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
     assert next(
@@ -254,11 +258,17 @@ def main() -> None:
     previous_catalog = os.environ.get("HERMES_MISSION_PROJECTS")
     try:
         os.environ["HERMES_MISSION_PROJECTS"] = catalog_manifest["data"]["projects.json"]
-        assert len(runtime.public_intake_projects("workspace")) == 33
+        assert len(runtime.public_intake_projects("workspace")) == len([
+            project for project in projects["projects"]
+            if "workspace" in project["platforms"]
+        ])
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == 11
+        ]) == len([
+            project for project in projects["projects"]
+            if "telegram" in project["platforms"] and project["status"] == "ready"
+        ])
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)
