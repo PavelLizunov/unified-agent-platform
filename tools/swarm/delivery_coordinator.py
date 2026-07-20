@@ -4003,14 +4003,49 @@ class DeliveryCoordinator:
                 return "waiting"
             return None
 
-        recovered_ci = state["prior_ci_failures"]
-        recovered_author = min(state.get("prior_author_failures", 0), 1)
-        state["prior_ci_failures"] = 0
-        state["prior_author_failures"] = (
-            state.get("prior_author_failures", 0) - recovered_author
+        author_summary = state.get("author_summary")
+        author_route_id = (
+            author_summary.get("route_decision_id")
+            if isinstance(author_summary, dict)
+            else None
         )
+        matching_epochs: set[int] = set()
+        for field in ("route_decisions", "effective_route_decisions"):
+            decisions = state.get(field, {})
+            if not isinstance(decisions, dict):
+                raise DeliveryError("stale pre-review CI recovery has invalid route history")
+            for key, route in decisions.items():
+                if not isinstance(key, str) or not key.isdigit() or key != str(int(key)):
+                    raise DeliveryError("stale pre-review CI recovery has invalid route epoch")
+                if isinstance(route, dict) and route.get("decision_id") == author_route_id:
+                    matching_epochs.add(int(key))
+        if not isinstance(author_route_id, str) or len(matching_epochs) != 1:
+            raise DeliveryError(
+                "stale pre-review CI recovery cannot bind the candidate author route"
+            )
+        author_epoch = matching_epochs.pop()
+        current_epoch = self._quality_failures(state)
+        recovered_failures = current_epoch - author_epoch
+        if recovered_failures < 1 or state.get("prior_author_failures", 0) < 1:
+            raise DeliveryError(
+                "stale pre-review CI recovery cannot identify the false repair failures"
+            )
+        state["prior_author_failures"] -= 1
+        recovered_ci = recovered_failures - 1
+        if recovered_ci > state["prior_ci_failures"]:
+            raise DeliveryError(
+                "stale pre-review CI recovery would erase unrelated quality failures"
+            )
+        state["prior_ci_failures"] -= recovered_ci
+        if (
+            self._quality_failures(state) != author_epoch
+            or self._current_route(state).get("decision_id") != author_route_id
+        ):
+            raise DeliveryError(
+                "stale pre-review CI recovery changed the candidate author route"
+            )
         state["review_cycle"] = max(
-            1, state["review_cycle"] - recovered_ci - recovered_author
+            1, state["review_cycle"] - recovered_failures
         )
         state.pop("ci_retry", None)
         state.update(

@@ -4177,10 +4177,78 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "candidate_push_sha": "candidate-sha",
                 "pr_head_sha": "candidate-sha",
                 "pr_number": 39,
-                "review_cycle": 4,
+                "review_cycle": 2,
+                "prior_author_failures": 0,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 1,
+                "review_findings": [
+                    "author candidate scope rejected: candidate changed no files"
+                ],
+                "pre_review_ci_checks": [
+                    {"name": "gitleaks", "outcome": "FAILURE"}
+                ],
+            }
+            author_route = instance._ensure_route(state, paths)
+            state["author_summary"] = {
+                "route_decision_id": author_route["decision_id"]
+            }
+            state.update(
+                review_cycle=4,
+                prior_author_failures=1,
+                prior_ci_failures=2,
+            )
+            current = [{
+                "name": "gitleaks", "status": "COMPLETED",
+                "conclusion": "SUCCESS", "run_id": 70, "run_attempt": 3,
+            }]
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_assert_candidate_branch"),
+                mock.patch.object(instance, "_require_draft_pr"),
+                mock.patch.object(instance, "_candidate_ci_rollup", return_value=current),
+            ):
+                result = instance._recover_stale_pre_review_ci(state, paths)
+
+            self.assertEqual("recovered", result)
+            self.assertEqual("pre_review_ci_green", state["phase"])
+            self.assertEqual(1, state["prior_ci_failures"])
+            self.assertEqual(0, state["prior_author_failures"])
+            self.assertEqual(2, state["review_cycle"])
+            self.assertEqual(
+                author_route["decision_id"],
+                instance._current_route(state)["decision_id"],
+            )
+            self.assertEqual([], state["review_findings"])
+            self.assertEqual([70], state["pre_review_ci_run_ids"])
+            self.assertEqual(
+                [{"name": "gitleaks", "outcome": "SUCCESS"}],
+                state["pre_review_ci_checks"],
+            )
+
+    def test_stale_pre_review_ci_recovery_requires_exact_author_route(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_ci_checks"] = ["gitleaks"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            state = {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "needs_fix",
+                "candidate_sha": "candidate-sha",
+                "candidate_push_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_number": 39,
+                "review_cycle": 3,
                 "prior_author_failures": 1,
                 "prior_review_rejections": 0,
-                "prior_ci_failures": 2,
+                "prior_ci_failures": 1,
+                "author_summary": {"route_decision_id": "missing-route"},
+                "route_decisions": {},
                 "review_findings": [
                     "author candidate scope rejected: candidate changed no files"
                 ],
@@ -4197,20 +4265,15 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 mock.patch.object(instance, "_assert_candidate_branch"),
                 mock.patch.object(instance, "_require_draft_pr"),
                 mock.patch.object(instance, "_candidate_ci_rollup", return_value=current),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "cannot bind the candidate author route"
+                ),
             ):
-                result = instance._recover_stale_pre_review_ci(state, paths)
+                instance._recover_stale_pre_review_ci(state, paths)
 
-            self.assertEqual("recovered", result)
-            self.assertEqual("pre_review_ci_green", state["phase"])
-            self.assertEqual(0, state["prior_ci_failures"])
-            self.assertEqual(0, state["prior_author_failures"])
-            self.assertEqual(1, state["review_cycle"])
-            self.assertEqual([], state["review_findings"])
-            self.assertEqual([70], state["pre_review_ci_run_ids"])
-            self.assertEqual(
-                [{"name": "gitleaks", "outcome": "SUCCESS"}],
-                state["pre_review_ci_checks"],
-            )
+            self.assertEqual("needs_fix", state["phase"])
+            self.assertEqual(1, state["prior_author_failures"])
+            self.assertEqual(1, state["prior_ci_failures"])
 
     def test_stale_pre_review_ci_waits_without_starting_author(self):
         with tempfile.TemporaryDirectory() as directory:
