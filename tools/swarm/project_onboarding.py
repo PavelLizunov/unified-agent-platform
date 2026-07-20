@@ -726,7 +726,7 @@ class Driver:
         values = self.run_json([
             "gh", "pr", "list", "--repo", UAP_REPOSITORY, "--head", branch,
             "--state", "all", "--limit", "2", "--json",
-            "number,state,mergeCommit,mergeStateStatus,headRefName,headRefOid",
+            "number,state,mergeCommit,mergeStateStatus,headRefName,commits",
         ])
         if not isinstance(values, list) or len(values) > 1:
             raise PermanentError("uap-onboarding-pr-collision")
@@ -972,7 +972,8 @@ class Driver:
     ) -> dict[str, Any]:
         pr = self._uap_pr(self._uap_branch(request, ready=ready))
         merge_sha = (pr.get("mergeCommit") or {}).get("oid") if pr else None
-        head_sha = pr.get("headRefOid") if pr else None
+        commits = pr.get("commits") if pr else None
+        head_sha = commits[-1].get("oid") if isinstance(commits, list) and commits else None
         if (
             not pr
             or pr.get("state") != "MERGED"
