@@ -78,9 +78,12 @@ Last updated: 2026-07-19
   Linux x86/ARM, Windows x86/ARM and macOS Intel/ARM artifacts. This is the registered
   no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory. The historical
   standalone `boosty_api_rs` entry is read-only because its active implementation is part of `vpnctl`; full cross-channel chat transcript
-  replication is not claimed. Telegram voice notes enter the same intake only after Hermes STT succeeds; the deployed
-  runtime currently has no allowed STT backend/credential, so voice fails closed without creating a mission. Text
-  intake and project selection are live; voice transcription still requires an owner-authorized STT credential.
+  replication is not claimed. Telegram voice/audio now enters the same intake through the local, checksum-pinned
+  GigaAM-v3 e2e RNNT Q4 CPU preprocessor. The deployed OGG/Opus canary completed in 2.815 seconds at 222,728 KiB peak
+  RSS; a second canary created one Central mission and replayed the stable Telegram source to the same receipt after a
+  new `MissionStore` instance. Decode/STT failure still creates no mission. Workspace displays the Central result but
+  does not yet provide a binary voice-upload control. Exact proof and allowed claims:
+  `docs/evidence/local-voice-stt-rollout-2026-07-20.md`.
 - **A7 observation and lifecycle baseline implemented (2026-07-17).** Workspace owns the separate owner-answer
   capability and resumes the same durable mission/root; coordinator processes explicitly lack that key. Central keeps
   the latest 100 unbound terminal mission histories while protecting the currently bound mission; payload-free

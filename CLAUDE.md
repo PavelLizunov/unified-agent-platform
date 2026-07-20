@@ -56,8 +56,10 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   resolve a closed server-owned catalog for `hermes-flow-v2-pilot`, `vpnctl` and `VPNRouter`, while build-1 persistent
   timers service the corresponding profiles. The browser/channel never supplies a repository path, model or command;
   unregistered repositories fail closed. Complete cross-channel chat history is still outside the contract. Telegram
-  voice intake is wired but intentionally fails before mission creation until an allowed STT credential/backend is
-  owner-authorized. See `STATUS.md` and the A7 evidence files for the exact live boundary.
+  voice/audio now uses the checksum-pinned local GigaAM Q4 CPU preprocessor inside the existing Hermes pod; a deployed
+  OGG canary and stable-source replay produced exactly one Central mission. Failure remains before mission creation.
+  Workspace projects the resulting mission but still has no binary voice-upload control. See `STATUS.md` and
+  `docs/evidence/local-voice-stt-rollout-2026-07-20.md` for the exact live boundary.
 - **Controlled owner research is Central live-proven, channel canary pending (2026-07-20):** PR #323 / ADR-033
   installed the bounded, restart-safe `research_session` facade over a separate read-only Codex native-search run.
   Exact-domain search, durable replay and Central MCP invocation passed. A later HTTP projection probe exposed the
