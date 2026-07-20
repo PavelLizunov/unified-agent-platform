@@ -6,6 +6,7 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -81,6 +82,22 @@ def main() -> None:
         assert child_auth.parent.parent == Path(kwargs["cwd"])
         assert "UNTRUSTED EXTERNAL CONTENT" in kwargs["input"]
         assert "example.com" in kwargs["input"]
+
+    with tempfile.TemporaryDirectory() as state:
+        auth_home = Path(state) / "deployment-codex"
+        auth_home.mkdir()
+        (auth_home / "auth.json").write_text("{}", encoding="utf-8")
+        with mock.patch.dict("os.environ", {"CODEX_HOME": ""}), mock.patch.object(
+            MODULE, "DEFAULT_CODEX_HOME", str(auth_home)
+        ):
+            fallback = MODULE.run_research_session(
+                "Use the deployment Codex authority",
+                ["example.com"],
+                1,
+                state_root=state,
+                runner=success_runner,
+            )
+        assert fallback["status"] == "complete"
 
     invalid = MODULE.run_research_session(
         "goal", ["https://example.com/private"], 5, state_root="unused"

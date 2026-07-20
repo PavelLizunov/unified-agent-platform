@@ -24,6 +24,7 @@ MAX_SOURCES = 8
 DEFAULT_SOURCES = 5
 SESSION_TIMEOUT_SECONDS = 180
 STATE_SCHEMA_VERSION = 1
+DEFAULT_CODEX_HOME = "/opt/data/.codex"
 
 
 def _utc_now() -> str:
@@ -261,7 +262,9 @@ def run_research_session(
     if isinstance(cached, dict) and cached.get("status") == "complete":
         return cached
 
-    source_codex_home = Path(codex_home or os.getenv("CODEX_HOME", ""))
+    source_codex_home = Path(
+        codex_home or os.getenv("CODEX_HOME") or DEFAULT_CODEX_HOME
+    )
     source_auth = source_codex_home / "auth.json"
     if not source_auth.is_file():
         failure = {
