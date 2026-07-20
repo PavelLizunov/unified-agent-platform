@@ -273,6 +273,20 @@ def main() -> None:
         assert "Проект не зарегистрирован" in project_api
         assert "project.status !== 'ready'" in project_api
         assert "HttpOnly; SameSite=Strict" in project_api
+        onboarding_api = (
+            clone / "src/routes/api/project-onboarding.ts"
+        ).read_text()
+        assert "createFileRoute('/api/project-onboarding')" in onboarding_api
+        assert "gatewayFetch(path" in onboarding_api
+        assert "central('/api/project-onboarding'" in onboarding_api
+        assert "const PRESETS = new Set(['rust', 'go', 'python', 'web'])" in onboarding_api
+        assert "PROJECT_NAME.test(body.name)" in onboarding_api
+        assert "uap_project_onboarding" in onboarding_api
+        assert "uap_mission_project" in onboarding_api
+        assert onboarding_api.count("HttpOnly; SameSite=Strict") == 3
+        assert all(field not in onboarding_api for field in (
+            "shell_command", "source_checkout", "dispatch_profile", "model_id",
+        ))
         project_settings = (
             clone / "src/components/settings/project-permissions.tsx"
         ).read_text()
@@ -280,6 +294,11 @@ def main() -> None:
         assert "Проверки:" in project_settings
         assert "Control-plane, Proxmox и ops-сервер" in project_settings
         assert "project.status === 'ready'" in project_settings
+        assert "Создать и подготовить" in project_settings
+        assert "Дополнительных подтверждений не потребуется" in project_settings
+        assert "GitHub macOS" in project_settings
+        assert "window.setInterval" in project_settings
+        assert "onboarding.progress_percent" in project_settings
         status_position = project_settings.index(
             "{statusLabels[project.status] || project.status}"
         )
