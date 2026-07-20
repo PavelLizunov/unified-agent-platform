@@ -728,6 +728,14 @@ class Driver:
                 raise PermanentError("uap-onboarding-pr-closed")
             if pr.get("mergeStateStatus") == "DIRTY":
                 raise PermanentError("uap-onboarding-pr-conflict")
+            if pr.get("mergeStateStatus") == "BEHIND":
+                updated = self.run([
+                    "gh", "api", "--method", "PUT",
+                    f"repos/{UAP_REPOSITORY}/pulls/{pr['number']}/update-branch",
+                ], check=False)
+                if "HTTP 401" in updated.stderr or "HTTP 403" in updated.stderr:
+                    raise PermanentError("github-capability-missing")
+                return None
             self.run([
                 "gh", "pr", "merge", "--repo", UAP_REPOSITORY,
                 "--auto", "--squash", str(pr["number"]),
