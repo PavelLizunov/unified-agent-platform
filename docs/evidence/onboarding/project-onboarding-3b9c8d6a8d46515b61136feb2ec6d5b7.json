@@ -1,0 +1,66 @@
+{
+  "canary": {
+    "completion_evidence_byte_sha256": "02ca486ee66565ed49567d104e88e737273173d60612dfbaac4407599430f64f",
+    "completion_evidence_path": "docs/evidence/completion/project-canary-8d258da32f2cf0de41c605879e7d1c6d.json",
+    "completion_evidence_sha256": "535a0abdee9245c6b9f5b3a73661d8c9b462269fc5498160258e292701522bda",
+    "mission_id": "project-canary-8d258da32f2cf0de41c605879e7d1c6d"
+  },
+  "catalog": {
+    "delivery_mode": "none",
+    "status": "ready",
+    "test_targets": [
+      "github-macos"
+    ]
+  },
+  "driver": {
+    "invocations": {
+      "chain_sha256": "f5aa2d433b63d855e2e7378d3ebafe565fc7989ca7d5100908bf106b487d8997",
+      "count": 14,
+      "first": {
+        "invocation_id": "cc0360e5844b49f289c186503a9c851f",
+        "unit": "hermes-project-onboarding.service"
+      },
+      "last": {
+        "invocation_id": "617b509906c748b6916f4242c5027eed",
+        "unit": "hermes-project-onboarding.service"
+      }
+    },
+    "sha256": "02621a08ba9ccc6c52d5d2603ae84352f17e8b60ac5b753e0584758101b9c561"
+  },
+  "repository": {
+    "bootstrap_sha": "bc2666d5ca1d2c4e699ce76efecd0a893b70974d",
+    "default_branch": "main",
+    "private": true
+  },
+  "request": {
+    "checkpoint": "ready",
+    "created_at": "2026-07-20T20:13:04.422Z",
+    "description_sha256": "390aa1c09577a40d5b11df4f5869e5570d821b5e1b82787084af17b8ed2691b4",
+    "name": "uap-macos-onboarding-proof-20260720",
+    "preset": "rust",
+    "project_id": "uap-macos-onboarding-proof-20260720",
+    "repository": "PavelLizunov/uap-macos-onboarding-proof-20260720",
+    "request_id": "project-onboarding-3b9c8d6a8d46515b61136feb2ec6d5b7"
+  },
+  "runtime": {
+    "dispatch_profile": "build1-uap-macos-onboarding-proof-20260720-registered-v4",
+    "profile_sha256": "357c9e13c50f78187ca98aebc699b2240960e47c775b304900a9b9f695c71a13",
+    "timer_unit": "hermes-delivery-coordinator@uap-macos-onboarding-proof-20260720-registered-v4.timer"
+  },
+  "schema_version": 1,
+  "sha256": "6469019953e8cdbc941edc52921dd2ec33200750dd708d1a6a01e3f41e208c7f",
+  "uap": {
+    "activation_pr": {
+      "head_sha": "733f9a2777137ace8a5ac740cca5aec1bb4eb526",
+      "merge_sha": "ab1db0b3c4b724320d4216d959a161a163f1f386",
+      "number": 369,
+      "url": "https://github.com/PavelLizunov/unified-agent-platform/pull/369"
+    },
+    "setup_pr": {
+      "head_sha": "26335b57dcfe3b3366b0cbd51b6f5e1328cbb035",
+      "merge_sha": "a36e22a9677590490ca1fd1ef604e791815752e8",
+      "number": 368,
+      "url": "https://github.com/PavelLizunov/unified-agent-platform/pull/368"
+    }
+  }
+}
