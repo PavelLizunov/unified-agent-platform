@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v62-intake-draft-cancel"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v63-controlled-research"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -86,7 +86,9 @@ spec:
               mkdir -p /opt/data/.codex
               [ -f /opt/data/.codex/config.toml ] || cp /config/codex-config.toml /opt/data/.codex/config.toml
               mkdir -p /opt/data/mcp
-              [ -f /opt/data/mcp/build1_mcp.py ] || cp /config/build1-mcp /opt/data/mcp/build1_mcp.py
+              # MCP policy is GitOps-owned; refresh it every roll so new bounded tools cannot be shadowed
+              # by the seed-only copy left on the PVC by an older revision.
+              cp /config/build1-mcp /opt/data/mcp/build1_mcp.py
               # ornith coder wrapper. Copy ALWAYS (not seed-if-absent) so a ConfigMap edit propagates on the next roll.
               mkdir -p /opt/data/.local/bin
               cp /config/ornith-wrapper /opt/data/.local/bin/ornith && chmod +x /opt/data/.local/bin/ornith
@@ -232,6 +234,7 @@ spec:
             failureThreshold: 5       # ~100s before restarting a single-replica Recreate agent (margin for a transient listener blip)
           volumeMounts:
             - { name: data, mountPath: /opt/data }
+            - { name: research-session, mountPath: /opt/data/mcp/research_session.py, subPath: research_session.py, readOnly: true }
             # managed scope: loaded LAST with override into os.environ, authoritative for
             # every profile + subprocess (codex spawn = os.environ.copy()). This is how the
             # Telegram adapter AND the gateway-driven codex brain reach the egress proxy —
@@ -284,6 +287,9 @@ spec:
         - name: mission-overlay
           configMap:
             name: hermes-mission-runtime
+        - name: research-session
+          configMap:
+            name: hermes-research-session
 ---
 # Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
 # tailscale-serve proxy can't reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy

@@ -45,8 +45,18 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v62-intake-draft-cancel"
+        "v63-controlled-research"
     )
+    research_mount = next(
+        mount for mount in template["spec"]["containers"][0]["volumeMounts"]
+        if mount["name"] == "research-session"
+    )
+    assert research_mount == {
+        "name": "research-session",
+        "mountPath": "/opt/data/mcp/research_session.py",
+        "subPath": "research_session.py",
+        "readOnly": True,
+    }
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
         if container["name"] == "bootstrap"

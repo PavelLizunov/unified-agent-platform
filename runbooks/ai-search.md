@@ -1,5 +1,9 @@
 # ai-search — веб-поиск для Hermes (free-tier, RU-egress-aware)
 
+> **Legacy engineering CLI.** Ordinary owner research must use Central's bounded `research_session` tool; do not
+> route it through build-1 shell. This CLI remains for explicit build-1 diagnostics and is not a durable citation
+> contract. See [controlled-research.md](controlled-research.md).
+
 **Развёрнут 2026-07-09 на build-1.** Даёт агентам веб-поиск/ответы/чтение страниц через API (без браузерной
 автоматизации — она отклонена). Реализация research-дока «Hermes Agent — AI Search Free Tier Mini Research».
 Код: [tools/websearch/ai_search.py](../tools/websearch/ai_search.py) (один файл, stdlib).

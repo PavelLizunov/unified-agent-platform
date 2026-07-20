@@ -598,3 +598,25 @@
 - **Последствия:** multiple registered projects получают независимые standing timers; одна ordinary goal может быть
   принята только после exact project resolution. Legacy single-route env остаётся временным backward-compatible
   fallback. Полная cross-channel chat transcript и arbitrary repository discovery по-прежнему не заявляются.
+
+## ADR-033 — Контролируемый web research через отдельный Codex session
+
+- **Контекст:** Central Hermes нужен веб-поиск только для явных owner research goals. Глобальный browser, произвольный
+  shell egress или legacy `ai-search` на build-1 расширяют полномочия coding workers и не дают механических bounds.
+  Закреплённый Hermes v0.18 уже содержит Brave provider, но стандартные Brave Search API Terms (2026-02-11) запрещают
+  долговременное хранение Search Results, тогда как UAP обязан сохранять итог и цитаты в Central/Workspace/Telegram.
+- **Решение:** отдельный MCP tool `research_session` запускает установленный Codex `0.142.0` как ephemeral
+  `codex --search exec` в read-only sandbox без shell tool, user config/MCP и с очищенным окружением. Для запуска во
+  временный `CODEX_HOME` копируется только существующий Codex auth, который удаляется вместе с child session. Facade ограничивает goal,
+  DNS allowlist и число источников, требует HTTPS, валидирует typed JSON result, атомарно сохраняет нормализованный
+  итог на Hermes PVC по детерминированному request id и повторяет только один transient failure. Raw subprocess
+  stdout/stderr и credential values не сохраняются и не возвращаются.
+- **Trust boundary:** web content всегда маркируется `untrusted_external_content` и остаётся ниже owner/system
+  instructions. Transient rate/transport outage возвращает retryable typed error без owner question. Обычные
+  `codex exec`/`claude -p` coding workers не получают `--search`, новый network access или новый credential.
+- **Отвергнуто:** глобально включить Hermes/Browser search; дать build-1 shell произвольный egress; новый search
+  service/MCP router; Brave key при несовместимом default retention contract; provider auto-fallback.
+- **Последствия:** Central сохраняет нормализованный result, а существующие Hermes channel sessions возвращают его
+  в originating Workspace или Telegram; одинаковый request из второго канала idempotently получает тот же result.
+  Brave остаётся исследованным, но неактивным кандидатом; его включение требует отдельного owner-provided credential
+  и письменного retention права/Order Form, после чего эта ADR пересматривается. Текущий путь не требует нового setup.

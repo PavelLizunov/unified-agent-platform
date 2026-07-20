@@ -58,6 +58,11 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   unregistered repositories fail closed. Complete cross-channel chat history is still outside the contract. Telegram
   voice intake is wired but intentionally fails before mission creation until an allowed STT credential/backend is
   owner-authorized. See `STATUS.md` and the A7 evidence files for the exact live boundary.
+- **Controlled owner research is source-ready, not live-proven (2026-07-20):** ADR-033 adds the bounded,
+  restart-safe `research_session` facade over a separate read-only Codex native-search run. Brave was rejected for
+  the durable path under its default retention terms, so there is no new key/setup. After the PR merges and Flux
+  rolls `v63-controlled-research`, run the Workspace + Telegram replay canary in
+  `runbooks/controlled-research.md`; do not claim live research until it passes.
 - **Model process isolation:** reviewer OS isolation is installed and live-proven. Current source reuses that exact
   parent-bound transient user-systemd boundary for author, with only the disposable author worktree plus model/Codex
   homes writable. Do not claim author rollout proof until the build-1 installed-wrapper probe and a real author turn
