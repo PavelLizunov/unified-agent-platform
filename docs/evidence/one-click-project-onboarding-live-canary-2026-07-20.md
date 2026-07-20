@@ -93,6 +93,11 @@ The coordinator wrote the closed completion bundle before terminal publication. 
 hermes-flow-completion-evidence-ok cd261e80b19e34e96f16a7b7af1ea7e6380372493c5f7124a805fbe1b57a64b3
 ```
 
+The exact verified bundle is published at
+`docs/evidence/completion/project-canary-351ea8ba5094f4e60f00ffa1cb87ac51.json`. The existing protected-master
+completion-evidence workflow verifies its closed schema and issues GitHub artifact attestation for exact byte SHA-256
+`f66aad1a30f14e21b82642585a03c801b3759a5ce51ccc409bc9e34e260e1434`.
+
 The bundle binds the mission/task/run, route and policy, runtime-attested author/reviewer sessions, exact reviewed
 SHA, PR and required CI run, merge/default SHA, post-verify, cleanup and a two-invocation systemd chain. Installed
 coordinator SHA-256 was `da0be7d9f3cafd946b9e695f017a48101e6e689cf0e68bc78be8a9ae63ba137b`;

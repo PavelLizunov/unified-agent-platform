@@ -1,0 +1,129 @@
+{
+  "author": {
+    "head_sha": "bca946e9caf4e668fdf42761683e19c339456763",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "route_decision_id": "1c6c46de97af5d26598af44ab065df1a0652c25eeddf1abc71be1d56ae74be47",
+    "sandbox": "workspace-write",
+    "session_id": "019f807e-0dbf-7e71-a352-a725721e9abe",
+    "tree_sha": "647705b8f3adabde879d55d1531c70f44ef101b5"
+  },
+  "central": {
+    "projection_id": "d881139ab1917110",
+    "result": "Выполнено: Extend this dependency-free Rust starter project: add a public project_status API that returns exactly ready, expose it in the existing user-facing output, and update tests plus README. Do not add dependencies.\nPR: https://github.com/PavelLizunov/uap-macos-oneclick-final-20260720/pull/1\nMerge-коммит: https://github.com/PavelLizunov/uap-macos-oneclick-final-20260720/commit/c46dcf5222e95e5a4fb013319d4dd9f0aa67b33e\nПроверки: тесты, независимое ревью, CI, post-verify и очистка пройдены\nДеплой: не требуется для этого проекта\nИзменённые файлы (3): README.md, src/lib.rs, src/main.rs",
+    "sequence": 23,
+    "status": "completed"
+  },
+  "cleanup": {
+    "kanban_gc_ran": false,
+    "local_branch_deleted": true,
+    "remote_branch_deleted": true,
+    "task_archived": true,
+    "worktrees_removed": true
+  },
+  "delivery": {
+    "applicability": "not_applicable",
+    "ci_run_ids": [
+      29762565767
+    ],
+    "mode": "none",
+    "pr_base_branch": "main",
+    "pr_head_sha": "bca946e9caf4e668fdf42761683e19c339456763",
+    "pr_number": 1,
+    "pr_url": "https://github.com/PavelLizunov/uap-macos-oneclick-final-20260720/pull/1"
+  },
+  "execution": {
+    "root_task_id": "t_f382f293",
+    "run_id": "64"
+  },
+  "gates": {
+    "ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "post_verify_checks": [
+      {
+        "command": "/usr/local/bin/cargo test --all-targets",
+        "exit_code": 0
+      }
+    ],
+    "pre_review_ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "required_ci_checks": [
+      "test-macos"
+    ]
+  },
+  "mission": {
+    "dispatch_profile": "build1-uap-macos-oneclick-final-20260720-registered-v4",
+    "goal_sha256": "ab48cda543ae322ae72a9d0bc7b5a8269be012322a9e8bc2257f41ccf64d687a",
+    "mission_id": "project-canary-351ea8ba5094f4e60f00ffa1cb87ac51",
+    "owner_answer_sha256s": [],
+    "parent_mission_id": null
+  },
+  "reviewer": {
+    "head_sha": "bca946e9caf4e668fdf42761683e19c339456763",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "xhigh",
+    "reviewed_sha": "bca946e9caf4e668fdf42761683e19c339456763",
+    "route_decision_id": "1c6c46de97af5d26598af44ab065df1a0652c25eeddf1abc71be1d56ae74be47",
+    "sandbox": "read-only",
+    "session_id": "019f8081-5590-7200-b55f-96f3496ce74b",
+    "source_attestation_sha256": "45b1f4b50d9fbdcc09d58cb0fd3f038c71966cd9761890dd3152a7507ceff5a4",
+    "tree_sha": "647705b8f3adabde879d55d1531c70f44ef101b5"
+  },
+  "route": {
+    "author_model": "gpt-5.6-sol",
+    "decision_id": "1c6c46de97af5d26598af44ab065df1a0652c25eeddf1abc71be1d56ae74be47",
+    "policy_id": "openai-autonomy-v2",
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "reviewer_model": "gpt-5.6-terra",
+    "route": "complex"
+  },
+  "runtime": {
+    "coordinator_sha256": "da0be7d9f3cafd946b9e695f017a48101e6e689cf0e68bc78be8a9ae63ba137b",
+    "invocations": {
+      "chain_sha256": "9f9329e206097302a65cb564fd9f2da989b4a35f2bc0a476cb263a41b7c65ea7",
+      "count": 2,
+      "first": {
+        "invocation_id": "1a12be553a874f54bf4171f70e03135b",
+        "unit": "hermes-delivery-coordinator@uap-macos-oneclick-final-20260720-registered-v4.service"
+      },
+      "last": {
+        "invocation_id": "9602d80e4d11476c8fb00a4753857a08",
+        "unit": "hermes-delivery-coordinator@uap-macos-oneclick-final-20260720-registered-v4.service"
+      }
+    },
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "profile_sha256": "f551e122385236cd091fd1d2898c254eb8e5156d6d8f6ca44a33e8218bdb068d"
+  },
+  "schema_version": 1,
+  "sha256": "cd261e80b19e34e96f16a7b7af1ea7e6380372493c5f7124a805fbe1b57a64b3",
+  "source": {
+    "base_sha": "9a35b81345deadba2342b2881c809c27aadc84cb",
+    "candidate_ancestor_of_merge": true,
+    "candidate_files": [
+      "README.md",
+      "src/lib.rs",
+      "src/main.rs"
+    ],
+    "candidate_sha": "bca946e9caf4e668fdf42761683e19c339456763",
+    "default_sha": "c46dcf5222e95e5a4fb013319d4dd9f0aa67b33e",
+    "merge_ancestor_of_default": true,
+    "merge_sha": "c46dcf5222e95e5a4fb013319d4dd9f0aa67b33e",
+    "repo": "PavelLizunov/uap-macos-oneclick-final-20260720"
+  }
+}
