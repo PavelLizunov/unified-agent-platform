@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v70-research-mcp-egress"
+        "v71-mac-ctc-stt"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -62,6 +62,13 @@ def main() -> None:
         if container["name"] == "bootstrap"
     )
     bootstrap_script = "\n".join(bootstrap["args"])
+    managed_config = (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert (
+        "UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions"
+        in managed_config
+    )
     assert (
         "cp /opt/hermes/hermes_cli/kanban.py "
         "/mission-runtime/root/hermes_cli/kanban.py"
@@ -307,7 +314,8 @@ def main() -> None:
             "uap_local": {
                 "type": "command",
                 "command": (
-                    "env PYTHONPATH=/opt/uap-stt/python "
+                    "env UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions "
+                    "PYTHONPATH=/opt/uap-stt/python "
                     "TRANSCRIBE_LIBRARY=/opt/uap-stt/native/libtranscribe.so "
                     "LD_LIBRARY_PATH=/opt/uap-stt/native "
                     "/opt/hermes/.venv/bin/python /opt/uap-stt/local_stt.py "

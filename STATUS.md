@@ -86,10 +86,11 @@ Last updated: 2026-07-20
   Linux x86/ARM, Windows x86/ARM and macOS Intel/ARM artifacts. This is the registered
   no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory. The historical
   standalone `boosty_api_rs` entry is read-only because its active implementation is part of `vpnctl`; full cross-channel chat transcript
-  replication is not claimed. Telegram voice/audio now enters the same intake through the local, checksum-pinned
-  GigaAM-v3 e2e RNNT Q4 CPU preprocessor. The deployed OGG/Opus canary completed in 2.815 seconds at 222,728 KiB peak
-  RSS; a second canary created one Central mission and replayed the stable Telegram source to the same receipt after a
-  new `MissionStore` instance. Decode/STT failure still creates no mission. Workspace displays the Central result but
+  replication is not claimed. Telegram voice/audio now enters the same intake through checksum-pinned
+  GigaAM-v3 e2e CTC Q4 on the always-on M4 Mac, with the original in-pod RNNT Q4 CPU path as automatic fallback. A
+  19.178-second OGG/Opus canary completed safe decode plus remote inference in 1.334 seconds at about 268 MiB worker
+  RSS; its transcript created one Central mission and stable-source replay returned the same receipt after a new
+  `MissionStore` instance. Decode/STT failure still creates no mission. Workspace displays the Central result but
   does not yet provide a binary voice-upload control. Exact proof and allowed claims:
   `docs/evidence/local-voice-stt-rollout-2026-07-20.md`.
 - **A7 observation and lifecycle baseline implemented (2026-07-17).** Workspace owns the separate owner-answer

@@ -1,4 +1,4 @@
-# Local-models router — Qwen-35B + Ornith-9B in parallel, one endpoint
+# Local-models router — local LLMs plus bounded Mac STT
 
 A fully-local LLM setup for when the paid Claude/Codex limits are exhausted. Two models run **in parallel
 on two boxes**, each for its strength, behind one OpenAI-compatible endpoint on `uap-ops-1`.
@@ -21,6 +21,46 @@ in the systemd unit to require `Authorization: Bearer <key>`.
 curl http://100.82.241.121:8090/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"ornith-9b","messages":[{"role":"user","content":"write a Rust gcd fn"}]}'
 ```
+
+## Voice STT route
+
+Hermes safe-decodes accepted Telegram voice/audio to mono 16 kHz signed-16 PCM and posts at most 800,000 bytes to
+`http://192.168.0.203:8090/v1/audio/transcriptions`. The ops router forwards only that exact path to the tailnet-only
+Mac worker at `http://100.116.97.112:8091/v1/audio/transcriptions`. The response is normalized untrusted owner text;
+it does not select a project/model or execute instructions. If the Mac or route is unavailable within eight seconds,
+the same wrapper uses the checksum-pinned in-pod RNNT CPU model. If both fail, intake returns the existing retry/text
+message before opening `MissionStore`.
+
+Pinned Mac artifacts:
+
+| Artifact | Identity |
+|---|---|
+| CTC model | HF commit `075dff81f843cf23d22b4ce943ffdc4dd8650cd7`; 182,497,888 bytes; SHA-256 `35581e11e048eef785657cff07e5fced794bba6d9c75143257f6452c8aeea655` |
+| Python wrapper | `transcribe_cpp-0.1.3-py3-none-any.whl`; SHA-256 `736f366beb8093eebd1a2ea694de48b6f87a34c6e5eb332384ba96fe3f4fceb3` |
+| Metal native runtime | `transcribe-native-0.1.3-macos-arm64-metal.tar.gz`; SHA-256 `5cd8791846dec8a4e1c269cbe836b7c7d294e7d6c295209a1348e3bc5aae08c3` |
+
+The runtime lives in `/Users/slovn/.uap-stt`; the checked-in launchd unit is
+`tools/local-models/com.uap.local-stt.plist`. It binds the stable tailnet IP, verifies the model hash before load,
+serializes inference, caps the accept queue at two and limits the process to 64 file descriptors. It never writes
+audio or transcripts to disk or logs.
+
+Health and restart checks:
+
+```bash
+# From ops-1
+curl -fsS --max-time 3 http://100.116.97.112:8091/healthz
+systemctl status local-model-router --no-pager
+
+# On the Mac user session
+launchctl print gui/501/com.uap.local-stt
+launchctl kickstart -k gui/501/com.uap.local-stt
+```
+
+To update the worker, first run both offline selfchecks, copy `mac_stt_server.py` atomically into
+`/Users/slovn/.uap-stt/`, validate/copy the plist into `~/Library/LaunchAgents/`, then kickstart launchd. Update the
+ops router the same way: copy `route.py` as a temporary sibling, run `python3 route.py.new --selfcheck`, atomically
+rename it and restart `local-model-router`. Do not place sample audio in the repository, journal or evidence; use an
+explicit `/tmp` path and delete it immediately after the canary.
 
 ## The three pieces
 
