@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v71-mac-ctc-stt"
+        "v72-project-onboarding-central"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
