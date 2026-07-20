@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "onboard-61136feb2ec6d5b7-ready"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v69-media-topic-routing"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -254,6 +254,13 @@ spec:
                 configMapKeyRef:
                   name: hermes-project-catalog
                   key: projects.json
+            # Telegram forum-topic allowlist for media routing.  JSON array of
+            # exact {"chat_id","thread_id"} pair objects whose ordinary text/voice
+            # deterministically enters media.image.generate instead of project
+            # intake.  Telegram thread IDs are chat-local, so both fields are
+            # required.  Empty = disabled (fail-closed).  Owner sets real pair
+            # after creating the supergroup; do NOT hardcode production IDs here.
+            - { name: HERMES_MISSION_MEDIA_TOPICS, value: "[]" }
           ports:
             - { name: dashboard, containerPort: 9119 }
             - { name: api, containerPort: 8642 }

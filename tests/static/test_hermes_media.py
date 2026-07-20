@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import pathlib
 import tempfile
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -134,6 +136,340 @@ def test_media_mission_is_durable_and_does_not_generate_twice() -> None:
                 os.environ["HERMES_HOME"] = previous_home
 
 
+TWO_PROJECT_CATALOG = json.dumps({
+    "schema_version": 1,
+    "projects": [
+        {
+            "project_id": "alpha",
+            "label": "Alpha",
+            "repository": "owner/alpha",
+            "summary": "First project",
+            "aliases": ["alpha"],
+            "dispatch_profile": "build1-alpha-v1",
+            "delivery_mode": "none",
+            "platforms": ["workspace", "telegram"],
+        },
+        {
+            "project_id": "beta",
+            "label": "Beta",
+            "repository": "owner/beta",
+            "summary": "Second project",
+            "aliases": ["beta"],
+            "dispatch_profile": "build1-beta-v1",
+            "delivery_mode": "none",
+            "platforms": ["workspace", "telegram"],
+        },
+    ],
+})
+
+MEDIA_TOPICS_SUPERGROUP = json.dumps([
+    {"chat_id": "supergroup", "thread_id": "images-topic"},
+])
+
+
+def test_topic_routes_ordinary_text_to_media() -> None:
+    """Configured (chat_id, thread_id) pair routes ordinary text to media."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_PROJECTS": TWO_PROJECT_CATALOG,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            accepted, created = store.ingest_owner_turn(
+                "lighthouse on a rocky shore at sunset",
+                platform="telegram",
+                source_message_id="img-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert created
+            assert accepted["payload"]["capability"] == "media.image.generate"
+            assert accepted["payload"]["goal"] == "lighthouse on a rocky shore at sunset"
+            assert store.bound_mission(
+                "telegram", "supergroup", "images-topic"
+            ) == accepted["mission_id"]
+
+
+def test_same_thread_id_in_different_chat_follows_project_intake() -> None:
+    """Same thread_id in a different chat does NOT route media (thread_id is chat-local)."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_PROJECTS": TWO_PROJECT_CATALOG,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "lighthouse on a rocky shore at sunset",
+                    platform="telegram",
+                    source_message_id="other-1",
+                    session_id="s1",
+                    chat_id="other-chat",
+                    thread_id="images-topic",
+                )
+                raise AssertionError("same thread_id in different chat must not route media")
+            except missions.MissionProjectRequired as error:
+                assert len(error.projects) == 2
+
+
+def test_ordinary_text_in_unknown_topic_follows_project_selection() -> None:
+    """Ordinary text in a non-configured topic still enters project intake."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_PROJECTS": TWO_PROJECT_CATALOG,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "lighthouse on a rocky shore at sunset",
+                    platform="telegram",
+                    source_message_id="code-1",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="code-topic",
+                )
+                raise AssertionError("ambiguous goal must require project selection")
+            except missions.MissionProjectRequired as error:
+                assert len(error.projects) == 2
+
+
+def test_pending_code_draft_intact_while_images_topic_media_accepted() -> None:
+    """A pending Code draft survives while ordinary Images-topic media is accepted."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_PROJECTS": TWO_PROJECT_CATALOG,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "add a status command",
+                    platform="telegram",
+                    source_message_id="code-1",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="code-topic",
+                )
+            except missions.MissionProjectRequired:
+                pass
+            code_scope = missions._json(
+                {"chat_id": "supergroup", "thread_id": "code-topic"}
+            )
+            assert store._intake_draft("telegram", code_scope) is not None
+
+            accepted, created = store.ingest_owner_turn(
+                "mountain lake with morning fog",
+                platform="telegram",
+                source_message_id="img-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert created
+            assert accepted["payload"]["capability"] == "media.image.generate"
+
+            assert store._intake_draft("telegram", code_scope) is not None
+            draft = store._intake_draft("telegram", code_scope)
+            assert draft["goal"] == "add a status command"
+
+            selected, selected_created = store.ingest_owner_turn(
+                "alpha",
+                platform="telegram",
+                source_message_id="code-2",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="code-topic",
+            )
+            assert selected_created
+            assert selected["payload"]["project_id"] == "alpha"
+
+
+def test_images_topic_replay_returns_same_mission() -> None:
+    """Replay of the Images source message returns the same mission, no duplicate."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            first, created1 = store.ingest_owner_turn(
+                "lighthouse on a rocky shore",
+                platform="telegram",
+                source_message_id="img-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert created1
+            second, created2 = store.ingest_owner_turn(
+                "lighthouse on a rocky shore",
+                platform="telegram",
+                source_message_id="img-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert not created2
+            assert second["mission_id"] == first["mission_id"]
+
+
+def test_explicit_imagegen_works_outside_media_topic() -> None:
+    """Explicit $imagegen still works in a non-configured topic."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            accepted, created = store.ingest_owner_turn(
+                "$imagegen: lighthouse on a rocky shore",
+                platform="telegram",
+                source_message_id="img-explicit",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="code-topic",
+            )
+            assert created
+            assert accepted["payload"]["capability"] == "media.image.generate"
+            assert accepted["payload"]["goal"] == "lighthouse on a rocky shore"
+
+
+def test_voice_transcript_uses_topic_dispatch() -> None:
+    """Voice transcript (ordinary text at the ingest_owner_turn seam) routes via topic pair."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            accepted, created = store.ingest_owner_turn(
+                "sunset over the mountains with a river",
+                platform="telegram",
+                source_message_id="voice-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert created
+            assert accepted["payload"]["capability"] == "media.image.generate"
+            assert accepted["payload"]["goal"] == "sunset over the mountains with a river"
+
+
+def test_malformed_media_topics_config_fails_closed() -> None:
+    """Malformed HERMES_MISSION_MEDIA_TOPICS fails closed at the helper level."""
+    malformed_values = [
+        '{"not": "a list"}',
+        '[{"chat_id": "a", "thread_id": "b", "extra": true}]',
+        '[{"chat_id": "a"}]',
+        '[{"chat_id": "a", "thread_id": 123}]',
+        '[{"chat_id": "a", "thread_id": "b"}, {"chat_id": "a", "thread_id": "b"}]',
+        '[{"chat_id": "", "thread_id": "b"}]',
+        '[{"chat_id": "a", "thread_id": ""}]',
+        '[{"chat_id": "a", "thread_id": "ctrl\\u0000"}]',
+        "not json at all",
+        "[",
+        '["plain-string-not-object"]',
+        '[{"chat_id":"allowed","chat_id":"other","thread_id":"images"}]',
+    ]
+    for malformed in malformed_values:
+        with tempfile.TemporaryDirectory() as temporary:
+            env_patch = {
+                "HERMES_HOME": temporary,
+                "HERMES_MISSION_MEDIA_TOPICS": malformed,
+            }
+            with mock.patch.dict(os.environ, env_patch, clear=False):
+                try:
+                    missions.media_topic_pairs()
+                    raise AssertionError(
+                        f"malformed config was accepted: {malformed!r}"
+                    )
+                except missions.MissionError as error:
+                    assert "media topic" in str(error)
+
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": "",
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            assert missions.media_topic_pairs() == set()
+
+
+def test_malformed_config_blocks_owner_turn_with_zero_side_effects() -> None:
+    """Malformed config raises MissionError on owner turn; no mission or draft created."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_PROJECTS": TWO_PROJECT_CATALOG,
+            "HERMES_MISSION_MEDIA_TOPICS": '[{"chat_id": "supergroup"}]',
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "lighthouse on a rocky shore",
+                    platform="telegram",
+                    source_message_id="bad-1",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="images-topic",
+                )
+                raise AssertionError("malformed config must block the owner turn")
+            except missions.MissionError as error:
+                assert "media topic" in str(error)
+            assert store.list(100) == []
+            scope = missions._json(
+                {"chat_id": "supergroup", "thread_id": "images-topic"}
+            )
+            assert store._intake_draft("telegram", scope) is None
+
+
+def test_media_topic_edit_request_fails_closed() -> None:
+    """Image edit requests in a configured media topic still fail closed."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "edit the image: remove the logo",
+                    platform="telegram",
+                    source_message_id="edit-1",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="images-topic",
+                )
+                raise AssertionError("edit request must fail closed in media topic")
+            except missions.MissionError as error:
+                assert "editing is unavailable" in str(error)
+
+
 if __name__ == "__main__":
     test_media_mission_is_durable_and_does_not_generate_twice()
+    test_topic_routes_ordinary_text_to_media()
+    test_same_thread_id_in_different_chat_follows_project_intake()
+    test_ordinary_text_in_unknown_topic_follows_project_selection()
+    test_pending_code_draft_intact_while_images_topic_media_accepted()
+    test_images_topic_replay_returns_same_mission()
+    test_explicit_imagegen_works_outside_media_topic()
+    test_voice_transcript_uses_topic_dispatch()
+    test_malformed_media_topics_config_fails_closed()
+    test_malformed_config_blocks_owner_turn_with_zero_side_effects()
+    test_media_topic_edit_request_fails_closed()
     print("hermes-media-ok")

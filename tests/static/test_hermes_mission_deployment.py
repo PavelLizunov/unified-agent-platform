@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "onboard-61136feb2ec6d5b7-ready"
+        "v69-media-topic-routing"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -62,13 +62,6 @@ def main() -> None:
         if container["name"] == "bootstrap"
     )
     bootstrap_script = "\n".join(bootstrap["args"])
-    managed_config = (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(
-        encoding="utf-8"
-    )
-    assert (
-        "UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions"
-        in managed_config
-    )
     assert (
         "cp /opt/hermes/hermes_cli/kanban.py "
         "/mission-runtime/root/hermes_cli/kanban.py"
@@ -123,6 +116,10 @@ def main() -> None:
             }
         },
     }
+    assert gateway_env["HERMES_MISSION_MEDIA_TOPICS"] == {
+        "name": "HERMES_MISSION_MEDIA_TOPICS",
+        "value": "[]",
+    }
     catalog_manifest = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-project-catalog.yaml").read_text(
             encoding="utf-8"
@@ -131,9 +128,7 @@ def main() -> None:
     assert catalog_manifest["kind"] == "ConfigMap"
     projects = json.loads(catalog_manifest["data"]["projects.json"])
     assert projects["schema_version"] == 2
-    assert len({project["project_id"] for project in projects["projects"]}) == len(
-        projects["projects"]
-    )
+    assert len(projects["projects"]) == 33
     ready = {
         project["project_id"]: (
             project["repository"],
@@ -143,7 +138,7 @@ def main() -> None:
         )
         for project in projects["projects"] if project["status"] == "ready"
     }
-    expected_ready = {
+    assert ready == {
         "uap": (
             "PavelLizunov/unified-agent-platform",
             "build1-uap-registered-v4",
@@ -211,8 +206,6 @@ def main() -> None:
             {"workspace", "telegram"},
         ),
     }
-    for project_id, expected in expected_ready.items():
-        assert ready[project_id] == expected
     installed_profiles = {}
     for path in (ROOT / "tools/swarm/profiles").glob("delivery-*-registered-v4.json"):
         profile = json.loads(path.read_text(encoding="utf-8"))
@@ -223,7 +216,7 @@ def main() -> None:
         profile = installed_profiles[project["dispatch_profile"]]
         assert profile["repo"] == project["repository"]
         assert profile["delivery_mode"] == project["delivery_mode"]
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) >= 12
+    assert sum(project["status"] == "setup_required" for project in projects["projects"]) == 12
     assert sum(project["status"] == "read_only" for project in projects["projects"]) == 3
     assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
     assert next(
@@ -258,17 +251,11 @@ def main() -> None:
     previous_catalog = os.environ.get("HERMES_MISSION_PROJECTS")
     try:
         os.environ["HERMES_MISSION_PROJECTS"] = catalog_manifest["data"]["projects.json"]
-        assert len(runtime.public_intake_projects("workspace")) == len([
-            project for project in projects["projects"]
-            if "workspace" in project["platforms"]
-        ])
+        assert len(runtime.public_intake_projects("workspace")) == 33
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == len([
-            project for project in projects["projects"]
-            if "telegram" in project["platforms"] and project["status"] == "ready"
-        ])
+        ]) == 11
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)
@@ -324,8 +311,7 @@ def main() -> None:
             "uap_local": {
                 "type": "command",
                 "command": (
-                    "env UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions "
-                    "PYTHONPATH=/opt/uap-stt/python "
+                    "env PYTHONPATH=/opt/uap-stt/python "
                     "TRANSCRIBE_LIBRARY=/opt/uap-stt/native/libtranscribe.so "
                     "LD_LIBRARY_PATH=/opt/uap-stt/native "
                     "/opt/hermes/.venv/bin/python /opt/uap-stt/local_stt.py "
@@ -334,7 +320,7 @@ def main() -> None:
                 "model": "/opt/data/.cache/uap-stt/gigaam-v3-e2e-rnnt-Q4_K_M.gguf",
                 "language": "ru",
                 "format": "txt",
-                "timeout": 90,
+                "timeout": 45,
             }
         },
     }

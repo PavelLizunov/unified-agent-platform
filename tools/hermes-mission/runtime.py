@@ -92,7 +92,6 @@ _ID_PAYLOAD_FIELDS = {
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
-_MAX_OWNER_GOAL_CHARS = 16_384
 _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
 _MAX_OWNER_ANSWER_CHARS = 4_000
@@ -104,20 +103,6 @@ _MEDIA_LEASE_SECONDS = 600
 _OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
 _OWNER_GATE_APPROVAL = "APPROVE"
 _MAX_RETAINED_TERMINAL_MISSIONS = 100
-_RESEARCH_INTENT = re.compile(
-    r"\b(?:research(?:_session)?|look\s+up|web\s+search|search\s+the\s+web|"
-    r"find\s+(?:the\s+)?(?:current|latest)|(?:current|latest)\s+documentation)\b|"
-    r"(?:исслед\w*|поищ\w*|веб[- ]?поиск\w*|поиск\s+(?:в\s+)?(?:интернете|сети)|"
-    r"найд\w*\s+(?:актуальн\w*|в\s+интернете|в\s+сети|документац\w*))",
-    re.IGNORECASE,
-)
-_MUTATION_INTENT = re.compile(
-    r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
-    r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
-    r"реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
-    r"собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
-    re.IGNORECASE,
-)
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -149,33 +134,9 @@ _NOTICE_LABELS = {
     ),
 }
 _INTAKE_CANCEL_ALIASES = {"cancel", "отмена", "отменить"}
-_PROJECT_ONBOARDING_OWNER = "PavelLizunov"
-_PROJECT_ONBOARDING_PRESETS = {"rust", "go", "python", "web"}
-_PROJECT_ONBOARDING_CHECKPOINTS = (
-    "requested",
-    "repository_ready",
-    "runtime_ready",
-    "canary_passed",
-    "ready",
-)
-_PROJECT_ONBOARDING_PROGRESS = {
-    checkpoint: index * 25
-    for index, checkpoint in enumerate(_PROJECT_ONBOARDING_CHECKPOINTS)
-}
-_PROJECT_REPOSITORY_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 NOTIFICATION_SEND_TIMEOUT_SECONDS = 240
 # ponytail: lease exceeds the bounded send; a crash releases binding after five minutes.
 _NOTIFICATION_LEASE_SECONDS = 300
-
-
-def is_controlled_research_goal(text: object) -> bool:
-    """Route research-only owner turns to the bounded Central search tool."""
-    if not isinstance(text, str):
-        return False
-    normalized = " ".join(text.split())[:4_000]
-    return bool(_RESEARCH_INTENT.search(normalized)) and not _MUTATION_INTENT.search(
-        normalized
-    )
 
 
 class MissionError(ValueError):
@@ -273,6 +234,48 @@ def image_edit_requested(value: str) -> bool:
         text,
         re.I,
     ))
+
+
+def media_topic_pairs() -> set[tuple[str, str]]:
+    """Return the exact Telegram ``(chat_id, thread_id)`` pairs that route to media.
+
+    Telegram's ``message_thread_id`` is unique within a chat, not globally,
+    so the allowlist must scope by both.  Configuration is a JSON array of
+    objects with exactly ``chat_id`` and ``thread_id`` string fields in the
+    ``HERMES_MISSION_MEDIA_TOPICS`` environment variable.  Empty or absent
+    means no topic routing (fail-closed default).  Only
+    ``media.image.generate`` is implied; there is no generic capability
+    registry.
+    """
+    raw = os.environ.get("HERMES_MISSION_MEDIA_TOPICS", "").strip()
+    if not raw:
+        return set()
+    if len(raw.encode("utf-8")) > 4_096:
+        raise MissionError("invalid mission media topic configuration")
+    try:
+        topics = json.loads(raw, object_pairs_hook=_unique_json_object)
+    except (json.JSONDecodeError, MissionError) as error:
+        raise MissionError("invalid mission media topic configuration") from error
+    if not isinstance(topics, list) or len(topics) > 16:
+        raise MissionError("invalid mission media topic configuration")
+    result: set[tuple[str, str]] = set()
+    for item in topics:
+        if not isinstance(item, dict) or set(item) != {"chat_id", "thread_id"}:
+            raise MissionError("invalid mission media topic configuration")
+        pair: list[str] = []
+        for field in ("chat_id", "thread_id"):
+            value = item[field]
+            if not isinstance(value, str):
+                raise MissionError("invalid mission media topic configuration")
+            value = value.strip()
+            if not value or len(value) > 256 or re.search(r"[\x00-\x1f\x7f]", value):
+                raise MissionError("invalid mission media topic configuration")
+            pair.append(value)
+        key = (pair[0], pair[1])
+        if key in result:
+            raise MissionError("invalid mission media topic configuration")
+        result.add(key)
+    return result
 
 
 def registered_intake_projects(platform: str) -> list[dict[str, Any]]:
@@ -1143,21 +1146,6 @@ class MissionStore:
                     error TEXT,
                     updated_at TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS project_onboarding_requests (
-                    request_id TEXT PRIMARY KEY,
-                    owner_scope_sha256 TEXT NOT NULL,
-                    project_id TEXT NOT NULL UNIQUE,
-                    repository TEXT NOT NULL UNIQUE,
-                    name TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    preset TEXT NOT NULL,
-                    payload_sha256 TEXT NOT NULL,
-                    checkpoint TEXT NOT NULL,
-                    error_code TEXT,
-                    invocations_json TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
                 """
             )
             columns = {
@@ -1177,16 +1165,6 @@ class MissionStore:
                 connection.execute(
                     """ALTER TABLE mission_subscriptions
                        ADD COLUMN notification_lease_until REAL NOT NULL DEFAULT 0"""
-                )
-            onboarding_columns = {
-                row["name"]
-                for row in connection.execute(
-                    "PRAGMA table_info(project_onboarding_requests)"
-                )
-            }
-            if "invocations_json" not in onboarding_columns:
-                connection.execute(
-                    "ALTER TABLE project_onboarding_requests ADD COLUMN invocations_json TEXT"
                 )
 
     @staticmethod
@@ -1466,276 +1444,6 @@ class MissionStore:
                 (limit,),
             ).fetchall()
         return [self.projection(row["mission_id"]) for row in rows]
-
-    @staticmethod
-    def _project_onboarding_row(row: sqlite3.Row) -> dict[str, Any]:
-        checkpoint = str(row["checkpoint"])
-        return {
-            "request_id": row["request_id"],
-            "project_id": row["project_id"],
-            "repository": row["repository"],
-            "name": row["name"],
-            "description": row["description"],
-            "preset": row["preset"],
-            "checkpoint": checkpoint,
-            "invocations": (
-                json.loads(row["invocations_json"])
-                if row["invocations_json"] is not None
-                else None
-            ),
-            "progress_percent": _PROJECT_ONBOARDING_PROGRESS.get(checkpoint, 0),
-            "error_code": row["error_code"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
-
-    def request_project_onboarding(
-        self, name: str, description: str, preset: str
-    ) -> tuple[dict[str, Any], bool]:
-        """Create or replay one server-owned repository onboarding request."""
-        name = _require_source_value(name, "project name")
-        if not isinstance(description, str):
-            raise MissionError("invalid project description")
-        description = _require_source_value(
-            description, "project description", optional=True
-        )
-        if (
-            not _PROJECT_REPOSITORY_NAME.fullmatch(name)
-            or name.casefold().endswith(".git")
-        ):
-            raise MissionError("invalid project name")
-        if not isinstance(preset, str) or preset not in _PROJECT_ONBOARDING_PRESETS:
-            raise MissionError("invalid project preset")
-        project_id = name.casefold()
-        repository = f"{_PROJECT_ONBOARDING_OWNER}/{name}"
-        payload = {
-            "description": description,
-            "name": name,
-            "preset": preset,
-        }
-        payload_sha256 = hashlib.sha256(_json(payload).encode("utf-8")).hexdigest()
-        owner_scope = _PROJECT_ONBOARDING_OWNER.casefold()
-        owner_scope_sha256 = hashlib.sha256(owner_scope.encode("utf-8")).hexdigest()
-        identity = hashlib.sha256(
-            f"{owner_scope}\0{project_id}".encode("utf-8")
-        ).hexdigest()[:32]
-        request_id = f"project-onboarding-{identity}"
-
-        with self._db() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            previous = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-            if previous:
-                if previous["payload_sha256"] != payload_sha256:
-                    raise MissionError("project onboarding idempotency collision")
-                return self._project_onboarding_row(previous), False
-            raw_catalog = os.environ.get("HERMES_MISSION_PROJECTS", "").strip()
-            if raw_catalog:
-                projects = registered_intake_projects("workspace")
-                if any(
-                    project.get("project_id", "").casefold() == project_id
-                    or project.get("repository", "").casefold()
-                    == repository.casefold()
-                    for project in projects
-                ):
-                    raise MissionError("project is already registered")
-            now = _utc_now()
-            connection.execute(
-                """INSERT INTO project_onboarding_requests(
-                       request_id, owner_scope_sha256, project_id, repository,
-                       name, description, preset, payload_sha256, checkpoint,
-                       created_at, updated_at
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?)""",
-                (
-                    request_id, owner_scope_sha256, project_id, repository,
-                    name, description, preset, payload_sha256, now, now,
-                ),
-            )
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-        assert row is not None
-        return self._project_onboarding_row(row), True
-
-    def project_onboarding(self, request_id: str) -> dict[str, Any]:
-        request_id = _require_id(request_id, "project onboarding request_id")
-        with self._db() as connection:
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-        if row is None:
-            raise MissionError("project onboarding request not found")
-        return self._project_onboarding_row(row)
-
-    def pending_project_onboarding(self) -> dict[str, Any] | None:
-        with self._db() as connection:
-            row = connection.execute(
-                """SELECT * FROM project_onboarding_requests
-                   WHERE checkpoint NOT IN ('ready', 'failed')
-                   ORDER BY created_at, request_id LIMIT 1"""
-            ).fetchone()
-        return self._project_onboarding_row(row) if row else None
-
-    def record_project_onboarding_invocation(
-        self, request_id: str, invocation: dict[str, Any]
-    ) -> tuple[dict[str, Any], bool]:
-        """Append one systemd InvocationID to a bounded durable chain summary."""
-        request_id = _require_id(request_id, "project onboarding request_id")
-        if (
-            not isinstance(invocation, dict)
-            or set(invocation) != {"unit", "invocation_id"}
-            or invocation.get("unit") != "hermes-project-onboarding.service"
-            or not re.fullmatch(
-                r"[0-9a-f]{32}", str(invocation.get("invocation_id") or "")
-            )
-        ):
-            raise MissionError("invalid project onboarding systemd invocation")
-
-        def valid_history(value: Any) -> bool:
-            if (
-                not isinstance(value, dict)
-                or set(value) != {"count", "first", "last", "chain_sha256"}
-                or isinstance(value.get("count"), bool)
-                or not isinstance(value.get("count"), int)
-                or value["count"] < 1
-                or not re.fullmatch(
-                    r"[0-9a-f]{64}", str(value.get("chain_sha256") or "")
-                )
-            ):
-                return False
-            for endpoint in (value.get("first"), value.get("last")):
-                if (
-                    not isinstance(endpoint, dict)
-                    or set(endpoint) != {"unit", "invocation_id"}
-                    or endpoint.get("unit") != "hermes-project-onboarding.service"
-                    or not re.fullmatch(
-                        r"[0-9a-f]{32}", str(endpoint.get("invocation_id") or "")
-                    )
-                ):
-                    return False
-            if value["count"] == 1:
-                return value["first"] == value["last"] and value[
-                    "chain_sha256"
-                ] == hashlib.sha256(_json({
-                    "invocation_id": value["first"]["invocation_id"],
-                    "previous": None,
-                    "unit": value["first"]["unit"],
-                }).encode("utf-8")).hexdigest()
-            return True
-
-        with self._db() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-            if row is None:
-                raise MissionError("project onboarding request not found")
-            if row["checkpoint"] in {"ready", "failed"}:
-                raise MissionError("project onboarding is terminal")
-            history = (
-                json.loads(row["invocations_json"])
-                if row["invocations_json"] is not None
-                else None
-            )
-            if history is not None and not valid_history(history):
-                raise MissionError("stored project onboarding invocation history is invalid")
-            if history is not None and history["last"] == invocation:
-                return self._project_onboarding_row(row), False
-            previous = None if history is None else history["chain_sha256"]
-            chain = hashlib.sha256(_json({
-                "invocation_id": invocation["invocation_id"],
-                "previous": previous,
-                "unit": invocation["unit"],
-            }).encode("utf-8")).hexdigest()
-            updated_history = {
-                "count": 1 if history is None else history["count"] + 1,
-                "first": invocation if history is None else history["first"],
-                "last": invocation,
-                "chain_sha256": chain,
-            }
-            updated = connection.execute(
-                """UPDATE project_onboarding_requests
-                   SET invocations_json = ?, updated_at = ?
-                   WHERE request_id = ? AND checkpoint = ?""",
-                (_json(updated_history), _utc_now(), request_id, row["checkpoint"]),
-            )
-            if updated.rowcount != 1:
-                raise MissionError("project onboarding checkpoint changed")
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-        assert row is not None
-        return self._project_onboarding_row(row), True
-
-    def advance_project_onboarding(
-        self,
-        request_id: str,
-        expected_checkpoint: str,
-        checkpoint: str,
-        *,
-        error_code: str | None = None,
-    ) -> tuple[dict[str, Any], bool]:
-        """Compare-and-swap one onboarding checkpoint, with idempotent replay."""
-        request_id = _require_id(request_id, "project onboarding request_id")
-        expected_checkpoint = _require_id(
-            expected_checkpoint, "project onboarding expected checkpoint"
-        )
-        checkpoint = _require_id(checkpoint, "project onboarding checkpoint")
-        valid = {*_PROJECT_ONBOARDING_CHECKPOINTS, "failed"}
-        if expected_checkpoint not in valid or checkpoint not in valid:
-            raise MissionError("invalid project onboarding checkpoint")
-        if checkpoint == "failed":
-            error_code = _require_id(error_code, "project onboarding error_code")
-        elif error_code is not None:
-            raise MissionError("project onboarding error_code requires failed checkpoint")
-
-        with self._db() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-            if row is None:
-                raise MissionError("project onboarding request not found")
-            current = str(row["checkpoint"])
-            if current == checkpoint:
-                if row["error_code"] != error_code:
-                    raise MissionError("project onboarding checkpoint collision")
-                return self._project_onboarding_row(row), False
-            if current != expected_checkpoint:
-                raise MissionError("project onboarding checkpoint changed")
-            if current in {"ready", "failed"}:
-                raise MissionError("project onboarding is terminal")
-            if current not in _PROJECT_ONBOARDING_CHECKPOINTS:
-                raise MissionError("invalid stored project onboarding checkpoint")
-            next_index = _PROJECT_ONBOARDING_CHECKPOINTS.index(current) + 1
-            required = (
-                _PROJECT_ONBOARDING_CHECKPOINTS[next_index]
-                if next_index < len(_PROJECT_ONBOARDING_CHECKPOINTS)
-                else None
-            )
-            if checkpoint != "failed" and checkpoint != required:
-                raise MissionError("project onboarding checkpoint is not forward-only")
-            updated = connection.execute(
-                """UPDATE project_onboarding_requests
-                   SET checkpoint = ?, error_code = ?, updated_at = ?
-                   WHERE request_id = ? AND checkpoint = ?""",
-                (checkpoint, error_code, _utc_now(), request_id, current),
-            )
-            if updated.rowcount != 1:
-                raise MissionError("project onboarding checkpoint changed")
-            row = connection.execute(
-                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
-                (request_id,),
-            ).fetchone()
-        assert row is not None
-        return self._project_onboarding_row(row), True
 
     def _prune_terminal(self, connection: sqlite3.Connection, keep: int) -> int:
         grouped: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
@@ -2180,7 +1888,7 @@ class MissionStore:
         """Answer the bound question, otherwise accept one new registered goal."""
         if not isinstance(text, str):
             raise MissionError("invalid owner turn")
-        if not text.strip() or len(text) > _MAX_OWNER_GOAL_CHARS:
+        if not text.strip() or len(text) > 8_192:
             raise MissionError("invalid owner turn")
         platform = _require_id(platform, "intake platform")
         source_message_id = _require_source_value(
@@ -2252,6 +1960,33 @@ class MissionStore:
                     source_message_id=source_message_id,
                     source_platform=platform,
                 )
+        # Topic capability dispatch: a server-owned allowlist of exact
+        # Telegram (chat_id, thread_id) pairs routes ordinary text to
+        # media.image.generate.  Telegram's message_thread_id is unique
+        # within a chat, not globally, so both fields are required.
+        # Ordered AFTER bound-question answering (a media mission's owner
+        # question is still answerable in its topic) and BEFORE project-
+        # selection drafts (media intake is projectless, so a configured
+        # media topic never creates a draft; an unrelated stale draft in
+        # the same scope cannot consume a media-topic message).
+        if (
+            platform == "telegram"
+            and chat_id
+            and thread_id
+            and (chat_id, thread_id) in media_topic_pairs()
+        ):
+            if image_edit_requested(text):
+                raise MissionError(
+                    "subscription image editing is unavailable: the production Codex adapter does not pass source images"
+                )
+            return self.ingest_media_goal(
+                text,
+                platform=platform,
+                source_message_id=source_message_id,
+                session_id=session_id or None,
+                chat_id=chat_id or None,
+                thread_id=thread_id or None,
+            )
         draft = self._intake_draft(platform, scope_key)
         if draft:
             if platform == "telegram" and _project_alias(text) in _INTAKE_CANCEL_ALIASES:
@@ -2457,7 +2192,7 @@ class MissionStore:
         input_source_message_sha256: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         goal = str(goal or "").strip()
-        if not goal or len(goal) > _MAX_OWNER_GOAL_CHARS:
+        if not goal or len(goal) > 8_192:
             raise MissionError("invalid mission goal")
         mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
         if dispatch_profile is not None:

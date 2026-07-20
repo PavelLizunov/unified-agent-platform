@@ -606,8 +606,7 @@
   Закреплённый Hermes v0.18 уже содержит Brave provider, но стандартные Brave Search API Terms (2026-02-11) запрещают
   долговременное хранение Search Results, тогда как UAP обязан сохранять итог и цитаты в Central/Workspace/Telegram.
 - **Решение:** отдельный MCP tool `research_session` запускает установленный Codex `0.142.0` как ephemeral
-  `codex --search --model gpt-5.3-codex-spark exec` в read-only sandbox без shell tool, user config/MCP и с очищенным окружением. Spark использует
-  отдельный лимит для bounded text-only search; итоговый анализ остаётся в Central Hermes. Для запуска во
+  `codex --search exec` в read-only sandbox без shell tool, user config/MCP и с очищенным окружением. Для запуска во
   временный `CODEX_HOME` копируется только существующий Codex auth, который удаляется вместе с child session. Facade ограничивает goal,
   DNS allowlist и число источников, требует HTTPS, валидирует typed JSON result, атомарно сохраняет нормализованный
   итог на Hermes PVC по детерминированному request id и повторяет только один transient failure. Raw subprocess
@@ -644,35 +643,11 @@
 - **Отвергнуто:** отдельный media service/workflow engine; переиспользование coding author/reviewer; прямой вызов
   private ChatGPT HTTP endpoint из Hermes plugin; автоматический повтор неоднозначной генерации; выбор провайдера
   моделью.
-
-## ADR-035 — One-click onboarding нового проекта через детерминированный checkpoint driver
-
-- **Контекст:** ADR-032 позволяет владельцу выбирать только уже зарегистрированный `ready`-проект. Создание нового
-  GitHub-репозитория всё ещё требует ручного bootstrap: шаблона, CI, schema-v4 delivery profile, build-1 checkout и
-  timer, live canary и отдельного изменения catalog status. Передача shell-команд, filesystem paths или profile из
-  browser нарушила бы server-owned boundary, а выполнение механических правок моделью создало бы ненужную
-  circular dependency.
-- **Решение:** существующая Workspace-вкладка «Проекты и доступы» получает одну owner-authenticated операцию
-  «Создать и подготовить». Browser передаёт только bounded `name`, `description` и preset из закрытого набора
-  `rust|go|python|web`. Central хранит один idempotent onboarding request и пять forward-only checkpoint:
-  `requested → repository_ready → runtime_ready → canary_passed → ready` либо явный `failed`. Один постоянный
-  build-1 oneshot timer продвигает не более одного request за tick. Driver выполняет только детерминированные
-  GitHub/git/systemd/Flux действия; model routing, review, CI repair и terminal semantics не дублирует.
-- **Source of truth:** новый repository всегда имеет owner `PavelLizunov`, private visibility, server-owned template,
-  commands и path boundary. Catalog/profile добавляются механическим UAP PR сначала как `setup_required`. Новый
-  профиль устанавливается атомарно без остановки timers других проектов. Только обычная delivery mission с
-  independent exact-SHA review, required GitHub-hosted macOS CI, merge, post-verify и проверенным completion evidence
-  разрешает второй механический PR `setup_required → ready`; Flux ConfigMap остаётся authoritative readiness.
-- **Полномочия:** нажатие кнопки является явным разрешением создать один named repository и выполнить bootstrap,
-  PR/CI/merge и canary. Существующая server-side GitHub identity переиспользуется только если preflight доказывает
-  нужные capability; иначе новый credential provisioning остаётся отдельным однократным owner setup. Credential не
-  попадает в browser, model environment, prompt или repository. Обычные OpenAI routing/retry/spend и разрешённые
-  PR/merge не создают дополнительных owner questions.
-- **Надёжность:** request identity выводится из owner scope и repository slug, а полный payload связан hash; повтор
-  HTTP/click возвращает тот же request, несовпадающий payload является collision. Каждый side effect сначала
-  reconciles по GitHub/git/systemd/Flux/Central authority. Workspace может сохранить будущий project cookie сразу,
-  но intake остаётся fail-closed, пока catalog status не `ready`.
-- **Отложено:** direct execution на личном Mac mini, public repositories, arbitrary templates/commands, deploy/release
-  и production credentials. В первой версии macOS означает только disposable GitHub-hosted runner. Отдельный
-  onboarding dashboard, per-request service instance, новый workflow engine и model-generated catalog/profile
-  отклонены.
+- **Поправка (2026-07-21, topology):** владелец утвердил один bot + один private forum supergroup с двумя topics
+  (Code и Images). Точный server-owned allowlist `HERMES_MISSION_MEDIA_TOPICS` содержит пары
+  `{"chat_id","thread_id"}` (Telegram `message_thread_id` уникален только внутри chat). Обычный текст/голос в
+  настроенной паре детерминированно создаёт `media.image.generate` без `$imagegen` и без выбора проекта; модель
+  не угадывает capability. Пустой/отсутствующий allowlist = маршрутизация отключена (fail-closed); malformed
+  конфигурация блокирует owner turn. Явный `$imagegen`/`/image`/`/imagine` продолжает работать в любом topic.
+  Fallback два bot — только если live topic canary не пройдёт; для него потребуется явная bot/account identity
+  в channel scope и отдельное решение.
