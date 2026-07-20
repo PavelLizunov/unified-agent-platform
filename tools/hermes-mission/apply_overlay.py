@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
-    "gateway/platforms/api_server.py": "b5df24c0f4fe4c564453c08871dc6d27465f582069cd78f2a2edaa61f84fac17",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "0d3899fe70c9cd02e71920e20edca99b2c3a0ce5e63fecd9f96fbe7dc93bee71",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -1104,6 +1104,29 @@ def connect(
             status = 404 if str(error) == "project onboarding request not found" else 400
             return web.json_response({"error": str(error)}, status=status)
 
+    async def _handle_record_project_onboarding_invocation(
+        self, request: "web.Request"
+    ) -> "web.Response":
+        if auth_error := self._check_auth(request):
+            return auth_error
+        if not producer_key_valid(
+            request.headers.get("X-Hermes-Mission-Producer-Key")
+        ):
+            return web.json_response({"error": "Invalid mission producer key"}, status=401)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {"invocation"}:
+                raise MissionError("invalid project onboarding invocation")
+            onboarding, recorded = self._missions().record_project_onboarding_invocation(
+                request.match_info["request_id"], body["invocation"]
+            )
+            return web.json_response(
+                {"recorded": recorded, "onboarding": onboarding}
+            )
+        except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+            status = 404 if str(error) == "project onboarding request not found" else 400
+            return web.json_response({"error": str(error)}, status=status)
+
     async def _handle_list_missions(self, request: "web.Request") -> "web.Response":
         if auth_error := self._check_auth(request):
             return auth_error
@@ -1398,6 +1421,7 @@ def connect(
             self._app.router.add_get("/api/project-onboarding/pending", self._handle_pending_project_onboarding)
             self._app.router.add_get("/api/project-onboarding/{request_id}", self._handle_get_project_onboarding)
             self._app.router.add_post("/api/project-onboarding/{request_id}/advance", self._handle_advance_project_onboarding)
+            self._app.router.add_post("/api/project-onboarding/{request_id}/invocation", self._handle_record_project_onboarding_invocation)
             self._app.router.add_get("/api/missions", self._handle_list_missions)
             self._app.router.add_post("/api/missions", self._handle_create_mission)
             self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)

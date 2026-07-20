@@ -34,7 +34,7 @@ data:
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
-        "gateway/platforms/api_server.py": "b5df24c0f4fe4c564453c08871dc6d27465f582069cd78f2a2edaa61f84fac17",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/platforms/api_server.py": "0d3899fe70c9cd02e71920e20edca99b2c3a0ce5e63fecd9f96fbe7dc93bee71",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -1112,6 +1112,29 @@ data:
                 status = 404 if str(error) == "project onboarding request not found" else 400
                 return web.json_response({"error": str(error)}, status=status)
 
+        async def _handle_record_project_onboarding_invocation(
+            self, request: "web.Request"
+        ) -> "web.Response":
+            if auth_error := self._check_auth(request):
+                return auth_error
+            if not producer_key_valid(
+                request.headers.get("X-Hermes-Mission-Producer-Key")
+            ):
+                return web.json_response({"error": "Invalid mission producer key"}, status=401)
+            try:
+                body = await request.json()
+                if not isinstance(body, dict) or set(body) != {"invocation"}:
+                    raise MissionError("invalid project onboarding invocation")
+                onboarding, recorded = self._missions().record_project_onboarding_invocation(
+                    request.match_info["request_id"], body["invocation"]
+                )
+                return web.json_response(
+                    {"recorded": recorded, "onboarding": onboarding}
+                )
+            except (MissionError, TypeError, ValueError, json.JSONDecodeError) as error:
+                status = 404 if str(error) == "project onboarding request not found" else 400
+                return web.json_response({"error": str(error)}, status=status)
+
         async def _handle_list_missions(self, request: "web.Request") -> "web.Response":
             if auth_error := self._check_auth(request):
                 return auth_error
@@ -1406,6 +1429,7 @@ data:
                 self._app.router.add_get("/api/project-onboarding/pending", self._handle_pending_project_onboarding)
                 self._app.router.add_get("/api/project-onboarding/{request_id}", self._handle_get_project_onboarding)
                 self._app.router.add_post("/api/project-onboarding/{request_id}/advance", self._handle_advance_project_onboarding)
+                self._app.router.add_post("/api/project-onboarding/{request_id}/invocation", self._handle_record_project_onboarding_invocation)
                 self._app.router.add_get("/api/missions", self._handle_list_missions)
                 self._app.router.add_post("/api/missions", self._handle_create_mission)
                 self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
@@ -2661,6 +2685,7 @@ data:
                         payload_sha256 TEXT NOT NULL,
                         checkpoint TEXT NOT NULL,
                         error_code TEXT,
+                        invocations_json TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     );
@@ -2683,6 +2708,16 @@ data:
                     connection.execute(
                         """ALTER TABLE mission_subscriptions
                            ADD COLUMN notification_lease_until REAL NOT NULL DEFAULT 0"""
+                    )
+                onboarding_columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(project_onboarding_requests)"
+                    )
+                }
+                if "invocations_json" not in onboarding_columns:
+                    connection.execute(
+                        "ALTER TABLE project_onboarding_requests ADD COLUMN invocations_json TEXT"
                     )
 
         @staticmethod
@@ -2974,6 +3009,11 @@ data:
                 "description": row["description"],
                 "preset": row["preset"],
                 "checkpoint": checkpoint,
+                "invocations": (
+                    json.loads(row["invocations_json"])
+                    if row["invocations_json"] is not None
+                    else None
+                ),
                 "progress_percent": _PROJECT_ONBOARDING_PROGRESS.get(checkpoint, 0),
                 "error_code": row["error_code"],
                 "created_at": row["created_at"],
@@ -3070,6 +3110,99 @@ data:
                        ORDER BY created_at, request_id LIMIT 1"""
                 ).fetchone()
             return self._project_onboarding_row(row) if row else None
+
+        def record_project_onboarding_invocation(
+            self, request_id: str, invocation: dict[str, Any]
+        ) -> tuple[dict[str, Any], bool]:
+            """Append one systemd InvocationID to a bounded durable chain summary."""
+            request_id = _require_id(request_id, "project onboarding request_id")
+            if (
+                not isinstance(invocation, dict)
+                or set(invocation) != {"unit", "invocation_id"}
+                or invocation.get("unit") != "hermes-project-onboarding.service"
+                or not re.fullmatch(
+                    r"[0-9a-f]{32}", str(invocation.get("invocation_id") or "")
+                )
+            ):
+                raise MissionError("invalid project onboarding systemd invocation")
+
+            def valid_history(value: Any) -> bool:
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != {"count", "first", "last", "chain_sha256"}
+                    or isinstance(value.get("count"), bool)
+                    or not isinstance(value.get("count"), int)
+                    or value["count"] < 1
+                    or not re.fullmatch(
+                        r"[0-9a-f]{64}", str(value.get("chain_sha256") or "")
+                    )
+                ):
+                    return False
+                for endpoint in (value.get("first"), value.get("last")):
+                    if (
+                        not isinstance(endpoint, dict)
+                        or set(endpoint) != {"unit", "invocation_id"}
+                        or endpoint.get("unit") != "hermes-project-onboarding.service"
+                        or not re.fullmatch(
+                            r"[0-9a-f]{32}", str(endpoint.get("invocation_id") or "")
+                        )
+                    ):
+                        return False
+                if value["count"] == 1:
+                    return value["first"] == value["last"] and value[
+                        "chain_sha256"
+                    ] == hashlib.sha256(_json({
+                        "invocation_id": value["first"]["invocation_id"],
+                        "previous": None,
+                        "unit": value["first"]["unit"],
+                    }).encode("utf-8")).hexdigest()
+                return True
+
+            with self._db() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+                if row is None:
+                    raise MissionError("project onboarding request not found")
+                if row["checkpoint"] in {"ready", "failed"}:
+                    raise MissionError("project onboarding is terminal")
+                history = (
+                    json.loads(row["invocations_json"])
+                    if row["invocations_json"] is not None
+                    else None
+                )
+                if history is not None and not valid_history(history):
+                    raise MissionError("stored project onboarding invocation history is invalid")
+                if history is not None and history["last"] == invocation:
+                    return self._project_onboarding_row(row), False
+                previous = None if history is None else history["chain_sha256"]
+                chain = hashlib.sha256(_json({
+                    "invocation_id": invocation["invocation_id"],
+                    "previous": previous,
+                    "unit": invocation["unit"],
+                }).encode("utf-8")).hexdigest()
+                updated_history = {
+                    "count": 1 if history is None else history["count"] + 1,
+                    "first": invocation if history is None else history["first"],
+                    "last": invocation,
+                    "chain_sha256": chain,
+                }
+                updated = connection.execute(
+                    """UPDATE project_onboarding_requests
+                       SET invocations_json = ?, updated_at = ?
+                       WHERE request_id = ? AND checkpoint = ?""",
+                    (_json(updated_history), _utc_now(), request_id, row["checkpoint"]),
+                )
+                if updated.rowcount != 1:
+                    raise MissionError("project onboarding checkpoint changed")
+                row = connection.execute(
+                    "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
+                    (request_id,),
+                ).fetchone()
+            assert row is not None
+            return self._project_onboarding_row(row), True
 
         def advance_project_onboarding(
             self,

@@ -1154,6 +1154,7 @@ class MissionStore:
                     payload_sha256 TEXT NOT NULL,
                     checkpoint TEXT NOT NULL,
                     error_code TEXT,
+                    invocations_json TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -1176,6 +1177,16 @@ class MissionStore:
                 connection.execute(
                     """ALTER TABLE mission_subscriptions
                        ADD COLUMN notification_lease_until REAL NOT NULL DEFAULT 0"""
+                )
+            onboarding_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(project_onboarding_requests)"
+                )
+            }
+            if "invocations_json" not in onboarding_columns:
+                connection.execute(
+                    "ALTER TABLE project_onboarding_requests ADD COLUMN invocations_json TEXT"
                 )
 
     @staticmethod
@@ -1467,6 +1478,11 @@ class MissionStore:
             "description": row["description"],
             "preset": row["preset"],
             "checkpoint": checkpoint,
+            "invocations": (
+                json.loads(row["invocations_json"])
+                if row["invocations_json"] is not None
+                else None
+            ),
             "progress_percent": _PROJECT_ONBOARDING_PROGRESS.get(checkpoint, 0),
             "error_code": row["error_code"],
             "created_at": row["created_at"],
@@ -1563,6 +1579,99 @@ class MissionStore:
                    ORDER BY created_at, request_id LIMIT 1"""
             ).fetchone()
         return self._project_onboarding_row(row) if row else None
+
+    def record_project_onboarding_invocation(
+        self, request_id: str, invocation: dict[str, Any]
+    ) -> tuple[dict[str, Any], bool]:
+        """Append one systemd InvocationID to a bounded durable chain summary."""
+        request_id = _require_id(request_id, "project onboarding request_id")
+        if (
+            not isinstance(invocation, dict)
+            or set(invocation) != {"unit", "invocation_id"}
+            or invocation.get("unit") != "hermes-project-onboarding.service"
+            or not re.fullmatch(
+                r"[0-9a-f]{32}", str(invocation.get("invocation_id") or "")
+            )
+        ):
+            raise MissionError("invalid project onboarding systemd invocation")
+
+        def valid_history(value: Any) -> bool:
+            if (
+                not isinstance(value, dict)
+                or set(value) != {"count", "first", "last", "chain_sha256"}
+                or isinstance(value.get("count"), bool)
+                or not isinstance(value.get("count"), int)
+                or value["count"] < 1
+                or not re.fullmatch(
+                    r"[0-9a-f]{64}", str(value.get("chain_sha256") or "")
+                )
+            ):
+                return False
+            for endpoint in (value.get("first"), value.get("last")):
+                if (
+                    not isinstance(endpoint, dict)
+                    or set(endpoint) != {"unit", "invocation_id"}
+                    or endpoint.get("unit") != "hermes-project-onboarding.service"
+                    or not re.fullmatch(
+                        r"[0-9a-f]{32}", str(endpoint.get("invocation_id") or "")
+                    )
+                ):
+                    return False
+            if value["count"] == 1:
+                return value["first"] == value["last"] and value[
+                    "chain_sha256"
+                ] == hashlib.sha256(_json({
+                    "invocation_id": value["first"]["invocation_id"],
+                    "previous": None,
+                    "unit": value["first"]["unit"],
+                }).encode("utf-8")).hexdigest()
+            return True
+
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+            if row is None:
+                raise MissionError("project onboarding request not found")
+            if row["checkpoint"] in {"ready", "failed"}:
+                raise MissionError("project onboarding is terminal")
+            history = (
+                json.loads(row["invocations_json"])
+                if row["invocations_json"] is not None
+                else None
+            )
+            if history is not None and not valid_history(history):
+                raise MissionError("stored project onboarding invocation history is invalid")
+            if history is not None and history["last"] == invocation:
+                return self._project_onboarding_row(row), False
+            previous = None if history is None else history["chain_sha256"]
+            chain = hashlib.sha256(_json({
+                "invocation_id": invocation["invocation_id"],
+                "previous": previous,
+                "unit": invocation["unit"],
+            }).encode("utf-8")).hexdigest()
+            updated_history = {
+                "count": 1 if history is None else history["count"] + 1,
+                "first": invocation if history is None else history["first"],
+                "last": invocation,
+                "chain_sha256": chain,
+            }
+            updated = connection.execute(
+                """UPDATE project_onboarding_requests
+                   SET invocations_json = ?, updated_at = ?
+                   WHERE request_id = ? AND checkpoint = ?""",
+                (_json(updated_history), _utc_now(), request_id, row["checkpoint"]),
+            )
+            if updated.rowcount != 1:
+                raise MissionError("project onboarding checkpoint changed")
+            row = connection.execute(
+                "SELECT * FROM project_onboarding_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
+        assert row is not None
+        return self._project_onboarding_row(row), True
 
     def advance_project_onboarding(
         self,

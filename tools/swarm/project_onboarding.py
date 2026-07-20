@@ -16,6 +16,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+import flow_contract
+
 
 OWNER = "PavelLizunov"
 UAP_REPOSITORY = f"{OWNER}/unified-agent-platform"
@@ -63,13 +65,14 @@ def _atomic_write(path: pathlib.Path, text: str) -> None:
 def _validate_request(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RetryLater("invalid Central onboarding response")
-    required = {
+    text_fields = {
         "request_id", "project_id", "repository", "name", "description",
         "preset", "checkpoint", "created_at",
     }
+    required = text_fields | {"invocations"}
     if not required <= value.keys():
         raise RetryLater("incomplete Central onboarding response")
-    for field in required:
+    for field in text_fields:
         if not isinstance(value[field], str):
             raise RetryLater("invalid Central onboarding response")
     if (
@@ -81,6 +84,15 @@ def _validate_request(value: Any) -> dict[str, Any]:
         or value["checkpoint"] not in {*CHECKPOINTS, "failed"}
     ):
         raise RetryLater("invalid Central onboarding identity")
+    if value["invocations"] is not None:
+        try:
+            flow_contract.validate_systemd_invocations(
+                value["invocations"],
+                unit_pattern=r"hermes-project-onboarding\.service",
+                where="project onboarding",
+            )
+        except flow_contract.ContractError as error:
+            raise RetryLater("invalid Central onboarding invocation history") from error
     return value
 
 
@@ -436,6 +448,18 @@ class CentralClient:
         ).get("onboarding")
         return _validate_request(value)
 
+    def record_invocation(
+        self, request: dict[str, Any], invocation: dict[str, str]
+    ) -> dict[str, Any]:
+        value = self.request(
+            "POST",
+            "/api/project-onboarding/"
+            + urllib.parse.quote(request["request_id"], safe="")
+            + "/invocation",
+            {"invocation": invocation},
+        ).get("onboarding")
+        return _validate_request(value)
+
     def projects(self) -> list[dict[str, Any]]:
         result = self.request("GET", "/api/mission-projects?platform=workspace")
         projects = result.get("projects")
@@ -514,6 +538,7 @@ class Driver:
         request = self.central.pending()
         if request is None:
             return False
+        request = self.central.record_invocation(request, self._systemd_invocation())
         try:
             checkpoint = request["checkpoint"]
             if checkpoint == "requested":
@@ -527,12 +552,41 @@ class Driver:
                     self.central.advance(request, "canary_passed")
             elif checkpoint == "canary_passed":
                 if self.ensure_ready(request):
+                    self._write_onboarding_evidence(request)
                     self.central.advance(request, "ready")
             else:
                 raise PermanentError("unsupported-onboarding-checkpoint")
         except PermanentError as error:
             self.central.advance(request, "failed", error_code=error.code)
         return True
+
+    def _systemd_invocation(self) -> dict[str, str]:
+        unit = os.environ.get("UAP_ONBOARDING_UNIT", "")
+        runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+        if (
+            unit != "hermes-project-onboarding.service"
+            or not runtime
+            or (os.name == "posix" and runtime != f"/run/user/{os.getuid()}")
+        ):
+            raise PermanentError("onboarding-evidence-requires-systemd")
+        environment = {
+            name: os.environ[name]
+            for name in ("DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR")
+            if name in os.environ
+        }
+        result = self.run(
+            [
+                "/usr/bin/systemctl", "--user", "show", unit,
+                "--property=InvocationID", "--value",
+            ],
+            env=environment,
+            check=False,
+            timeout=10,
+        )
+        invocation_id = result.stdout.strip() if result.returncode == 0 else ""
+        if not re.fullmatch(r"[0-9a-f]{32}", invocation_id):
+            raise PermanentError("onboarding-evidence-invocation-unavailable")
+        return {"unit": unit, "invocation_id": invocation_id}
 
     def _request_root(self, request: dict[str, Any]) -> pathlib.Path:
         root = (self.state_root / request["request_id"]).resolve()
@@ -672,7 +726,7 @@ class Driver:
         values = self.run_json([
             "gh", "pr", "list", "--repo", UAP_REPOSITORY, "--head", branch,
             "--state", "all", "--limit", "2", "--json",
-            "number,state,mergeCommit,mergeStateStatus,headRefName",
+            "number,state,mergeCommit,mergeStateStatus,headRefName,headRefOid",
         ])
         if not isinstance(values, list) or len(values) > 1:
             raise PermanentError("uap-onboarding-pr-collision")
@@ -912,6 +966,161 @@ class Driver:
             and project.get("repository", "").casefold()
             == request["repository"].casefold()
         )
+
+    def _merged_uap_pr_evidence(
+        self, request: dict[str, Any], *, ready: bool
+    ) -> dict[str, Any]:
+        pr = self._uap_pr(self._uap_branch(request, ready=ready))
+        merge_sha = (pr.get("mergeCommit") or {}).get("oid") if pr else None
+        head_sha = pr.get("headRefOid") if pr else None
+        if (
+            not pr
+            or pr.get("state") != "MERGED"
+            or isinstance(pr.get("number"), bool)
+            or not isinstance(pr.get("number"), int)
+            or not re.fullmatch(r"[0-9a-f]{40}", str(head_sha or ""))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(merge_sha or ""))
+        ):
+            raise RetryLater("UAP onboarding PR evidence is not ready")
+        return {
+            "number": pr["number"],
+            "url": f"https://github.com/{UAP_REPOSITORY}/pull/{pr['number']}",
+            "head_sha": head_sha,
+            "merge_sha": merge_sha,
+        }
+
+    def _completion_evidence(self, request: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        mission_id = canary_mission_id(request)
+        directory = "mission-" + hashlib.sha256(
+            mission_id.encode("utf-8")
+        ).hexdigest()[:24]
+        path = self.home / "swarm-out" / directory / "completion-evidence.json"
+        try:
+            raw = path.read_bytes()
+            value = json.loads(raw.decode("utf-8"))
+            bundle = flow_contract.validate_completion_evidence(value)
+        except FileNotFoundError as error:
+            raise RetryLater("canary completion evidence is not ready") from error
+        except (OSError, UnicodeError, json.JSONDecodeError, flow_contract.ContractError) as error:
+            raise PermanentError("canary-completion-evidence-invalid") from error
+        expected_profile_sha256 = flow_contract.canonical_sha256(render_profile(request))
+        if (
+            bundle["mission"]["mission_id"] != mission_id
+            or bundle["mission"]["dispatch_profile"] != dispatch_profile(request)
+            or bundle["source"]["repo"] != request["repository"]
+            or bundle["runtime"]["profile_sha256"] != expected_profile_sha256
+            or bundle["delivery"]["mode"] != "none"
+        ):
+            raise PermanentError("canary-completion-evidence-collision")
+        return bundle, hashlib.sha256(raw).hexdigest()
+
+    def _onboarding_evidence(self, request: dict[str, Any]) -> dict[str, Any]:
+        invocations = request.get("invocations")
+        if invocations is None:
+            raise PermanentError("onboarding-invocation-history-missing")
+        try:
+            flow_contract.validate_systemd_invocations(
+                invocations,
+                unit_pattern=r"hermes-project-onboarding\.service",
+                where="project onboarding",
+            )
+        except flow_contract.ContractError as error:
+            raise PermanentError("onboarding-invocation-history-invalid") from error
+
+        repository = self._github_repository(request["repository"])
+        _, bootstrap_sha = self._bootstrap_checkout(request)
+        if repository is None:
+            raise RetryLater("GitHub repository evidence is not ready")
+        profile_path = self.home / ".config/uap" / profile_name(request)
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise RetryLater("installed onboarding profile is unavailable") from error
+        expected_profile = render_profile(request)
+        if profile != expected_profile:
+            raise PermanentError("installed-onboarding-profile-collision")
+        timer_unit = f"hermes-delivery-coordinator@{profile_instance(request)}.timer"
+        if (
+            self.run(
+                ["systemctl", "--user", "is-enabled", timer_unit], check=False
+            ).stdout.strip()
+            != "enabled"
+            or self.run(
+                ["systemctl", "--user", "is-active", timer_unit], check=False
+            ).stdout.strip()
+            != "active"
+        ):
+            raise RetryLater("onboarding delivery timer is not armed")
+        project = self._live_project(request)
+        expected_catalog = catalog_entry(request, ready=True)
+        if project != expected_catalog:
+            raise RetryLater("ready project catalog evidence is not converged")
+        completion, completion_bytes_sha256 = self._completion_evidence(request)
+        mission_id = canary_mission_id(request)
+        bundle: dict[str, Any] = {
+            "schema_version": 1,
+            "request": {
+                "request_id": request["request_id"],
+                "project_id": request["project_id"],
+                "repository": request["repository"],
+                "name": request["name"],
+                "description_sha256": hashlib.sha256(
+                    request["description"].encode("utf-8")
+                ).hexdigest(),
+                "preset": request["preset"],
+                "created_at": request["created_at"],
+                "checkpoint": "ready",
+            },
+            "driver": {
+                "sha256": hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+                "invocations": invocations,
+            },
+            "repository": {
+                "private": repository.get("private"),
+                "default_branch": repository.get("default_branch"),
+                "bootstrap_sha": bootstrap_sha,
+            },
+            "uap": {
+                "setup_pr": self._merged_uap_pr_evidence(request, ready=False),
+                "activation_pr": self._merged_uap_pr_evidence(request, ready=True),
+            },
+            "runtime": {
+                "dispatch_profile": dispatch_profile(request),
+                "profile_sha256": flow_contract.canonical_sha256(profile),
+                "timer_unit": timer_unit,
+            },
+            "canary": {
+                "mission_id": mission_id,
+                "completion_evidence_path": (
+                    f"docs/evidence/completion/{mission_id}.json"
+                ),
+                "completion_evidence_sha256": completion["sha256"],
+                "completion_evidence_byte_sha256": completion_bytes_sha256,
+            },
+            "catalog": {
+                "status": project["status"],
+                "delivery_mode": project["delivery_mode"],
+                "test_targets": project["test_targets"],
+            },
+        }
+        bundle["sha256"] = flow_contract.canonical_sha256(bundle)
+        try:
+            return flow_contract.validate_project_onboarding_evidence(bundle)
+        except flow_contract.ContractError as error:
+            raise PermanentError("project-onboarding-evidence-invalid") from error
+
+    def _write_onboarding_evidence(self, request: dict[str, Any]) -> None:
+        path = self._request_root(request) / "onboarding-evidence.json"
+        bundle = self._onboarding_evidence(request)
+        _atomic_write(
+            path,
+            json.dumps(bundle, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+        try:
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+            flow_contract.validate_project_onboarding_evidence(persisted)
+        except (OSError, json.JSONDecodeError, flow_contract.ContractError) as error:
+            raise PermanentError("persisted-onboarding-evidence-invalid") from error
 
 
 def _producer_key(home: pathlib.Path) -> str:

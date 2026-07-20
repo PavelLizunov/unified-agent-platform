@@ -138,6 +138,7 @@ def main() -> None:
             '"/api/project-onboarding/pending"',
             '"/api/project-onboarding/{request_id}"',
             '"/api/project-onboarding/{request_id}/advance"',
+            '"/api/project-onboarding/{request_id}/invocation"',
             '"/api/missions/{mission_id}"',
             '"/api/missions/{mission_id}/events"',
             '"/api/missions/{mission_id}/answer"',
@@ -161,6 +162,7 @@ def main() -> None:
         assert "request_project_onboarding(" in api
         assert "pending_project_onboarding()" in api
         assert "advance_project_onboarding(" in api
+        assert "record_project_onboarding_invocation(" in api
         assert "project onboarding request must contain name, description and preset" in api
         assert "notify_subscribers" in api
         assert "complete_if_ready" in api

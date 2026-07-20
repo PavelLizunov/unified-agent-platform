@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -41,6 +42,7 @@ def request(preset: str = "rust", checkpoint: str = "requested") -> dict:
         "description": "Dependency-free starter",
         "preset": preset,
         "checkpoint": checkpoint,
+        "invocations": None,
         "created_at": "2026-07-20T12:00:00.000Z",
         "updated_at": "2026-07-20T12:00:00.000Z",
         "progress_percent": 0,
@@ -208,6 +210,7 @@ class ProjectOnboardingTests(unittest.TestCase):
             def __init__(self, value):
                 self.value = value
                 self.transitions = []
+                self.invocations = []
 
             def pending(self):
                 return self.value
@@ -216,7 +219,25 @@ class ProjectOnboardingTests(unittest.TestCase):
                 self.transitions.append((value["checkpoint"], checkpoint, error_code))
                 return {**value, "checkpoint": checkpoint, "error_code": error_code}
 
+            def record_invocation(self, value, invocation):
+                self.invocations.append(invocation)
+                history = {
+                    "count": 1,
+                    "first": invocation,
+                    "last": invocation,
+                    "chain_sha256": driver.flow_contract.canonical_sha256({
+                        "previous": None, **invocation,
+                    }),
+                }
+                return {**value, "invocations": history}
+
         class Successful(driver.Driver):
+            def _systemd_invocation(self):
+                return {
+                    "unit": "hermes-project-onboarding.service",
+                    "invocation_id": "1" * 32,
+                }
+
             def ensure_repository(self, _request):
                 return None
 
@@ -225,12 +246,35 @@ class ProjectOnboardingTests(unittest.TestCase):
         self.assertEqual([("requested", "repository_ready", None)], central.transitions)
 
         class Failed(driver.Driver):
+            def _systemd_invocation(self):
+                return {
+                    "unit": "hermes-project-onboarding.service",
+                    "invocation_id": "1" * 32,
+                }
+
             def ensure_repository(self, _request):
                 raise driver.PermanentError("repository-collision")
 
         central = Central(request())
         self.assertTrue(Failed(central, home=pathlib.Path.cwd()).tick())
         self.assertEqual([("requested", "failed", "repository-collision")], central.transitions)
+
+    def test_manual_tick_stops_before_recording_or_external_work(self):
+        class Central:
+            def pending(self):
+                return request()
+
+            def record_invocation(self, *_args):
+                raise AssertionError("manual tick reached Central mutation")
+
+        with mock.patch.dict(
+            os.environ,
+            {"UAP_ONBOARDING_UNIT": "", "XDG_RUNTIME_DIR": ""},
+        ):
+            with self.assertRaisesRegex(
+                driver.PermanentError, "onboarding-evidence-requires-systemd"
+            ):
+                driver.Driver(Central(), home=pathlib.Path.cwd()).tick()
 
     def test_disposable_uap_checkout_recovers_from_total_local_loss(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -312,6 +356,73 @@ class ProjectOnboardingTests(unittest.TestCase):
                 Central({**complete, "delivery_mode": None}),
                 home=pathlib.Path.cwd(),
             ).ensure_canary(value)
+
+    def test_ready_checkpoint_writes_closed_onboarding_evidence(self):
+        value = request(checkpoint="canary_passed")
+        value["request_id"] = "project-onboarding-" + driver.hashlib.sha256(
+            f"pavellizunov\0{value['project_id']}".encode("utf-8")
+        ).hexdigest()[:32]
+        invocation = {
+            "unit": "hermes-project-onboarding.service",
+            "invocation_id": "1" * 32,
+        }
+        value["invocations"] = {
+            "count": 1,
+            "first": invocation,
+            "last": invocation,
+            "chain_sha256": driver.flow_contract.canonical_sha256({
+                "previous": None, **invocation,
+            }),
+        }
+
+        class EvidenceDriver(driver.Driver):
+            def _github_repository(self, _repository):
+                return {"private": True, "default_branch": "main"}
+
+            def _bootstrap_checkout(self, _request):
+                return self.home / "bootstrap", "a" * 40
+
+            def _uap_pr(self, branch):
+                ready = branch.endswith("-ready")
+                return {
+                    "number": 20 if ready else 10,
+                    "state": "MERGED",
+                    "mergeCommit": {"oid": ("d" if ready else "c") * 40},
+                    "mergeStateStatus": "CLEAN",
+                    "headRefName": branch,
+                    "headRefOid": ("f" if ready else "e") * 40,
+                }
+
+            def _live_project(self, _request):
+                return driver.catalog_entry(value, ready=True)
+
+            def _completion_evidence(self, _request):
+                return {"sha256": "2" * 64}, "3" * 64
+
+            def run(self, command, **_kwargs):
+                if command[:3] == ["systemctl", "--user", "is-enabled"]:
+                    return subprocess.CompletedProcess(command, 0, "enabled\n", "")
+                if command[:3] == ["systemctl", "--user", "is-active"]:
+                    return subprocess.CompletedProcess(command, 0, "active\n", "")
+                raise AssertionError(command)
+
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            profile = home / ".config/uap" / driver.profile_name(value)
+            profile.parent.mkdir(parents=True)
+            profile.write_text(
+                json.dumps(driver.render_profile(value)), encoding="utf-8"
+            )
+            instance = EvidenceDriver(None, home=home)
+            instance._write_onboarding_evidence(value)
+            path = instance._request_root(value) / "onboarding-evidence.json"
+            evidence = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                evidence,
+                driver.flow_contract.validate_project_onboarding_evidence(evidence),
+            )
+            self.assertEqual(value["invocations"], evidence["driver"]["invocations"])
+            self.assertEqual("2" * 64, evidence["canary"]["completion_evidence_sha256"])
 
     def test_uap_pr_creation_reconciles_ambiguous_api_result(self):
         value = request(checkpoint="repository_ready")
@@ -407,6 +518,10 @@ class ProjectOnboardingTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertIn("SuccessExitStatus=75", service)
+        self.assertIn(
+            "Environment=UAP_ONBOARDING_UNIT=hermes-project-onboarding.service",
+            service,
+        )
         self.assertIn("UnsetEnvironment=HERMES_MISSION_OWNER_KEY", service)
         self.assertIn("UMask=0077", service)
         self.assertIn("OnUnitActiveSec=1min", timer)
