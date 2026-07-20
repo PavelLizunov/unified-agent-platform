@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 
-FILES = {
+CORE_FILES = {
     "flow_contract.py": pathlib.Path("swarm-bin/flow_contract.py"),
     "mission_adapter.py": pathlib.Path("swarm-bin/mission_adapter.py"),
     "delivery_coordinator.py": pathlib.Path("swarm-bin/delivery_coordinator.py"),
@@ -25,60 +25,56 @@ FILES = {
     ),
     "flow-policy.json": pathlib.Path("swarm-bin/flow-policy.json"),
     "hermes-flow-v2/SKILL.md": pathlib.Path(".hermes/skills/hermes-flow-v2/SKILL.md"),
-    "profiles/delivery-flow-pilot-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-flow-pilot-registered-v4.json"
-    ),
-    "profiles/delivery-flow-pilot-owner-gate-v4.json": pathlib.Path(
-        ".config/uap/delivery-flow-pilot-owner-gate-v4.json"
-    ),
-    "profiles/delivery-vpnctl-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-vpnctl-registered-v4.json"
-    ),
-    "profiles/delivery-vpnrouter-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-vpnrouter-registered-v4.json"
-    ),
-    "profiles/delivery-vpnrouter-gateway-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-vpnrouter-gateway-registered-v4.json"
-    ),
-    "profiles/delivery-suflyor-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-suflyor-registered-v4.json"
-    ),
-    "profiles/delivery-spark-runner-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-spark-runner-registered-v4.json"
-    ),
-    "profiles/delivery-subfleet-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-subfleet-registered-v4.json"
-    ),
-    "profiles/delivery-slipstream-rust-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-slipstream-rust-registered-v4.json"
-    ),
-    "profiles/delivery-uap-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-uap-registered-v4.json"
-    ),
-    "profiles/delivery-gs-ninitux-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-gs-ninitux-registered-v4.json"
-    ),
-    "profiles/delivery-ninitux-landing-registered-v4.json": pathlib.Path(
-        ".config/uap/delivery-ninitux-landing-registered-v4.json"
-    ),
-}
-_PRIVATE_TARGETS = {
-    pathlib.Path(".config/uap/delivery-flow-pilot-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-flow-pilot-owner-gate-v4.json"),
-    pathlib.Path(".config/uap/delivery-vpnctl-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-vpnrouter-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-vpnrouter-gateway-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-suflyor-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-spark-runner-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-subfleet-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-slipstream-rust-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-uap-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-gs-ninitux-registered-v4.json"),
-    pathlib.Path(".config/uap/delivery-ninitux-landing-registered-v4.json"),
 }
 _LEGACY_MODEL_FIELDS = {
     "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",
 }
+
+
+def _profile_files(source: pathlib.Path) -> dict[str, pathlib.Path]:
+    profiles = {}
+    source_string = str(source)
+    if source_string not in sys.path:
+        sys.path.insert(0, source_string)
+    for path in sorted((source / "profiles").glob("delivery-*.json")):
+        try:
+            from delivery_coordinator import load_profile
+
+            load_profile(path)
+        except (OSError, ValueError) as error:
+            raise SystemExit(
+                f"flow-v2-install-error: invalid delivery profile {path.name}: {error}"
+            ) from error
+        profiles[f"profiles/{path.name}"] = pathlib.Path(".config/uap") / path.name
+    return profiles
+
+
+def _files(source: pathlib.Path) -> dict[str, pathlib.Path]:
+    return CORE_FILES | _profile_files(source)
+
+
+def _is_private_target(path: pathlib.Path) -> bool:
+    return path.parent == pathlib.Path(".config/uap")
+
+
+def _copy(source: pathlib.Path, target: pathlib.Path, *, private: bool) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary: pathlib.Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=target.parent, prefix=f".{target.name}.", delete=False
+        ) as handle:
+            with source.open("rb") as source_handle:
+                shutil.copyfileobj(source_handle, handle)
+            temporary = pathlib.Path(handle.name)
+        if os.name != "nt" and private:
+            target.parent.chmod(0o700)
+            temporary.chmod(0o600)
+        os.replace(temporary, target)
+        temporary = None
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def _build1_overlay(
@@ -111,34 +107,32 @@ def install(
 ) -> None:
     if hermes_root is not None:
         _build1_overlay(source, hermes_root, check=False)
-    for relative_source, relative_target in FILES.items():
+    files = _files(source)
+    for relative_source, relative_target in files.items():
         src = source / relative_source
         dst = home / relative_target
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
-        if os.name != "nt" and relative_target in _PRIVATE_TARGETS:
-            dst.parent.chmod(0o700)
-            dst.chmod(0o600)
+        _copy(src, dst, private=_is_private_target(relative_target))
     for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
-        (home / FILES[executable]).chmod(0o755)
+        (home / files[executable]).chmod(0o755)
 
 
 def check(
     source: pathlib.Path, home: pathlib.Path, hermes_root: pathlib.Path | None = None
 ) -> None:
-    for relative_source, relative_target in FILES.items():
+    files = _files(source)
+    for relative_source, relative_target in files.items():
         src = source / relative_source
         dst = home / relative_target
         if not dst.is_file() or dst.read_bytes() != src.read_bytes():
             raise SystemExit(f"flow-v2-install-error: stale or missing {dst}")
-        if os.name != "nt" and relative_target in _PRIVATE_TARGETS:
+        if os.name != "nt" and _is_private_target(relative_target):
             if dst.parent.stat().st_mode & 0o777 != 0o700:
                 raise SystemExit(f"flow-v2-install-error: insecure profile directory {dst.parent}")
             if dst.stat().st_mode & 0o777 != 0o600:
                 raise SystemExit(f"flow-v2-install-error: insecure profile mode {dst}")
     if os.name != "nt":
         for executable in ("flow_contract.py", "mission_adapter.py", "delivery_coordinator.py"):
-            if not (home / FILES[executable]).stat().st_mode & 0o111:
+            if not (home / files[executable]).stat().st_mode & 0o111:
                 raise SystemExit(f"flow-v2-install-error: {executable} is not executable")
     if hermes_root is not None:
         _build1_overlay(source, hermes_root, check=True)
@@ -177,6 +171,35 @@ def _require_profile_units_inactive(path: pathlib.Path, unit_state=None) -> None
 def _require_all_profile_units_inactive(home: pathlib.Path, unit_state=None) -> None:
     for path in sorted((home / ".config/uap").glob("delivery-*.json")):
         _require_profile_units_inactive(path, unit_state)
+
+
+def install_profile(
+    source: pathlib.Path,
+    home: pathlib.Path,
+    name: str,
+    *,
+    check_only: bool = False,
+    unit_state=None,
+) -> None:
+    profiles = _profile_files(source)
+    relative_source = f"profiles/{name}"
+    if relative_source not in profiles:
+        raise SystemExit(f"flow-v2-install-error: unknown delivery profile {name}")
+    target = home / profiles[relative_source]
+    _require_profile_units_inactive(target, unit_state)
+    profile = source / relative_source
+    if check_only:
+        if not target.is_file() or target.read_bytes() != profile.read_bytes():
+            raise SystemExit(f"flow-v2-install-error: stale or missing {target}")
+        if os.name != "nt":
+            if target.parent.stat().st_mode & 0o777 != 0o700:
+                raise SystemExit(
+                    f"flow-v2-install-error: insecure profile directory {target.parent}"
+                )
+            if target.stat().st_mode & 0o777 != 0o600:
+                raise SystemExit(f"flow-v2-install-error: insecure profile mode {target}")
+        return
+    _copy(profile, target, private=True)
 
 
 def migrate_profile(path: pathlib.Path, *, unit_state=None) -> bool:
@@ -231,13 +254,26 @@ def main() -> int:
         default=pathlib.Path("/home/uap/hermes-agent"),
     )
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--install-profile")
     parser.add_argument("--migrate-profile", type=pathlib.Path)
     args = parser.parse_args()
     if args.check and args.migrate_profile:
         parser.error("--check cannot mutate --migrate-profile")
+    if args.install_profile and args.migrate_profile:
+        parser.error("--install-profile cannot be combined with --migrate-profile")
     source = pathlib.Path(__file__).resolve().parent
     home = args.home.expanduser().resolve()
     hermes_root = args.hermes_root.expanduser().resolve()
+    if args.install_profile:
+        install_profile(
+            source, home, args.install_profile, check_only=args.check
+        )
+        print(
+            "hermes-flow-v2-profile-check-ok"
+            if args.check
+            else "hermes-flow-v2-profile-installed"
+        )
+        return 0
     _require_all_profile_units_inactive(home)
     (check if args.check else install)(source, home, hermes_root)
     if args.migrate_profile:
