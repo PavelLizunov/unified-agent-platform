@@ -51,12 +51,12 @@ _PROFILE_FIELDS = {
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
-    "delivery_mode", "completion_evidence",
+    "post_verify_repair", "delivery_mode", "completion_evidence",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "goal", "required_files", "allowed_path_prefixes", "max_changed_files",
     "crash_after_author_commit_once", "route_flags", "codex_bin", "gh_bin",
-    "codex_home", "delivery_mode", "completion_evidence",
+    "codex_home", "post_verify_repair", "delivery_mode", "completion_evidence",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -72,6 +72,11 @@ _PRE_REVIEW_CI_SUMMARY = (
 _PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed twice on the exact merged revision"
+_LEGACY_POST_VERIFY_PHASES = {
+    "post_verify_repair_pending",
+    "post_verify_repair_waiting",
+    "post_verify_repair_completed",
+}
 _MAX_CHECK_FAILURE_CHARS = 4000
 _COORDINATOR_PARENT_UNIT = re.compile(
     r"^hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service$"
@@ -287,6 +292,19 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     profile.setdefault("codex_bin", "/home/uap/.local/bin/codex")
     profile.setdefault("gh_bin", "gh")
     profile.setdefault("codex_home", str(pathlib.Path.home() / ".codex"))
+    repair = profile.get("post_verify_repair")
+    if repair is not None:
+        if not isinstance(repair, dict) or set(repair) != {"dispatch_profile", "goal"}:
+            raise DeliveryError(
+                "profile.post_verify_repair must contain only dispatch_profile and goal"
+            )
+        repair = {
+            name: _required_text(repair.get(name), f"post_verify_repair.{name}")
+            for name in ("dispatch_profile", "goal")
+        }
+        if repair["dispatch_profile"] == profile["dispatch_profile"]:
+            raise DeliveryError("post-verify repair must use a distinct dispatch profile")
+        profile["post_verify_repair"] = repair
     return profile
 
 
@@ -3935,7 +3953,24 @@ class DeliveryCoordinator:
                 raise DeliveryError("merged PR branch cleanup did not converge")
         state["merge_sha"] = merge_sha
 
-    def _post_verify(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+    @staticmethod
+    def _validated_post_verify_commands(value: Any) -> list[list[str]]:
+        if (
+            not isinstance(value, list)
+            or not value
+            or not all(
+                isinstance(command, list)
+                and command
+                and all(isinstance(argument, str) and argument for argument in command)
+                for command in value
+            )
+        ):
+            raise DeliveryError("durable post-verify commands are invalid")
+        return value
+
+    def _pin_post_verify_plan(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> bool:
         merge_sha = state.get("merge_sha")
         candidate_sha = state.get("candidate_sha")
         if (
@@ -3945,6 +3980,38 @@ class DeliveryCoordinator:
             or not candidate_sha
         ):
             raise DeliveryError("post-verify has no exact merged revision")
+
+        pinned_sha = state.get("post_verify_sha")
+        if pinned_sha is None:
+            state["post_verify_sha"] = merge_sha
+            state["default_sha"] = merge_sha
+            expanded = [
+                self._expand(command, state, paths)
+                for command in self.profile["post_verify_checks"]
+            ]
+            state["post_verify_commands"] = expanded
+            return True
+        elif pinned_sha != merge_sha or state.get("default_sha") != pinned_sha:
+            raise DeliveryError("durable post-verify revision changed")
+        self._validated_post_verify_commands(state.get("post_verify_commands"))
+        return False
+
+    def _post_verify(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+        merge_sha = state.get("merge_sha")
+        candidate_sha = state.get("candidate_sha")
+        pinned_sha = state.get("post_verify_sha")
+        if (
+            not isinstance(merge_sha, str)
+            or not merge_sha
+            or not isinstance(candidate_sha, str)
+            or not candidate_sha
+            or pinned_sha != merge_sha
+            or state.get("default_sha") != pinned_sha
+        ):
+            raise DeliveryError("post-verify has no pinned exact merged revision")
+        pinned_commands = self._validated_post_verify_commands(
+            state.get("post_verify_commands")
+        )
         source = pathlib.Path(self.profile["source_checkout"])
         self._git(source, "fetch", "--prune", "origin", self.profile["default_branch"])
         default_ref = f"origin/{self.profile['default_branch']}"
@@ -3964,25 +4031,6 @@ class DeliveryCoordinator:
             check=False,
         ).returncode:
             raise DeliveryError("merge revision is not on the fetched default branch")
-
-        pinned_sha = state.get("post_verify_sha")
-        if pinned_sha is None:
-            state["post_verify_sha"] = merge_sha
-            state["default_sha"] = merge_sha
-        elif pinned_sha != merge_sha or state.get("default_sha") != pinned_sha:
-            raise DeliveryError("durable post-verify revision changed")
-
-        expanded = [
-            self._expand(command, state, paths)
-            for command in self.profile["post_verify_checks"]
-        ]
-        pinned_commands = state.get("post_verify_commands")
-        if pinned_commands is None:
-            state["post_verify_commands"] = expanded
-            pinned_commands = expanded
-            self._save(paths, state)
-        elif pinned_commands != expanded:
-            raise DeliveryError("durable post-verify commands changed")
 
         self._remove_worktree(paths["verify"])
         self._git(
@@ -4021,6 +4069,27 @@ class DeliveryCoordinator:
             raise DeliveryError("post-verify failure is outside the bounded retry state")
         self._save(paths, state)
 
+    def _migrate_legacy_post_verify_state(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> bool:
+        legacy_phase = state.get("phase")
+        if legacy_phase not in _LEGACY_POST_VERIFY_PHASES:
+            return False
+        attempts = state.get("post_verify_attempts")
+        if attempts not in {None, 1}:
+            raise DeliveryError("legacy post-verify repair attempt state is invalid")
+        failure = state.get("post_verify_failure") or state.get("failure_error")
+        diagnostic = _bounded_diagnostic(str(failure or "post-verify failed"))
+        self._pin_post_verify_plan(state, paths)
+        state.update(
+            phase="post_verify_retry_pending",
+            post_verify_attempts=1,
+            post_verify_first_failure=diagnostic,
+            legacy_post_verify_phase=legacy_phase,
+        )
+        self._save(paths, state)
+        return True
+
     def _run_post_verify_attempt(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> bool:
@@ -4033,6 +4102,8 @@ class DeliveryCoordinator:
             or (attempts == 0) != (state.get("phase") == "merged")
         ):
             raise DeliveryError("post-verify attempt state is invalid")
+        if self._pin_post_verify_plan(state, paths):
+            self._save(paths, state)
         state.update(
             phase="post_verify_running",
             post_verify_attempts=attempts + 1,
@@ -4584,6 +4655,13 @@ class DeliveryCoordinator:
                     self._assert_claim(state)
                 self._ensure_worktree(state, paths)
                 self._save(paths, state)
+
+            if self._migrate_legacy_post_verify_state(state, paths):
+                return {
+                    "action": state["phase"],
+                    "mission_id": mission_id,
+                    "state": state,
+                }
 
             if state["phase"] == "post_verify_running":
                 self._assert_claim(state)

@@ -190,6 +190,10 @@ After merge, the coordinator pins the exact merge SHA and the expanded post-veri
 The first post-verify failure creates a durable retry checkpoint. The next timer tick runs that same command plan once
 against the same detached exact-SHA worktree; success continues to cleanup, while a second failure is terminal and
 preserves the merged PR evidence. This retry never creates an author/reviewer session, commit, PR or merge.
+Installed profiles may still contain the deprecated `post_verify_repair` object; it remains schema-compatible but is
+not used to dispatch new work. Existing `post_verify_repair_pending`, `post_verify_repair_waiting` and
+`post_verify_repair_completed` parent checkpoints atomically migrate to the same pinned parent-local retry, preserving
+their first bounded failure while neither accepting nor observing another repair mission.
 
 ## 2. Repository guard
 

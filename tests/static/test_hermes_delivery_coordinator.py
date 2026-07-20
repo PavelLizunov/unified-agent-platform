@@ -617,6 +617,27 @@ class PostVerifyRetryCoordinator(HermeticCoordinator):
             self.client.publish(mission_id, event)
 
 
+class PostVerifyPlanCrashCoordinator(PostVerifyRetryCoordinator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.plan_crash_pending = True
+
+    def _save(self, paths, state):
+        crash = (
+            self.plan_crash_pending
+            and state.get("phase") == "merged"
+            and state.get("post_verify_attempts") is None
+            and state.get("post_verify_sha") is not None
+            and state.get("post_verify_commands") is not None
+        )
+        super()._save(paths, state)
+        if crash:
+            self.plan_crash_pending = False
+            raise coordinator.InjectedCrash(
+                "crash after durable post-verify plan before attempt start"
+            )
+
+
 class DeliveryCoordinatorTests(unittest.TestCase):
     def test_missing_delivery_state_with_projected_task_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3096,6 +3117,26 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ["--strict-config", "-c", 'model_reasoning_effort="xhigh"'],
                 instance._reasoning_args(state, "reviewer"),
             )
+
+    def test_legacy_post_verify_repair_profile_field_remains_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            path = root / "profile.json"
+            value = profile(root)
+            value["post_verify_repair"] = {
+                "dispatch_profile": "legacy-post-verify-repair",
+                "goal": "Repair the failed post-verify gate",
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+
+            loaded = coordinator.load_profile(path)
+
+            self.assertEqual(value["post_verify_repair"], loaded["post_verify_repair"])
+
+            value["post_verify_repair"]["dispatch_profile"] = value["dispatch_profile"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(coordinator.DeliveryError, "distinct dispatch profile"):
+                coordinator.load_profile(path)
 
     def test_reusable_profile_binds_each_mission_goal_and_candidate_scope(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -7259,6 +7300,112 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(0, counters["authors"])
             self.assertEqual(0, counters["reviews"])
             self.assertEqual(0, counters.get("merges", 0))
+
+    def test_post_verify_plan_crash_keeps_original_sha_and_argv_before_first_attempt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["post_verify_checks"] = [["post-verify", "original", "{default_sha}"]]
+            approved["codex_home"] = str(root / "codex")
+            client = FakeClient()
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            runner = PostVerifyRunner([False, True])
+            counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+            crashing = PostVerifyPlanCrashCoordinator(
+                approved, client, backend, root / "state",
+                counters=counters, runner=runner,
+            )
+            paths = crashing._paths("mission-a7-3")
+            crashing._save(paths, merged_post_verify_state(approved))
+
+            with self.assertRaisesRegex(coordinator.InjectedCrash, "durable post-verify plan"):
+                crashing.tick()
+
+            checkpoint = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("merged", checkpoint["phase"])
+            self.assertNotIn("post_verify_attempts", checkpoint)
+            self.assertEqual("merge-sha", checkpoint["post_verify_sha"])
+            self.assertEqual(
+                [["post-verify", "original", "merge-sha"]],
+                checkpoint["post_verify_commands"],
+            )
+            self.assertEqual([], runner.commands)
+
+            changed = copy.deepcopy(approved)
+            changed["post_verify_checks"] = [["post-verify", "changed", "{default_sha}"]]
+            restarted = PostVerifyRetryCoordinator(
+                changed, client, backend, root / "state",
+                counters=counters, runner=runner,
+            )
+            self.assertEqual("post_verify_retry_pending", restarted.tick()["action"])
+            result = restarted.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(2, result["state"]["post_verify_attempts"])
+            self.assertEqual(
+                [
+                    ["post-verify", "original", "merge-sha"],
+                    ["post-verify", "original", "merge-sha"],
+                ],
+                runner.commands,
+            )
+            self.assertEqual(["merge-sha", "merge-sha"], counters["post_verify_shas"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual(0, counters["reviews"])
+            self.assertEqual(0, counters.get("merges", 0))
+
+    def test_legacy_post_verify_repair_phases_migrate_to_parent_local_retry(self):
+        for legacy_phase in sorted(coordinator._LEGACY_POST_VERIFY_PHASES):
+            with self.subTest(legacy_phase), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved["post_verify_checks"] = [["post-verify", "{default_sha}"]]
+                approved["post_verify_repair"] = {
+                    "dispatch_profile": "legacy-post-verify-repair",
+                    "goal": "Repair the failed post-verify gate",
+                }
+                approved["codex_home"] = str(root / "codex")
+                client = FakeClient()
+                backend = FakeBackend()
+                backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+                runner = PostVerifyRunner([True])
+                counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
+                instance = PostVerifyRetryCoordinator(
+                    approved, client, backend, root / "state",
+                    counters=counters, runner=runner,
+                )
+                paths = instance._paths("mission-a7-3")
+                state = merged_post_verify_state(approved)
+                state.update(
+                    phase=legacy_phase,
+                    post_verify_failure="legacy first failure",
+                    failed_default_sha="merge-sha",
+                    repair_mission_id="repair-legacy",
+                )
+                instance._save(paths, state)
+
+                migrated = instance.tick()
+
+                self.assertEqual("post_verify_retry_pending", migrated["action"])
+                self.assertEqual(1, migrated["state"]["post_verify_attempts"])
+                self.assertEqual(legacy_phase, migrated["state"]["legacy_post_verify_phase"])
+                self.assertEqual("merge-sha", migrated["state"]["post_verify_sha"])
+                self.assertEqual(
+                    [["post-verify", "merge-sha"]],
+                    migrated["state"]["post_verify_commands"],
+                )
+                self.assertEqual([], runner.commands)
+
+                result = instance.tick()
+
+                self.assertEqual("complete", result["action"])
+                self.assertEqual(2, result["state"]["post_verify_attempts"])
+                self.assertEqual([["post-verify", "merge-sha"]], runner.commands)
+                self.assertEqual(["merge-sha"], counters["post_verify_shas"])
+                self.assertEqual(0, counters["authors"])
+                self.assertEqual(0, counters["reviews"])
+                self.assertEqual(0, counters.get("merges", 0))
 
 
 if __name__ == "__main__":
