@@ -2804,7 +2804,11 @@ class DeliveryCoordinator:
                 self._record_author_check_failure(state, paths, error, retryable=preserved)
                 return True
             if self._candidate_fingerprint(paths["author"]) != fingerprint:
-                raise DeliveryError("author recovery checks changed the exact candidate")
+                error = DeliveryError("author recovery checks changed the exact candidate")
+                if self.profile["schema_version"] == 3:
+                    raise error
+                self._reject_invalid_candidate(state, paths, error)
+                return True
             self._git(paths["author"], "add", "-A", "--")
             self._assert_claim(state)
             self._git(paths["author"], "commit", "-m", self.profile["commit_message"])
@@ -3043,7 +3047,11 @@ class DeliveryCoordinator:
             self._record_author_check_failure(state, paths, error, retryable=preserved)
             return True
         if self._candidate_fingerprint(paths["author"]) != fingerprint:
-            raise DeliveryError("author checks changed the exact candidate")
+            error = DeliveryError("author checks changed the exact candidate")
+            if self.profile["schema_version"] == 3:
+                raise error
+            self._reject_invalid_candidate(state, paths, error)
+            return True
         self._git(paths["author"], "add", "-A", "--")
         self._assert_claim(state)
         self._git(paths["author"], "commit", "-m", self.profile["commit_message"])

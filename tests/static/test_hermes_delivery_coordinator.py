@@ -1360,6 +1360,70 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertNotIn("model_ambiguous", state)
             self.assertTrue((paths["directory"] / "author-1-last.txt").is_file())
 
+    def test_v4_successful_check_mutation_enters_guarded_candidate_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+
+            def runner(command, **_kwargs):
+                raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                raw.write_text("author completed", encoding="utf-8")
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=(
+                        '{"type":"thread.started","thread_id":"author-mutated"}\n'
+                        '{"type":"turn.completed"}\n'
+                    ),
+                    stderr="",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("mutated-author-output")
+            goal = "Change src/lib.rs"
+            state = {
+                "mission_id": "mutated-author-output",
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "mission_goal": goal,
+                "mission_goal_sha256": hashlib.sha256(goal.encode()).hexdigest(),
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            changed = {"src/lib.rs"}
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                mock.patch.object(instance, "_changed_files", return_value=changed),
+                mock.patch.object(
+                    instance, "_worktree_candidate_files", return_value=changed
+                ),
+                mock.patch.object(
+                    instance, "_candidate_fingerprint", side_effect=["before", "after"]
+                ),
+                mock.patch.object(instance, "_checks", return_value=[]),
+                mock.patch.object(instance, "_reject_invalid_candidate") as reject,
+                mock.patch.object(instance, "_record_author") as record_author,
+            ):
+                self.assertTrue(instance._author(state, paths))
+
+            reject.assert_called_once()
+            self.assertEqual(
+                "author checks changed the exact candidate", str(reject.call_args.args[2])
+            )
+            record_author.assert_not_called()
+
     def test_reviewer_timeout_is_durably_quarantined_before_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

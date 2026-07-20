@@ -96,7 +96,8 @@ class ProjectOnboardingTests(unittest.TestCase):
                 continue
             with self.subTest(preset=preset), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
-                for relative, content in driver.bootstrap_files(request(preset)).items():
+                files = driver.bootstrap_files(request(preset))
+                for relative, content in files.items():
                     path = root / relative
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(content, encoding="utf-8", newline="\n")
@@ -104,6 +105,11 @@ class ProjectOnboardingTests(unittest.TestCase):
                     command, cwd=root, text=True, capture_output=True, timeout=120,
                 )
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                if preset == "rust":
+                    self.assertEqual(
+                        files["Cargo.lock"],
+                        (root / "Cargo.lock").read_text(encoding="utf-8"),
+                    )
 
     def test_bootstrap_commit_is_deterministic_after_total_local_loss(self):
         value = request("rust")
