@@ -4,6 +4,16 @@ Last updated: 2026-07-20
 
 ## Phase
 
+- **One-click new-project onboarding live-proven (2026-07-20; ADR-035).** Workspace request
+  `project-onboarding-170ac9b31190f8b6d4eb263cac3bf35d` created private Rust repository
+  `PavelLizunov/uap-macos-oneclick-final-20260720`, admitted its setup through protected PR #358, installed an exact
+  registered-v4 profile and persistent timer, then completed a real Sol/Terra delivery canary through a review
+  rejection, automatic repair, repeated GitHub macOS CI, target PR #1, exact merge/post-verify and cleanup. Protected
+  activation PR #359 and Flux exact revision `c87055a...` then made the project selectable and ready at `100%`.
+  No owner approval or manual delivery command was used after the single Workspace submission. Exact proof and honest
+  preset/timer-provenance boundaries:
+  `docs/evidence/one-click-project-onboarding-live-canary-2026-07-20.md`.
+
 - **Codex subscription image capability live-proven (2026-07-20; ADR-034).** PRs #327/#329 deployed a separate
   Central text-to-image mission through Codex `0.142.0` app-server and the built-in `$imagegen` under current
   ChatGPT subscription auth. The exact `v68-imagegen-completion` canary completed with one 796,818-byte PNG,
