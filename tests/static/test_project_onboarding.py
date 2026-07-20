@@ -394,7 +394,11 @@ class ProjectOnboardingTests(unittest.TestCase):
                 }
 
             def _live_project(self, _request):
-                return driver.catalog_entry(value, ready=True)
+                return {
+                    key: item
+                    for key, item in driver.catalog_entry(value, ready=True).items()
+                    if key not in {"aliases", "dispatch_profile", "platforms"}
+                }
 
             def _completion_evidence(self, _request):
                 return {"sha256": "2" * 64}, "3" * 64
