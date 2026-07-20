@@ -24,6 +24,7 @@ MAX_SOURCES = 8
 DEFAULT_SOURCES = 5
 SESSION_TIMEOUT_SECONDS = 180
 STATE_SCHEMA_VERSION = 1
+RESEARCH_MODEL = "gpt-5.3-codex-spark"
 DEFAULT_CODEX_HOME = "/opt/data/.codex"
 DEFAULT_PROXY = "http://singbox-egress-ha.uap-system.svc:12080"
 DEFAULT_NO_PROXY = ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10"
@@ -332,6 +333,8 @@ def run_research_session(
                     [
                         codex_bin,
                         "--search",
+                        "--model",
+                        RESEARCH_MODEL,
                         "--disable",
                         "shell_tool",
                         "--ask-for-approval",

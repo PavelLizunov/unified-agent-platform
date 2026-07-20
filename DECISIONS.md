@@ -606,7 +606,8 @@
   Закреплённый Hermes v0.18 уже содержит Brave provider, но стандартные Brave Search API Terms (2026-02-11) запрещают
   долговременное хранение Search Results, тогда как UAP обязан сохранять итог и цитаты в Central/Workspace/Telegram.
 - **Решение:** отдельный MCP tool `research_session` запускает установленный Codex `0.142.0` как ephemeral
-  `codex --search exec` в read-only sandbox без shell tool, user config/MCP и с очищенным окружением. Для запуска во
+  `codex --search --model gpt-5.3-codex-spark exec` в read-only sandbox без shell tool, user config/MCP и с очищенным окружением. Spark использует
+  отдельный лимит для bounded text-only search; итоговый анализ остаётся в Central Hermes. Для запуска во
   временный `CODEX_HOME` копируется только существующий Codex auth, который удаляется вместе с child session. Facade ограничивает goal,
   DNS allowlist и число источников, требует HTTPS, валидирует typed JSON result, атомарно сохраняет нормализованный
   итог на Hermes PVC по детерминированному request id и повторяет только один transient failure. Raw subprocess
