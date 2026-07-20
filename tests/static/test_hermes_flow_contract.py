@@ -762,7 +762,19 @@ class FlowContractTests(unittest.TestCase):
         finally:
             path.unlink()
         self.assertEqual("unknown", result["error_class"])
+        self.assertTrue(result["terminal_success"])
         self.assertFalse(result["safe_before_side_effects"])
+
+    def test_completed_turn_with_terminal_failure_is_not_success(self):
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+            handle.write(json.dumps({"type": "turn.completed"}) + "\n")
+            handle.write(json.dumps({"type": "turn.failed", "message": "late failure"}) + "\n")
+            path = pathlib.Path(handle.name)
+        try:
+            result = flow.parse_codex_failure(path)
+        finally:
+            path.unlink()
+        self.assertFalse(result["terminal_success"])
 
     def test_delivery_policy_identity_is_semantic_and_binds_the_exact_policy(self):
         signals = {

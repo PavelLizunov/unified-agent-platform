@@ -922,6 +922,9 @@ def parse_codex_failure(
         "schema_version": 1,
         "error_class": "transient_capacity" if capacity_source else "unknown",
         "terminal_source": capacity_source,
+        "terminal_success": (
+            turn_completed and terminal_records == 0 and not malformed_records
+        ),
         "thread_started": thread_started,
         "turn_started": turn_started,
         "item_seen": item_seen,

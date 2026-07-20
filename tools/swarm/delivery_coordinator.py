@@ -3007,7 +3007,8 @@ class DeliveryCoordinator:
                     "ambiguous Codex timeout requires reconciliation before retry"
                 ) from error
             _private_codex_events(events, result.stdout)
-            if result.returncode:
+            parsed_result = flow_contract.parse_codex_failure(events, result.stderr)
+            if result.returncode and not parsed_result["terminal_success"]:
                 failure = self._capacity_failure_is_retryable(
                     state, paths, role="author", result=result, events=events,
                     checkpoint=checkpoint,
@@ -3379,7 +3380,8 @@ class DeliveryCoordinator:
                     "ambiguous Codex timeout requires reconciliation before retry"
                 ) from error
             _private_codex_events(events, result.stdout)
-            if result.returncode:
+            parsed_result = flow_contract.parse_codex_failure(events, result.stderr)
+            if result.returncode and not parsed_result["terminal_success"]:
                 failure = self._capacity_failure_is_retryable(
                     state, paths, role="reviewer", result=result, events=events,
                     checkpoint=checkpoint,

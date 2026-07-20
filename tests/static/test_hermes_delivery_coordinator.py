@@ -1304,6 +1304,62 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "timeout-cookie-secret", paths["state"].read_text(encoding="utf-8")
             )
 
+    def test_nonzero_author_wrapper_accepts_authoritative_completed_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+
+            def runner(command, **_kwargs):
+                raw = pathlib.Path(command[command.index("--output-last-message") + 1])
+                raw.write_text("author completed", encoding="utf-8")
+                return subprocess.CompletedProcess(
+                    command,
+                    2,
+                    stdout=(
+                        '{"type":"thread.started","thread_id":"author-completed"}\n'
+                        '{"type":"turn.started"}\n'
+                        '{"type":"turn.completed"}\n'
+                    ),
+                    stderr="wrapper returned a non-zero status",
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("completed-author-output")
+            state = {
+                "review_cycle": 1,
+                "base_sha": "base-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+
+            def git(_checkout, *arguments, **_kwargs):
+                return "base-sha" if arguments[:2] == ("rev-parse", "HEAD") else ""
+
+            required = set(approved["required_files"])
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_git", side_effect=git),
+                mock.patch.object(instance, "_changed_files", return_value=required),
+                mock.patch.object(
+                    instance, "_worktree_candidate_files", return_value=required
+                ),
+                mock.patch.object(instance, "_candidate_fingerprint", return_value="candidate"),
+                mock.patch.object(instance, "_checks", return_value=[]),
+                mock.patch.object(instance, "_record_author") as record_author,
+            ):
+                self.assertTrue(instance._author(state, paths))
+
+            record_author.assert_called_once_with(state, paths, [])
+            self.assertNotIn("model_ambiguous", state)
+            self.assertTrue((paths["directory"] / "author-1-last.txt").is_file())
+
     def test_reviewer_timeout_is_durably_quarantined_before_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
