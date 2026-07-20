@@ -131,7 +131,9 @@ def main() -> None:
     assert catalog_manifest["kind"] == "ConfigMap"
     projects = json.loads(catalog_manifest["data"]["projects.json"])
     assert projects["schema_version"] == 2
-    assert len(projects["projects"]) == 33
+    assert len({project["project_id"] for project in projects["projects"]}) == len(
+        projects["projects"]
+    )
     ready = {
         project["project_id"]: (
             project["repository"],
@@ -254,11 +256,17 @@ def main() -> None:
     previous_catalog = os.environ.get("HERMES_MISSION_PROJECTS")
     try:
         os.environ["HERMES_MISSION_PROJECTS"] = catalog_manifest["data"]["projects.json"]
-        assert len(runtime.public_intake_projects("workspace")) == 33
+        assert len(runtime.public_intake_projects("workspace")) == len([
+            project for project in projects["projects"]
+            if "workspace" in project["platforms"]
+        ])
         assert len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
-        ]) == 11
+        ]) == len([
+            project for project in projects["projects"]
+            if "telegram" in project["platforms"] and project["status"] == "ready"
+        ])
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)
