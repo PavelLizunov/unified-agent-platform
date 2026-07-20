@@ -87,7 +87,9 @@ Last updated: 2026-07-20
   no-deploy boundary: a GitHub repository is not executable merely because it appears in inventory. The historical
   standalone `boosty_api_rs` entry is read-only because its active implementation is part of `vpnctl`; full cross-channel chat transcript
   replication is not claimed. Telegram voice/audio now enters the same intake through checksum-pinned
-  GigaAM-v3 e2e CTC Q4 on the always-on M4 Mac, with the original in-pod RNNT Q4 CPU path as automatic fallback. A
+  GigaAM-v3 e2e CTC Q4 on the always-on M4 Mac. Deterministic 20-second chunking removes the former 25-second ingress
+  limit while retaining a 15-minute emergency ceiling; the original in-pod RNNT Q4 CPU path remains the automatic
+  fallback for recordings that fit one chunk. A
   19.178-second OGG/Opus canary completed safe decode plus remote inference in 1.334 seconds at about 268 MiB worker
   RSS; its transcript created one Central mission and stable-source replay returned the same receipt after a new
   `MissionStore` instance. Decode/STT failure still creates no mission. Workspace displays the Central result but

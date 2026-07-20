@@ -22,9 +22,12 @@ import urllib.parse
 
 
 MAX_INPUT_BYTES = 8 * 1024 * 1024
-MAX_DURATION_SECONDS = 25.0
+MAX_DURATION_SECONDS = 15 * 60
+CHUNK_DURATION_SECONDS = 20
 MAX_PCM_BYTES = int(MAX_DURATION_SECONDS * 16_000 * 2)
-MAX_TRANSCRIPT_CHARS = 4_096
+MAX_CHUNK_PCM_BYTES = CHUNK_DURATION_SECONDS * 16_000 * 2
+MAX_CHUNK_TRANSCRIPT_CHARS = 4_096
+MAX_TRANSCRIPT_CHARS = 16_384
 DECODE_TIMEOUT_SECONDS = 12
 CPU_SECONDS = 40
 ADDRESS_SPACE_BYTES = 1_500 * 1024 * 1024
@@ -87,7 +90,7 @@ def _probe(path: pathlib.Path) -> float:
     except (OSError, subprocess.SubprocessError):
         raise STTFailure("audio probe failed") from None
     if not 0 < duration <= MAX_DURATION_SECONDS:
-        raise STTFailure("voice note duration is outside the 25 second limit")
+        raise STTFailure("voice note exceeds the 15 minute safety ceiling")
     if not formats.intersection(ALLOWED_FORMATS):
         raise STTFailure("unsupported audio container")
     return duration
@@ -123,13 +126,9 @@ def _decode(path: pathlib.Path, target: pathlib.Path) -> None:
         raise STTFailure("safe audio decode produced invalid PCM")
 
 
-def _pcm(path: pathlib.Path) -> array.array[float]:
+def _pcm(raw: bytes) -> array.array[float]:
     samples = array.array("h")
-    try:
-        with path.open("rb") as handle:
-            samples.fromfile(handle, path.stat().st_size // samples.itemsize)
-    except OSError:
-        raise STTFailure("failed to read decoded audio") from None
+    samples.frombytes(raw)
     if sys.byteorder != "little":
         samples.byteswap()
     return array.array("f", (sample / 32768.0 for sample in samples))
@@ -145,7 +144,7 @@ def _normalize_transcript(value: object) -> str:
     return value
 
 
-def _remote_transcribe(path: pathlib.Path, endpoint: str) -> str:
+def _remote_transcribe(body: bytes, endpoint: str) -> str:
     parsed = urllib.parse.urlsplit(endpoint)
     if (
         parsed.scheme != "http"
@@ -156,11 +155,7 @@ def _remote_transcribe(path: pathlib.Path, endpoint: str) -> str:
         or parsed.fragment
     ):
         raise STTFailure("remote transcriber configuration is invalid")
-    try:
-        body = path.read_bytes()
-    except OSError:
-        raise STTFailure("failed to read decoded audio") from None
-    if not 0 < len(body) <= MAX_PCM_BYTES:
+    if not 0 < len(body) <= MAX_CHUNK_PCM_BYTES or len(body) % 2:
         raise STTFailure("decoded audio is outside the remote limit")
     connection = http.client.HTTPConnection(
         parsed.hostname,
@@ -178,8 +173,8 @@ def _remote_transcribe(path: pathlib.Path, endpoint: str) -> str:
             },
         )
         response = connection.getresponse()
-        raw = response.read(MAX_TRANSCRIPT_CHARS * 4 + 1)
-        if response.status != 200 or len(raw) > MAX_TRANSCRIPT_CHARS * 4:
+        raw = response.read(MAX_CHUNK_TRANSCRIPT_CHARS * 4 + 1)
+        if response.status != 200 or len(raw) > MAX_CHUNK_TRANSCRIPT_CHARS * 4:
             raise STTFailure("remote transcriber failed")
         try:
             return _normalize_transcript(raw.decode("utf-8"))
@@ -227,27 +222,41 @@ def transcribe(input_path: pathlib.Path, model_path: pathlib.Path) -> str:
         pcm_path = pathlib.Path(temporary) / "audio.s16"
         _decode(input_path, pcm_path)
         remote_endpoint = os.environ.get("UAP_STT_REMOTE_URL", "").strip()
-        if remote_endpoint:
-            try:
-                return _remote_transcribe(pcm_path, remote_endpoint)
-            except STTFailure:
-                pass
-        samples = _pcm(pcm_path)
-        with _exclusive_model(model_path):
-            try:
-                import transcribe_cpp
+        short_audio = pcm_path.stat().st_size <= MAX_CHUNK_PCM_BYTES
+        transcripts: list[str] = []
+        try:
+            with pcm_path.open("rb") as handle:
+                while chunk := handle.read(MAX_CHUNK_PCM_BYTES):
+                    if remote_endpoint:
+                        try:
+                            transcripts.append(_remote_transcribe(chunk, remote_endpoint))
+                            continue
+                        except STTFailure:
+                            if not short_audio:
+                                raise STTFailure(
+                                    "long voice transcription requires the Mac worker"
+                                ) from None
+                    samples = _pcm(chunk)
+                    with _exclusive_model(model_path):
+                        try:
+                            import transcribe_cpp
 
-                result = transcribe_cpp.transcribe(
-                    model_path,
-                    samples,
-                    backend="cpu",
-                    n_threads=2,
-                    language="ru",
-                    timestamps="none",
-                )
-            except Exception:
-                raise STTFailure("local inference failed") from None
-    return _normalize_transcript(getattr(result, "text", None))
+                            result = transcribe_cpp.transcribe(
+                                model_path,
+                                samples,
+                                backend="cpu",
+                                n_threads=2,
+                                language="ru",
+                                timestamps="none",
+                            )
+                        except Exception:
+                            raise STTFailure("local inference failed") from None
+                    transcripts.append(
+                        _normalize_transcript(getattr(result, "text", None))
+                    )
+        except OSError:
+            raise STTFailure("failed to read decoded audio") from None
+    return _normalize_transcript(" ".join(transcripts))
 
 
 def _write_atomic(path: pathlib.Path, text: str) -> None:

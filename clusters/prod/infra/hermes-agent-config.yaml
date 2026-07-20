@@ -268,7 +268,7 @@ data:
           model: /opt/data/.cache/uap-stt/gigaam-v3-e2e-rnnt-Q4_K_M.gguf
           language: ru
           format: txt
-          timeout: 45
+          timeout: 90
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram

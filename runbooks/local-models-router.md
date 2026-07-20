@@ -24,12 +24,13 @@ curl http://100.82.241.121:8090/v1/chat/completions -H 'Content-Type: applicatio
 
 ## Voice STT route
 
-Hermes safe-decodes accepted Telegram voice/audio to mono 16 kHz signed-16 PCM and posts at most 800,000 bytes to
-`http://192.168.0.203:8090/v1/audio/transcriptions`. The ops router forwards only that exact path to the tailnet-only
+Hermes safe-decodes accepted Telegram voice/audio to mono 16 kHz signed-16 PCM and sequentially posts 20-second
+chunks of at most 640,000 bytes to `http://192.168.0.203:8090/v1/audio/transcriptions`. The ops router forwards only that exact path to the tailnet-only
 Mac worker at `http://100.116.97.112:8091/v1/audio/transcriptions`. The response is normalized untrusted owner text;
-it does not select a project/model or execute instructions. If the Mac or route is unavailable within eight seconds,
-the same wrapper uses the checksum-pinned in-pod RNNT CPU model. If both fail, intake returns the existing retry/text
-message before opening `MissionStore`.
+it does not select a project/model or execute instructions. The normal voice-note ceiling is gone; a 15-minute,
+8 MiB and 16,384-character emergency boundary remains. If the Mac or route is unavailable within eight seconds,
+a recording that fits one chunk uses the checksum-pinned in-pod RNNT CPU model. Longer recordings fail before
+opening `MissionStore` rather than tying up the pod CPU.
 
 Pinned Mac artifacts:
 
