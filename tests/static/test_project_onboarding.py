@@ -390,7 +390,7 @@ class ProjectOnboardingTests(unittest.TestCase):
                     "mergeCommit": {"oid": ("d" if ready else "c") * 40},
                     "mergeStateStatus": "CLEAN",
                     "headRefName": branch,
-                    "headRefOid": ("f" if ready else "e") * 40,
+                    "commits": [{"oid": ("f" if ready else "e") * 40}],
                 }
 
             def _live_project(self, _request):
@@ -423,6 +423,19 @@ class ProjectOnboardingTests(unittest.TestCase):
             )
             self.assertEqual(value["invocations"], evidence["driver"]["invocations"])
             self.assertEqual("2" * 64, evidence["canary"]["completion_evidence_sha256"])
+
+    def test_uap_pr_query_uses_fields_supported_by_installed_gh(self):
+        commands = []
+
+        def runner(command, **_kwargs):
+            commands.append(command)
+            return subprocess.CompletedProcess(command, 0, "[]\n", "")
+
+        instance = driver.Driver(None, home=pathlib.Path.cwd(), runner=runner)
+        self.assertIsNone(instance._uap_pr("codex/onboard-example-setup"))
+        fields = commands[0][commands[0].index("--json") + 1]
+        self.assertIn("commits", fields.split(","))
+        self.assertNotIn("headRefOid", fields.split(","))
 
     def test_uap_pr_creation_reconciles_ambiguous_api_result(self):
         value = request(checkpoint="repository_ready")
