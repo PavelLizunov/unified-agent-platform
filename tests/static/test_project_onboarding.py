@@ -361,6 +361,38 @@ class ProjectOnboardingTests(unittest.TestCase):
         self.assertIn(f"head={instance._uap_branch(value, ready=False)}", api)
         self.assertFalse(any(command[:3] == ["gh", "pr", "create"] for command in instance.commands))
 
+    def test_behind_uap_pr_updates_base_without_operator(self):
+        value = request(checkpoint="repository_ready")
+
+        class BehindDriver(driver.Driver):
+            def __init__(self):
+                super().__init__(None, home=pathlib.Path.cwd())
+                self.commands = []
+
+            def _uap_pr(self, branch):
+                return {
+                    "number": 42,
+                    "state": "OPEN",
+                    "mergeCommit": None,
+                    "mergeStateStatus": "BEHIND",
+                    "headRefName": branch,
+                }
+
+            def run(self, command, **_kwargs):
+                self.commands.append(command)
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+        instance = BehindDriver()
+        self.assertIsNone(instance._ensure_uap_pr(value, ready=False))
+        self.assertEqual(
+            [
+                "gh", "api", "--method", "PUT",
+                f"repos/{driver.UAP_REPOSITORY}/pulls/42/update-branch",
+            ],
+            instance.commands[0],
+        )
+        self.assertFalse(any(command[:3] == ["gh", "pr", "merge"] for command in instance.commands))
+
     def test_standing_unit_is_bounded_and_receives_no_owner_key(self):
         service = (ROOT / "tools/swarm/systemd/hermes-project-onboarding.service").read_text(
             encoding="utf-8"
