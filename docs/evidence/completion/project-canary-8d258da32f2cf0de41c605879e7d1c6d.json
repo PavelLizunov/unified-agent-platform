@@ -1,0 +1,129 @@
+{
+  "author": {
+    "head_sha": "98eebe136f80c2a45305add7a6b269a956936f2d",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "route_decision_id": "57ceef17c20e4ea78c1e3abfedc6b6e1bc958032ecbc74e06b72ac885f0d15c5",
+    "sandbox": "workspace-write",
+    "session_id": "019f812f-eb4a-7b51-b74c-b4b547ebb663",
+    "tree_sha": "e79dc6f48280cce79fa8aff813098cb20d13e629"
+  },
+  "central": {
+    "projection_id": "7dde0f6b76f9644f",
+    "result": "Выполнено: Extend this dependency-free Rust starter project: add a public project_status API that returns exactly ready, expose it in the existing user-facing output, and update tests plus README. Do not add dependencies.\nPR: https://github.com/PavelLizunov/uap-macos-onboarding-proof-20260720/pull/1\nMerge-коммит: https://github.com/PavelLizunov/uap-macos-onboarding-proof-20260720/commit/04a6b3bb1ec8c61f31145f414f733312098fe442\nПроверки: тесты, независимое ревью, CI, post-verify и очистка пройдены\nДеплой: не требуется для этого проекта\nИзменённые файлы (3): README.md, src/lib.rs, src/main.rs",
+    "sequence": 23,
+    "status": "completed"
+  },
+  "cleanup": {
+    "kanban_gc_ran": false,
+    "local_branch_deleted": true,
+    "remote_branch_deleted": true,
+    "task_archived": true,
+    "worktrees_removed": true
+  },
+  "delivery": {
+    "applicability": "not_applicable",
+    "ci_run_ids": [
+      29775890019
+    ],
+    "mode": "none",
+    "pr_base_branch": "main",
+    "pr_head_sha": "98eebe136f80c2a45305add7a6b269a956936f2d",
+    "pr_number": 1,
+    "pr_url": "https://github.com/PavelLizunov/uap-macos-onboarding-proof-20260720/pull/1"
+  },
+  "execution": {
+    "root_task_id": "t_12538e58",
+    "run_id": "66"
+  },
+  "gates": {
+    "ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "post_verify_checks": [
+      {
+        "command": "/usr/local/bin/cargo test --all-targets",
+        "exit_code": 0
+      }
+    ],
+    "pre_review_ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "test-macos",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "required_ci_checks": [
+      "test-macos"
+    ]
+  },
+  "mission": {
+    "dispatch_profile": "build1-uap-macos-onboarding-proof-20260720-registered-v4",
+    "goal_sha256": "ab48cda543ae322ae72a9d0bc7b5a8269be012322a9e8bc2257f41ccf64d687a",
+    "mission_id": "project-canary-8d258da32f2cf0de41c605879e7d1c6d",
+    "owner_answer_sha256s": [],
+    "parent_mission_id": null
+  },
+  "reviewer": {
+    "head_sha": "98eebe136f80c2a45305add7a6b269a956936f2d",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "xhigh",
+    "reviewed_sha": "98eebe136f80c2a45305add7a6b269a956936f2d",
+    "route_decision_id": "57ceef17c20e4ea78c1e3abfedc6b6e1bc958032ecbc74e06b72ac885f0d15c5",
+    "sandbox": "read-only",
+    "session_id": "019f8132-de56-75f0-988f-7e9ea5012174",
+    "source_attestation_sha256": "c6cbf896bf1cb235f89e93b82adc1db88a91dceb3f6200a387f3b356a06244d2",
+    "tree_sha": "e79dc6f48280cce79fa8aff813098cb20d13e629"
+  },
+  "route": {
+    "author_model": "gpt-5.6-sol",
+    "decision_id": "57ceef17c20e4ea78c1e3abfedc6b6e1bc958032ecbc74e06b72ac885f0d15c5",
+    "policy_id": "openai-autonomy-v2",
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "reviewer_model": "gpt-5.6-terra",
+    "route": "complex"
+  },
+  "runtime": {
+    "coordinator_sha256": "da0be7d9f3cafd946b9e695f017a48101e6e689cf0e68bc78be8a9ae63ba137b",
+    "invocations": {
+      "chain_sha256": "2d9facd48ddd946925c1782136b74dc0dbf360c5b7d49cf6d6812dcf124bb74f",
+      "count": 1,
+      "first": {
+        "invocation_id": "29d41b9efd474a7faa7e94322bb530b8",
+        "unit": "hermes-delivery-coordinator@uap-macos-onboarding-proof-20260720-registered-v4.service"
+      },
+      "last": {
+        "invocation_id": "29d41b9efd474a7faa7e94322bb530b8",
+        "unit": "hermes-delivery-coordinator@uap-macos-onboarding-proof-20260720-registered-v4.service"
+      }
+    },
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "profile_sha256": "357c9e13c50f78187ca98aebc699b2240960e47c775b304900a9b9f695c71a13"
+  },
+  "schema_version": 1,
+  "sha256": "535a0abdee9245c6b9f5b3a73661d8c9b462269fc5498160258e292701522bda",
+  "source": {
+    "base_sha": "bc2666d5ca1d2c4e699ce76efecd0a893b70974d",
+    "candidate_ancestor_of_merge": true,
+    "candidate_files": [
+      "README.md",
+      "src/lib.rs",
+      "src/main.rs"
+    ],
+    "candidate_sha": "98eebe136f80c2a45305add7a6b269a956936f2d",
+    "default_sha": "04a6b3bb1ec8c61f31145f414f733312098fe442",
+    "merge_ancestor_of_default": true,
+    "merge_sha": "04a6b3bb1ec8c61f31145f414f733312098fe442",
+    "repo": "PavelLizunov/uap-macos-onboarding-proof-20260720"
+  }
+}

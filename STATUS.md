@@ -4,6 +4,16 @@ Last updated: 2026-07-20
 
 ## Phase
 
+- **One-click onboarding certificate and driver provenance live-proven (2026-07-20; ADR-035).** Clean Workspace
+  request `project-onboarding-3b9c8d6a8d46515b61136feb2ec6d5b7` created private Rust repository
+  `PavelLizunov/uap-macos-onboarding-proof-20260720`, completed Sol/Terra delivery through GitHub macOS CI, target
+  PR #1, exact merge/post-verify and cleanup, and reached `ready` only after protected setup/activation PRs #368/#369
+  and exact Flux rollout. The closed onboarding certificate binds a 14-invocation systemd chain, driver/profile,
+  private bootstrap repository, both UAP PRs, persistent timer, ready catalog and the byte-exact canonical completion
+  bundle. Three defects exposed by the preceding disposable request were fixed through PRs #363/#366/#367; the failed
+  request remains terminal negative evidence. Exact proof:
+  `docs/evidence/one-click-project-onboarding-attested-canary-2026-07-20.md`.
+
 - **One-click new-project onboarding live-proven (2026-07-20; ADR-035).** Workspace request
   `project-onboarding-170ac9b31190f8b6d4eb263cac3bf35d` created private Rust repository
   `PavelLizunov/uap-macos-oneclick-final-20260720`, admitted its setup through protected PR #358, installed an exact
