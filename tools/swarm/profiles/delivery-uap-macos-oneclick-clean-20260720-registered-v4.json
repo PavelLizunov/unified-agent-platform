@@ -1,0 +1,52 @@
+{
+  "allowed_path_prefixes": [
+    "README.md",
+    "src"
+  ],
+  "assignee": "coordinator-codex-auto-uap-macos-oneclick-clean-20260720",
+  "author_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets"
+    ]
+  ],
+  "branch_prefix": "codex/registered-uap-macos-oneclick-clean-20260720",
+  "ci_timeout_seconds": 3600,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered uap-macos-oneclick-clean-20260720 mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-uap-macos-oneclick-clean-20260720-registered-v4",
+  "max_changed_files": 40,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets"
+    ]
+  ],
+  "pull_request_body": "Implements one registered owner mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered uap-macos-oneclick-clean-20260720 mission",
+  "remote": "https://github.com/PavelLizunov/uap-macos-oneclick-clean-20260720.git",
+  "repo": "PavelLizunov/uap-macos-oneclick-clean-20260720",
+  "required_ci_checks": [
+    "test-macos"
+  ],
+  "review_checks": [
+    [
+      "/usr/local/bin/cargo",
+      "test",
+      "--all-targets"
+    ]
+  ],
+  "route_flags": [
+    "multi_platform"
+  ],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/uap-macos-oneclick-clean-20260720",
+  "worktree_root": "/home/uap/worktrees/uap-macos-oneclick-clean-20260720-registered-v4"
+}
