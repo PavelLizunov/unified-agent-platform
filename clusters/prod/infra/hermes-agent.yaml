@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v65-api-credential-rotation"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v66-research-codex-home"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
