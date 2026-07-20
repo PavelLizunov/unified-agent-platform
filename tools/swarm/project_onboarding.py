@@ -1053,7 +1053,11 @@ class Driver:
         ):
             raise RetryLater("onboarding delivery timer is not armed")
         project = self._live_project(request)
-        expected_catalog = catalog_entry(request, ready=True)
+        expected_catalog = {
+            key: value
+            for key, value in catalog_entry(request, ready=True).items()
+            if key not in {"aliases", "dispatch_profile", "platforms"}
+        }
         if project != expected_catalog:
             raise RetryLater("ready project catalog evidence is not converged")
         completion, completion_bytes_sha256 = self._completion_evidence(request)
