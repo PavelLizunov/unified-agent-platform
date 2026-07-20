@@ -46,6 +46,8 @@ All three required `static-checks` jobs passed. Flux applied exact merge `5f2ca0
 The final Workspace session `e7a39933-856f-49c5-91e0-56ab6636880e` contained exactly one
 `mcp.build1.research_session` call. It returned request `research-523fe33db798d7cc70a578a0`,
 `trust=untrusted_external_content`, and two `developers.openai.com` citations. The same cited result was then delivered
-through the installed Telegram outbound adapter; bot authority and chat identity stayed in pod memory and were not
-printed. A real inbound Telegram owner turn cannot be impersonated by an operator canary, so that optional UI action
-remains owner UAT rather than setup or a platform blocker.
+with the installed Telegram SDK using the production bot/proxy authority; bot authority and chat identity stayed in
+pod memory and were not printed. This proves Telegram delivery, not invocation of the already-running adapter object.
+A real inbound Telegram owner turn cannot be impersonated by an operator canary, so that optional UI action remains
+owner UAT rather than setup or a platform blocker. The two pre-fix canaries that entered coding mission intake were
+cancelled by their exact mission ids after the route was proven, so they no longer consume worker capacity.
