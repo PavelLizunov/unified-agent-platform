@@ -137,6 +137,17 @@ Protected-branch identity:
 
 - acceleration PR: <https://github.com/PavelLizunov/unified-agent-platform/pull/336>
 - implementation commit: `e448f8867ec4bb9da5c02292dd66f0b52de56b36`
+- PR head: `86ad816e0e4615eae9b95b4f9274b28d993468c8`
+- required `static-checks`: run `29743546734`, job `88355791113`, passed in 38 seconds
+- squash merge: `54ce95b95f37a8aac1a2c20a1db3eb2693180bb4`
 
-The PR page is the immutable source for its required `static-checks` run and squash merge. Final Flux revision and
-Ready-pod identity are added after reconciliation.
+Flux reconciled both `GitRepository/uap-platform` and `Kustomization/uap-platform` Ready at
+`master@sha1:54ce95b95f37a8aac1a2c20a1db3eb2693180bb4`. The rolled workload was
+`hermes-agent-d9b567fff-z4q67`, config revision `v71-mac-ctc-stt`, Ready `1/1`, zero restarts on `uap-home-2`.
+
+The post-deploy 19.185-second OGG/Opus run used the mounted `/opt/uap-stt/local_stt.py` and managed remote URL. It
+returned the same 314-character transcript/hash in 1.069 seconds. Replaying source
+`uap-mac-stt-canary-20260720-v1` returned `created=false` and the original
+`mission-intake-11807b9d61c3f804b09c6d3ba2116fe4`; the canary mission was then terminally cancelled, its Kanban task
+archived, its transient author unit stopped and its disposable worktree removed. The post-deploy audio and transient
+scripts were removed, and the Mac worker log contained no transcript.
