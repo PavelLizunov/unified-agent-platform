@@ -650,11 +650,11 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   controlled canary. This is not a soak, HA proof or approval for automatic model/GPU/swarm selection.
 - **ai-search (#105)** — zero-key web-search CLI (DuckDuckGo via the VLESS proxy; exa/tavily/brave opt-in from a key
   file); `runbooks/ai-search.md`.
-- **Controlled owner research (Central live-proven, channel canary pending, 2026-07-20)** — PR #323 / ADR-033
-  installed the bounded, idempotent `research_session` MCP facade over a separate read-only Codex native-search run.
-  Exact-domain live search, durable replay and the Central MCP call passed. A later build-1 HTTP probe exposed the API
-  bearer in process diagnostics because of incorrect shell quoting; rotation revision `v65-api-credential-rotation`
-  replaces every copy before Workspace/Telegram projection is claimed. Evidence:
+- **Controlled owner research is live-proven (2026-07-20)** — PR #323 / ADR-033 installed the bounded,
+  idempotent `research_session` facade over a separate read-only Codex native-search run. PR #325 rotated the bearer
+  exposed by a faulty diagnostic; PRs #328/#332/#333 closed MCP home, channel-routing and egress gaps found by the live
+  canary. Flux exact merge `5f2ca07`, revision `v70-research-mcp-egress`, Workspace one-tool-call cited result and
+  Telegram outbound cited delivery passed. Brave remains inactive under its default retention terms. Evidence:
   `docs/evidence/controlled-research-rollout-2026-07-20.md`.
 - **Egress ops hardening (#108/#109/#110)** — SNI pre-flight gate + decrypt-verify guard + first gated rotation through
   the new pipeline (also summarised in the "Egress ops hardening — DONE 2026-07-10" bullet under Phase).

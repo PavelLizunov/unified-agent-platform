@@ -60,12 +60,12 @@ resolved; use `STATUS.md` rather than this handoff for their exact outcome.
   OGG canary and stable-source replay produced exactly one Central mission. Failure remains before mission creation.
   Workspace projects the resulting mission but still has no binary voice-upload control. See `STATUS.md` and
   `docs/evidence/local-voice-stt-rollout-2026-07-20.md` for the exact live boundary.
-- **Controlled owner research is Central live-proven, channel canary pending (2026-07-20):** PR #323 / ADR-033
-  installed the bounded, restart-safe `research_session` facade over a separate read-only Codex native-search run.
-  Exact-domain search, durable replay and Central MCP invocation passed. A later HTTP projection probe exposed the
-  Central API bearer in process diagnostics; finish `v65-api-credential-rotation`, reject the old token, then run the
-  Workspace + Telegram replay canary in `runbooks/controlled-research.md`. Brave remains inactive under its default
-  retention terms. See `docs/evidence/controlled-research-rollout-2026-07-20.md`.
+- **Controlled owner research is live-proven (2026-07-20):** PR #323 / ADR-033 installed the bounded,
+  restart-safe `research_session` facade over a separate read-only Codex native-search run. PR #325 rotated the bearer
+  exposed by a faulty diagnostic; PRs #328/#332/#333 closed MCP home, channel-routing and egress gaps. Flux exact merge
+  `5f2ca07`, revision `v70-research-mcp-egress`, Workspace one-tool-call cited result and Telegram outbound cited
+  delivery passed. Brave remains inactive under its default retention terms. See
+  `docs/evidence/controlled-research-rollout-2026-07-20.md`.
 - **Subscription image generation is live-proven (2026-07-20):** PRs #327/#329 / ADR-034 installed a separate
   Central text-to-image mission using production `openai-codex`/`codex_app_server` and built-in `$imagegen`.
   Workspace canary, bounded artifact download and stable-source replay passed on `v68-imagegen-completion`; build-1
