@@ -76,6 +76,13 @@ export const Route = createFileRoute('/api/project-onboarding')({
         if (!isAuthenticated(request)) {
           return Response.json({ error: 'Unauthorized' }, { status: 401 })
         }
+        const ownerKey = process.env.HERMES_MISSION_OWNER_KEY?.trim()
+        if (!ownerKey) {
+          return Response.json(
+            { error: 'Mission owner capability unavailable' },
+            { status: 503 },
+          )
+        }
         const body = (await request.json().catch(() => null)) as {
           name?: unknown
           description?: unknown
@@ -95,7 +102,10 @@ export const Route = createFileRoute('/api/project-onboarding')({
         try {
           const { response, payload } = await central('/api/project-onboarding', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Hermes-Mission-Owner-Key': ownerKey,
+            },
             body: JSON.stringify({
               name: body.name,
               description: body.description,

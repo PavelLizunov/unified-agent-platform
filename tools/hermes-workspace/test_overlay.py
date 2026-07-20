@@ -283,6 +283,8 @@ def main() -> None:
         assert "PROJECT_NAME.test(body.name)" in onboarding_api
         assert "uap_project_onboarding" in onboarding_api
         assert "uap_mission_project" in onboarding_api
+        assert "process.env.HERMES_MISSION_OWNER_KEY?.trim()" in onboarding_api
+        assert "'X-Hermes-Mission-Owner-Key': ownerKey" in onboarding_api
         assert onboarding_api.count("HttpOnly; SameSite=Strict") == 3
         assert all(field not in onboarding_api for field in (
             "shell_command", "source_checkout", "dispatch_profile", "model_id",
