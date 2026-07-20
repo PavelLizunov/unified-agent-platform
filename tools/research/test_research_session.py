@@ -68,8 +68,8 @@ def main() -> None:
         assert first["trust"] == "untrusted_external_content"
         assert len(calls) == 1
         command, kwargs = calls[0]
-        assert command[:7] == [
-            "codex", "--search", "--disable", "shell_tool",
+        assert command[:9] == [
+            "codex", "--search", "--model", "gpt-5.3-codex-spark", "--disable", "shell_tool",
             "--ask-for-approval", "never", "exec"
         ]
         assert "--ephemeral" in command and "--ignore-user-config" in command
