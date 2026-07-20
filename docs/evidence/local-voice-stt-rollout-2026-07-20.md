@@ -133,4 +133,10 @@ resident worker used 267,648 KiB RSS. All canary audio and transient scripts wer
 ops-1, pod and Mac immediately after the run. Linux CPU fallback, failure-before-mission and replay remain covered by
 `tools/hermes-mission/test_local_stt.py`.
 
-The acceleration PR and exact rollout identity are appended after the protected-branch deployment.
+Protected-branch identity:
+
+- acceleration PR: <https://github.com/PavelLizunov/unified-agent-platform/pull/336>
+- implementation commit: `e448f8867ec4bb9da5c02292dd66f0b52de56b36`
+
+The PR page is the immutable source for its required `static-checks` run and squash merge. Final Flux revision and
+Ready-pod identity are added after reconciliation.
