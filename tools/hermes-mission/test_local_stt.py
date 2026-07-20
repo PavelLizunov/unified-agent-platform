@@ -26,15 +26,16 @@ LOCAL_ROUTER = ROOT / "tools" / "local-models" / "route.py"
 
 class FakeMacSTT(BaseHTTPRequestHandler):
     received_lengths: list[int] = []
+    transcripts = ("fragment one", "fragment two", "fragment three", "fragment four")
 
     def do_POST(self) -> None:
         length = int(self.headers["Content-Length"])
         body = self.rfile.read(length)
         assert self.path == "/v1/audio/transcriptions"
         assert self.headers["Content-Type"] == "application/octet-stream"
-        assert len(body) == 20 * 16_000 * 2
+        assert 0 < len(body) <= 20 * 16_000 * 2
         self.received_lengths.append(len(body))
-        transcript = "Проверить резервную копию.".encode("utf-8")
+        transcript = self.transcripts[len(self.received_lengths) - 1].encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(transcript)))
@@ -73,13 +74,13 @@ def main() -> None:
             fake_bin / "ffprobe",
             "#!/usr/bin/env python3\n"
             "import json\n"
-            "print(json.dumps({'format': {'duration': '20', 'format_name': 'ogg'}}))\n",
+            "print(json.dumps({'format': {'duration': '65', 'format_name': 'ogg'}}))\n",
         )
         _executable(
             fake_bin / "ffmpeg",
             "#!/usr/bin/env python3\n"
             "import pathlib, sys\n"
-            "pathlib.Path(sys.argv[-1]).write_bytes(b'\\0' * (20 * 16000 * 2))\n",
+            "pathlib.Path(sys.argv[-1]).write_bytes(b'\\0' * (65 * 16000 * 2))\n",
         )
         fake_python = root / "python"
         fake_python.mkdir()
@@ -154,10 +155,29 @@ def main() -> None:
             backend_thread.join(timeout=5)
         assert completed.returncode == 0, completed.stderr
         assert completed.stdout == ""
-        assert output.read_text(encoding="utf-8") == "Проверить резервную копию.\n"
-        assert FakeMacSTT.received_lengths == [20 * 16_000 * 2]
+        assert output.read_text(encoding="utf-8") == (
+            "fragment one fragment two fragment three fragment four\n"
+        )
+        assert FakeMacSTT.received_lengths == [
+            20 * 16_000 * 2,
+            20 * 16_000 * 2,
+            20 * 16_000 * 2,
+            5 * 16_000 * 2,
+        ]
         assert not (root / "fallback-called").exists()
 
+        (fake_bin / "ffprobe").write_text(
+            "#!/usr/bin/env python3\n"
+            "import json\n"
+            "print(json.dumps({'format': {'duration': '20', 'format_name': 'ogg'}}))\n",
+            encoding="utf-8",
+        )
+        (fake_bin / "ffmpeg").write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            "pathlib.Path(sys.argv[-1]).write_bytes(b'\\0' * (20 * 16000 * 2))\n",
+            encoding="utf-8",
+        )
         fallback_output = root / "fallback.txt"
         fallback = subprocess.run(
             [sys.executable, str(STT), str(audio), str(fallback_output), "--model", str(model)],
@@ -212,11 +232,10 @@ def main() -> None:
             ).fetchone()[0] == 1
 
         output.unlink()
-        env["UAP_STT_FFPROBE_DURATION"] = "26"
         (fake_bin / "ffprobe").write_text(
             "#!/usr/bin/env python3\n"
             "import json\n"
-            "print(json.dumps({'format': {'duration': '26', 'format_name': 'ogg'}}))\n",
+            "print(json.dumps({'format': {'duration': '901', 'format_name': 'ogg'}}))\n",
             encoding="utf-8",
         )
         failed = subprocess.run(
@@ -227,7 +246,7 @@ def main() -> None:
             timeout=10,
         )
         assert failed.returncode == 2
-        assert "25 second limit" in failed.stderr
+        assert "15 minute safety ceiling" in failed.stderr
         assert not output.exists()
         with sqlite3.connect(database) as connection:
             assert connection.execute(

@@ -92,6 +92,7 @@ _ID_PAYLOAD_FIELDS = {
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
+_MAX_OWNER_GOAL_CHARS = 16_384
 _MAX_TERMINAL_ENTRIES = 200
 _MAX_TERMINAL_CHARS = 65_536
 _MAX_OWNER_ANSWER_CHARS = 4_000
@@ -2070,7 +2071,7 @@ class MissionStore:
         """Answer the bound question, otherwise accept one new registered goal."""
         if not isinstance(text, str):
             raise MissionError("invalid owner turn")
-        if not text.strip() or len(text) > 8_192:
+        if not text.strip() or len(text) > _MAX_OWNER_GOAL_CHARS:
             raise MissionError("invalid owner turn")
         platform = _require_id(platform, "intake platform")
         source_message_id = _require_source_value(
@@ -2347,7 +2348,7 @@ class MissionStore:
         input_source_message_sha256: str | None = None,
     ) -> tuple[dict[str, Any], bool]:
         goal = str(goal or "").strip()
-        if not goal or len(goal) > 8_192:
+        if not goal or len(goal) > _MAX_OWNER_GOAL_CHARS:
             raise MissionError("invalid mission goal")
         mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
         if dispatch_profile is not None:

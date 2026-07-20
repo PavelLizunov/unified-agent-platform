@@ -24,7 +24,7 @@ larger runtime and adds a gated long-form VAD dependency that the bounded voice-
 | Other useful size point | Q8_0: 273,724,832 bytes; F16: 452,381,408 bytes | approximately 220–240M parameters plus PyTorch/torchaudio/Transformers runtime |
 | Runtime format | GGUF loaded by C/C++ `ggml`; Python wrapper is stdlib `ctypes` | custom Hugging Face Python module with `trust_remote_code=True` and PyTorch stack |
 | Short-form boundary | model/runtime rejects audio beyond 25 seconds | `LONGFORM_THRESHOLD = 25 * 16000`; `transcribe()` rejects longer audio |
-| Long-form/VAD | not used in UAP; hard 25-second ingress ceiling | `transcribe_longform()` adds `pyannote/segmentation-3.0`, extra packages, gated terms and `HF_TOKEN` |
+| Long-form/VAD | UAP splits decoded PCM into deterministic 20-second requests; no VAD/model dependency | `transcribe_longform()` adds `pyannote/segmentation-3.0`, extra packages, gated terms and `HF_TOKEN` |
 | Input | 16 kHz mono PCM; UAP performs bounded OGG/Opus or audio-container decode with the image's FFmpeg | checked model code invokes FFmpeg to produce 16 kHz mono PCM |
 | Timestamps | native API exposes timestamp modes; this model card mentions token timestamps, but UAP did not verify timestamp accuracy and requests `timestamps=none` | current upstream code/release mentions word timestamps, but the ordinary-goal intake does not consume them |
 
@@ -88,15 +88,17 @@ The wrapper and existing Hermes seam jointly enforce:
 
 - Telegram rejects media above its existing pre-download bound; STT adds an 8 MiB regular-file bound;
 - accepted container suffix plus FFprobe format check; local-file-only protocols;
-- duration `0 < d <= 25.0s`; no long-form VAD or HF token;
+- duration `0 < d <= 15m` as an emergency resource ceiling; no long-form VAD or HF token;
 - FFmpeg `-nostdin`, one decode thread, no video/subtitle/data, 16 kHz mono signed-16 PCM, 12-second decode timeout and
   bounded PCM output;
-- remote body capped at 800,000 bytes, an eight-second request timeout, one serialized Mac request with queue depth
-  two, Metal CTC with two host threads, 64 Mac file descriptors and launchd restart convergence;
-- on remote failure, CPU RNNT with two inference threads, 40 CPU seconds, 1.5 GiB address-space ceiling, a five-second
-  exclusive model lock and the existing 45-second outer command timeout;
+- decoded PCM is sent sequentially in 20-second bodies capped at 640,000 bytes, with an eight-second per-request
+  timeout, one serialized Mac request with queue depth two, Metal CTC with two host threads, 64 Mac file descriptors
+  and launchd restart convergence;
+- on remote failure, recordings fitting one chunk use CPU RNNT with two inference threads, 40 CPU seconds, 1.5 GiB
+  address-space ceiling and a five-second exclusive model lock; longer recordings fail before mission creation
+  instead of multiplying CPU time; the outer command timeout is 90 seconds;
 - temporary decode/output directories removed automatically; Telegram cache audio removed after success or failure;
-- transcript normalized and capped at 4,096 characters, then redacted before either durable store;
+- the joined transcript is normalized and capped at 16,384 characters, then redacted before either durable store;
 - STT failure returns the existing Russian retry/text message before `MissionStore` is opened;
 - the Telegram message ID remains the durable intake identity, so replay and a new `MissionStore` instance converge
   to the original Central mission.
