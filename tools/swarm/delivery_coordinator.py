@@ -97,6 +97,11 @@ _CAPACITY_RETRY_DELAYS_SECONDS = (5, 20)
 _CAPACITY_ROUTE_SWITCH_DELAY_SECONDS = 5
 _CAPACITY_ROUND_DELAY_SECONDS = 120
 _CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
+_CI_RETRY_DELAY_SECONDS = 60
+_CI_RETRY_FIELDS = {
+    "schema_version", "gate", "candidate_sha", "run_ids", "baseline_attempts",
+    "requested_run_ids", "status", "not_before",
+}
 _CAPACITY_STATE_FIELDS = {
     "schema_version", "role", "quality_epoch", "route_decision_id", "candidate_sha",
     "failures_on_route", "round", "status", "not_before", "error_class",
@@ -500,6 +505,38 @@ def _ci_run_ids(checks: Any) -> list[int]:
         and not isinstance(item.get("run_id"), bool)
         and item["run_id"] > 0
     }) if isinstance(checks, list) else []
+
+
+def _ci_run_attempts(checks: Any) -> dict[int, int]:
+    attempts: dict[int, int] = {}
+    for item in checks if isinstance(checks, list) else []:
+        if not isinstance(item, dict):
+            continue
+        run_id = item.get("run_id")
+        attempt = item.get("run_attempt", 1)
+        if (
+            isinstance(run_id, int) and not isinstance(run_id, bool) and run_id > 0
+            and isinstance(attempt, int) and not isinstance(attempt, bool) and attempt > 0
+        ):
+            attempts[run_id] = max(attempts.get(run_id, 0), attempt)
+    return attempts
+
+
+def _failed_ci_run_ids(checks: Any) -> list[int]:
+    if not isinstance(checks, list):
+        return []
+    pending = {
+        None, "PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "REQUESTED", "WAITING",
+    }
+    passing = {"SUCCESS", "NEUTRAL", "SKIPPED"}
+    return sorted({
+        item["run_id"]
+        for item in checks if isinstance(item, dict)
+        and isinstance(item.get("run_id"), int) and not isinstance(item.get("run_id"), bool)
+        and item["run_id"] > 0
+        and (item.get("conclusion") or item.get("state") or item.get("status"))
+        not in pending | passing
+    })
 
 
 def _stored_ci_passed(checks: Any, required: list[str]) -> bool:
@@ -1899,6 +1936,7 @@ class DeliveryCoordinator:
             state.setdefault("effective_route_decisions", {})
             state.setdefault("owner_answers", [])
             self._owner_answers(state)
+            self._ci_retry_state(state)
             migrated = False
             if "review_findings" in state:
                 findings = _sanitize_findings(state["review_findings"])
@@ -3255,6 +3293,7 @@ class DeliveryCoordinator:
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
                 self._require_draft_pr(state)
+                state.pop("ci_retry", None)
                 state.update(
                     phase="pre_review_ci_green",
                     pre_review_gate_version=_PRE_REVIEW_GATE_VERSION,
@@ -3628,6 +3667,7 @@ class DeliveryCoordinator:
             checks = self._ci_rollup(state)
             decision = _ci_decision(checks, self.profile["required_ci_checks"])
             if decision == "passed":
+                state.pop("ci_retry", None)
                 state["ci_checks"] = _ci_summaries(checks)
                 state["ci_run_ids"] = _ci_run_ids(checks)
                 return
@@ -3740,6 +3780,7 @@ class DeliveryCoordinator:
                 "status": str(run.get("status") or "").upper() or None,
                 "conclusion": str(run.get("conclusion") or "").upper() or None,
                 "run_id": run["id"],
+                "run_attempt": run.get("run_attempt", 1),
             })
             jobs_value = json.loads(self._run([
                 self.profile["gh_bin"], "api", "--method", "GET",
@@ -3757,6 +3798,7 @@ class DeliveryCoordinator:
                     "status": str(job.get("status") or "").upper() or None,
                     "conclusion": str(job.get("conclusion") or "").upper() or None,
                     "run_id": run["id"],
+                    "run_attempt": run.get("run_attempt", 1),
                 })
         return checks
 
@@ -3797,6 +3839,119 @@ class DeliveryCoordinator:
                 failure_error=finding,
             )
         self._save(paths, state)
+
+    def _ci_retry_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("ci_retry")
+        if value is None:
+            return None
+        if (
+            not isinstance(value, dict)
+            or set(value) != _CI_RETRY_FIELDS
+            or value.get("schema_version") != 1
+            or value.get("gate") not in {"pre_review", "pr"}
+            or not isinstance(value.get("candidate_sha"), str)
+            or not value["candidate_sha"]
+            or not isinstance(value.get("run_ids"), list)
+            or not value["run_ids"]
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item <= 0
+                for item in value["run_ids"]
+            )
+            or value["run_ids"] != sorted(set(value["run_ids"]))
+            or not isinstance(value.get("requested_run_ids"), list)
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item <= 0
+                for item in value["requested_run_ids"]
+            )
+            or value["requested_run_ids"] != sorted(set(value["requested_run_ids"]))
+            or not set(value["requested_run_ids"]) <= set(value["run_ids"])
+            or not isinstance(value.get("baseline_attempts"), dict)
+            or set(value["baseline_attempts"]) != {
+                str(item) for item in value["run_ids"]
+            }
+            or any(
+                isinstance(item, bool) or not isinstance(item, int) or item <= 0
+                for item in value["baseline_attempts"].values()
+            )
+            or value.get("status") not in {"prepared", "requested"}
+            or isinstance(value.get("not_before"), bool)
+            or not isinstance(value.get("not_before"), (int, float))
+            or not math.isfinite(float(value["not_before"]))
+            or value["not_before"] < 0
+        ):
+            raise DeliveryError("durable CI retry checkpoint is invalid")
+        return value
+
+    def _retry_failed_ci_once(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        error: CIFailed,
+        *,
+        pre_review: bool,
+    ) -> bool:
+        """Schedule one same-SHA failed-job rerun; return True while it is pending."""
+        gate = "pre_review" if pre_review else "pr"
+        candidate = state.get("candidate_sha")
+        if not isinstance(candidate, str) or not candidate:
+            return False
+        attempts = _ci_run_attempts(error.checks)
+        failed_run_ids = _failed_ci_run_ids(error.checks)
+        retry = self._ci_retry_state(state)
+        if retry is not None and (
+            retry["gate"] != gate or retry["candidate_sha"] != candidate
+        ):
+            raise DeliveryError("CI retry checkpoint belongs to a different candidate gate")
+
+        if retry is not None:
+            advanced_run_ids = {
+                run_id for run_id in retry["run_ids"]
+                if attempts.get(run_id, 0) > retry["baseline_attempts"][str(run_id)]
+            }
+            decision = _ci_decision(error.checks, self.profile["required_ci_checks"])
+            if advanced_run_ids == set(retry["run_ids"]) and decision == "failed":
+                state.pop("ci_retry", None)
+                self._save(paths, state)
+                return False
+            if decision == "pending" or retry["not_before"] > time.time():
+                return True
+            failed_run_ids = retry["run_ids"]
+            if retry["status"] == "requested":
+                retry["requested_run_ids"] = sorted(advanced_run_ids)
+        elif not failed_run_ids or any(run_id not in attempts for run_id in failed_run_ids):
+            return False
+        else:
+            retry = {
+                "schema_version": 1,
+                "gate": gate,
+                "candidate_sha": candidate,
+                "run_ids": failed_run_ids,
+                "baseline_attempts": {
+                    str(run_id): attempts[run_id] for run_id in failed_run_ids
+                },
+                "requested_run_ids": [],
+                "status": "prepared",
+                "not_before": 0,
+            }
+            state["ci_retry"] = retry
+            self._save(paths, state)
+
+        retry["status"] = "prepared"
+        retry["not_before"] = time.time() + _CI_RETRY_DELAY_SECONDS
+        self._save(paths, state)
+        for run_id in retry["run_ids"]:
+            if run_id in retry["requested_run_ids"]:
+                continue
+            self._run([
+                self.profile["gh_bin"], "api", "--method", "POST",
+                f"repos/{self.profile['repo']}/actions/runs/{run_id}/rerun-failed-jobs",
+            ])
+            retry["requested_run_ids"].append(run_id)
+            retry["requested_run_ids"].sort()
+            self._save(paths, state)
+        retry["status"] = "requested"
+        self._save(paths, state)
+        return True
 
     def _finalize_failed_pr(self, state: dict[str, Any]) -> bool:
         self._assert_claim(
@@ -4744,6 +4899,13 @@ class DeliveryCoordinator:
                 try:
                     self._pre_review_ci(state, paths)
                 except CIFailed as error:
+                    if self._retry_failed_ci_once(
+                        state, paths, error, pre_review=True
+                    ):
+                        return {
+                            "action": "ci_retry_wait", "mission_id": mission_id,
+                            "state": state,
+                        }
                     self._record_ci_failure(state, paths, error, pre_review=True)
                     if state["phase"] == "ci_failed":
                         return self._finish_rejection(state, paths)
@@ -4785,6 +4947,13 @@ class DeliveryCoordinator:
                     self._save(paths, state)
                     self._publish_stage(state, "verifying", 90)
             except CIFailed as error:
+                if self._retry_failed_ci_once(
+                    state, paths, error, pre_review=False
+                ):
+                    return {
+                        "action": "ci_retry_wait", "mission_id": mission_id,
+                        "state": state,
+                    }
                 self._record_ci_failure(state, paths, error)
                 if state["phase"] == "ci_failed":
                     return self._finish_rejection(state, paths)
