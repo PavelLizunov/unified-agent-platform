@@ -51,8 +51,7 @@ _PROFILE_FIELDS = {
     "pull_request_title", "pull_request_body", "max_review_cycles",
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
-    "post_verify_repair",
-    "delivery_mode", "completion_evidence",
+    "post_verify_repair", "delivery_mode", "completion_evidence",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "goal", "required_files", "allowed_path_prefixes", "max_changed_files",
@@ -72,7 +71,12 @@ _PRE_REVIEW_CI_SUMMARY = (
 )
 _PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
-_POST_VERIFY_SUMMARY = "Post-verify failed after the approved repair mission"
+_POST_VERIFY_SUMMARY = "Post-verify failed twice on the exact merged revision"
+_LEGACY_POST_VERIFY_PHASES = {
+    "post_verify_repair_pending",
+    "post_verify_repair_waiting",
+    "post_verify_repair_completed",
+}
 _MAX_CHECK_FAILURE_CHARS = 4000
 _COORDINATOR_PARENT_UNIT = re.compile(
     r"^hermes-delivery-coordinator@[A-Za-z0-9_.:-]+\.service$"
@@ -1849,12 +1853,6 @@ class DeliveryCoordinator:
             and mission.get("goal") != self.profile["goal"]
         ):
             raise DeliveryError("mission goal does not match the owner-approved profile")
-        if (
-            mission is not None
-            and mission.get("parent_mission_id") is not None
-            and self.profile.get("post_verify_repair") is not None
-        ):
-            raise DeliveryError("repair missions cannot recursively dispatch another repair")
         return mission
 
     def _paths(self, mission_id: str) -> dict[str, pathlib.Path]:
@@ -1868,7 +1866,6 @@ class DeliveryCoordinator:
             "author": root / f"author-{digest}",
             "review": root / f"review-{digest}",
             "verify": root / f"verify-{digest}",
-            "repair_context": directory / "post-verify-repair.json",
             "evidence": directory / "completion-evidence.json",
         }
 
@@ -2039,8 +2036,6 @@ class DeliveryCoordinator:
                     "delivery state is missing for a mission with execution history"
                 )
         allowed_state_files = {paths["lock"].name}
-        if paths["repair_context"].is_file():
-            allowed_state_files.add(paths["repair_context"].name)
         if safe_waiting_owner:
             allowed_state_files.add("adapter-state.json")
         directory_artifacts = (
@@ -2059,30 +2054,6 @@ class DeliveryCoordinator:
         if directory_artifacts or worktree_artifacts:
             raise DeliveryError(
                 "delivery state is missing for a mission with local execution artifacts"
-            )
-        if paths["repair_context"].is_file():
-            context = mission_adapter._read_json(paths["repair_context"])
-            expected = {
-                "schema_version", "mission_id", "parent_mission_id",
-                "dispatch_profile", "diagnostic", "failed_default_sha",
-            }
-            if (
-                not isinstance(context, dict)
-                or set(context) != expected
-                or context.get("schema_version") != 1
-                or context.get("mission_id") != mission_id
-                or context.get("dispatch_profile") != self.profile["dispatch_profile"]
-                or not isinstance(context.get("parent_mission_id"), str)
-                or not isinstance(context.get("failed_default_sha"), str)
-            ):
-                raise DeliveryError("post-verify repair context is invalid")
-            diagnostic = _bounded_diagnostic(
-                str(context.get("diagnostic") or ""), "post-verify failed"
-            )
-            state.update(
-                parent_mission_id=context["parent_mission_id"],
-                repair_failed_default_sha=context["failed_default_sha"],
-                review_findings=[diagnostic],
             )
         return state
 
@@ -4242,29 +4213,98 @@ class DeliveryCoordinator:
                 raise DeliveryError("merged PR branch cleanup did not converge")
         state["merge_sha"] = merge_sha
 
+    @staticmethod
+    def _validated_post_verify_commands(value: Any) -> list[list[str]]:
+        if (
+            not isinstance(value, list)
+            or not value
+            or not all(
+                isinstance(command, list)
+                and command
+                and all(isinstance(argument, str) and argument for argument in command)
+                for command in value
+            )
+        ):
+            raise DeliveryError("durable post-verify commands are invalid")
+        return value
+
+    def _pin_post_verify_plan(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> bool:
+        merge_sha = state.get("merge_sha")
+        candidate_sha = state.get("candidate_sha")
+        if (
+            not isinstance(merge_sha, str)
+            or not merge_sha
+            or not isinstance(candidate_sha, str)
+            or not candidate_sha
+        ):
+            raise DeliveryError("post-verify has no exact merged revision")
+
+        pinned_sha = state.get("post_verify_sha")
+        if pinned_sha is None:
+            state["post_verify_sha"] = merge_sha
+            state["default_sha"] = merge_sha
+            expanded = [
+                self._expand(command, state, paths)
+                for command in self.profile["post_verify_checks"]
+            ]
+            state["post_verify_commands"] = expanded
+            return True
+        elif pinned_sha != merge_sha or state.get("default_sha") != pinned_sha:
+            raise DeliveryError("durable post-verify revision changed")
+        self._validated_post_verify_commands(state.get("post_verify_commands"))
+        return False
+
     def _post_verify(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
+        merge_sha = state.get("merge_sha")
+        candidate_sha = state.get("candidate_sha")
+        pinned_sha = state.get("post_verify_sha")
+        if (
+            not isinstance(merge_sha, str)
+            or not merge_sha
+            or not isinstance(candidate_sha, str)
+            or not candidate_sha
+            or pinned_sha != merge_sha
+            or state.get("default_sha") != pinned_sha
+        ):
+            raise DeliveryError("post-verify has no pinned exact merged revision")
+        pinned_commands = self._validated_post_verify_commands(
+            state.get("post_verify_commands")
+        )
         source = pathlib.Path(self.profile["source_checkout"])
         self._git(source, "fetch", "--prune", "origin", self.profile["default_branch"])
         default_ref = f"origin/{self.profile['default_branch']}"
         if self._run(
-            ["git", "-C", str(source), "merge-base", "--is-ancestor", state["candidate_sha"], default_ref],
+            [
+                "git", "-C", str(source), "merge-base", "--is-ancestor",
+                candidate_sha, merge_sha,
+            ],
             check=False,
         ).returncode:
-            raise DeliveryError("reviewed candidate is not an ancestor of the default branch")
-        state["default_sha"] = self._git(source, "rev-parse", default_ref)
+            raise DeliveryError("reviewed candidate is not an ancestor of the merge revision")
+        if self._run(
+            [
+                "git", "-C", str(source), "merge-base", "--is-ancestor",
+                merge_sha, default_ref,
+            ],
+            check=False,
+        ).returncode:
+            raise DeliveryError("merge revision is not on the fetched default branch")
+
         self._remove_worktree(paths["verify"])
-        self._git(source, "worktree", "add", "--detach", str(paths["verify"]), state["default_sha"])
+        self._git(
+            source, "worktree", "add", "--detach", str(paths["verify"]),
+            state["post_verify_sha"],
+        )
         try:
-            state["post_verify_checks"] = self._checks(
-                "post_verify_checks", paths["verify"], state, paths
-            )
+            records = []
+            for command in pinned_commands:
+                self._run(command, cwd=paths["verify"])
+                records.append({"command": shlex.join(command), "exit_code": 0})
+            state["post_verify_checks"] = records
         except DeliveryError as error:
             raise PostVerifyFailed(str(error)) from error
-
-    @staticmethod
-    def _repair_mission_id(mission_id: str) -> str:
-        digest = hashlib.sha256(mission_id.encode()).hexdigest()[:32]
-        return f"repair-{digest}"
 
     def _record_post_verify_failure(
         self,
@@ -4273,122 +4313,115 @@ class DeliveryCoordinator:
         error: Exception,
     ) -> None:
         diagnostic = _bounded_diagnostic(str(error), "post-verify failed")
-        repair = self.profile.get("post_verify_repair")
-        if repair is None or state.get("repair_mission_id") is not None:
+        attempts = state.get("post_verify_attempts")
+        if attempts == 1:
+            state.update(
+                phase="post_verify_retry_pending",
+                post_verify_first_failure=diagnostic,
+            )
+        elif attempts == 2:
             state.update(
                 phase="post_verify_failed",
                 failure_kind="post_verify",
                 failure_error=diagnostic,
             )
         else:
-            state.update(
-                phase="post_verify_repair_pending",
-                post_verify_failure=diagnostic,
-                failed_default_sha=state.get("default_sha", ""),
-                repair_mission_id=self._repair_mission_id(state["mission_id"]),
-            )
+            raise DeliveryError("post-verify failure is outside the bounded retry state")
         self._save(paths, state)
 
-    def _dispatch_post_verify_repair(
+    def _migrate_legacy_post_verify_state(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
-    ) -> dict[str, Any]:
-        repair = self.profile.get("post_verify_repair")
-        if not isinstance(repair, dict):
-            raise DeliveryError("post-verify repair profile disappeared")
-        child_id = state.get("repair_mission_id")
-        if not isinstance(child_id, str) or not child_id:
-            raise DeliveryError("post-verify repair identity is missing")
-        context = {
-            "schema_version": 1,
-            "mission_id": child_id,
-            "parent_mission_id": state["mission_id"],
-            "dispatch_profile": repair["dispatch_profile"],
-            "diagnostic": _bounded_diagnostic(
-                str(state.get("post_verify_failure") or ""), "post-verify failed"
-            ),
-            "failed_default_sha": str(state.get("failed_default_sha") or ""),
-        }
-        child_paths = self._paths(child_id)
-        mission_adapter._write_json(
-            child_paths["repair_context"], context, private_parent=True
-        )
-        child = self.client.accept_mission(
-            mission_id=child_id,
-            goal=repair["goal"],
-            dispatch_profile=repair["dispatch_profile"],
-            parent_mission_id=state["mission_id"],
-        )
-        if (
-            child.get("mission_id") != child_id
-            or child.get("goal") != repair["goal"]
-            or child.get("dispatch_profile") != repair["dispatch_profile"]
-            or child.get("parent_mission_id") != state["mission_id"]
-        ):
-            raise DeliveryError("Central accepted the wrong post-verify repair mission")
-        state["phase"] = "post_verify_repair_waiting"
-        self._save(paths, state)
-        return {
-            "action": state["phase"],
-            "mission_id": state["mission_id"],
-            "repair_mission_id": child_id,
-            "state": state,
-        }
-
-    def _observe_post_verify_repair(
-        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
-    ) -> dict[str, Any] | None:
-        child_id = state.get("repair_mission_id")
-        repair = self.profile.get("post_verify_repair")
-        if not isinstance(child_id, str) or not isinstance(repair, dict):
-            raise DeliveryError("post-verify repair state is invalid")
-        child = self.client.get_mission(child_id)
-        if (
-            child.get("mission_id") != child_id
-            or child.get("goal") != repair["goal"]
-            or child.get("dispatch_profile") != repair["dispatch_profile"]
-            or child.get("parent_mission_id") != state["mission_id"]
-        ):
-            raise DeliveryError("post-verify repair mission identity changed")
-        if child.get("status") in {"active", "waiting_owner"}:
-            return {
-                "action": state["phase"],
-                "mission_id": state["mission_id"],
-                "repair_mission_id": child_id,
-                "state": state,
-            }
-        if child.get("status") == "completed":
-            state["phase"] = "post_verify_repair_completed"
-            self._save(paths, state)
+    ) -> str | None:
+        legacy_phase = state.get("phase")
+        if legacy_phase not in _LEGACY_POST_VERIFY_PHASES:
             return None
-        if child.get("status") not in {"failed", "cancelled"}:
-            raise DeliveryError("post-verify repair has an invalid terminal status")
-        self._record_post_verify_failure(
-            state,
-            paths,
-            DeliveryError(
-                _bounded_diagnostic(
-                    str(child.get("error") or "repair mission failed"),
-                    "repair mission failed",
-                )
-            ),
+        attempts = state.get("post_verify_attempts")
+        if attempts not in {None, 1}:
+            raise DeliveryError("legacy post-verify repair attempt state is invalid")
+        if legacy_phase != "post_verify_repair_completed":
+            child_id = state.get("repair_mission_id")
+            repair = self.profile.get("post_verify_repair")
+            if not isinstance(child_id, str) or not child_id or not isinstance(repair, dict):
+                raise DeliveryError("legacy post-verify repair identity is invalid")
+            try:
+                child = self.client.get_mission(child_id)
+            except mission_adapter.AdapterError as error:
+                if (
+                    legacy_phase == "post_verify_repair_pending"
+                    and str(error) == "central mission API returned HTTP 404"
+                ):
+                    child = None
+                else:
+                    raise DeliveryError(
+                        "legacy post-verify repair state cannot be reconciled"
+                    ) from error
+            if child is not None:
+                if (
+                    child.get("mission_id") != child_id
+                    or child.get("goal") != repair["goal"]
+                    or child.get("dispatch_profile") != repair["dispatch_profile"]
+                    or child.get("parent_mission_id") != state.get("mission_id")
+                ):
+                    raise DeliveryError("legacy post-verify repair mission identity changed")
+                status = child.get("status")
+                if status in {"active", "waiting_owner"}:
+                    return "waiting"
+                if status in {"failed", "cancelled"}:
+                    state.update(
+                        phase="post_verify_failed",
+                        failure_kind="post_verify",
+                        failure_error=_bounded_diagnostic(
+                            str(child.get("error") or "repair mission failed"),
+                            "repair mission failed",
+                        ),
+                    )
+                    self._save(paths, state)
+                    return "failed"
+                if status != "completed":
+                    raise DeliveryError(
+                        "legacy post-verify repair has an invalid terminal status"
+                    )
+            elif legacy_phase != "post_verify_repair_pending":
+                raise DeliveryError("legacy post-verify repair mission disappeared")
+        failure = state.get("post_verify_failure") or state.get("failure_error")
+        diagnostic = _bounded_diagnostic(str(failure or "post-verify failed"))
+        self._pin_post_verify_plan(state, paths)
+        state.update(
+            phase="post_verify_retry_pending",
+            post_verify_attempts=1,
+            post_verify_first_failure=diagnostic,
+            legacy_post_verify_phase=legacy_phase,
         )
-        return None
+        self._save(paths, state)
+        return "migrated"
 
-    def _retry_post_verify_after_repair(
+    def _run_post_verify_attempt(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
-    ) -> None:
-        failed_sha = state.get("failed_default_sha")
+    ) -> bool:
+        attempts = state.get("post_verify_attempts", 0)
+        if (
+            not isinstance(attempts, int)
+            or isinstance(attempts, bool)
+            or attempts not in {0, 1}
+            or state.get("phase") not in {"merged", "post_verify_retry_pending"}
+            or (attempts == 0) != (state.get("phase") == "merged")
+        ):
+            raise DeliveryError("post-verify attempt state is invalid")
+        if self._pin_post_verify_plan(state, paths):
+            self._save(paths, state)
+        state.update(
+            phase="post_verify_running",
+            post_verify_attempts=attempts + 1,
+        )
+        self._save(paths, state)
         try:
             self._post_verify(state, paths)
-            if not failed_sha or state.get("default_sha") == failed_sha:
-                raise PostVerifyFailed(
-                    "repair mission completed without changing the default branch"
-                )
         except PostVerifyFailed as error:
             self._record_post_verify_failure(state, paths, error)
-            return
+            return False
         state["phase"] = "verified"
         self._save(paths, state)
+        return True
 
     def _events(self, state: dict[str, Any], *, cleanup: bool) -> list[dict[str, Any]]:
         events = [
@@ -4928,23 +4961,39 @@ class DeliveryCoordinator:
                 self._ensure_worktree(state, paths)
                 self._save(paths, state)
 
-            if state["phase"] == "post_verify_repair_pending":
-                self._assert_claim(state)
-                return self._dispatch_post_verify_repair(state, paths)
+            legacy_repair = self._migrate_legacy_post_verify_state(state, paths)
+            if legacy_repair == "failed":
+                return self._finish_rejection(state, paths)
+            if legacy_repair is not None:
+                return {
+                    "action": state["phase"],
+                    "mission_id": mission_id,
+                    "state": state,
+                }
 
-            if state["phase"] == "post_verify_repair_waiting":
+            if state["phase"] == "post_verify_running":
                 self._assert_claim(state)
-                waiting = self._observe_post_verify_repair(state, paths)
-                if waiting is not None:
-                    return waiting
+                self._record_post_verify_failure(
+                    state,
+                    paths,
+                    PostVerifyFailed(
+                        "post-verify attempt ended without a durable result"
+                    ),
+                )
                 if state["phase"] == "post_verify_failed":
                     return self._finish_rejection(state, paths)
+                return {
+                    "action": state["phase"],
+                    "mission_id": mission_id,
+                    "state": state,
+                }
 
-            if state["phase"] == "post_verify_repair_completed":
+            if state["phase"] == "post_verify_retry_pending":
                 self._assert_claim(state)
-                self._retry_post_verify_after_repair(state, paths)
-                if state["phase"] == "post_verify_failed":
-                    return self._finish_rejection(state, paths)
+                if not self._run_post_verify_attempt(state, paths):
+                    if state["phase"] == "post_verify_failed":
+                        return self._finish_rejection(state, paths)
+                    raise DeliveryError("post-verify retry did not reach a terminal result")
 
             if state["phase"] == "new":
                 self._assert_nonroutable_assignee()
@@ -5073,16 +5122,12 @@ class DeliveryCoordinator:
 
             if state["phase"] == "merged":
                 self._assert_claim(state)
-                try:
-                    self._post_verify(state, paths)
-                except PostVerifyFailed as error:
-                    self._record_post_verify_failure(state, paths, error)
-                    if state["phase"] == "post_verify_failed":
-                        return self._finish_rejection(state, paths)
-                    return self._dispatch_post_verify_repair(state, paths)
-                else:
-                    state["phase"] = "verified"
-                    self._save(paths, state)
+                if not self._run_post_verify_attempt(state, paths):
+                    return {
+                        "action": state["phase"],
+                        "mission_id": mission_id,
+                        "state": state,
+                    }
 
             if state["phase"] == "verified":
                 self._assert_claim(state)
