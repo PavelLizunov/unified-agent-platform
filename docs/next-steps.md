@@ -33,10 +33,11 @@
   voice-upload control, so Telegram is the live voice transport.
 - **Brain reality (2026-07-11):** Codex `gpt-5.6-luna` via `codex_app_server` is live after owner re-auth and an
   explicit in-pod `LUNA-PROBE-OK`. The local `qwen-35b`/`ornith-9b` router remains the manual fallback; coding work stays on build-1.
-- **Image capability (offline green, live canary pending PR/CI):** production Codex OAuth reports built-in image
-  generation available. ADR-034 adds a separate Central text-to-image mission and durable artifact delivery without
-  a new service or paid API. Editing stays unavailable until the subscription app-server accepts and preserves real
-  image input; do not silently fall back to Claude/local/GPU or a paid backend.
+- **Image capability (live green):** PRs #327/#329 and the `v68-imagegen-completion` Workspace canary prove built-in
+  subscription image generation, bounded Central artifact download and no-regeneration replay without a new service
+  or paid API. Telegram native delivery is installed but still lacks a live send canary. Editing stays unavailable
+  until the subscription app-server accepts and preserves real image input; do not silently fall back to
+  Claude/local/GPU or a paid backend.
 
 ---
 

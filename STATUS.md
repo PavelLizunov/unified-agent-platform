@@ -4,13 +4,13 @@ Last updated: 2026-07-20
 
 ## Phase
 
-- **Codex subscription image capability implemented offline (2026-07-20; ADR-034).** The deployed worker was
-  verified read-only: Codex CLI `0.142.0`, stable `image_generation`, installed `$imagegen`, authenticated
-  app-server capability `imageGeneration: true`, and a typed result containing `status`, `result` and `savedPath`.
-  Central now has a separate text-to-image media mission, durable bounded artifact metadata, Telegram native image
-  delivery and authenticated Workspace rendering. The component/replay gate is green; live generation remains
-  intentionally pending PR/CI/merge/deploy. Subscription-auth image editing remains fail-closed because the pinned
-  adapter does not pass image inputs and its Codex backend advertises text-only capability.
+- **Codex subscription image capability live-proven (2026-07-20; ADR-034).** PRs #327/#329 deployed a separate
+  Central text-to-image mission through Codex `0.142.0` app-server and the built-in `$imagegen` under current
+  ChatGPT subscription auth. The exact `v68-imagegen-completion` canary completed with one 796,818-byte PNG,
+  matching MIME/SHA-256 download metadata and an unchanged 24 ms stable-source replay. Workspace returned the
+  result in its originating session and its overlay was rebuilt/restarted on build-1; Telegram uses the existing
+  native image adapter but was not sent a live canary. Subscription-auth image editing remains fail-closed because
+  the pinned adapter does not pass image inputs. Exact proof: `docs/evidence/subscription-imagegen-rollout-2026-07-20.md`.
 
 - Current phase: **post-Stage 0P** — infra bootstrap done; the **model + agent layers are LIVE** in `uap-system`
   (see "Model & Agent Layer" below). Active direction (2026-06-22/23 **pivot**): **vibe-coding** — adopt the
