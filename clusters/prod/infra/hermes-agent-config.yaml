@@ -250,6 +250,24 @@ data:
         exact_failure: 5
         same_tool_failure: 8
         idempotent_no_progress: 5
+    # Deterministic media preprocessing only. This provider emits untrusted owner
+    # text into the existing intake seam; it has no agent/model/routing authority.
+    stt:
+      enabled: true
+      provider: uap_local
+      providers:
+        uap_local:
+          type: command
+          command: >-
+            env PYTHONPATH=/opt/uap-stt/python
+            TRANSCRIBE_LIBRARY=/opt/uap-stt/native/libtranscribe.so
+            LD_LIBRARY_PATH=/opt/uap-stt/native
+            /opt/hermes/.venv/bin/python /opt/uap-stt/local_stt.py
+            {input_path} {output_path} --model {model}
+          model: /opt/data/.cache/uap-stt/gigaam-v3-e2e-rnnt-Q4_K_M.gguf
+          language: ru
+          format: txt
+          timeout: 45
   # Managed scope — mounted at /etc/hermes/.env. hermes loads this LAST with override into
   # os.environ, authoritative for every profile + subprocess. Required because the per-profile
   # os.environ is isolated (multiplex mode) and does NOT see /opt/data/.env, so the Telegram

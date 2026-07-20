@@ -25,7 +25,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-        "gateway/run.py": "c5c8d32cd9ab9075bea6caa202a9455c9ed29135377b2adf163f85676a76be75",
+    "gateway/run.py": "6e3c2c01ce1bc2bac799eba95dde2f3affeda372be6fa119693c2b69ec89aaf5",
     "gateway/platforms/api_server.py": "8cce8df0a142014ab8027505820536e1753398245bb9c37aa22fec4f7f344e94",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
@@ -732,32 +732,44 @@ def connect(
                 if not source_message_id:
                     raise MissionError("mission intake requires a stable source message")
                 goal_text = event.text or ""
-                if event.message_type == MessageType.VOICE:
+                if event.message_type in (MessageType.VOICE, MessageType.AUDIO):
                     audio_paths = [
                         path for index, path in enumerate(event.media_urls or [])
                         if (
                             (event.media_types[index] if index < len(event.media_types or []) else "").startswith("audio/")
-                            or event.message_type == MessageType.VOICE
+                            or event.message_type in (MessageType.VOICE, MessageType.AUDIO)
                         )
                     ]
-                    _, transcripts = await self._enrich_message_with_transcription(
-                        goal_text, audio_paths,
-                    )
-                    if not transcripts:
+                    try:
+                        _, transcripts = await self._enrich_message_with_transcription(
+                            goal_text, audio_paths,
+                        )
+                    finally:
+                        # Telegram caches inbound audio on the durable Hermes volume.
+                        # Remove only files owned by that exact cache, on success or failure.
+                        from gateway.platforms.base import get_audio_cache_dir
+                        audio_cache = get_audio_cache_dir().resolve()
+                        for audio_path in audio_paths:
+                            try:
+                                candidate = Path(audio_path)
+                                if candidate.is_symlink():
+                                    continue
+                                candidate = candidate.resolve(strict=True)
+                                if candidate.parent == audio_cache and candidate.is_file():
+                                    candidate.unlink()
+                            except OSError:
+                                logger.warning("Failed to remove cached owner voice")
+                    if not audio_paths or len(transcripts) != len(audio_paths):
                         raise MissionError(
                             "не удалось расшифровать голосовое сообщение; отправьте его ещё раз или напишите текстом"
                         )
                     goal_text = "\\n".join(transcripts)
-                    adapter = self.adapters.get(source.platform)
-                    if adapter:
-                        await adapter.send(
-                            source.chat_id,
-                            f'🎙️ "{goal_text}"',
-                            metadata={"thread_id": source.thread_id} if source.thread_id else None,
-                        )
+                # The transcript is untrusted owner text. Redact before either
+                # durable store sees it; STT has no authority beyond media decode.
+                goal_text = redact_sensitive_text(goal_text, force=True)
                 store = MissionStore.default()
                 accepted, _ = store.ingest_owner_turn(
-                    redact_sensitive_text(goal_text, force=True),
+                    goal_text,
                     platform="telegram",
                     source_message_id=source_message_id,
                     session_id=session_entry.session_id,

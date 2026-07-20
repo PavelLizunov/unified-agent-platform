@@ -9,7 +9,7 @@ import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "clusters/prod/infra/hermes-mission-runtime.yaml"
-SOURCES = ("apply_overlay.py", "runtime.py")
+SOURCES = ("apply_overlay.py", "runtime.py", "local_stt.py")
 
 
 def render() -> str:
