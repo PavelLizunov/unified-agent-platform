@@ -150,6 +150,7 @@ def main() -> None:
         assert "owner_key_valid" in api
         assert 'if not isinstance(body, dict)' in api
         assert 'producer_key = request.headers.get("X-Hermes-Mission-Producer-Key")' in api
+        assert 'delivery_mode=body.get("delivery_mode")' in api
         assert 'parent_mission_id=body.get("parent_mission_id")' in api
         assert "store.ingest_owner_turn(" in api
         assert "if not owner_key_valid(owner_key)" in api
