@@ -1792,6 +1792,75 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("candidate-sha", state["model_capacity"]["candidate_sha"])
             self.assertEqual(0, instance._quality_failures(state))
 
+    def test_capacity_round_backoff_progresses_and_caps_at_the_maximum(self):
+        """Exponential backoff: 120, 240, 480, 960, 1800 (capped), 1800, ..."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("capacity-backoff")
+            state = {
+                "schema_version": 1,
+                "mission_id": "capacity-backoff",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            failure = {
+                "error_class": "transient_capacity",
+                "message_sha256": "c" * 64,
+            }
+            # Drive standard -> complex -> escalated (3 failures each = 6 total).
+            now = 10_000
+            for _ in range(6):
+                with mock.patch.object(coordinator.time, "time", return_value=now):
+                    instance._record_capacity_failure(
+                        state, paths, role="author", failure=failure
+                    )
+                now += 200
+            self.assertEqual("escalated", instance._current_route(state)["route"])
+            # Now on escalated: each batch of 3 failures increments the round.
+            expected = [
+                (1, 120),    # round 1: 120 * 2^0
+                (2, 240),    # round 2: 120 * 2^1
+                (3, 480),    # round 3: 120 * 2^2
+                (4, 960),    # round 4: 120 * 2^3
+                (5, 1800),   # round 5: 120 * 2^4 = 1920 -> capped to 1800
+                (6, 1800),   # round 6: still capped
+            ]
+            for round_index, expected_delay in expected:
+                batch_start = now
+                for _ in range(3):
+                    with mock.patch.object(
+                        coordinator.time, "time", return_value=now
+                    ):
+                        instance._record_capacity_failure(
+                            state, paths, role="author", failure=failure
+                        )
+                    now += 60
+                waiting = state["model_capacity"]
+                self.assertEqual("capacity_round_wait", waiting["status"])
+                self.assertEqual(round_index, waiting["round"])
+                self.assertEqual(0, waiting["failures_on_route"])
+                # not_before is set on the 3rd failure (batch_start + 120) + delay
+                self.assertAlmostEqual(
+                    batch_start + 120 + expected_delay,
+                    waiting["not_before"],
+                    delta=1,
+                )
+                now += expected_delay + 1
+            self.assertEqual(0, instance._quality_failures(state))
+
     def test_capacity_wait_parks_expiring_claim_and_reclaims_when_due(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
