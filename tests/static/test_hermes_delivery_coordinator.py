@@ -6378,6 +6378,67 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
             self.assertFalse(any(command[0] == "git" for command in commands))
 
+    def test_open_failed_pr_can_be_preserved_without_claim_after_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            commands = []
+            views = [{
+                "number": 39, "state": "OPEN", "isDraft": True,
+                "headRefName": "codex/fix",
+                "commits": [{"oid": "candidate-sha"}],
+                "baseRefName": approved["default_branch"],
+            }]
+            remote_heads = ["candidate-sha\trefs/heads/codex/fix\n"]
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(views.pop(0))
+                elif "ls-remote" in command:
+                    output = remote_heads.pop(0)
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=output, stderr=""
+                )
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            }
+
+            preserved = instance._finalize_failed_pr(
+                state, require_claim=False
+            )
+            self.assertTrue(preserved)
+            self.assertFalse(any(
+                command[0:3] == ["gh", "pr", "ready"] for command in commands
+            ))
+            self.assertFalse(any(
+                command[0] == "git" and "push" in command for command in commands
+            ))
+
+            commands.clear()
+            views.append({
+                "number": 39, "state": "OPEN", "isDraft": True,
+                "headRefName": "codex/fix",
+                "commits": [{"oid": "different-sha"}],
+                "baseRefName": approved["default_branch"],
+            })
+            with self.assertRaisesRegex(coordinator.DeliveryError, "identity"):
+                instance._finalize_failed_pr(state, require_claim=False)
+            self.assertFalse(any(command[0] == "git" for command in commands))
+
     def test_already_closed_failed_pr_lease_deletes_only_the_exact_branch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
