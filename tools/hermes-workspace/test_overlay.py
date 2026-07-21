@@ -187,13 +187,55 @@ def main() -> None:
         assert "const _initialOverrides = CENTRAL_ONLY ? {} : readOverrides()" in capabilities
         assert capabilities.count("environment-managed in central-only mode") == 2
         root_source = (clone / "src/routes/__root.tsx").read_text()
-        assert "DISABLED_GAME_PATHS" in root_source and "<Navigate to=\"/dashboard\" replace />" in root_source
-        assert all(path in root_source for path in ("/reserve", "/reserve/confirm", "/early-access"))
+        blocked_routes = (
+            "/playground", "/hermes-world", "/world", "/reserve", "/reserve/confirm",
+            "/early-access", "/files", "/terminal", "/jobs", "/tasks", "/conductor",
+            "/operations", "/agents", "/swarm", "/swarm2",
+        )
+        # Every experimental/non-authoritative route redirects direct navigation to /dashboard.
+        assert "CENTRAL_ONLY_BLOCKED_PATHS = new Set([" in root_source
+        assert all(f"'{path}'" in root_source for path in blocked_routes)
+        assert "redirectBlockedRoute" in root_source
+        assert "<Navigate to=\"/dashboard\" replace />" in root_source
+        # HermesWorld and Update Center are fail-closed: only an explicit build-time
+        # =1 enables them, so an undefined flag leaves both disabled.
+        assert "import.meta.env.VITE_HERMESWORLD_ENABLED === '1'" in root_source
+        assert "import.meta.env.VITE_UPDATE_CENTER_ENABLED === '1'" in root_source
+        assert "!== '0'" not in root_source
+        assert "{UPDATE_CENTER_ENABLED && !isHermesWorldLandingRoute ? <UpdateCenterNotifier />" in root_source
         for endpoint in ("src/routes/api/playground-admin.ts", "src/routes/api/playground-npc.ts"):
             endpoint_source = (clone / endpoint).read_text()
-            assert "import.meta.env.VITE_HERMESWORLD_ENABLED" in endpoint_source
+            assert "import.meta.env.VITE_HERMESWORLD_ENABLED === '1'" in endpoint_source
             assert "process.env.VITE_HERMESWORLD_ENABLED" not in endpoint_source
+            assert "!== '0'" not in endpoint_source
             assert "if (!HERMESWORLD_ENABLED) return json" in endpoint_source
+        # Blocked entries are filtered out of the desktop sidebar.
+        sidebar_source = (clone / "src/screens/chat/components/chat-sidebar.tsx").read_text()
+        assert "CENTRAL_ONLY_BLOCKED_NAV_PATHS = new Set([" in sidebar_source
+        assert ".filter((item) => !(item.kind === 'link' && item.to && CENTRAL_ONLY_BLOCKED_NAV_PATHS.has(item.to)))" in sidebar_source
+        for path in ("/files", "/terminal", "/jobs", "/tasks", "/conductor", "/operations", "/swarm"):
+            assert f"'{path}'" in sidebar_source
+        for path in ("/dashboard", "/chat", "/memory", "/skills", "/mcp", "/profiles"):
+            assert f"to: '{path}'" in sidebar_source
+        # Blocked entries are filtered out of mobile navigation (hamburger + tab bar).
+        hamburger_source = (clone / "src/components/mobile-hamburger-menu.tsx").read_text()
+        assert "CENTRAL_ONLY_BLOCKED_NAV_IDS = new Set([" in hamburger_source
+        assert "!CENTRAL_ONLY_BLOCKED_NAV_IDS.has(item.id)" in hamburger_source
+        for nav_id in ("playground", "terminal", "jobs", "conductor", "operations", "swarm"):
+            assert f"'{nav_id}'" in hamburger_source
+        tab_bar_source = (clone / "src/components/mobile-tab-bar.tsx").read_text()
+        assert "VISIBLE_NAV_TABS = MOBILE_NAV_TABS.filter((tab) => !CENTRAL_ONLY_BLOCKED_TAB_IDS.has(tab.id))" in tab_bar_source
+        assert "{VISIBLE_NAV_TABS.map((tab, idx) => {" in tab_bar_source
+        assert "MOBILE_NAV_TABS.map" not in tab_bar_source
+        assert "MOBILE_NAV_TABS.findIndex" not in tab_bar_source
+        for nav_id in ("playground", "files", "terminal", "jobs", "swarm"):
+            assert f"'{nav_id}'" in tab_bar_source
+        # Blocked entries are filtered out of the command palette; allowed screens remain.
+        palette_source = (clone / "src/components/command-palette.tsx").read_text()
+        assert "CENTRAL_ONLY_BLOCKED_SCREEN_IDS = new Set(['screen-files', 'screen-terminal'])" in palette_source
+        assert ".filter((action) => !CENTRAL_ONLY_BLOCKED_SCREEN_IDS.has(action.id))" in palette_source
+        for screen_id in ("screen-chat", "screen-memory", "screen-skills", "screen-mcp", "screen-settings"):
+            assert f"id: '{screen_id}'" in palette_source
         models_source = (clone / "src/routes/api/models.ts").read_text()
         central_only = models_source.index("process.env.HERMES_CENTRAL_ONLY === '1'")
         local_catalog = models_source.index("let models = readClaudeModelsJson()")

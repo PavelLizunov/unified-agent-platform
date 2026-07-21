@@ -92,6 +92,7 @@ shell history, process listings, logs, markdown, or manifests. The encrypted Sec
 curl -fsS -H "Authorization: Bearer $HERMES_API_TOKEN" http://100.94.228.67:30642/v1/models
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.85.56.31:3000/
 curl -fsS -o /dev/null -w '%{http_code}\n' http://100.94.228.67:30911/api/status
+# HermesWorld game endpoints are 404 by fail-closed default (no build flag enables them).
 test "$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://100.85.56.31:3000/api/playground-npc)" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' http://100.85.56.31:3000/api/playground-admin)" = 404
 ```
@@ -99,3 +100,14 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' http://100.85.56.31:3000/api/pla
 Log in to Workspace and verify chat, central dashboard-backed Profiles, and Kanban. Verify no HermesWorld,
 build-1 local-model, or Update Center navigation is present. A dashboard 401 must trigger one in-memory
 password-session refresh; credentials and cookies must never appear in logs.
+
+Central-only navigation smoke (browser — these routes are client-side, so the SPA shell still answers HTTP 200
+and the redirect to `/dashboard` happens in the UI, not at curl):
+
+- Open each of `/playground`, `/hermes-world`, `/world`, `/reserve`, `/reserve/confirm`, `/early-access`,
+  `/files`, `/terminal`, `/jobs`, `/tasks`, `/conductor`, `/operations`, `/agents`, `/swarm`, `/swarm2`
+  directly; every one must land on `/dashboard`.
+- Confirm the desktop sidebar, mobile navigation and command palette show none of those entries, and still
+  show Dashboard, Chat, Settings, Memory, Skills, MCP and Profiles.
+- Confirm the dashboard MissionOverviewCard, selected-project cookie intake and ordinary owner answers still
+  work (central mission projection is unchanged by this route cleanup).
