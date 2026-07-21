@@ -25,7 +25,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "3c6e9fe00234826e9745f52a56ce8442217505273fc28f1aed04b1904463330e",
+    "gateway/run.py": "283ffbde1cbc3a5fb18918568b5bb444970a89760f26869605aabe37fd56e486",
     "gateway/platforms/api_server.py": "0d3899fe70c9cd02e71920e20edca99b2c3a0ce5e63fecd9f96fbe7dc93bee71",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
@@ -584,6 +584,7 @@ def connect(
         owner_help = (
             "Напишите обычным сообщением, что нужно сделать. "
             "Hermes сам создаст задачу, выберет разрешённые модели и доведёт работу до результата.\n\n"
+            "Если задача ждёт вашего ответа — просто напишите его обычным сообщением.\n\n"
             "/projects — разрешённые проекты\n"
             "/mission — текущая задача\n"
             "/status — состояние сессии\n"

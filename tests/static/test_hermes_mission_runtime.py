@@ -1401,6 +1401,13 @@ def test_owner_gate_accepts_only_exact_approval_without_clearing_question() -> N
             assert projection["question"]["question_id"] == question_id
             assert projection["answer"] is None
 
+        # Regression: owner gate question text must distinguish plain text from command
+        gate_view = store.projection(accepted["mission_id"])
+        gate_text = missions.telegram_text(gate_view)
+        assert "обычным сообщением" in gate_text
+        assert "(не командой)" in gate_text
+        assert "APPROVE" in gate_text
+
         answer, answer_created = store.answer(
             accepted["mission_id"], question_id, "APPROVE"
         )

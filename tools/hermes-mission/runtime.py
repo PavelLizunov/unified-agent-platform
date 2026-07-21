@@ -854,7 +854,8 @@ def telegram_text(view: dict[str, Any]) -> str:
         if str(question.get("question_id", "")).startswith(_OWNER_GATE_QUESTION_PREFIX):
             text = (
                 "Задача меняет утверждённую архитектурную границу. Чтобы разрешить "
-                "это изменение только для этой задачи, ответьте одним сообщением: APPROVE."
+                "это изменение только для этой задачи, ответьте обычным сообщением "
+                "(не командой): APPROVE."
             )
         lines.append(f"Нужен ваш ответ: {text}")
     if view.get("answer"):
