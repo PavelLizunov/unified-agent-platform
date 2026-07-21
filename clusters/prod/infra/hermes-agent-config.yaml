@@ -283,6 +283,7 @@ data:
     # egress proxy (proven: proxied curl to 192.168.0.169:8006 = 000, direct = 200). curl honors the CIDR (httpx doesn't).
     NO_PROXY=.svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10,100.82.241.121,192.168.0.0/16
     TELEGRAM_ALLOWED_USERS=729937253
+    TELEGRAM_GROUP_ALLOWED_USERS=242206776
     # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the
     # fallback IPs add redundant connection targets through the proxy). The occasional reconnects are
     # egress-stability noise; they self-heal and Telegram re-delivers queued updates, so no message loss.
