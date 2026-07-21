@@ -70,6 +70,21 @@ PREVIOUS_PATCHED_FILES = {
     "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned previous patched SHA-256
     "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
 ),
+"src/components/mobile-hamburger-menu.tsx": (
+    "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
+),
+"src/components/mobile-tab-bar.tsx": (
+    "8e699f2c2fe547001a3d0c42bcaf0c9b737bb681fe2817d689865d6110b1c08c",
+),
+"src/routes/__root.tsx": (
+    "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
+),
+"src/routes/api/playground-admin.ts": (
+    "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
+),
+"src/routes/api/playground-npc.ts": (
+    "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
+),
 }
 ADDED_FILES = {
     "src/routes/api/missions.ts": "src/routes/api/missions.ts",
@@ -768,6 +783,36 @@ const _authHeaders""", "central-only session source upgrade")
   },""", """    source_message_id?: string
     project_id?: string
   },""", "project selection request type upgrade")
+    if rel == "src/components/mobile-hamburger-menu.tsx":
+        text = replace(text, "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const MOBILE_HAMBURGER_NAV_ITEMS = [", "const CENTRAL_ONLY_BLOCKED_NAV_IDS = new Set(['playground', 'terminal', 'jobs', 'conductor', 'operations', 'swarm', 'swarm2', 'files', 'tasks', 'agents'])\n\nexport const MOBILE_HAMBURGER_NAV_ITEMS = [", "hamburger blocked ids upgrade")
+        text = replace(text, "  ...(HERMESWORLD_ENABLED ? [{\n    id: 'playground',", "  {\n    id: 'playground',", "hamburger unwrap open")
+        text = replace(text, "  }] : []),\n  {\n    id: 'terminal',", "  },\n  {\n    id: 'terminal',", "hamburger unwrap close")
+        return replace(text, """  const visibleNavItems = MOBILE_HAMBURGER_NAV_ITEMS.filter(
+    (item) => item.id !== 'echo-studio' || echoStudioEnabled,
+  )""", """  const visibleNavItems = MOBILE_HAMBURGER_NAV_ITEMS.filter(
+    (item) =>
+      (item.id !== 'echo-studio' || echoStudioEnabled) &&
+      !CENTRAL_ONLY_BLOCKED_NAV_IDS.has(item.id),
+  )""", "hamburger blocked filter upgrade")
+    if rel == "src/components/mobile-tab-bar.tsx":
+        text = replace(text, "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const MOBILE_NAV_TABS: Array<TabItem> = [", "export const MOBILE_NAV_TABS: Array<TabItem> = [", "tab bar flag removal")
+        text = replace(text, "  ...(HERMESWORLD_ENABLED ? [{\n    id: 'playground',", "  {\n    id: 'playground',", "tab bar unwrap open")
+        text = replace(text, "  }] : []),\n  {\n    id: 'files',", "  },\n  {\n    id: 'files',", "tab bar unwrap close")
+        text = replace(text, "]\n\nexport function MobileTabBar() {", "]\n\nconst CENTRAL_ONLY_BLOCKED_TAB_IDS = new Set(['playground', 'files', 'terminal', 'jobs', 'swarm', 'swarm2', 'conductor', 'operations', 'tasks', 'agents'])\nconst VISIBLE_NAV_TABS = MOBILE_NAV_TABS.filter((tab) => !CENTRAL_ONLY_BLOCKED_TAB_IDS.has(tab.id))\n\nexport function MobileTabBar() {", "tab bar blocked ids upgrade")
+        text = replace(text, "const currentIdx = MOBILE_NAV_TABS.findIndex((tab) => tab.match(pathname))", "const currentIdx = VISIBLE_NAV_TABS.findIndex((tab) => tab.match(pathname))", "tab bar swipe find upgrade")
+        text = replace(text, "Math.min(currentIdx + 1, MOBILE_NAV_TABS.length - 1)", "Math.min(currentIdx + 1, VISIBLE_NAV_TABS.length - 1)", "tab bar swipe next upgrade")
+        text = replace(text, "nextIdx < MOBILE_NAV_TABS.length", "nextIdx < VISIBLE_NAV_TABS.length", "tab bar swipe bound upgrade")
+        text = replace(text, "void navigate({ to: MOBILE_NAV_TABS[nextIdx].to })", "void navigate({ to: VISIBLE_NAV_TABS[nextIdx].to })", "tab bar swipe navigate upgrade")
+        return replace(text, "{MOBILE_NAV_TABS.map((tab, idx) => {", "{VISIBLE_NAV_TABS.map((tab, idx) => {", "tab bar render map upgrade")
+    if rel == "src/routes/__root.tsx":
+        text = replace(text, "import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'", "import.meta.env.VITE_HERMESWORLD_ENABLED === '1'", "root hermesworld flag upgrade")
+        text = replace(text, "import.meta.env.VITE_UPDATE_CENTER_ENABLED !== '0'", "import.meta.env.VITE_UPDATE_CENTER_ENABLED === '1'", "root update center flag upgrade")
+        text = replace(text, "const DISABLED_GAME_PATHS = new Set(['/playground', '/hermes-world', '/world', '/reserve', '/reserve/confirm', '/early-access'])", "const CENTRAL_ONLY_BLOCKED_PATHS = new Set(['/playground', '/hermes-world', '/world', '/reserve', '/reserve/confirm', '/early-access', '/files', '/terminal', '/jobs', '/tasks', '/conductor', '/operations', '/agents', '/swarm', '/swarm2'])", "root blocked paths upgrade")
+        text = replace(text, "  const redirectDisabledGame = !HERMESWORLD_ENABLED && DISABLED_GAME_PATHS.has(pathname)", "  const redirectBlockedRoute = [...CENTRAL_ONLY_BLOCKED_PATHS].some((base) => pathname === base || pathname.startsWith(`${base}/`))", "root redirect logic upgrade")
+        text = replace(text, "{redirectDisabledGame ? <Navigate to=\"/dashboard\" replace /> : null}", "{redirectBlockedRoute ? <Navigate to=\"/dashboard\" replace /> : null}", "root redirect jsx upgrade")
+        return replace(text, "{!redirectDisabledGame ? <>", "{!redirectBlockedRoute ? <>", "root redirect close upgrade")
+    if rel in ("src/routes/api/playground-admin.ts", "src/routes/api/playground-npc.ts"):
+        return replace(text, "import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'", "import.meta.env.VITE_HERMESWORLD_ENABLED === '1'", "game endpoint flag upgrade")
     raise SystemExit(f"no previous patched upgrade for {rel}")
 
 def main():

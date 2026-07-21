@@ -18,6 +18,7 @@ PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
 PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
 PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
 PREVIOUS_PROJECT_CATALOG_UI_COMMIT = "95343b3ba3891c15dd80d9b911c66c013dcada69"
+PREVIOUS_HIDE_COMMIT = "99a55da4c93b4d861241237b12bda05a8916ecf2"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -597,6 +598,63 @@ def main() -> None:
         assert legacy_added_upgrade.returncode == 0 and "overlay applied" in legacy_added_upgrade.stdout
         final_check = run(clone, "--check")
         assert final_check.returncode == 0 and "legacy-needs-overlay" not in final_check.stdout
+
+        hide_script = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_HIDE_COMMIT}:tools/hermes-workspace/apply_overlay.py",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            encoding="utf-8",
+        )
+        hide_namespace = {
+            "__name__": "hide_workspace_overlay",
+            "__file__": str(TOOL),
+        }
+        exec(compile(hide_script, "hide_workspace_overlay.py", "exec"), hide_namespace)
+        hide_files = (
+            "src/components/mobile-hamburger-menu.tsx",
+            "src/components/mobile-tab-bar.tsx",
+            "src/routes/__root.tsx",
+            "src/routes/api/playground-admin.ts",
+            "src/routes/api/playground-npc.ts",
+        )
+        hide_expected = {
+            "src/components/mobile-hamburger-menu.tsx":
+                "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
+            "src/components/mobile-tab-bar.tsx":
+                "8e699f2c2fe547001a3d0c42bcaf0c9b737bb681fe2817d689865d6110b1c08c",
+            "src/routes/__root.tsx":
+                "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
+            "src/routes/api/playground-admin.ts":
+                "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
+            "src/routes/api/playground-npc.ts":
+                "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
+        }
+        for relative in hide_files:
+            upstream_text = subprocess.check_output(
+                ["git", "show", f"{COMMIT}:{relative}"],
+                cwd=clone,
+                text=True,
+                encoding="utf-8",
+            )
+            old_patched = hide_namespace["transform"](relative, upstream_text)
+            (clone / relative).write_text(old_patched, encoding="utf-8")
+            assert hashlib.sha256((clone / relative).read_bytes()).hexdigest() == hide_expected[relative]
+        hide_check = run(clone, "--check")
+        assert hide_check.returncode == 0
+        assert hide_check.stdout.count("previous-needs-overlay") == 5
+        hide_upgrade = run(clone)
+        assert hide_upgrade.returncode == 0, hide_upgrade.stderr
+        assert "overlay applied" in hide_upgrade.stdout
+        hide_final = run(clone, "--check")
+        assert hide_final.returncode == 0
+        assert "previous-needs-overlay" not in hide_final.stdout
+        assert hide_final.stdout.count("exact-patched") == len(hide_final.stdout.strip().splitlines())
+        hide_idempotent = run(clone)
+        assert hide_idempotent.returncode == 0
+        assert "overlay already applied" in hide_idempotent.stdout
 
         target = clone / "src/server/gateway-capabilities.ts"
         target.write_bytes(target.read_bytes() + b"\n// tamper\n")
