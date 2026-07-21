@@ -8844,5 +8844,674 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertTrue(any(d["payload"]["status"] == "failed" for d in deliveries))
 
 
+class CancelledClient:
+    def __init__(self, missions=None):
+        self._missions = missions or {}
+        self.published = []
+
+    def list_missions(self, _profile, *, reconcile=False):
+        return []
+
+    def get_mission(self, mission_id):
+        return dict(self._missions[mission_id])
+
+    def publish(self, mission_id, event):
+        self.published.append((mission_id, event))
+
+
+class CancelledBackend:
+    def __init__(
+        self,
+        task_id="t-1",
+        status="running",
+        assignee="coordinator-codex-luna-a7",
+    ):
+        self.task_id = task_id
+        self.status = status
+        self.assignee = assignee
+        self.shows = 0
+        self.claims = 0
+        self.verifies = 0
+        self.completes = 0
+        self.archives = 0
+        self.gcs = 0
+
+    def _snap(self):
+        return {
+            "task": {
+                "id": self.task_id,
+                "status": self.status,
+                "assignee": self.assignee,
+            },
+            "runs": [{
+                "id": 7,
+                "status": "running",
+                "claim_expires": int(time.time()) + 99999,
+            }],
+        }
+
+    def show(self, _task_id):
+        self.shows += 1
+        return self._snap()
+
+    def claim(self, _task_id, *, ttl_seconds, provenance=None):
+        self.claims += 1
+        self.status = "running"
+        return self._snap()
+
+    def verify_claim(
+        self, _task_id, _run_id, *, min_remaining_seconds=60, provenance=None
+    ):
+        self.verifies += 1
+        return self._snap()
+
+    def complete(self, _task_id, *, result, summary, metadata):
+        self.completes += 1
+        self.status = "done"
+
+    def archive(self, _task_id):
+        self.archives += 1
+        self.status = "archived"
+        return self._snap()
+
+    def gc(self):
+        self.gcs += 1
+        return True
+
+
+def _cancelled_profile(root):
+    approved = profile(root)
+    approved["crash_after_author_commit_once"] = False
+    return approved
+
+
+def _write_cancelled_state(state_root, mission_id, dispatch_profile, phase, **extra):
+    digest = hashlib.sha256(mission_id.encode()).hexdigest()[:24]
+    directory = state_root / f"mission-{digest}"
+    directory.mkdir(parents=True, exist_ok=True)
+    state = {
+        "schema_version": 1,
+        "mission_id": mission_id,
+        "dispatch_profile": dispatch_profile,
+        "phase": phase,
+        "branch": f"codex/test-{mission_id[:8]}",
+        "review_cycle": 1,
+        "prior_review_rejections": 0,
+        "prior_ci_failures": 0,
+        "prior_author_failures": 0,
+        "discarded_author_attempts": 0,
+        "author_commit_count": 0,
+        "route_decisions": {},
+        "effective_route_decisions": {},
+        "owner_answers": [],
+        "crash_injected": False,
+    }
+    state.update(extra)
+    (directory / "delivery-state.json").write_text(
+        json.dumps(state), encoding="utf-8"
+    )
+    return state
+
+
+def _make_cancelled(root, missions, backend=None, states=None):
+    approved = _cancelled_profile(root)
+    client = CancelledClient(missions)
+    backend = backend or CancelledBackend()
+    state_root = root / "state"
+    state_root.mkdir(parents=True, exist_ok=True)
+    for state in states or []:
+        _write_cancelled_state(state_root, **state)
+    instance = coordinator.DeliveryCoordinator(
+        approved, client, backend, state_root
+    )
+    return instance, client, backend, state_root
+
+
+_CANCELLED_DP = "build1-vpnrouter-a7-3"
+_CANCELLED_GOAL = "Fix issue 39"
+
+
+def _cancelled_mission(mission_id, status="cancelled"):
+    return {
+        "mission_id": mission_id,
+        "status": status,
+        "goal": _CANCELLED_GOAL,
+        "dispatch_profile": _CANCELLED_DP,
+        "tasks": [],
+    }
+
+
+class _RaiseOnceComplete(CancelledBackend):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._raised_complete = False
+
+    def complete(self, task_id, *, result, summary, metadata):
+        self.completes += 1
+        self.status = "done"
+        if not self._raised_complete:
+            self._raised_complete = True
+            raise ConnectionError("lost completion response")
+
+
+class _RaiseOnceArchive(CancelledBackend):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._raised_archive = False
+
+    def archive(self, task_id):
+        self.archives += 1
+        self.status = "archived"
+        if not self._raised_archive:
+            self._raised_archive = True
+            raise ConnectionError("lost archive response")
+        return self._snap()
+
+
+class TestCancelledCleanup(unittest.TestCase):
+    def test_new_no_task_na_sentinel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-new-cancel"
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "new",
+                }],
+            )
+            with mock.patch.object(instance, "_git", return_value=""):
+                result = instance.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertIs(True, result["state"]["task_archive_not_applicable"])
+            self.assertEqual(0, backend.completes)
+            self.assertEqual(0, backend.archives)
+            self.assertEqual(0, backend.gcs)
+
+    def test_new_no_task_rejects_artifacts(self):
+        cases = [
+            ("worktree", {"git_return": ""}, True),
+            ("local_branch", {"git_return": "codex/x"}, False),
+            ("remote_branch", {"git_side": ["", "abc refs/heads/x"]}, False),
+            ("pr_identity", {"pr_number": 9, "git_return": ""}, False),
+        ]
+        for name, values, create_worktree in cases:
+            with self.subTest(artifact=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    mission_id = f"m-reject-{name}"
+                    extra = {}
+                    if "pr_number" in values:
+                        extra["pr_number"] = values["pr_number"]
+                    instance, _, _, _ = _make_cancelled(
+                        root,
+                        {mission_id: _cancelled_mission(mission_id)},
+                        states=[{
+                            "mission_id": mission_id,
+                            "dispatch_profile": _CANCELLED_DP,
+                            "phase": "new",
+                            **extra,
+                        }],
+                    )
+                    if create_worktree:
+                        instance._paths(mission_id)["author"].mkdir(
+                            parents=True, exist_ok=True
+                        )
+                        context = self.assertRaisesRegex(
+                            coordinator.DeliveryError, "worktree"
+                        )
+                        with context:
+                            instance.tick()
+                    elif "git_side" in values:
+                        with mock.patch.object(
+                            instance, "_git", side_effect=values["git_side"]
+                        ):
+                            with self.assertRaisesRegex(
+                                coordinator.DeliveryError, "remote branch"
+                            ):
+                                instance.tick()
+                    else:
+                        with mock.patch.object(
+                            instance, "_git", return_value=values["git_return"]
+                        ):
+                            with self.assertRaisesRegex(
+                                coordinator.DeliveryError,
+                                "local branch|PR identity",
+                            ):
+                                instance.tick()
+
+    def test_na_sentinel_prune_no_archive_gc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-prune-na"
+            backend = CancelledBackend()
+            instance, _, backend, state_root = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "new",
+                }],
+            )
+            with mock.patch.object(instance, "_git", return_value=""):
+                instance.tick()
+            state_path = (
+                state_root
+                / f"mission-{hashlib.sha256(mission_id.encode()).hexdigest()[:24]}"
+                / "delivery-state.json"
+            )
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertIs(True, state["task_archive_not_applicable"])
+            old_mtime = state_path.stat().st_mtime - 31 * 24 * 3600
+            os.utime(state_path, (old_mtime, old_mtime))
+            instance._prune_completed_states()
+            self.assertEqual(0, backend.archives)
+            self.assertEqual(0, backend.gcs)
+            self.assertFalse(state_path.exists())
+
+    def test_na_sentinel_contradictory_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-contradict"
+            instance, _, _, state_root = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "complete",
+                    "task_archive_not_applicable": True,
+                    "root_task_id": "t-x",
+                }],
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "contradictory"):
+                instance._prune_completed_states()
+            self.assertTrue(state_root.exists())
+
+    def test_multiple_cancelled_sorted_one_per_tick(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            first, second = "m-aaa", "m-bbb"
+            instance, _, _, _ = _make_cancelled(
+                root,
+                {
+                    first: _cancelled_mission(first),
+                    second: _cancelled_mission(second),
+                },
+                states=[
+                    {
+                        "mission_id": first,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "new",
+                    },
+                    {
+                        "mission_id": second,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "new",
+                    },
+                ],
+            )
+            with mock.patch.object(instance, "_git", return_value=""):
+                first_result = instance.tick()
+            self.assertEqual(first, first_result["mission_id"])
+            with mock.patch.object(instance, "_git", return_value=""):
+                second_result = instance.tick()
+            self.assertEqual(second, second_result["mission_id"])
+            with mock.patch.object(instance, "_git", return_value=""):
+                self.assertIsNone(instance.tick())
+
+    def test_cancelled_before_one_live(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            cancelled, live = "m-cancel", "m-live"
+            instance, _, _, _ = _make_cancelled(
+                root,
+                {
+                    cancelled: _cancelled_mission(cancelled),
+                    live: _cancelled_mission(live, status="active"),
+                },
+                states=[
+                    {
+                        "mission_id": cancelled,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "new",
+                    },
+                    {
+                        "mission_id": live,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "new",
+                    },
+                ],
+            )
+            with mock.patch.object(instance, "_git", return_value=""):
+                result = instance.tick()
+            self.assertEqual(cancelled, result["mission_id"])
+
+    def test_two_live_recoverables_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            first, second = "m-live1", "m-live2"
+            instance, _, _, _ = _make_cancelled(
+                root,
+                {
+                    first: _cancelled_mission(first, status="active"),
+                    second: _cancelled_mission(second, status="active"),
+                },
+                states=[
+                    {
+                        "mission_id": first,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "claimed",
+                        "root_task_id": "t1",
+                        "run_id": "7",
+                    },
+                    {
+                        "mission_id": second,
+                        "dispatch_profile": _CANCELLED_DP,
+                        "phase": "claimed",
+                        "root_task_id": "t2",
+                        "run_id": "7",
+                    },
+                ],
+            )
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "more than one recoverable"
+            ):
+                instance.tick()
+
+    def test_active_missing_delivery_mode_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-active-nomode"
+            approved = reusable_profile(root)
+            approved["delivery_mode"] = "autonomous"
+            client = CancelledClient({
+                mission_id: _cancelled_mission(mission_id, status="active")
+            })
+            backend = CancelledBackend()
+            state_root = root / "state"
+            state_root.mkdir(parents=True, exist_ok=True)
+            _write_cancelled_state(
+                state_root, mission_id, _CANCELLED_DP, "new"
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, state_root
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "delivery mode"):
+                instance.tick()
+
+    def test_archived_task_from_claimed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-archived-claimed"
+            backend = CancelledBackend(status="archived")
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertIs(True, result["state"]["task_archived"])
+            self.assertEqual(0, backend.claims)
+            self.assertEqual(0, backend.completes)
+            self.assertEqual(0, backend.archives)
+            cleanup.assert_called_once()
+            self.assertFalse(cleanup.call_args.kwargs["require_claim"])
+
+    def test_archived_task_with_open_draft_pr_preserves_remote(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-archived-pr"
+            backend = CancelledBackend(status="archived")
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "needs_fix",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                    "pr_number": 42,
+                    "pr_head_sha": "abc",
+                    "pr_base_branch": "main",
+                    "candidate_sha": "abc",
+                    "candidate_push_sha": "abc",
+                }],
+            )
+            with mock.patch.object(
+                instance, "_finalize_failed_pr", return_value=True
+            ) as finalize, mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+            finalize.assert_called_once_with(
+                result["state"], require_claim=False
+            )
+            cleanup.assert_called_once()
+            self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
+            self.assertFalse(cleanup.call_args.kwargs["require_claim"])
+            self.assertEqual(0, backend.claims)
+            self.assertEqual(0, backend.completes)
+            self.assertEqual(0, backend.archives)
+
+    def test_task_identity_mismatch(self):
+        for label, backend_args in [
+            ("wrong_id", {"task_id": "WRONG"}),
+            ("wrong_assignee", {"assignee": "WRONG"}),
+        ]:
+            with self.subTest(case=label):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = pathlib.Path(directory)
+                    mission_id = f"m-mismatch-{label}"
+                    backend = CancelledBackend(**backend_args)
+                    instance, _, backend, _ = _make_cancelled(
+                        root,
+                        {mission_id: _cancelled_mission(mission_id)},
+                        backend=backend,
+                        states=[{
+                            "mission_id": mission_id,
+                            "dispatch_profile": _CANCELLED_DP,
+                            "phase": "claimed",
+                            "root_task_id": "t-1",
+                            "run_id": "7",
+                        }],
+                    )
+                    with mock.patch.object(instance, "_cleanup") as cleanup:
+                        with self.assertRaisesRegex(
+                            coordinator.DeliveryError, "identity mismatch"
+                        ):
+                            instance.tick()
+                    cleanup.assert_not_called()
+                    self.assertEqual(0, backend.completes)
+
+    def test_open_draft_pr_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-pr-preserve"
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "needs_fix",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                    "pr_number": 42,
+                    "pr_head_sha": "abc",
+                    "pr_base_branch": "main",
+                    "candidate_sha": "abc",
+                    "candidate_push_sha": "abc",
+                }],
+            )
+            with mock.patch.object(
+                instance, "_finalize_failed_pr", return_value=True
+            ) as finalize, mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+            finalize.assert_called_once()
+            cleanup.assert_called_once()
+            self.assertTrue(cleanup.call_args.kwargs["preserve_remote"])
+            self.assertTrue(cleanup.call_args.kwargs["require_claim"])
+            self.assertIs(True, result["state"]["cancelled_pr_preserved"])
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(1, backend.completes)
+            self.assertEqual(1, backend.archives)
+
+    def test_running_task_full_flow(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-running"
+            instance, client, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with mock.patch.object(instance, "_cleanup"):
+                result = instance.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertEqual(1, backend.completes)
+            self.assertEqual(1, backend.archives)
+            self.assertEqual([], client.published)
+
+    def test_lost_completion_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-lost-complete"
+            backend = _RaiseOnceComplete()
+            instance, _, backend, state_root = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with mock.patch.object(instance, "_cleanup"):
+                with self.assertRaises(ConnectionError):
+                    instance.tick()
+            self.assertEqual(1, backend.completes)
+            digest = hashlib.sha256(mission_id.encode()).hexdigest()[:24]
+            persisted = json.loads(
+                (state_root / f"mission-{digest}" / "delivery-state.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual("cancelled_cleaned", persisted["phase"])
+            restarted = coordinator.DeliveryCoordinator(
+                _cancelled_profile(root),
+                CancelledClient({mission_id: _cancelled_mission(mission_id)}),
+                backend,
+                state_root,
+            )
+            result = restarted.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(1, backend.completes)
+            self.assertEqual(1, backend.archives)
+
+    def test_lost_archive_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-lost-archive"
+            backend = _RaiseOnceArchive(status="done")
+            instance, _, backend, state_root = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "cancelled_cleaned",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with self.assertRaises(ConnectionError):
+                instance.tick()
+            self.assertEqual(1, backend.archives)
+            restarted = coordinator.DeliveryCoordinator(
+                _cancelled_profile(root),
+                CancelledClient({mission_id: _cancelled_mission(mission_id)}),
+                backend,
+                state_root,
+            )
+            result = restarted.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertEqual(1, backend.archives)
+
+    def test_done_task_never_claims_or_completes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-done"
+            backend = CancelledBackend(status="done")
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with mock.patch.object(instance, "_cleanup"):
+                result = instance.tick()
+            self.assertEqual("complete", result["action"])
+            self.assertEqual(0, backend.claims)
+            self.assertEqual(0, backend.completes)
+            self.assertEqual(1, backend.archives)
+
+    def test_restart_after_complete_no_duplicates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-restart-complete"
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                }],
+            )
+            with mock.patch.object(instance, "_cleanup"):
+                first = instance.tick()
+            self.assertEqual("complete", first["action"])
+            completes, archives = backend.completes, backend.archives
+            self.assertIsNone(instance.tick())
+            self.assertEqual(completes, backend.completes)
+            self.assertEqual(archives, backend.archives)
+
+
 if __name__ == "__main__":
     unittest.main()
