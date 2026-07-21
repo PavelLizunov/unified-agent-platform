@@ -969,6 +969,7 @@ class Driver:
             and project.get("status") == "ready"
             and project.get("repository", "").casefold()
             == request["repository"].casefold()
+            and project.get("dispatch_profile") == dispatch_profile(request)
         )
 
     def _merged_uap_pr_evidence(
