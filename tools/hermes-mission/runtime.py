@@ -2429,9 +2429,21 @@ class MissionStore:
         try:
             result = self.accept(prompt, **arguments)
         except MissionError as error:
-            if str(error) != "mission already accepted":
+            if str(error) == "mission already accepted":
+                result = self.accept(prompt, **arguments)
+            elif str(error) == "mission already accepted with different parameters":
+                existing = self.events(mission_id)[0]
+                if existing["payload"].get("input_source_key_sha256") != digest:
+                    raise
+                # mission_id is derived from the stable source_key, so the same
+                # source message replayed with a different derived prompt (a
+                # redelivered voice note whose local STT produced a slightly
+                # different transcript) is a replay, not a new goal.  Return the
+                # original mission instead of failing closed; a genuine source
+                # collision (different input_source_key_sha256) still raises.
+                result = existing, False
+            else:
                 raise
-            result = self.accept(prompt, **arguments)
         if chat_id:
             self.bind(mission_id, platform, chat_id, thread_id, reason="owner-intake")
         return result
