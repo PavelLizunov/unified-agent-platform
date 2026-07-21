@@ -880,6 +880,37 @@ class MissionAdapterTests(unittest.TestCase):
                     }]},
                 )
 
+        valid = adapter._worker_metadata_events(
+            "mission-1", "task-1", "worker-1",
+            {"mission_events": [{
+                "type": "delivery.upsert",
+                "payload": {
+                    "kind": "pull_request", "status": "merged",
+                    "url": "https://example.invalid/pr/1",
+                    "summary": "Implemented and verified the requested change.",
+                },
+            }]},
+        )
+        self.assertEqual(
+            "Implemented and verified the requested change.",
+            valid[0]["payload"]["summary"],
+        )
+
+        for summary in ("x" * 701, "two\nlines"):
+            with self.subTest(summary=summary[:20]):
+                with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
+                    adapter._worker_metadata_events(
+                        "mission-1", "task-1", "worker-1",
+                        {"mission_events": [{
+                            "type": "delivery.upsert",
+                            "payload": {
+                                "kind": "pull_request", "status": "merged",
+                                "url": "https://example.invalid/pr/1",
+                                "summary": summary,
+                            },
+                        }]},
+                    )
+
     @unittest.skipUnless(os.name == "posix", "POSIX mode invariant")
     def test_adapter_state_is_owner_only(self):
         backend = FakeKanban()

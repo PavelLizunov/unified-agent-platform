@@ -10,6 +10,8 @@ export type MissionView = {
   status: string
   stage: string
   progress_percent: number
+  project_label?: string | null
+  project_repository?: string | null
   notice?: {
     code: string
     message: string
@@ -218,6 +220,9 @@ export function MissionOverviewCard() {
   })
   const mission = replayQuery.data?.mission ?? snapshotMission
   const missionEvents = replayQuery.data?.events ?? []
+  const projectTitle = mission?.project_label
+    ? `${mission.project_label}${mission.project_repository ? ` (${mission.project_repository})` : ''}`
+    : mission?.project_repository || mission?.goal || mission?.mission_id
 
   async function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -276,7 +281,10 @@ export function MissionOverviewCard() {
           className={`size-2 rounded-full ${activeStatuses.has(mission.status) ? 'bg-amber-400' : mission.status === 'completed' ? 'bg-emerald-500' : 'bg-red-500'}`}
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{mission.goal || mission.mission_id}</div>
+          <div className="truncate text-sm font-semibold">{projectTitle}</div>
+          {mission.goal && mission.goal !== projectTitle ? (
+            <div className="truncate text-xs opacity-75">{mission.goal}</div>
+          ) : null}
           <div className="text-xs opacity-65">
             Этап: {stageLabels[mission.stage] || mission.stage} · {mission.progress_percent}% · Статус: {statusLabels[mission.status] || mission.status}
           </div>
@@ -354,7 +362,12 @@ export function MissionOverviewCard() {
           </p>
         </div>
       ) : null}
-      {mission.result ? <p className="mt-3 text-sm">Итог: {mission.result}</p> : null}
+      {mission.result ? (
+        <div className="mt-3 rounded-md bg-emerald-500/10 px-3 py-2 text-sm">
+          <h3 className="text-xs font-semibold uppercase tracking-wide opacity-70">Результат</h3>
+          <p className="mt-1 whitespace-pre-wrap leading-relaxed">{mission.result}</p>
+        </div>
+      ) : null}
       {mission.artifacts?.map((artifact) => (
         <figure key={artifact.artifact_id} className="mt-3">
           <img
@@ -376,8 +389,14 @@ export function MissionOverviewCard() {
       ) : null}
       <details className="mt-3 text-sm">
         <summary className="cursor-pointer select-none text-xs font-medium opacity-75">
-          Задачи {mission.tasks.length} · Исполнители {mission.workers.length} · Проверки {mission.gates.length} · Изменения {mission.changes.length} · События {missionEvents.length}
+          Подробнее о задаче · Задачи {mission.tasks.length} · Исполнители {mission.workers.length} · Проверки {mission.gates.length} · Изменения {mission.changes.length} · Результаты {mission.deliveries.length} · События {missionEvents.length}
         </summary>
+        {mission.goal ? (
+          <div className="mt-3 rounded-md bg-black/10 px-3 py-2">
+            <h3 className="mb-1 text-xs font-semibold">Исходная цель</h3>
+            <p className="whitespace-pre-wrap text-xs leading-relaxed">{mission.goal}</p>
+          </div>
+        ) : null}
         <div className="mt-3 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div><h3 className="mb-1 text-xs font-semibold">Задачи</h3>{rows(mission.tasks, 'title', 'status')}</div>
           <div><h3 className="mb-1 text-xs font-semibold">Исполнители</h3>{rows(mission.workers, 'worker_id', 'status')}</div>

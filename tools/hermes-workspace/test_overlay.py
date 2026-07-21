@@ -464,6 +464,9 @@ def main() -> None:
         assert "Следующая автоматическая попытка" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
+        assert "Подробнее о задаче" in mission_card
+        assert "whitespace-pre-wrap leading-relaxed" in mission_card
+        assert "project_repository" in mission_card
         assert 'aria-label="Ответ"' in mission_card
         assert "question_id: question.question_id" in mission_card
 
