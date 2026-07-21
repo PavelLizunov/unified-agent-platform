@@ -5,7 +5,11 @@ Prevents root-filesystem exhaustion from Rust build artifacts, abandoned temp
 files and swarm-out growth.
 
 **Physical mount deployment: complete (2026-07-21).** Software 40 GiB
-minimum-free guard: pending merge/deploy of this patch.
+minimum-free guard: merged and deployed 2026-07-21 via PR #381, exact
+squash merge `fcfc38063a9b225c57251b1d6b25959ced1787ac`; CI
+`static-checks` succeeded (run `29842969560`); Flux reconciled that exact
+revision. Central runtime rolled out; build-1 coordinator installer and
+check both passed.
 
 ## Current state (verified 2026-07-21)
 
@@ -38,9 +42,9 @@ The repo base unit (`tools/swarm/systemd/hermes-delivery-coordinator@.service`)
 includes `ConditionPathIsMountPoint=/home/uap/worktrees` in `[Unit]`.
 The 2026-07-21 production deployment also has a manually installed drop-in
 (`~/.config/systemd/user/hermes-delivery-coordinator@.service.d/20-worktree-mount.conf`)
-with the same condition; the duplicate is harmless and will be superseded
-when the repo unit is next installed. Future installer runs persist the
-condition from the repo base unit. `/etc/fstab` is **not** repo-managed.
+with the same condition. The repo base unit carrying the identical condition
+is now installed; the duplicate drop-in remains harmless. `/etc/fstab` is
+**not** repo-managed.
 
 If the mount is missing the service is skipped (not failed) and the timer
 retries on the next tick. A manual `python3 delivery_coordinator.py`
@@ -68,6 +72,31 @@ systemd-analyze --user condition 'ConditionPathIsMountPoint=/home/uap/worktrees'
 - No automatic `rm`/`reset`/`clean` of worktrees or data.
 - On recovery the exact parked Kanban run is reclaimed with provenance
   validation before delivery resumes.
+
+## Post-deployment evidence (2026-07-21)
+
+Installed hashes:
+
+```
+coordinator  SHA-256 be78b37e38630394f4c30033d0ac13d6629c14fbe7a0232c39b142a16f96dfcb
+base service SHA-256 4909868adab16e61e47f7c640070053457d0831da2a10391df46eae9422dcacb
+```
+
+Post-install automatic timer ticks (2026-07-21 15:27 UTC):
+
+| Profile | Result | ExecMainStatus | ConditionResult |
+|---|---|---|---|
+| `vpnctl` | success | 0 | yes |
+| `ninitux-landing` | success | 0 | yes |
+| `vpnrouter` | success | 0 | yes |
+
+Mount condition checks:
+
+- Positive: `ConditionPathIsMountPoint=/home/uap/worktrees` passed.
+- Negative: a non-mount path was rejected.
+
+No real low-disk production canary was run; deterministic tests cover the
+low-space transition without filling the disk.
 
 ## Verification
 
