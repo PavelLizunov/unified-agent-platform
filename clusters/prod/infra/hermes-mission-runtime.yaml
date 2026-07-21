@@ -1608,7 +1608,7 @@ data:
         "task.upsert": {"task_id", "title", "status", "assignee"},
         "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
         "terminal.append": {"stream", "text", "offset"},
-        "delivery.upsert": {"kind", "status", "url"},
+        "delivery.upsert": {"kind", "status", "url", "summary"},
         "artifact.upsert": {
             "artifact_id", "kind", "name", "media_type", "size_bytes", "sha256",
         },
@@ -1619,6 +1619,7 @@ data:
     }
     _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
     _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
+    _MAX_DELIVERY_SUMMARY_CHARS = 700
     _ID_PAYLOAD_FIELDS = {
         "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
         "run_id", "status", "stream", "task_id", "worker_id",
@@ -2213,11 +2214,20 @@ data:
                 payload.get("kind") == "delivery"
                 and payload.get("status") == "not_applicable"
             )
+            summary = payload.get("summary")
             if not_applicable:
                 if "url" in payload:
                     raise MissionError("not-applicable delivery must not have a URL")
             elif "url" not in payload:
                 raise MissionError("delivery URL is required")
+            if summary is not None and (
+                payload.get("kind") != "pull_request"
+                or not isinstance(summary, str)
+                or summary != " ".join(summary.split())
+                or not summary
+                or len(summary) > _MAX_DELIVERY_SUMMARY_CHARS
+            ):
+                raise MissionError("invalid delivery summary")
         if event_type == "artifact.upsert":
             if (
                 payload.get("kind") != "image"
@@ -2585,7 +2595,12 @@ data:
             for item in view.get("deliveries", [])
             if isinstance(item, dict)
         }
-        lines = [f"Выполнено: {compact(view.get('goal'), 700)}"]
+        owner_result = deliveries.get("pull_request", {}).get("summary")
+        lines = [
+            compact(owner_result, _MAX_DELIVERY_SUMMARY_CHARS)
+            if isinstance(owner_result, str) and owner_result.strip()
+            else "Изменения внесены, проверены и слиты; подробное описание результата недоступно."
+        ]
         for label, kind in (("PR", "pull_request"), ("Merge-коммит", "default_branch")):
             url = deliveries.get(kind, {}).get("url")
             if isinstance(url, str) and url.strip():

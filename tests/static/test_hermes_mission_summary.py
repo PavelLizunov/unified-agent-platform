@@ -76,6 +76,53 @@ def test_completion_gates_deploy_and_fail_closed() -> None:
     assert "\u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u043f\u0440\u043e\u0435\u043a\u0442\u0430" in dep
 
 
+def test_completion_uses_delivery_summary_and_never_echoes_goal() -> None:
+    goal = "A very long owner request that is not a completion answer"
+    summary = "Исправлены русские склонения; число 14 подтверждено тестом."
+    result = m._completion_result(_view(
+        goal=goal,
+        status="completed",
+        deliveries=[{
+            "kind": "pull_request", "status": "merged",
+            "url": "https://example.invalid/pr/1", "summary": summary,
+        }],
+    ))
+    assert result.startswith(summary)
+    assert goal not in result
+    fallback = m._completion_result(_view(goal=goal, status="completed"))
+    assert "подробное описание результата недоступно" in fallback
+    assert goal not in fallback
+
+
+def test_delivery_summary_schema_is_closed_and_bounded() -> None:
+    base = {
+        "schema_version": 1, "mission_id": "mission-x",
+        "type": "delivery.upsert", "source": "build1-flow",
+        "correlation": {"producer_event_id": "summary:test"},
+        "payload": {
+            "kind": "pull_request", "status": "merged",
+            "url": "https://example.invalid/pr/1", "summary": "Короткий итог",
+        },
+    }
+    m._validate_submission("mission-x", base)
+    for summary in ("x" * 701, "две\nстроки", "", 42):
+        invalid = {**base, "payload": {**base["payload"], "summary": summary}}
+        try:
+            m._validate_submission("mission-x", invalid)
+            raise AssertionError("invalid summary was accepted")
+        except m.MissionError as error:
+            assert "summary" in str(error)
+    wrong_kind = {
+        **base,
+        "payload": {**base["payload"], "kind": "default_branch"},
+    }
+    try:
+        m._validate_submission("mission-x", wrong_kind)
+        raise AssertionError("summary on a non-PR delivery was accepted")
+    except m.MissionError as error:
+        assert "delivery summary" in str(error)
+
+
 def test_completion_elapsed_from_updated_at() -> None:
     v = _view(goal="G", status="completed",
               started_at="2026-07-21T10:00:00.000Z", updated_at="2026-07-21T11:30:00.000Z")

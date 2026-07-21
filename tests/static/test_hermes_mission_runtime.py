@@ -1814,7 +1814,11 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             number += 1
         publish(
             "delivery.upsert",
-            {"kind": "pull_request", "status": "merged", "url": "https://example.invalid/pr/1"},
+            {
+                "kind": "pull_request", "status": "merged",
+                "url": "https://example.invalid/pr/1",
+                "summary": "Implemented the requested change and covered it with tests.",
+            },
             number,
         )
         number += 1
@@ -1838,7 +1842,10 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert completed[0]["source"] == "central-hermes"
         assert completed[0]["type"] == "mission.completed"
         result_text = completed[0]["payload"]["result"]
-        assert "Выполнено: Deliver safely" in result_text
+        assert result_text.startswith(
+            "Implemented the requested change and covered it with tests."
+        )
+        assert "Deliver safely" not in result_text
         assert "PR: https://example.invalid/pr/1" in result_text
         assert "Merge-коммит: https://example.invalid/commit/1" in result_text
         assert "тесты" in result_text

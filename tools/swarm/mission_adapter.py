@@ -35,11 +35,12 @@ REQUIRED_PAYLOAD = {
 }
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
-    "delivery.upsert": {"kind", "status", "url"},
+    "delivery.upsert": {"kind", "status", "url", "summary"},
     "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
 }
 MAX_LOG_BYTES = 1024 * 1024
 MAX_EVENT_JSON_BYTES = 65_536
+MAX_DELIVERY_SUMMARY_CHARS = 700
 OVERSIZED_TERMINAL_LINE = "[REDACTED: oversized terminal line]"
 
 
@@ -722,10 +723,20 @@ def _worker_metadata_events(
                 payload.get("kind") == "delivery"
                 and payload.get("status") == "not_applicable"
             )
+            summary = payload.get("summary")
             if (
                 (not_applicable and "url" in payload)
                 or (not not_applicable and not isinstance(payload.get("url"), str))
                 or (isinstance(payload.get("url"), str) and not payload["url"])
+                or (
+                    summary is not None
+                    and (
+                        payload.get("kind") != "pull_request"
+                        or not isinstance(summary, str)
+                        or summary != " ".join(summary.split())
+                        or not 0 < len(summary) <= MAX_DELIVERY_SUMMARY_CHARS
+                    )
+                )
             ):
                 raise AdapterError("worker mission event payload is invalid")
         event_worker_id = worker_id

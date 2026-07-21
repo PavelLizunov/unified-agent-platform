@@ -640,6 +640,31 @@ class PostVerifyPlanCrashCoordinator(PostVerifyRetryCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def test_owner_result_requires_one_closed_bounded_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "author-last.txt"
+            self.assertIsNone(coordinator._owner_result(path))
+            path.write_text("", encoding="utf-8")
+            self.assertIsNone(coordinator._owner_result(path))
+            path.write_text("OWNER_RESULT:   \n", encoding="utf-8")
+            self.assertIsNone(coordinator._owner_result(path))
+            path.write_text(
+                "Details above\nOWNER_RESULT: Исправлено склонение; число 14 подтверждено.\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                "Исправлено склонение; число 14 подтверждено.",
+                coordinator._owner_result(path),
+            )
+            path.write_text(
+                "OWNER_RESULT: first\nOWNER_RESULT: second\n", encoding="utf-8"
+            )
+            self.assertIsNone(coordinator._owner_result(path))
+            path.write_text(
+                "OWNER_RESULT: " + "x" * 701 + "\n", encoding="utf-8"
+            )
+            self.assertIsNone(coordinator._owner_result(path))
+
     def setUp(self):
         real = shutil.disk_usage(str(pathlib.Path(__file__).parent))
         plenty = real._replace(
@@ -1323,8 +1348,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             root = pathlib.Path(directory)
             approved = profile(root)
             approved.update(codex_bin="codex", codex_home=str(root / "codex-home"))
+            prompts = []
 
-            def runner(command, **_kwargs):
+            def runner(command, **kwargs):
+                prompts.append(kwargs["input"])
                 raw = pathlib.Path(command[command.index("--output-last-message") + 1])
                 raw.write_text("author completed", encoding="utf-8")
                 return subprocess.CompletedProcess(
@@ -1373,6 +1400,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             record_author.assert_called_once_with(state, paths, [])
             self.assertNotIn("model_ambiguous", state)
             self.assertTrue((paths["directory"] / "author-1-last.txt").is_file())
+            self.assertIn("OWNER_RESULT:", prompts[0])
 
     def test_v4_successful_check_mutation_enters_guarded_candidate_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -8805,12 +8833,24 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "model": "gpt-5.6-sol", "reasoning_effort": "xhigh",
                     "usage": {"input_tokens": 1000, "output_tokens": 200},
                 },
+                "author_summary": {
+                    "owner_result": "Implemented and verified the requested change."
+                },
                 "reviewer_telemetry": {
                     "model": "gpt-5.6-terra", "reasoning_effort": "high",
                     "usage": {"input_tokens": 500},
                 },
             }
             events = coord._events(state, cleanup=True)
+            pull_request = next(
+                e for e in events
+                if e["type"] == "delivery.upsert"
+                and e["payload"]["kind"] == "pull_request"
+            )
+            self.assertEqual(
+                "Implemented and verified the requested change.",
+                pull_request["payload"]["summary"],
+            )
             workers = [e for e in events if e["type"] == "worker.upsert"]
             self.assertEqual(2, len(workers))
             author = next(w for w in workers if w["payload"]["worker_id"] == "author")
