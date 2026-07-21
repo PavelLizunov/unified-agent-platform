@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Static gate: read-only diagnostics policy in the managed Hermes prompt."""
+from pathlib import Path
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+cm = yaml.safe_load(
+    (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(encoding="utf-8")
+)
+profile = cm["data"]["user-profile"]
+agents = cm["data"]["agents-md"]
+
+# Automatic read-only diagnostics + evidence
+assert "READ-ONLY ДИАГНОСТИКА" in profile
+assert "АВТОМАТИЧЕСКИ, БЕЗ ПОДТВЕРЖДЕНИЯ" in profile
+assert "Резюмируй доказательства" in profile
+assert "Read-only diagnostics are automatic" in agents
+assert "summarize evidence" in agents
+
+# Exact three owner-gate categories
+for token in ("недоступные credentials/новые полномочия",
+              "неоднозначный продуктовый",
+              "destructive/write действие"):
+    assert token in profile, token
+for token in ("unavailable credentials or new authority",
+              "ambiguous product intent",
+              "destructive/write action"):
+    assert token in agents, token
+
+# Ordinary configured subscription/API spend needs no confirmation
+assert "Обычные расходы уже настроенных" in profile
+assert "subscription/API" in profile
+assert "Ordinary already-configured subscription/API spend" in agents
+
+# Spending is NOT in the external-side-effects approval list
+g2_block = profile[profile.index("ПОБОЧКИ НАРУЖУ"):profile.index("КОНТЕКСТ-ГИГИЕНА")]
+assert "трата денег" not in g2_block, "spending must not require approval"
+
+# Destructive / external-write boundary preserved
+assert "РАЗРУШИТЕЛЬНОЕ" in profile and "без явного согласования" in profile
+assert "ПОБОЧКИ НАРУЖУ" in profile
+assert "только с ЯВНОГО подтверждения владельца" in profile
+
+print("hermes-diagnostics-policy-ok")
