@@ -26,17 +26,19 @@ FILES = {
 "src/screens/dashboard/dashboard-screen.tsx": "3e562694308922351aee07bc5bbb7908e752d3c9a6211e896e90dec284bcc7c4",
 "src/components/settings/settings-sidebar.tsx": "f6d986201b242e9adbfae4675c6224aa2ee56bb8306c12a0fb0bfe2d68f4c1a2",
 "src/routes/settings/index.tsx": "ba25520be3c3e53b760dd40e77c2fb84d67098a029e274c5c32882244fb540a9",
+"src/screens/chat/components/chat-sidebar.tsx": "a5bd23e6c678c620ba5251cd94b26facba6d8c9f124dbff6c98efc860e49707c",
+"src/components/command-palette.tsx": "29a9c16810544572dea66ddef084c9f872df378176f70a173ea5d36301fc8ed4",
 }
 PATCHED_FILES = {
 "src/server/gateway-capabilities.ts": "8d37e5895ff40899242200d24f88e2e2e17ea0651f8575581bbc1c2a829c91c7",
 "src/server/kanban-dashboard-proxy.ts": "ba981a50148a0d75b6a02d873646fd0371e116a266a907b56b4c5b4eb10ac6f7",
 "src/routes/api/claude-tasks-assignees.ts": "001e870c6db2294ad73315de09b4a8f5337061a9bb179af63f01489d148fa0e9",
 "src/server/profiles-browser.ts": "e397c6712bc265a21cf8046eff778557d7f9d4a1c2cef529bd863edb8e1915e5",
-"src/components/mobile-hamburger-menu.tsx": "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
-"src/components/mobile-tab-bar.tsx": "8e699f2c2fe547001a3d0c42bcaf0c9b737bb681fe2817d689865d6110b1c08c",
-"src/routes/__root.tsx": "c61251c233f325a6a9871bc153b89e0aa91baac2cd1c4aa03f54422f366907fc",
-"src/routes/api/playground-admin.ts": "c99380cd813bad4e7d210e1654211bb571751cbb9de553cdd00f501febf13a27",
-"src/routes/api/playground-npc.ts": "652135b9afb2ae8cabcf0ae4d4f9d993cee1f335a72482dbd07bba51914098f7",
+"src/components/mobile-hamburger-menu.tsx": "97005e234d8e98297908ee4aef2e4141fb731ee1406e3a79cb748d2242e9e970",
+"src/components/mobile-tab-bar.tsx": "f0494c1497085d36c6d59d599117f2909eeb2638d5bd6d34ae6e525619de6fa0",
+"src/routes/__root.tsx": "cdb09287285105e67d986459b5b09c256d6397a8b33686fa9ffd77995355e3f0",
+"src/routes/api/playground-admin.ts": "b83ced3b20dabf4b0ba7604f28b326ab25202cf5efc44060d7b141e8d7544f06",
+"src/routes/api/playground-npc.ts": "7d626539973696cda605222a3408c83bcbdfcbbd32763be6936cebf1ab8ad5f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
 "src/routes/api/send-stream.ts": "ec312e605aadce46748087c392c9a414ff228a5f16c65b2a80d6a71cd40466e2",
@@ -49,6 +51,8 @@ PATCHED_FILES = {
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 "src/components/settings/settings-sidebar.tsx": "4e8e540d7b5e1a2dd42847249a5431f8372a01fc2d847ae9c962dce98e85300d",
 "src/routes/settings/index.tsx": "3f4ccf742d4cb98adabc563c555cd2fee6b7f42d736b8cd19aa2b57b9712f87b",
+"src/screens/chat/components/chat-sidebar.tsx": "321334173ba996d7b77819d6b84ec2d2488657ab0cb58c4b5091109314a96feb",
+"src/components/command-palette.tsx": "a7c343e6a39e1e9e623107626512a68b66e4ac73c577917ac5164be24020a2ab",
 }
 LEGACY_FILES = {
 "src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
@@ -567,22 +571,31 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
               return json({ ok: false, error: 'Central Conductor unavailable in central-only mode' }, { status: 503 })
             }
             const native = createNativeConductorMission({""", "conductor local fallback")
-    elif rel in ("src/components/mobile-hamburger-menu.tsx", "src/components/mobile-tab-bar.tsx"):
-        is_h = "hamburger" in rel
-        needle = "export const MOBILE_HAMBURGER_NAV_ITEMS = [" if is_h else "export const MOBILE_NAV_TABS: Array<TabItem> = ["
-        text = replace(text, needle, "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\n" + needle, "mobile flag")
-        text = replace(text, "  {\n    id: 'playground',", "  ...(HERMESWORLD_ENABLED ? [{\n    id: 'playground',", "mobile game item")
-        marker = "  },\n  {\n    id: 'terminal'," if is_h else "  },\n  {\n    id: 'files',"
-        text = replace(text, marker, "  }] : []),\n  {\n    id: '" + ("terminal" if is_h else "files") + "',", "mobile game close")
+    elif rel == "src/components/mobile-hamburger-menu.tsx":
+        text = replace(text, "export const MOBILE_HAMBURGER_NAV_ITEMS = [", "const CENTRAL_ONLY_BLOCKED_NAV_IDS = new Set(['playground', 'terminal', 'jobs', 'conductor', 'operations', 'swarm', 'swarm2', 'files', 'tasks', 'agents'])\n\nexport const MOBILE_HAMBURGER_NAV_ITEMS = [", "hamburger blocked ids")
+        text = replace(text, """  const visibleNavItems = MOBILE_HAMBURGER_NAV_ITEMS.filter(
+    (item) => item.id !== 'echo-studio' || echoStudioEnabled,
+  )""", """  const visibleNavItems = MOBILE_HAMBURGER_NAV_ITEMS.filter(
+    (item) =>
+      (item.id !== 'echo-studio' || echoStudioEnabled) &&
+      !CENTRAL_ONLY_BLOCKED_NAV_IDS.has(item.id),
+  )""", "hamburger blocked filter")
+    elif rel == "src/components/mobile-tab-bar.tsx":
+        text = replace(text, "]\n\nexport function MobileTabBar() {", "]\n\nconst CENTRAL_ONLY_BLOCKED_TAB_IDS = new Set(['playground', 'files', 'terminal', 'jobs', 'swarm', 'swarm2', 'conductor', 'operations', 'tasks', 'agents'])\nconst VISIBLE_NAV_TABS = MOBILE_NAV_TABS.filter((tab) => !CENTRAL_ONLY_BLOCKED_TAB_IDS.has(tab.id))\n\nexport function MobileTabBar() {", "tab bar blocked ids")
+        text = replace(text, "const currentIdx = MOBILE_NAV_TABS.findIndex((tab) => tab.match(pathname))", "const currentIdx = VISIBLE_NAV_TABS.findIndex((tab) => tab.match(pathname))", "tab bar swipe find")
+        text = replace(text, "Math.min(currentIdx + 1, MOBILE_NAV_TABS.length - 1)", "Math.min(currentIdx + 1, VISIBLE_NAV_TABS.length - 1)", "tab bar swipe next")
+        text = replace(text, "nextIdx < MOBILE_NAV_TABS.length", "nextIdx < VISIBLE_NAV_TABS.length", "tab bar swipe bound")
+        text = replace(text, "void navigate({ to: MOBILE_NAV_TABS[nextIdx].to })", "void navigate({ to: VISIBLE_NAV_TABS[nextIdx].to })", "tab bar swipe navigate")
+        text = replace(text, "{MOBILE_NAV_TABS.map((tab, idx) => {", "{VISIBLE_NAV_TABS.map((tab, idx) => {", "tab bar render map")
     elif rel == "src/routes/__root.tsx":
         text = replace(text, "} from '@tanstack/react-router'", "  Navigate,\n} from '@tanstack/react-router'", "root Navigate import")
-        text = replace(text, "import { LoginScreen } from '@/components/auth/login-screen'", "import { LoginScreen } from '@/components/auth/login-screen'\n\nconst HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\nconst UPDATE_CENTER_ENABLED = import.meta.env.VITE_UPDATE_CENTER_ENABLED !== '0'\nconst DISABLED_GAME_PATHS = new Set(['/playground', '/hermes-world', '/world', '/reserve', '/reserve/confirm', '/early-access'])", "root flags")
-        text = replace(text, "  const isGameSurfaceRoute = isHermesWorldLandingRoute || pathname === '/playground' || pathname.startsWith('/playground/')", "  const isGameSurfaceRoute = HERMESWORLD_ENABLED && (isHermesWorldLandingRoute || pathname === '/playground' || pathname.startsWith('/playground/'))\n  const redirectDisabledGame = !HERMESWORLD_ENABLED && DISABLED_GAME_PATHS.has(pathname)", "root game guard")
+        text = replace(text, "import { LoginScreen } from '@/components/auth/login-screen'", "import { LoginScreen } from '@/components/auth/login-screen'\n\nconst HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED === '1'\nconst UPDATE_CENTER_ENABLED = import.meta.env.VITE_UPDATE_CENTER_ENABLED === '1'\nconst CENTRAL_ONLY_BLOCKED_PATHS = new Set(['/playground', '/hermes-world', '/world', '/reserve', '/reserve/confirm', '/early-access', '/files', '/terminal', '/jobs', '/tasks', '/conductor', '/operations', '/agents', '/swarm', '/swarm2'])", "root flags")
+        text = replace(text, "  const isGameSurfaceRoute = isHermesWorldLandingRoute || pathname === '/playground' || pathname.startsWith('/playground/')", "  const isGameSurfaceRoute = HERMESWORLD_ENABLED && (isHermesWorldLandingRoute || pathname === '/playground' || pathname.startsWith('/playground/'))\n  const redirectBlockedRoute = [...CENTRAL_ONLY_BLOCKED_PATHS].some((base) => pathname === base || pathname.startsWith(`${base}/`))", "root game guard")
         text = replace(text, "{!isHermesWorldLandingRoute ? <UpdateCenterNotifier /> : null}", "{UPDATE_CENTER_ENABLED && !isHermesWorldLandingRoute ? <UpdateCenterNotifier /> : null}", "update flag")
-        text = replace(text, "        <>\n          <GlobalShortcutListener />", "        <>\n          {redirectDisabledGame ? <Navigate to=\"/dashboard\" replace /> : null}\n          {!redirectDisabledGame ? <>\n          <GlobalShortcutListener />", "root redirect")
+        text = replace(text, "        <>\n          <GlobalShortcutListener />", "        <>\n          {redirectBlockedRoute ? <Navigate to=\"/dashboard\" replace /> : null}\n          {!redirectBlockedRoute ? <>\n          <GlobalShortcutListener />", "root redirect")
         text = replace(text, "          ) : null}\n        </>\n      ) : null", "          ) : null}\n          </> : null}\n        </>\n      ) : null", "root redirect close")
     elif rel in ("src/routes/api/playground-admin.ts", "src/routes/api/playground-npc.ts"):
-        text = replace(text, "export const Route = createFileRoute", "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const Route = createFileRoute", "game endpoint flag")
+        text = replace(text, "export const Route = createFileRoute", "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED === '1'\n\nexport const Route = createFileRoute", "game endpoint flag")
         if "GET: async ({ request }) => {" in text:
             text = replace(text, "GET: async ({ request }) => {", "GET: async ({ request }) => {\n        if (!HERMESWORLD_ENABLED) return json({ error: 'HermesWorld is disabled' }, { status: 404 })", "game GET guard")
         if "POST: async ({ request }) => {" in text:
@@ -634,6 +647,35 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
           )}
 """,
             "project permissions section",
+        )
+    elif rel == "src/screens/chat/components/chat-sidebar.tsx":
+        text = replace(
+            text,
+            "  const isDashboardActive = pathname === '/dashboard'\n\n  const mainItems: Array<NavItemDef> = [",
+            "  const isDashboardActive = pathname === '/dashboard'\n\n"
+            "  const CENTRAL_ONLY_BLOCKED_NAV_PATHS = new Set(['/files', '/terminal', '/jobs', '/tasks', '/conductor', '/operations', '/agents', '/swarm', '/swarm2'])\n\n"
+            "  const mainItems: Array<NavItemDef> = [",
+            "desktop sidebar blocked paths",
+        )
+        return replace(
+            text,
+            "  ]\n\n  const knowledgeItems: Array<NavItemDef> = [",
+            "  ].filter((item) => !(item.kind === 'link' && item.to && CENTRAL_ONLY_BLOCKED_NAV_PATHS.has(item.to)))\n\n  const knowledgeItems: Array<NavItemDef> = [",
+            "desktop sidebar blocked filter",
+        )
+    elif rel == "src/components/command-palette.tsx":
+        text = replace(
+            text,
+            "export function CommandPalette({ pathname, sessions }: CommandPaletteProps) {",
+            "const CENTRAL_ONLY_BLOCKED_SCREEN_IDS = new Set(['screen-files', 'screen-terminal'])\n\n"
+            "export function CommandPalette({ pathname, sessions }: CommandPaletteProps) {",
+            "command palette blocked ids",
+        )
+        return replace(
+            text,
+            "    ],\n    [navigate],\n  )",
+            "    ].filter((action) => !CENTRAL_ONLY_BLOCKED_SCREEN_IDS.has(action.id)),\n    [navigate],\n  )",
+            "command palette blocked filter",
         )
     return text
 
