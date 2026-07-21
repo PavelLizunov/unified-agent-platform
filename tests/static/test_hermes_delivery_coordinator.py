@@ -8728,5 +8728,121 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
 
 
+    def test_events_emit_author_reviewer_telemetry_with_valid_usage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            counters = {"worktrees": 0, "authors": 0, "reviews": 0, "cleanups": 0}
+            coord = HermeticCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                counters=counters,
+            )
+            state = {
+                "branch": "b", "candidate_sha": "sha", "pr_url": "https://x/pr/1",
+                "default_sha": "dsha", "candidate_files": ["src/a.py"],
+                "author_telemetry": {
+                    "model": "gpt-5.6-sol", "reasoning_effort": "xhigh",
+                    "usage": {"input_tokens": 1000, "output_tokens": 200},
+                },
+                "reviewer_telemetry": {
+                    "model": "gpt-5.6-terra", "reasoning_effort": "high",
+                    "usage": {"input_tokens": 500},
+                },
+            }
+            events = coord._events(state, cleanup=True)
+            workers = [e for e in events if e["type"] == "worker.upsert"]
+            self.assertEqual(2, len(workers))
+            author = next(w for w in workers if w["payload"]["worker_id"] == "author")
+            reviewer = next(w for w in workers if w["payload"]["worker_id"] == "reviewer")
+            self.assertEqual("gpt-5.6-sol", author["payload"]["model"])
+            self.assertEqual("xhigh", author["payload"]["effort"])
+            self.assertEqual(1000, author["payload"]["input_tokens"])
+            self.assertEqual(200, author["payload"]["output_tokens"])
+            self.assertEqual("gpt-5.6-terra", reviewer["payload"]["model"])
+            self.assertEqual(500, reviewer["payload"]["input_tokens"])
+            self.assertNotIn("output_tokens", reviewer["payload"])
+            # Deterministic replay
+            self.assertEqual(events, coord._events(state, cleanup=True))
+
+    def test_events_omit_absent_or_invalid_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            counters = {"worktrees": 0, "authors": 0, "reviews": 0, "cleanups": 0}
+            coord = HermeticCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                counters=counters,
+            )
+            state = {
+                "branch": "b", "candidate_sha": "sha", "pr_url": "https://x/pr/1",
+                "default_sha": "dsha", "candidate_files": [],
+                "author_telemetry": {"model": "gpt-5.6-sol", "usage": {"input_tokens": -5}},
+            }
+            events = coord._events(state, cleanup=False)
+            workers = [e for e in events if e["type"] == "worker.upsert"]
+            self.assertEqual(1, len(workers))
+            self.assertNotIn("input_tokens", workers[0]["payload"])
+            self.assertNotIn("output_tokens", workers[0]["payload"])
+            # No telemetry at all → no worker events
+            state2 = {"branch": "b", "candidate_sha": "s", "pr_url": "https://x/pr/1",
+                       "default_sha": "d", "candidate_files": []}
+            self.assertEqual(0, len([e for e in coord._events(state2, cleanup=False)
+                                     if e["type"] == "worker.upsert"]))
+
+    def test_failure_contract_post_verify_includes_telemetry_and_merged_pr(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            counters = {"worktrees": 0, "authors": 0, "reviews": 0, "cleanups": 0}
+            coord = HermeticCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                counters=counters,
+            )
+            state = {
+                "failure_kind": "post_verify",
+                "pr_url": "https://x/pr/1",
+                "author_telemetry": {
+                    "model": "gpt-5.6-sol", "reasoning_effort": "xhigh",
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                },
+                "reviewer_telemetry": {"model": "gpt-5.6-terra"},
+            }
+            _, _, events = coord._failure_contract(state)
+            # Merged PR preserved, no failed PR
+            deliveries = [e for e in events if e["type"] == "delivery.upsert"]
+            self.assertEqual(1, len(deliveries))
+            self.assertEqual("merged", deliveries[0]["payload"]["status"])
+            # Telemetry present
+            workers = [e for e in events if e["type"] == "worker.upsert"]
+            self.assertEqual(2, len(workers))
+            self.assertEqual("author", workers[0]["payload"]["worker_id"])
+            # post-verify gate failed
+            gates = {e["payload"]["gate_id"]: e["payload"]["status"]
+                     for e in events if e["type"] == "gate.upsert"}
+            self.assertEqual("failed", gates["post-verify"])
+            self.assertEqual("passed", gates["tests"])
+
+    def test_failure_contract_review_rejection_includes_telemetry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            counters = {"worktrees": 0, "authors": 0, "reviews": 0, "cleanups": 0}
+            coord = HermeticCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state",
+                counters=counters,
+            )
+            state = {
+                "pr_url": "https://x/pr/1",
+                "author_telemetry": {"model": "gpt-5.6-sol"},
+            }
+            _, _, events = coord._failure_contract(state)
+            workers = [e for e in events if e["type"] == "worker.upsert"]
+            self.assertEqual(1, len(workers))
+            self.assertEqual("author", workers[0]["payload"]["worker_id"])
+            # Failed PR inserted for non-post_verify
+            deliveries = [e for e in events if e["type"] == "delivery.upsert"]
+            self.assertTrue(any(d["payload"]["status"] == "failed" for d in deliveries))
+
+
 if __name__ == "__main__":
     unittest.main()
