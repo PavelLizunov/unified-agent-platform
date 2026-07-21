@@ -2034,8 +2034,25 @@ class DeliveryCoordinator:
                 ):
                     recoverable.append(state)
             if len(recoverable) > 1:
-                raise DeliveryError("profile has more than one recoverable delivery state")
-            if recoverable:
+                central_cache: dict[str, dict[str, Any]] = {}
+                cancelled: list[tuple[dict[str, Any], dict[str, Any]]] = []
+                live: list[dict[str, Any]] = []
+                for candidate in recoverable:
+                    candidate_id = candidate["mission_id"]
+                    central = self.client.get_mission(candidate_id)
+                    central_cache[candidate_id] = central
+                    if central.get("status") == "cancelled":
+                        cancelled.append((candidate, central))
+                    else:
+                        live.append(candidate)
+                if len(live) > 1:
+                    raise DeliveryError("profile has more than one recoverable delivery state")
+                if cancelled:
+                    cancelled.sort(key=lambda pair: pair[0]["mission_id"])
+                    mission = cancelled[0][1]
+                elif live:
+                    mission = central_cache[live[0]["mission_id"]]
+            elif recoverable:
                 mission = self.client.get_mission(recoverable[0]["mission_id"])
         if (
             mission is not None
@@ -2794,6 +2811,141 @@ class DeliveryCoordinator:
             state.update(phase="complete", outcome=result)
             self._save(paths, state)
         return {"action": state["phase"], "mission_id": state["mission_id"], "state": state}
+
+    def _validate_cancelled_task(
+        self, snapshot: dict[str, Any], state: dict[str, Any]
+    ) -> str:
+        task = snapshot.get("task", {})
+        runs = snapshot.get("runs")
+        task_id = state["root_task_id"]
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != task_id
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("cancelled task identity mismatch")
+        status = task.get("status")
+        if status not in {"ready", "running", "done", "archived"}:
+            raise DeliveryError(f"cancelled task has unexpected status: {status}")
+        return status
+
+    def _checkpoint_observed_task_archive(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        retained_at, current_time = self._retention_clock(paths["state"])
+        if state.get("task_archived") is True:
+            self._task_archive_time(state, retained_at, current_time)
+            return
+        if "task_archived_at" in state:
+            raise DeliveryError("completed state has invalid task archive time")
+        state["task_archived"] = True
+        state["task_archived_at"] = current_time
+        state["kanban_gc_ran"] = self.backend.gc()
+        self._save(paths, state)
+
+    def _finish_cancelled(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any]:
+        """Converge a cancelled mission without publishing producer events."""
+        mission_id = state["mission_id"]
+        source = pathlib.Path(self.profile["source_checkout"])
+
+        if state["phase"] == "new" and state.get("root_task_id") is None:
+            for name in ("author", "review", "verify"):
+                if paths[name].exists():
+                    raise DeliveryError("cancelled new state has unexpected worktree")
+            if self._git(source, "branch", "--list", state["branch"]):
+                raise DeliveryError("cancelled new state has unexpected local branch")
+            if self._git(source, "ls-remote", "--heads", "origin", state["branch"]):
+                raise DeliveryError("cancelled new state has unexpected remote branch")
+            if any(
+                state.get(field) is not None
+                for field in ("pr_number", "pr_url", "pr_head_sha", "pr_base_branch")
+            ):
+                raise DeliveryError("cancelled new state has unexpected PR identity")
+            state["task_archive_not_applicable"] = True
+            state["phase"] = "complete"
+            state["outcome"] = "cancelled"
+            self._save(paths, state)
+            return {"action": "complete", "mission_id": mission_id, "state": state}
+
+        if state.get("root_task_id") is None:
+            raise DeliveryError("cancelled non-new state has no Kanban task")
+
+        if state["phase"] not in {
+            "cancelled_cleaned", "cancelled_task_completed", "complete",
+        }:
+            task_status = self._validate_cancelled_task(
+                self.backend.show(state["root_task_id"]), state
+            )
+            require_claim = task_status not in {"done", "archived"}
+            if require_claim:
+                self._ensure_claimed(state)
+                self._save(paths, state)
+            preserve_remote = False
+            if state.get("pr_number") is not None:
+                preserve_remote = self._finalize_failed_pr(
+                    state, require_claim=require_claim
+                )
+            self._cleanup(
+                state,
+                paths,
+                preserve_remote=preserve_remote,
+                require_claim=require_claim,
+            )
+            state["cancelled_pr_preserved"] = preserve_remote
+            state["phase"] = "cancelled_cleaned"
+            self._save(paths, state)
+
+        if state["phase"] == "cancelled_cleaned":
+            task_status = self._validate_cancelled_task(
+                self.backend.show(state["root_task_id"]), state
+            )
+            if task_status == "archived":
+                self._checkpoint_observed_task_archive(state, paths)
+                state["phase"] = "complete"
+                state["outcome"] = "cancelled"
+                self._save(paths, state)
+            elif task_status == "done":
+                self._archive_task(state, paths)
+                state["phase"] = "complete"
+                state["outcome"] = "cancelled"
+                self._save(paths, state)
+            else:
+                self._ensure_claimed(state)
+                self.backend.complete(
+                    state["root_task_id"],
+                    result="cancelled",
+                    summary="Central cancelled the mission; local delivery converged",
+                    metadata={"mission_events": []},
+                )
+                if self._validate_cancelled_task(
+                    self.backend.show(state["root_task_id"]), state
+                ) != "done":
+                    raise DeliveryError("cancelled task completion did not persist")
+                state["phase"] = "cancelled_task_completed"
+                self._save(paths, state)
+
+        if state["phase"] == "cancelled_task_completed":
+            task_status = self._validate_cancelled_task(
+                self.backend.show(state["root_task_id"]), state
+            )
+            if task_status == "archived":
+                self._checkpoint_observed_task_archive(state, paths)
+            elif task_status == "done":
+                self._archive_task(state, paths)
+            else:
+                raise DeliveryError(
+                    f"cancelled task reverted to unexpected status: {task_status}"
+                )
+            state["phase"] = "complete"
+            state["outcome"] = "cancelled"
+            self._save(paths, state)
+
+        if state["phase"] == "complete":
+            return {"action": "complete", "mission_id": mission_id, "state": state}
+        raise DeliveryError("cancelled convergence stuck at phase " + state["phase"])
 
     def _expand(self, command: list[str], state: dict[str, Any], paths: dict[str, pathlib.Path]) -> list[str]:
         values = {
@@ -4234,10 +4386,13 @@ class DeliveryCoordinator:
         self._save(paths, state)
         return "recovered"
 
-    def _finalize_failed_pr(self, state: dict[str, Any]) -> bool:
-        self._assert_claim(
-            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-        )
+    def _finalize_failed_pr(
+        self, state: dict[str, Any], *, require_claim: bool = True
+    ) -> bool:
+        if require_claim:
+            self._assert_claim(
+                state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+            )
         fields = "number,state,isDraft,headRefName,commits,baseRefName"
         expected_head = state.get("pr_head_sha")
         if not isinstance(expected_head, str) or not expected_head:
@@ -4282,9 +4437,10 @@ class DeliveryCoordinator:
             if not remote:
                 raise DeliveryError("open failed PR has no exact remote branch")
             return True
-        self._assert_claim(
-            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-        )
+        if require_claim:
+            self._assert_claim(
+                state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+            )
         if remote:
             self._git(
                 source, "push",
@@ -4934,10 +5090,12 @@ class DeliveryCoordinator:
         paths: dict[str, pathlib.Path],
         *,
         preserve_remote: bool = False,
+        require_claim: bool = True,
     ) -> None:
-        self._assert_claim(
-            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-        )
+        if require_claim:
+            self._assert_claim(
+                state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+            )
         source = pathlib.Path(self.profile["source_checkout"])
         for name in ("review", "verify", "author"):
             self._remove_worktree(paths[name])
@@ -5038,6 +5196,29 @@ class DeliveryCoordinator:
                 and state.get("phase") == "complete"
             ):
                 retained_at, current_time = self._retention_clock(path)
+                if state.get("task_archive_not_applicable") is True:
+                    if (
+                        state.get("root_task_id") is not None
+                        or "task_archived" in state
+                        or "task_archived_at" in state
+                    ):
+                        raise DeliveryError(
+                            "contradictory no-task sentinel in completed state"
+                        )
+                    if current_time < (
+                        retained_at + _COMPLETED_STATE_RETENTION_SECONDS
+                    ):
+                        continue
+                    pending = self.state_root / f".prune-{path.parent.name}"
+                    try:
+                        path.parent.replace(pending)
+                    except FileNotFoundError:
+                        continue
+                    try:
+                        shutil.rmtree(pending)
+                    except FileNotFoundError:
+                        pass
+                    continue
                 if state.get("task_archived") is not True:
                     if "task_archived_at" in state:
                         raise DeliveryError("completed state has invalid task archive time")
@@ -5111,6 +5292,8 @@ class DeliveryCoordinator:
             state = self._load_state(mission_id, paths, mission=mission)
             if state.get("phase") != "complete":
                 self._record_systemd_invocation(state, paths)
+            if mission.get("status") == "cancelled":
+                return self._finish_cancelled(state, paths)
             self._bind_mission_goal(state, mission, paths)
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
@@ -5130,7 +5313,7 @@ class DeliveryCoordinator:
                 else:
                     self._validate_persisted_completion_evidence(state, paths)
                 return {"action": "complete", "mission_id": mission_id, "state": state}
-            if mission.get("status") in {"failed", "cancelled"}:
+            if mission.get("status") == "failed":
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
             if mission.get("status") == "waiting_owner":
                 return self._wait_for_owner(state, mission, paths)
