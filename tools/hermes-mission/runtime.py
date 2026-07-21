@@ -147,6 +147,13 @@ _NOTICE_LABELS = {
         "Проверяю прерванный запуск модели. Новый исполнитель не запускается; "
         "восстановление продолжится автоматически."
     ),
+    "disk_space_wait": (
+        "Недостаточно свободного места на выделенном томе. "
+        "Доставка приостановлена до освобождения пространства."
+    ),
+    "disk_space_recovered": (
+        "Место на выделенном томе освобождено. Доставка продолжилась автоматически."
+    ),
 }
 _INTAKE_CANCEL_ALIASES = {"cancel", "отмена", "отменить"}
 _PROJECT_ONBOARDING_OWNER = "PavelLizunov"
@@ -599,6 +606,7 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.notice":
         if payload.get("code") not in {
             "capacity_wait", "capacity_recovered", "execution_reconciling",
+            "disk_space_wait", "disk_space_recovered",
         }:
             raise MissionError("invalid mission notice code")
         next_attempt = payload.get("next_attempt_at")

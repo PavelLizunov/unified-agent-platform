@@ -9,6 +9,7 @@ Some runbooks are Russian, some English — the platform docs are bilingual; the
 | Runbook | Purpose | When to use |
 |---|---|---|
 | [ai-search.md](ai-search.md) | Free-tier web search / answer / page-read for Hermes (RU-egress aware): zero-key DuckDuckGo via VLESS, keyed exa/tavily/brave auto-enable. | Wiring or debugging agent web search on build-1. |
+| [build1-worktree-storage.md](build1-worktree-storage.md) | Dedicated ≥200 GB ext4 volume for coordinator worktrees on build-1; coordinator fails closed below 40 GiB free. | Creating the isolated worktree mount or diagnosing disk-space delivery pauses. |
 | [controlled-research.md](controlled-research.md) | Bounded, restart-safe owner research through a separate Codex native-search session; citations project through Central to Workspace/Telegram. | Operating or canary-testing the approved Central research path. |
 | [claude-routing-goal.md](claude-routing-goal.md) | GOAL: reliably route coding to `claude -p` on build-1 + honest tests (close the codex-`apply_patch` substitution gap). | Making the harness actually use `claude` for edits, and measuring it honestly. |
 | [cloudflare-r2-k3s-snapshots.md](cloudflare-r2-k3s-snapshots.md) | Cloudflare R2 as the near-free offsite target for k3s etcd snapshots. | Configuring or rotating the R2 bucket for etcd DR. |

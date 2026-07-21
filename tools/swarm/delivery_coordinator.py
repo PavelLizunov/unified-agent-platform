@@ -101,6 +101,10 @@ _CAPACITY_RETRY_DELAYS_SECONDS = (5, 20)
 _CAPACITY_ROUTE_SWITCH_DELAY_SECONDS = 5
 _CAPACITY_ROUND_DELAY_SECONDS = 120
 _CAPACITY_MAX_ROUND_DELAY_SECONDS = 1800
+# 31 GiB observed Rust worktree peak + bounded headroom for build artifacts.
+_DISK_SPACE_MIN_FREE_BYTES = 40 * 1024 * 1024 * 1024
+_DISK_SPACE_RETRY_DELAY_SECONDS = 300
+_DISK_SPACE_MAX_RETRY_DELAY_SECONDS = 3600
 _CI_RETRY_DELAY_SECONDS = 60
 _CI_RETRY_FIELDS = {
     "schema_version", "gate", "candidate_sha", "run_ids", "baseline_attempts",
@@ -1296,11 +1300,16 @@ class DeliveryCoordinator:
         }
         self._save(paths, state)
 
-    def _park_capacity_claim(
-        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    def _park_scheduled_claim(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        waiting: dict[str, Any],
+        *,
+        label: str,
+        reason: str,
     ) -> None:
-        waiting = self._capacity_state(state)
-        if waiting is None or waiting["claim_parked"]:
+        if waiting["claim_parked"]:
             return
         snapshot = self.backend.show(state["root_task_id"])
         task = snapshot.get("task")
@@ -1311,7 +1320,7 @@ class DeliveryCoordinator:
             or task.get("assignee") != self.profile["assignee"]
             or not isinstance(runs, list)
         ):
-            raise DeliveryError("capacity wait found a different Kanban task owner")
+            raise DeliveryError(f"{label} found a different Kanban task owner")
         active = [
             run for run in runs
             if isinstance(run, dict) and run.get("status") == "running"
@@ -1321,16 +1330,14 @@ class DeliveryCoordinator:
                 len(active) != 1
                 or str(active[0].get("id")) != str(state.get("run_id"))
             ):
-                raise DeliveryError("capacity wait cannot park a different active Kanban run")
+                raise DeliveryError(f"{label} cannot park a different active Kanban run")
             if task.get("status") == "ready" and active:
-                raise DeliveryError("capacity wait found an active run on a ready Kanban task")
+                raise DeliveryError(f"{label} found an active run on a ready Kanban task")
             if task.get("status") == "ready":
                 self._ensure_claimed(state)
                 self._save(paths, state)
             self._assert_claim(state)
-            snapshot = self.backend.schedule(
-                state["root_task_id"], reason="automatic OpenAI capacity cooldown"
-            )
+            snapshot = self.backend.schedule(state["root_task_id"], reason=reason)
             task = snapshot.get("task")
             runs = snapshot.get("runs")
         matching = [
@@ -1347,16 +1354,21 @@ class DeliveryCoordinator:
             or len(matching) != 1
             or matching[0].get("status") != "scheduled"
         ):
-            raise DeliveryError("capacity wait did not park the exact Kanban task")
+            raise DeliveryError(f"{label} did not park the exact Kanban task")
         waiting["claim_parked"] = True
         waiting["reclaim_pending"] = False
         self._save(paths, state)
 
-    def _resume_capacity_claim(
-        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    def _resume_scheduled_claim(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        waiting: dict[str, Any],
+        *,
+        label: str,
+        reason: str,
     ) -> None:
-        waiting = self._capacity_state(state)
-        if waiting is None or not waiting["claim_parked"]:
+        if not waiting["claim_parked"]:
             return
         snapshot = self.backend.show(state["root_task_id"])
         task = snapshot.get("task")
@@ -1367,14 +1379,14 @@ class DeliveryCoordinator:
             or task.get("assignee") != self.profile["assignee"]
             or not isinstance(runs, list)
         ):
-            raise DeliveryError("capacity retry found a different Kanban task owner")
+            raise DeliveryError(f"{label} found a different Kanban task owner")
         active = [
             run for run in runs
             if isinstance(run, dict) and run.get("status") == "running"
         ]
         if not waiting["reclaim_pending"]:
             if task.get("status") not in {"scheduled", "ready"} or active:
-                raise DeliveryError("capacity retry found a different active Kanban run")
+                raise DeliveryError(f"{label} found a different active Kanban run")
             waiting["reclaim_pending"] = True
             self._save(paths, state)
         if task.get("status") == "scheduled":
@@ -1383,10 +1395,8 @@ class DeliveryCoordinator:
                 if isinstance(run, dict) and str(run.get("id")) == str(state.get("run_id"))
             ]
             if len(matching) != 1 or matching[0].get("status") != "scheduled":
-                raise DeliveryError("capacity retry lost the exact parked Kanban run")
-            snapshot = self.backend.unblock(
-                state["root_task_id"], reason="automatic OpenAI capacity retry due"
-            )
+                raise DeliveryError(f"{label} lost the exact parked Kanban run")
+            snapshot = self.backend.unblock(state["root_task_id"], reason=reason)
             task = snapshot.get("task")
             runs = snapshot.get("runs")
             if (
@@ -1395,7 +1405,7 @@ class DeliveryCoordinator:
                 or task.get("assignee") != self.profile["assignee"]
                 or not isinstance(runs, list)
             ):
-                raise DeliveryError("capacity retry unblocked a different Kanban task owner")
+                raise DeliveryError(f"{label} unblocked a different Kanban task owner")
             active = [
                 run for run in runs
                 if isinstance(run, dict) and run.get("status") == "running"
@@ -1414,7 +1424,7 @@ class DeliveryCoordinator:
                 or task.get("assignee") != self.profile["assignee"]
                 or not isinstance(runs, list)
             ):
-                raise DeliveryError("capacity retry claimed a different Kanban task owner")
+                raise DeliveryError(f"{label} claimed a different Kanban task owner")
             active = [
                 run for run in runs
                 if isinstance(run, dict) and run.get("status") == "running"
@@ -1424,7 +1434,7 @@ class DeliveryCoordinator:
             or len(active) != 1
             or active[0].get("profile") != self.profile["assignee"]
         ):
-            raise DeliveryError("capacity retry found a different active Kanban run")
+            raise DeliveryError(f"{label} found a different active Kanban run")
         previous_run_id = state.get("run_id")
         state["run_id"] = str(active[0]["id"])
         try:
@@ -1436,6 +1446,28 @@ class DeliveryCoordinator:
         waiting["claim_parked"] = False
         waiting["reclaim_pending"] = False
         self._save(paths, state)
+
+    def _park_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or waiting["claim_parked"]:
+            return
+        self._park_scheduled_claim(
+            state, paths, waiting,
+            label="capacity wait", reason="automatic OpenAI capacity cooldown",
+        )
+
+    def _resume_capacity_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._capacity_state(state)
+        if waiting is None or not waiting["claim_parked"]:
+            return
+        self._resume_scheduled_claim(
+            state, paths, waiting,
+            label="capacity retry", reason="automatic OpenAI capacity retry due",
+        )
 
     def _capacity_wait_result(
         self, state: dict[str, Any], mission_id: str, paths: dict[str, pathlib.Path]
@@ -1501,6 +1533,161 @@ class DeliveryCoordinator:
             "mission.notice",
             payload,
             {"task_id": state["root_task_id"]},
+        )
+        self.client.publish(state["mission_id"], event)
+
+    def _check_disk_space(self) -> tuple[int, int]:
+        """Return (free_bytes, required_bytes) for the configured worktree_root."""
+        root = pathlib.Path(self.profile["worktree_root"])
+        usage = shutil.disk_usage(str(root if root.is_dir() else root.parent))
+        return usage.free, _DISK_SPACE_MIN_FREE_BYTES
+
+    def _disk_space_state(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        waiting = state.get("disk_space_wait")
+        if waiting is None:
+            return None
+        if (
+            not isinstance(waiting, dict)
+            or waiting.get("schema_version") != 1
+            or not isinstance(waiting.get("phase"), str)
+            or not waiting["phase"]
+            or isinstance(waiting.get("not_before"), bool)
+            or not isinstance(waiting.get("not_before"), (int, float))
+            or not math.isfinite(float(waiting["not_before"]))
+            or waiting["not_before"] < 0
+            or isinstance(waiting.get("round"), bool)
+            or not isinstance(waiting.get("round"), int)
+            or waiting["round"] < 0
+            or not isinstance(waiting.get("claim_parked"), bool)
+            or not isinstance(waiting.get("reclaim_pending"), bool)
+            or not isinstance(waiting.get("reclaim_token"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", waiting["reclaim_token"]) is None
+        ):
+            raise DeliveryError("durable disk-space wait state is invalid")
+        return waiting
+
+    def _disk_space_wait_result(
+        self, state: dict[str, Any], mission_id: str, paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any] | None:
+        waiting = self._disk_space_state(state)
+        if waiting is not None:
+            if waiting["phase"] != state["phase"]:
+                raise DeliveryError(
+                    "disk-space wait belongs to a different delivery phase"
+                )
+            if waiting["not_before"] > time.time():
+                self._park_disk_space_claim(state, paths)
+                self._publish_disk_space_notice(state, recovered=False)
+                return {
+                    "action": "disk_space_wait",
+                    "mission_id": mission_id,
+                    "state": state,
+                }
+        free_bytes, required_bytes = self._check_disk_space()
+        if free_bytes >= required_bytes:
+            if waiting is not None:
+                self._resume_disk_space_claim(state, paths)
+                state.pop("disk_space_wait")
+                self._save(paths, state)
+                self._publish_disk_space_notice(state, recovered=True)
+            return None
+        round_index = waiting["round"] + 1 if waiting is not None else 0
+        capped_exponent = min(
+            round_index,
+            math.ceil(math.log2(
+                _DISK_SPACE_MAX_RETRY_DELAY_SECONDS / _DISK_SPACE_RETRY_DELAY_SECONDS
+            )),
+        )
+        delay = min(
+            _DISK_SPACE_RETRY_DELAY_SECONDS * (2 ** capped_exponent),
+            _DISK_SPACE_MAX_RETRY_DELAY_SECONDS,
+        )
+        reclaim_identity = {
+            "mission_id": state.get("mission_id"),
+            "phase": state["phase"],
+            "round": round_index,
+        }
+        state["disk_space_wait"] = {
+            "schema_version": 1,
+            "phase": state["phase"],
+            "not_before": time.time() + delay,
+            "round": round_index,
+            "claim_parked": False,
+            "reclaim_pending": False,
+            "reclaim_token": hashlib.sha256(
+                json.dumps(
+                    reclaim_identity, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest(),
+        }
+        self._save(paths, state)
+        self._park_disk_space_claim(state, paths)
+        self._publish_disk_space_notice(state, recovered=False)
+        return {
+            "action": "disk_space_wait",
+            "mission_id": mission_id,
+            "state": state,
+        }
+
+    def _park_disk_space_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._disk_space_state(state)
+        if waiting is None or waiting["claim_parked"]:
+            return
+        if "run_id" not in state:
+            return
+        self._park_scheduled_claim(
+            state, paths, waiting,
+            label="disk-space wait",
+            reason="worktree volume below minimum free-space reserve",
+        )
+
+    def _resume_disk_space_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        waiting = self._disk_space_state(state)
+        if waiting is None or not waiting["claim_parked"]:
+            return
+        self._resume_scheduled_claim(
+            state, paths, waiting,
+            label="disk-space retry",
+            reason="worktree volume free-space reserve satisfied",
+        )
+
+    def _publish_disk_space_notice(
+        self, state: dict[str, Any], *, recovered: bool
+    ) -> None:
+        if recovered:
+            payload = {
+                "code": "disk_space_recovered",
+                "message": "Worktree volume free space recovered; delivery resumed.",
+                "owner_action_required": False,
+            }
+        else:
+            waiting = state.get("disk_space_wait")
+            if not isinstance(waiting, dict):
+                return
+            payload = {
+                "code": "disk_space_wait",
+                "message": (
+                    "Worktree volume is below the minimum free-space reserve; "
+                    "delivery paused until space is available."
+                ),
+                "owner_action_required": False,
+                "next_attempt_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(waiting["not_before"])
+                ),
+            }
+        correlation: dict[str, str] = {}
+        root_task_id = state.get("root_task_id")
+        if isinstance(root_task_id, str) and root_task_id:
+            correlation["task_id"] = root_task_id
+        event = mission_adapter._producer_event(
+            state["mission_id"],
+            "mission.notice",
+            payload,
+            correlation,
         )
         self.client.publish(state["mission_id"], event)
 
@@ -4969,6 +5156,12 @@ class DeliveryCoordinator:
             if state["phase"] not in {
                 "cleanup_pending", "cleaned", "task_completed", "complete"
             }:
+                if state.get("disk_space_wait") is not None or state["phase"] == "new":
+                    disk_wait = self._disk_space_wait_result(
+                        state, mission_id, paths
+                    )
+                    if disk_wait is not None:
+                        return disk_wait
                 if state["phase"] != "new":
                     self._assert_claim(state)
                 self._ensure_worktree(state, paths)
@@ -5003,6 +5196,9 @@ class DeliveryCoordinator:
 
             if state["phase"] == "post_verify_retry_pending":
                 self._assert_claim(state)
+                disk_wait = self._disk_space_wait_result(state, mission_id, paths)
+                if disk_wait is not None:
+                    return disk_wait
                 if not self._run_post_verify_attempt(state, paths):
                     if state["phase"] == "post_verify_failed":
                         return self._finish_rejection(state, paths)
@@ -5044,6 +5240,9 @@ class DeliveryCoordinator:
             if state["phase"] in {"claimed", "needs_fix"}:
                 self._assert_claim(state)
                 if not self._recover_author_commit(state, paths):
+                    disk_wait = self._disk_space_wait_result(state, mission_id, paths)
+                    if disk_wait is not None:
+                        return disk_wait
                     author = self._author(state, paths)
                     if author is False:
                         return {
@@ -5089,6 +5288,9 @@ class DeliveryCoordinator:
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
                 self._require_draft_pr(state)
+                disk_wait = self._disk_space_wait_result(state, mission_id, paths)
+                if disk_wait is not None:
+                    return disk_wait
                 review = self._review(state, paths)
                 if review is None:
                     return {
@@ -5135,6 +5337,9 @@ class DeliveryCoordinator:
 
             if state["phase"] == "merged":
                 self._assert_claim(state)
+                disk_wait = self._disk_space_wait_result(state, mission_id, paths)
+                if disk_wait is not None:
+                    return disk_wait
                 if not self._run_post_verify_attempt(state, paths):
                     return {
                         "action": state["phase"],

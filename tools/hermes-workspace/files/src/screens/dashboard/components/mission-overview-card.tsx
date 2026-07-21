@@ -79,6 +79,10 @@ const noticeLabels: Record<string, string> = {
   capacity_recovered: 'Модель OpenAI снова доступна. Выполнение продолжилось автоматически.',
   execution_reconciling:
     'Проверяю прерванный запуск модели. Новый исполнитель не запускается; восстановление продолжится автоматически.',
+  disk_space_wait:
+    'Недостаточно свободного места на выделенном томе. Доставка приостановлена до освобождения пространства.',
+  disk_space_recovered:
+    'Место на выделенном томе освобождено. Доставка продолжилась автоматически.',
 }
 
 function ownerQuestionText(question: { question_id: string; text: string }) {
