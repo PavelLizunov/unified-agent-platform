@@ -2607,6 +2607,12 @@ class DeliveryCoordinator:
     def _failure_contract(
         self, state: dict[str, Any]
     ) -> tuple[str, str, list[dict[str, Any]]]:
+        def append_telemetry(events: list[dict[str, Any]]) -> None:
+            for role, key in (("author", "author_telemetry"), ("reviewer", "reviewer_telemetry")):
+                worker_event = self._telemetry_worker_event(role, state.get(key))
+                if worker_event is not None:
+                    events.insert(-1, worker_event)
+
         def finish(
             result: str, summary: str, events: list[dict[str, Any]]
         ) -> tuple[str, str, list[dict[str, Any]]]:
@@ -2616,26 +2622,25 @@ class DeliveryCoordinator:
                     "type": "delivery.upsert",
                     "payload": {"kind": "pull_request", "status": "failed", "url": pr_url},
                 })
+            append_telemetry(events)
             return result, summary, events
 
         if state.get("failure_kind") == "post_verify":
             pr_url = state.get("pr_url")
             if not isinstance(pr_url, str) or not pr_url:
                 raise DeliveryError("post-verify failure has no merged PR identity")
-            return (
-                _POST_VERIFY_RESULT,
-                _POST_VERIFY_SUMMARY,
-                [
-                    {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
-                    {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
-                    {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "passed"}},
-                    {"type": "gate.upsert", "payload": {"gate_id": "post-verify", "status": "failed"}},
-                    {"type": "delivery.upsert", "payload": {
-                        "kind": "pull_request", "status": "merged", "url": pr_url,
-                    }},
-                    {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
-                ],
-            )
+            events = [
+                {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "post-verify", "status": "failed"}},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "pull_request", "status": "merged", "url": pr_url,
+                }},
+                {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+            ]
+            append_telemetry(events)
+            return _POST_VERIFY_RESULT, _POST_VERIFY_SUMMARY, events
         if state.get("failure_kind") == "pre_review_ci":
             return finish(
                 _CI_RESULT,
@@ -4623,6 +4628,31 @@ class DeliveryCoordinator:
         self._save(paths, state)
         return True
 
+    @staticmethod
+    def _telemetry_worker_event(
+        role: str, telemetry: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if not isinstance(telemetry, dict):
+            return None
+        payload: dict[str, Any] = {
+            "worker_id": role,
+            "status": "completed",
+            "profile": role,
+        }
+        model = telemetry.get("model")
+        if isinstance(model, str) and model:
+            payload["model"] = model
+        effort = telemetry.get("reasoning_effort")
+        if isinstance(effort, str) and effort:
+            payload["effort"] = effort
+        usage = telemetry.get("usage")
+        if isinstance(usage, dict):
+            for field in ("input_tokens", "output_tokens"):
+                value = usage.get(field)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    payload[field] = value
+        return {"type": "worker.upsert", "payload": payload}
+
     def _events(self, state: dict[str, Any], *, cleanup: bool) -> list[dict[str, Any]]:
         events = [
             *(
@@ -4641,6 +4671,10 @@ class DeliveryCoordinator:
                 "url": f"https://github.com/{self.profile['repo']}/commit/{state['default_sha']}",
             }},
         ]
+        for role, key in (("author", "author_telemetry"), ("reviewer", "reviewer_telemetry")):
+            worker_event = self._telemetry_worker_event(role, state.get(key))
+            if worker_event is not None:
+                events.append(worker_event)
         if self.profile.get("delivery_mode") == "none":
             events.append({
                 "type": "delivery.upsert",

@@ -26,15 +26,17 @@ class AdapterError(ValueError):
 
 
 Runner = Callable[[list[str]], subprocess.CompletedProcess[str]]
-ALLOWED_WORKER_EVENTS = {"change.upsert", "gate.upsert", "delivery.upsert"}
+ALLOWED_WORKER_EVENTS = {"change.upsert", "gate.upsert", "delivery.upsert", "worker.upsert"}
 REQUIRED_PAYLOAD = {
     "change.upsert": {"path", "status"},
     "gate.upsert": {"gate_id", "status"},
     "delivery.upsert": {"kind", "status"},
+    "worker.upsert": {"worker_id", "status"},
 }
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
     "delivery.upsert": {"kind", "status", "url"},
+    "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
 }
 MAX_LOG_BYTES = 1024 * 1024
 MAX_EVENT_JSON_BYTES = 65_536
@@ -697,9 +699,24 @@ def _worker_metadata_events(
         if (
             not isinstance(payload, dict)
             or not REQUIRED_PAYLOAD[event_type] <= set(payload) <= PAYLOAD_FIELDS[event_type]
-            or any(not isinstance(payload[key], str) or not payload[key] for key in REQUIRED_PAYLOAD[event_type])
         ):
             raise AdapterError("worker mission event payload is invalid")
+        for key in REQUIRED_PAYLOAD[event_type]:
+            if event_type == "worker.upsert" and key in ("input_tokens", "output_tokens"):
+                continue
+            if not isinstance(payload[key], str) or not payload[key]:
+                raise AdapterError("worker mission event payload is invalid")
+        if event_type == "worker.upsert":
+            for field in ("input_tokens", "output_tokens"):
+                value = payload.get(field)
+                if value is not None and (
+                    not isinstance(value, int) or isinstance(value, bool) or value < 0
+                ):
+                    raise AdapterError("worker mission event payload is invalid")
+            for field in ("run_id", "profile", "model", "effort"):
+                value = payload.get(field)
+                if value is not None and (not isinstance(value, str) or not value):
+                    raise AdapterError("worker mission event payload is invalid")
         if event_type == "delivery.upsert":
             not_applicable = (
                 payload.get("kind") == "delivery"
@@ -711,8 +728,11 @@ def _worker_metadata_events(
                 or (isinstance(payload.get("url"), str) and not payload["url"])
             ):
                 raise AdapterError("worker mission event payload is invalid")
+        event_worker_id = worker_id
+        if event_type == "worker.upsert" and isinstance(payload.get("worker_id"), str) and payload["worker_id"]:
+            event_worker_id = payload["worker_id"]
         events.append(_producer_event(
-            mission_id, event_type, payload, {"task_id": task_id, "worker_id": worker_id}
+            mission_id, event_type, payload, {"task_id": task_id, "worker_id": event_worker_id}
         ))
     return events
 

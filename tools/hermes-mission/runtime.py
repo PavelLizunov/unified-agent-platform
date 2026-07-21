@@ -62,7 +62,8 @@ REQUIRED_PAYLOAD = {
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
     "mission.accepted": {
-        "goal", "project_id", "dispatch_profile", "delivery_mode", "parent_mission_id",
+        "goal", "project_id", "project_label", "project_repository",
+        "dispatch_profile", "delivery_mode", "parent_mission_id",
         "capability",
         "input_platform", "input_source_key_sha256", "input_source_message_sha256",
     },
@@ -73,7 +74,7 @@ PAYLOAD_FIELDS = {
         "question_id", "text", "source_message_id", "source_platform",
     },
     "task.upsert": {"task_id", "title", "status", "assignee"},
-    "worker.upsert": {"worker_id", "status", "run_id", "profile"},
+    "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
     "terminal.append": {"stream", "text", "offset"},
     "delivery.upsert": {"kind", "status", "url"},
     "artifact.upsert": {
@@ -87,7 +88,7 @@ PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
 _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation", "payload"}
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _ID_PAYLOAD_FIELDS = {
-    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "gate_id", "input_platform", "kind", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
+    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
     "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -123,6 +124,17 @@ _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
     "default_branch": "verified",
 }
+_GATE_LABELS = {
+    "tests": "тесты",
+    "review": "независимое ревью",
+    "ci": "CI",
+    "post-verify": "проверка после слияния",
+    "cleanup": "очистка",
+    "execution": "выполнение",
+}
+_ALLOWED_WORKER_MODELS = {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
+_ALLOWED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
+_ROLE_LABELS = {"author": "Автор", "reviewer": "Ревьюер"}
 _STAGE_LABELS = {
     "accepted": "Цель принята",
     "planning": "Планирование",
@@ -593,10 +605,20 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise MissionError("invalid payload.offset")
             continue
+        if name in ("input_tokens", "output_tokens"):
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise MissionError(f"invalid payload.{name}")
+            continue
         if not isinstance(value, str) or not value.strip():
             raise MissionError(f"invalid payload.{name}")
         if name in _ID_PAYLOAD_FIELDS:
             _require_id(value, f"payload.{name}")
+    if event_type == "worker.upsert" and "model" in payload:
+        if payload["model"] not in _ALLOWED_WORKER_MODELS:
+            raise MissionError("worker model is not in the closed delivery set")
+    if event_type == "worker.upsert" and "effort" in payload:
+        if payload["effort"] not in _ALLOWED_EFFORTS:
+            raise MissionError("worker effort is not in the closed Codex effort enum")
     if event_type == "mission.stage":
         if payload.get("stage") not in STAGES:
             raise MissionError("invalid mission stage")
@@ -649,6 +671,11 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 or mission_id != f"mission-intake-{source_key_sha256[:32]}"
             ):
                 raise MissionError("invalid mission input lineage")
+    if event_type == "mission.accepted" and "project_repository" in payload:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", payload.get("project_repository", "")):
+            raise MissionError("invalid project repository")
+    if event_type == "mission.accepted" and "project_label" in payload:
+        _require_source_value(payload.get("project_label"), "project_label")
     if event_type == "delivery.upsert":
         not_applicable = (
             payload.get("kind") == "delivery"
@@ -720,6 +747,8 @@ def empty_projection() -> dict[str, Any]:
         "notice": None,
         "goal": None,
         "project_id": None,
+        "project_label": None,
+        "project_repository": None,
         "dispatch_profile": None,
         "capability": None,
         "delivery_mode": None,
@@ -738,6 +767,9 @@ def empty_projection() -> dict[str, Any]:
         "gates": [],
         "deliveries": [],
         "artifacts": [],
+        "started_at": None,
+        "updated_at": None,
+        "finished_at": None,
     }
 
 
@@ -762,6 +794,10 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             raise MissionError("projection mission mismatch")
         view["mission_id"] = event["mission_id"]
         view["sequence"] = event["sequence"]
+        if event.get("occurred_at"):
+            if view["started_at"] is None:
+                view["started_at"] = event["occurred_at"]
+            view["updated_at"] = event["occurred_at"]
         kind, payload = event["type"], event["payload"]
         if kind == "mission.accepted":
             view.update(
@@ -769,6 +805,8 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 stage="accepted",
                 goal=payload["goal"],
                 project_id=payload.get("project_id"),
+                project_label=payload.get("project_label"),
+                project_repository=payload.get("project_repository"),
                 dispatch_profile=payload.get("dispatch_profile"),
                 capability=payload.get("capability"),
                 delivery_mode=payload.get("delivery_mode"),
@@ -827,11 +865,14 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             view.update(
                 status="completed", stage="complete", progress_percent=100,
                 result=payload["result"], notice=None,
+                finished_at=event.get("occurred_at"),
             )
         elif kind == "mission.failed":
-            view.update(status="failed", error=payload["error"], notice=None)
+            view.update(status="failed", error=payload["error"], notice=None,
+                        finished_at=event.get("occurred_at"))
         elif kind == "mission.cancelled":
-            view.update(status="cancelled", error=payload["reason"], notice=None)
+            view.update(status="cancelled", error=payload["reason"], notice=None,
+                        finished_at=event.get("occurred_at"))
 
     view.update(
         tasks=list(tasks.values()),
@@ -847,15 +888,47 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
     return view
 
 
+def _short_mission_id(mission_id: str | None) -> str:
+    """Return a short technical identifier for support references."""
+    text = str(mission_id or "")
+    if not text:
+        return "неизвестен"
+    return text[-8:] if len(text) > 12 else text
+
+
+def _headline(view: dict[str, Any]) -> str:
+    """Build the owner-readable headline from server-owned project metadata."""
+    label = view.get("project_label")
+    repository = view.get("project_repository")
+    if label and repository:
+        return f"{label} ({repository})"
+    if label:
+        return str(label)
+    if repository:
+        return str(repository)
+    goal = view.get("goal")
+    if isinstance(goal, str) and goal.strip():
+        text = " ".join(goal.split())
+        return text[:80] + ("…" if len(text) > 80 else "")
+    return f"Задача {_short_mission_id(view.get('mission_id'))}"
+
+
 def telegram_text(view: dict[str, Any]) -> str:
     """Render the compact Telegram view from the exact Workspace projection."""
     status = view.get("status") or "unknown"
     stage = view.get("stage") or "unknown"
     lines = [
-        f"Задача {view.get('mission_id') or 'неизвестна'}",
+        _headline(view),
+        f"ID: {_short_mission_id(view.get('mission_id'))}",
         f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
         f"Статус: {_STATUS_LABELS.get(status, status)}",
     ]
+    goal = view.get("goal")
+    if isinstance(goal, str) and goal.strip():
+        short_goal = " ".join(goal.split())
+        if len(short_goal) > 120:
+            short_goal = short_goal[:119].rstrip() + "…"
+        lines.append(f"Цель: {short_goal}")
     if view.get("question"):
         question = view["question"]
         text = question["text"]
@@ -882,15 +955,22 @@ def telegram_text(view: dict[str, Any]) -> str:
         lines.append(f"Итог: {view['result']}")
     if view.get("error"):
         lines.append(f"Ошибка: {view['error']}")
+    if status in ("failed", "cancelled"):
+        lines.extend(_role_telemetry_lines(view.get("workers", [])))
     lines.append(
         "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
             tasks=len(view.get("tasks", [])),
-            workers=len(view.get("workers", [])),
+            workers=sum(1 for w in view.get("workers", []) if isinstance(w, dict) and not _is_telemetry_worker(w)),
             gates=len(view.get("gates", [])),
             deliveries=len(view.get("deliveries", [])),
         )
     )
     return "\n".join(lines)
+
+
+def _is_telemetry_worker(worker: dict[str, Any]) -> bool:
+    """True for informational author/reviewer telemetry records."""
+    return isinstance(worker.get("profile"), str) and worker["profile"] in _ROLE_LABELS
 
 
 def _one_terminal_worker(
@@ -902,11 +982,64 @@ def _one_terminal_worker(
         or not all(isinstance(worker, dict) for worker in workers)
     ):
         return False
-    statuses = [worker.get("status") for worker in workers]
+    canonical = [w for w in workers if not _is_telemetry_worker(w)]
+    if not canonical:
+        return False
+    statuses = [worker.get("status") for worker in canonical]
     return (
         statuses[-1] in terminal_statuses
         and all(status == "scheduled" for status in statuses[:-1])
     )
+
+
+def _format_elapsed(started_at: str | None, finished_at: str | None) -> str | None:
+    """Compute human-readable elapsed time from authoritative event timestamps."""
+    if not started_at or not finished_at:
+        return None
+    try:
+        start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    delta = end - start
+    if delta.total_seconds() < 0:
+        return None
+    total_seconds = int(delta.total_seconds())
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}ч {minutes}м"
+    if minutes > 0:
+        return f"{minutes}м {seconds}с"
+    return f"{seconds}с"
+
+
+def _role_telemetry_lines(workers: list[dict[str, Any]]) -> list[str]:
+    """Render role-bound telemetry from final accepted author/reviewer runs."""
+    lines: list[str] = []
+    for worker in workers:
+        if not isinstance(worker, dict):
+            continue
+        profile = worker.get("profile")
+        if not isinstance(profile, str) or profile not in _ROLE_LABELS:
+            continue
+        model = worker.get("model")
+        if not isinstance(model, str) or not model.strip():
+            continue
+        role = _ROLE_LABELS[profile]
+        parts = [f"{role} (финальный прогон): {model.strip()}"]
+        effort = worker.get("effort")
+        if isinstance(effort, str) and effort.strip():
+            parts.append(f"effort {effort.strip()}")
+        in_tok = worker.get("input_tokens")
+        out_tok = worker.get("output_tokens")
+        if (
+            isinstance(in_tok, int) and not isinstance(in_tok, bool) and in_tok >= 0
+            and isinstance(out_tok, int) and not isinstance(out_tok, bool) and out_tok >= 0
+        ):
+            parts.append(f"{in_tok} in / {out_tok} out")
+        lines.append(" · ".join(parts))
+    return lines
 
 
 def _completion_result(view: dict[str, Any]) -> str:
@@ -925,9 +1058,30 @@ def _completion_result(view: dict[str, Any]) -> str:
         url = deliveries.get(kind, {}).get("url")
         if isinstance(url, str) and url.strip():
             lines.append(f"{label}: {compact(url, 512)}")
-    lines.append("Проверки: тесты, независимое ревью, CI, post-verify и очистка пройдены")
+    gates = view.get("gates", [])
+    if gates and all(isinstance(g, dict) for g in gates):
+        passed = []
+        failed = []
+        for gate in gates:
+            label = _GATE_LABELS.get(gate.get("gate_id", ""), gate.get("gate_id", "?"))
+            if gate.get("status") == "passed":
+                passed.append(label)
+            else:
+                failed.append(label)
+        if failed:
+            parts = []
+            if passed:
+                parts.append(", ".join(passed) + " — пройдены")
+            parts.append(", ".join(failed) + " — не пройдены")
+            lines.append(f"Проверки: {'; '.join(parts)}")
+        elif passed:
+            lines.append(f"Проверки: {', '.join(passed)} — пройдены")
+        else:
+            lines.append("Проверки: нет данных о проверках")
+    else:
+        lines.append("Проверки: нет данных о проверках")
     if view.get("delivery_mode") == "none":
-        lines.append("Деплой: не требуется для этого проекта")
+        lines.append("Деплой: не настроен для этого проекта")
     paths = sorted({
         item.get("path")
         for item in view.get("changes", [])
@@ -938,6 +1092,10 @@ def _completion_result(view: dict[str, Any]) -> str:
         if len(paths) > 8:
             visible += f", ещё {len(paths) - 8}"
         lines.append(f"Изменённые файлы ({len(paths)}): {visible}")
+    elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
+    if elapsed:
+        lines.append(f"Время: {elapsed}")
+    lines.extend(_role_telemetry_lines(view.get("workers", [])))
     result = "\n".join(lines)
     return (
         result
@@ -2508,6 +2666,8 @@ class MissionStore:
             "dispatch_profile": target["dispatch_profile"],
             "delivery_mode": target["delivery_mode"],
             "project_id": target["project_id"],
+            "project_label": target.get("label"),
+            "project_repository": target.get("repository"),
             "input_platform": platform,
             "input_source_key_sha256": source_key_sha256,
             "input_source_message_sha256": hashlib.sha256(
@@ -2541,6 +2701,8 @@ class MissionStore:
         delivery_mode: str | None = None,
         capability: str | None = None,
         project_id: str | None = None,
+        project_label: str | None = None,
+        project_repository: str | None = None,
         parent_mission_id: str | None = None,
         input_platform: str | None = None,
         input_source_key_sha256: str | None = None,
@@ -2554,6 +2716,12 @@ class MissionStore:
             dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
         if project_id is not None:
             project_id = _require_id(project_id, "project_id")
+        if project_label is not None:
+            project_label = _require_source_value(project_label, "project_label")
+        if project_repository is not None:
+            project_repository = _require_source_value(project_repository, "project_repository")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", project_repository):
+                raise MissionError("invalid project repository")
         if delivery_mode is not None and delivery_mode != "none":
             raise MissionError("invalid mission delivery mode")
         if capability is not None and capability != _MEDIA_CAPABILITY:
@@ -2609,6 +2777,14 @@ class MissionStore:
                 and first["payload"].get("delivery_mode") == delivery_mode
                 and first["payload"].get("capability") == capability
                 and first["payload"].get("project_id") == project_id
+                and (
+                    first["payload"].get("project_label") == project_label
+                    or (project_label is not None and first["payload"].get("project_label") is None)
+                )
+                and (
+                    first["payload"].get("project_repository") == project_repository
+                    or (project_repository is not None and first["payload"].get("project_repository") is None)
+                )
                 and first["payload"].get("parent_mission_id") == parent_mission_id
                 and (exact_input or legacy_input)
             ):
@@ -2623,6 +2799,10 @@ class MissionStore:
         payload = {"goal": goal}
         if project_id is not None:
             payload["project_id"] = project_id
+        if project_label is not None:
+            payload["project_label"] = project_label
+        if project_repository is not None:
+            payload["project_repository"] = project_repository
         if dispatch_profile is not None:
             payload["dispatch_profile"] = dispatch_profile
         if delivery_mode is not None:

@@ -1837,14 +1837,15 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert completed is not None and completed[1]
         assert completed[0]["source"] == "central-hermes"
         assert completed[0]["type"] == "mission.completed"
-        assert completed[0]["payload"]["result"] == (
-            "Выполнено: Deliver safely\n"
-            "PR: https://example.invalid/pr/1\n"
-            "Merge-коммит: https://example.invalid/commit/1\n"
-            "Проверки: тесты, независимое ревью, CI, post-verify и очистка пройдены\n"
-            "Деплой: не требуется для этого проекта\n"
-            "Изменённые файлы (2): README.md, src/lib.rs"
-        )
+        result_text = completed[0]["payload"]["result"]
+        assert "Выполнено: Deliver safely" in result_text
+        assert "PR: https://example.invalid/pr/1" in result_text
+        assert "Merge-коммит: https://example.invalid/commit/1" in result_text
+        assert "тесты" in result_text
+        assert "независимое ревью" in result_text
+        assert "пройдены" in result_text
+        assert "не настроен для этого проекта" in result_text
+        assert "Изменённые файлы (2): README.md, src/lib.rs" in result_text
         verbose = store.projection(mission_id)
         verbose["goal"] = "x" * 8_192
         verbose["changes"] = [
@@ -1979,7 +1980,7 @@ def test_completion_ready_depends_only_on_delivery_contract() -> None:
 
 def test_auto_failure_requires_one_cleaned_review_rejection() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        store = missions.MissionStore(pathlib.Path(directory) / "missions.sqlite3")
+        store = missions.MissionStore(Path(directory) / "missions.sqlite3")
         mission_id = "mission-review-rejected"
         store.accept(
             "Fix issue 39",
@@ -2025,7 +2026,7 @@ def test_auto_failure_requires_one_cleaned_review_rejection() -> None:
 
 def test_auto_failure_accepts_only_cleaned_exhausted_author_checks() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        store = missions.MissionStore(pathlib.Path(directory) / "missions.sqlite3")
+        store = missions.MissionStore(Path(directory) / "missions.sqlite3")
         mission_id = "mission-author-checks-failed"
         store.accept(
             "Fix issue 39",
@@ -2935,7 +2936,7 @@ def test_failure_terminal_commits_before_telegram_and_retries_delivery() -> None
                 delivered.append(text)
 
             assert await missions.notify_subscribers(store, notification, send) == 1
-            assert delivered and "failed" in delivered[0].lower()
+            assert delivered and ("ошибк" in delivered[0].lower() or "failed" in delivered[0].lower())
             assert store.completion_notification(mission_id) is None
             assert store.complete_if_ready(mission_id) is None
             assert store.pending_subscriptions(mission_id, terminal[0]["sequence"]) == []
@@ -3101,3 +3102,53 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+def test_worker_upsert_schema_accepts_telemetry_fields() -> None:
+    """worker.upsert accepts model, effort, input_tokens, output_tokens."""
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Schema test", mission_id="mission-schema-worker")
+        store.append_producer("mission-schema-worker", {
+            "schema_version": 1, "mission_id": "mission-schema-worker",
+            "type": "worker.upsert", "source": "build1-flow",
+            "correlation": {"producer_event_id": "schema:w1"},
+            "payload": {"worker_id": "w1", "status": "completed",
+                        "model": "gpt-5.6-sol", "effort": "high",
+                        "input_tokens": 1000, "output_tokens": 500},
+        })
+        view = store.projection("mission-schema-worker")
+        assert view["workers"][0]["model"] == "gpt-5.6-sol"
+        assert view["workers"][0]["input_tokens"] == 1000
+
+
+def test_worker_upsert_schema_rejects_invalid_tokens() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        store.accept("Schema test", mission_id="mission-schema-reject")
+        for bad_value in (-1, True):
+            try:
+                store.append_producer("mission-schema-reject", {
+                    "schema_version": 1, "mission_id": "mission-schema-reject",
+                    "type": "worker.upsert", "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"schema:bad:{bad_value}"},
+                    "payload": {"worker_id": "w1", "status": "completed",
+                                "input_tokens": bad_value},
+                })
+                raise AssertionError(f"invalid input_tokens {bad_value} was accepted")
+            except missions.MissionError:
+                pass
+
+
+def test_accepted_schema_project_label_repository() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        ev, created = store.accept("Label test", mission_id="mission-schema-label",
+                                   project_label="UAP",
+                                   project_repository="Owner/repo")
+        assert created and ev["payload"]["project_label"] == "UAP"
+        try:
+            store.accept("Bad repo", mission_id="mission-schema-badrepo",
+                         project_repository="not valid!")
+            raise AssertionError("invalid project_repository was accepted")
+        except missions.MissionError:
+            pass

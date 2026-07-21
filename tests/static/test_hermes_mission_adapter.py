@@ -1218,5 +1218,71 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertEqual(1, payload["channels"]["telegram"]["subscriber_count"])
 
 
+    def test_worker_upsert_metadata_projects_with_matching_correlation(self):
+        mission_id = self.document["mission_id"]
+        task_id = "task-w1"
+        snapshot = {
+            "task": {
+                "id": task_id, "title": "T", "status": "done",
+                "assignee": "p", "created_by": "central-hermes",
+                "tenant": mission_id,
+            },
+            "runs": [{
+                "id": 1, "profile": "p", "status": "completed",
+                "outcome": "success",
+                "metadata": {"mission_events": [
+                    {"type": "worker.upsert", "payload": {
+                        "worker_id": "author", "status": "completed",
+                        "profile": "author", "model": "gpt-5.6-sol",
+                        "effort": "high", "input_tokens": 100, "output_tokens": 50,
+                    }},
+                    {"type": "gate.upsert", "payload": {
+                        "gate_id": "cleanup", "status": "passed",
+                    }},
+                ]},
+            }],
+        }
+        events = adapter.project_task_snapshot(mission_id, task_id, snapshot, "")
+        worker_events = [e for e in events if e["type"] == "worker.upsert"
+                         and e["payload"].get("profile") == "author"]
+        self.assertEqual(1, len(worker_events))
+        we = worker_events[0]
+        self.assertEqual("author", we["payload"]["worker_id"])
+        self.assertEqual("author", we["correlation"]["worker_id"])
+        self.assertEqual("gpt-5.6-sol", we["payload"]["model"])
+        self.assertEqual(100, we["payload"]["input_tokens"])
+        # Deterministic replay
+        events2 = adapter.project_task_snapshot(mission_id, task_id, snapshot, "")
+        w2 = [e for e in events2 if e["type"] == "worker.upsert"
+              and e["payload"].get("profile") == "author"]
+        self.assertEqual(we["correlation"]["producer_event_id"],
+                         w2[0]["correlation"]["producer_event_id"])
+
+    def test_worker_upsert_metadata_malformed_fails_closed(self):
+        mission_id = self.document["mission_id"]
+        for bad_payload in (
+            {"worker_id": "w", "status": "done", "input_tokens": -1},
+            {"worker_id": "w", "status": "done", "input_tokens": True},
+            {"worker_id": "w", "status": "done", "model": 123},
+            {"worker_id": "w"},
+        ):
+            snapshot = {
+                "task": {
+                    "id": "t", "title": "T", "status": "done",
+                    "assignee": "p", "created_by": "central-hermes",
+                    "tenant": mission_id,
+                },
+                "runs": [{
+                    "id": 1, "profile": "p", "status": "completed",
+                    "outcome": "success",
+                    "metadata": {"mission_events": [
+                        {"type": "worker.upsert", "payload": bad_payload},
+                    ]},
+                }],
+            }
+            with self.assertRaises(adapter.AdapterError):
+                adapter.project_task_snapshot(mission_id, "t", snapshot, "")
+
+
 if __name__ == "__main__":
     unittest.main()
