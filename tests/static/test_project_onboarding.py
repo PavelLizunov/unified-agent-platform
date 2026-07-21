@@ -556,6 +556,41 @@ class ProjectOnboardingTests(unittest.TestCase):
         self.assertIn("OnUnitActiveSec=1min", timer)
         self.assertIn("Persistent=true", timer)
 
+    def test_ensure_ready_requires_dispatch_profile_in_live_catalog(self):
+        value = request(checkpoint="canary_passed")
+
+        class ReadyCentral:
+            def __init__(self, project):
+                self._project = project
+
+            def projects(self):
+                return [self._project] if self._project else []
+
+        class ReadyDriver(driver.Driver):
+            def __init__(self, project):
+                super().__init__(ReadyCentral(project), home=pathlib.Path.cwd())
+                self._project = project
+
+            def _ensure_uap_pr(self, _request, *, ready):
+                return "a" * 40
+
+            def _live_project(self, _request):
+                return self._project
+
+        full_ready = driver.catalog_entry(value, ready=True)
+        self.assertTrue(ReadyDriver(full_ready).ensure_ready(value))
+
+        missing_profile = {**full_ready, "dispatch_profile": None}
+        self.assertFalse(ReadyDriver(missing_profile).ensure_ready(value))
+
+        wrong_profile = {**full_ready, "dispatch_profile": "build1-other-registered-v4"}
+        self.assertFalse(ReadyDriver(wrong_profile).ensure_ready(value))
+
+        not_ready = {**full_ready, "status": "setup_required"}
+        self.assertFalse(ReadyDriver(not_ready).ensure_ready(value))
+
+        self.assertFalse(ReadyDriver(None).ensure_ready(value))
+
 
 if __name__ == "__main__":
     unittest.main()
