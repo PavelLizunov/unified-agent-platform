@@ -41,4 +41,14 @@ assert "РАЗРУШИТЕЛЬНОЕ" in profile and "без явного сог
 assert "ПОБОЧКИ НАРУЖУ" in profile
 assert "только с ЯВНОГО подтверждения владельца" in profile
 
+# Migration wiring: profile-migrate.py must propagate guardrail changes to live USER.md
+migration = cm["data"]["profile-migrate.py"]
+assert "трата денег" in migration, "migration must remove spending from approval list"
+assert "READ-ONLY ДИАГНОСТИКА" in migration, "migration must insert guardrail 8"
+
+# AGENTS.md is always-copied (not seed-if-absent) — verify bootstrap wiring
+deployment = (ROOT / "clusters/prod/infra/hermes-agent.yaml").read_text(encoding="utf-8")
+assert "cp /config/agents-md /opt/data/.codex/AGENTS.md" in deployment
+assert "[ -f /opt/data/.codex/AGENTS.md ] ||" not in deployment
+
 print("hermes-diagnostics-policy-ok")
