@@ -437,6 +437,44 @@ def test_malformed_config_blocks_owner_turn_with_zero_side_effects() -> None:
             assert store._intake_draft("telegram", scope) is None
 
 
+def test_voice_topic_replay_with_different_transcript_returns_same_mission() -> None:
+    """A redelivered voice note (same message_id, different STT text) is one mission.
+
+    Local STT is non-deterministic: the same voice message can transcribe
+    differently on a transport redelivery.  Mission identity is the stable
+    Telegram source_message_id (via the source_key-derived mission_id), not the
+    transcript content, so the replay must return the original mission instead
+    of failing closed as a goal collision or generating a second image.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            first, created1 = store.ingest_owner_turn(
+                "sunset over the mountains with a river",
+                platform="telegram",
+                source_message_id="voice-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert created1
+            assert first["payload"]["capability"] == "media.image.generate"
+            second, created2 = store.ingest_owner_turn(
+                "sunset over mountains near a river",
+                platform="telegram",
+                source_message_id="voice-1",
+                session_id="s1",
+                chat_id="supergroup",
+                thread_id="images-topic",
+            )
+            assert not created2
+            assert second["mission_id"] == first["mission_id"]
+
+
 def test_media_topic_edit_request_fails_closed() -> None:
     """Image edit requests in a configured media topic still fail closed."""
     with tempfile.TemporaryDirectory() as temporary:
@@ -469,6 +507,7 @@ if __name__ == "__main__":
     test_images_topic_replay_returns_same_mission()
     test_explicit_imagegen_works_outside_media_topic()
     test_voice_transcript_uses_topic_dispatch()
+    test_voice_topic_replay_with_different_transcript_returns_same_mission()
     test_malformed_media_topics_config_fails_closed()
     test_malformed_config_blocks_owner_turn_with_zero_side_effects()
     test_media_topic_edit_request_fails_closed()
