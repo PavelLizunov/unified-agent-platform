@@ -2943,6 +2943,121 @@ def test_failure_terminal_commits_before_telegram_and_retries_delivery() -> None
     asyncio.run(scenario())
 
 
+def test_disk_space_notice_contract_through_runtime_validation_and_store() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            store.accept("Deliver the change", mission_id="mission-disk")
+
+            pre_handoff = {
+                "schema_version": 1,
+                "mission_id": "mission-disk",
+                "type": "mission.notice",
+                "source": "build1-flow",
+                "correlation": {
+                    "producer_event_id": "flow:mission-disk:disk-wait-pre",
+                },
+                "payload": {
+                    "code": "disk_space_wait",
+                    "message": (
+                        "Worktree volume is below the minimum free-space reserve; "
+                        "delivery paused until space is available."
+                    ),
+                    "owner_action_required": False,
+                    "next_attempt_at": "2026-07-21T12:00:00Z",
+                },
+            }
+            stored, created = store.append_producer("mission-disk", pre_handoff)
+            assert created
+            view = store.projection("mission-disk")
+            assert view["notice"] == pre_handoff["payload"]
+            assert view["question"] is None
+
+            dup, dup_created = store.append_producer("mission-disk", pre_handoff)
+            assert not dup_created
+            assert dup["sequence"] == stored["sequence"]
+
+            collision = {
+                **pre_handoff,
+                "payload": {**pre_handoff["payload"], "message": "changed text"},
+            }
+            try:
+                store.append_producer("mission-disk", collision)
+                raise AssertionError("producer id collision was accepted")
+            except missions.MissionError as error:
+                assert "collision" in str(error)
+
+            with_task = {
+                "schema_version": 1,
+                "mission_id": "mission-disk",
+                "type": "mission.notice",
+                "source": "build1-flow",
+                "correlation": {
+                    "task_id": "task-42",
+                    "producer_event_id": "flow:mission-disk:disk-wait-active",
+                },
+                "payload": {
+                    "code": "disk_space_wait",
+                    "message": (
+                        "Worktree volume is below the minimum free-space reserve; "
+                        "delivery paused until space is available."
+                    ),
+                    "owner_action_required": False,
+                    "next_attempt_at": "2026-07-21T12:05:00Z",
+                },
+            }
+            stored2, created2 = store.append_producer("mission-disk", with_task)
+            assert created2
+            view2 = store.projection("mission-disk")
+            assert view2["notice"] == with_task["payload"]
+
+            recovered = {
+                "schema_version": 1,
+                "mission_id": "mission-disk",
+                "type": "mission.notice",
+                "source": "build1-flow",
+                "correlation": {
+                    "task_id": "task-42",
+                    "producer_event_id": "flow:mission-disk:disk-recovered",
+                },
+                "payload": {
+                    "code": "disk_space_recovered",
+                    "message": "Worktree volume free space recovered; delivery resumed.",
+                    "owner_action_required": False,
+                },
+            }
+            stored3, created3 = store.append_producer("mission-disk", recovered)
+            assert created3
+            view3 = store.projection("mission-disk")
+            assert view3["notice"] == recovered["payload"]
+            rendered = missions.telegram_text(view3)
+            assert "освобождено" in rendered
+
+            empty_correlation = {
+                "schema_version": 1,
+                "mission_id": "mission-disk",
+                "type": "mission.notice",
+                "source": "build1-flow",
+                "correlation": {
+                    "task_id": "",
+                    "producer_event_id": "flow:mission-disk:empty-task",
+                },
+                "payload": {
+                    "code": "disk_space_wait",
+                    "message": "test",
+                    "owner_action_required": False,
+                },
+            }
+            try:
+                store.append_producer("mission-disk", empty_correlation)
+                raise AssertionError("empty task_id correlation was accepted")
+            except missions.MissionError as error:
+                assert "correlation.task_id" in str(error)
+
+    asyncio.run(scenario())
+
+
+
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
@@ -2980,6 +3095,7 @@ def main() -> None:
     test_repair_mission_inherits_and_restores_telegram_binding()
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
     test_failure_terminal_commits_before_telegram_and_retries_delivery()
+    test_disk_space_notice_contract_through_runtime_validation_and_store()
     print("hermes mission runtime checks passed")
 
 

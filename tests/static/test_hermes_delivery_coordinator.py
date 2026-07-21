@@ -10,6 +10,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -639,6 +640,19 @@ class PostVerifyPlanCrashCoordinator(PostVerifyRetryCoordinator):
 
 
 class DeliveryCoordinatorTests(unittest.TestCase):
+    def setUp(self):
+        real = shutil.disk_usage(str(pathlib.Path(__file__).parent))
+        plenty = real._replace(
+            total=128 * 1024 ** 3,
+            used=32 * 1024 ** 3,
+            free=96 * 1024 ** 3,
+        )
+        patcher = mock.patch.object(
+            coordinator.shutil, "disk_usage", return_value=plenty
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_missing_delivery_state_with_projected_task_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -6852,6 +6866,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         self.assertIn("OnActiveSec=1min", timer)
         self.assertNotIn("OnBootSec=", timer)
         self.assertIn("Persistent=true", timer)
+        self.assertIn("ConditionPathIsMountPoint=/home/uap/worktrees", service)
 
     def test_profile_lock_rejects_an_overlapping_tick(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -8097,6 +8112,620 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             self.assertEqual("post_verify_retry_pending", migrated["action"])
             self.assertEqual(1, migrated["state"]["post_verify_attempts"])
+
+
+    def test_low_disk_blocks_author_and_preserves_quality_counters(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            client = FakeClient()
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-low")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-low",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            route_before = instance._current_route(state)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=1024 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=5000):
+                    result = instance._disk_space_wait_result(state, "disk-low", paths)
+            self.assertIsNotNone(result)
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual(0, instance._quality_failures(state))
+            self.assertEqual(route_before, instance._current_route(state))
+            waiting = state["disk_space_wait"]
+            self.assertEqual("claimed", waiting["phase"])
+            self.assertEqual(0, waiting["round"])
+            self.assertGreater(waiting["not_before"], 5000)
+            self.assertTrue(waiting["claim_parked"])
+            notices = [
+                e for e in client.stages
+                if isinstance(e, dict)
+                and e.get("type") == "mission.notice"
+                and e.get("payload", {}).get("code") == "disk_space_wait"
+            ]
+            self.assertEqual(1, len(notices))
+            self.assertFalse(notices[0]["payload"]["owner_action_required"])
+            self.assertNotIn("free_bytes", notices[0]["payload"])
+
+    def test_disk_space_wait_parks_exact_run_and_reclaims_on_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("disk-park")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-park",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            backend.claim("task-1", ttl_seconds=28800)
+            state["run_id"] = str(backend.runs[-1]["id"])
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=1000):
+                    result = instance._disk_space_wait_result(state, "disk-park", paths)
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertTrue(state["disk_space_wait"]["claim_parked"])
+            self.assertEqual("scheduled", backend.task["status"])
+            instance._save(paths, state)
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state("disk-park", paths)
+            self.assertIn("disk_space_wait", recovered)
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                waiting = restarted._disk_space_wait_result(
+                    recovered, "disk-park", paths
+                )
+            self.assertEqual("disk_space_wait", waiting["action"])
+
+            plenty = shutil.disk_usage(str(root))
+            plenty = plenty._replace(free=50 * 1024 ** 3)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=plenty):
+                with mock.patch.object(coordinator.time, "time", return_value=2000):
+                    result = restarted._disk_space_wait_result(
+                        recovered, "disk-park", paths
+                    )
+            self.assertIsNone(result)
+            self.assertNotIn("disk_space_wait", recovered)
+            self.assertEqual("running", backend.task["status"])
+
+    def test_disk_space_wait_is_restart_safe_with_backoff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-restart")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-restart",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=50 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=1000):
+                    result = instance._disk_space_wait_result(state, "disk-restart", paths)
+            self.assertEqual("disk_space_wait", result["action"])
+            instance._save(paths, state)
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            recovered = restarted._load_state("disk-restart", paths)
+            self.assertIn("disk_space_wait", recovered)
+            self.assertEqual("claimed", recovered["disk_space_wait"]["phase"])
+
+            with mock.patch.object(coordinator.time, "time", return_value=2000):
+                with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                    waiting = restarted._disk_space_wait_result(
+                        recovered, "disk-restart", paths
+                    )
+            self.assertEqual("disk_space_wait", waiting["action"])
+            self.assertEqual(1, recovered["disk_space_wait"]["round"])
+
+    def test_disk_space_checks_worktree_root_not_state_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            checked_paths = []
+            real_disk_usage = coordinator.shutil.disk_usage
+
+            def tracking_disk_usage(path):
+                checked_paths.append(path)
+                return real_disk_usage(path)
+
+            with mock.patch.object(
+                coordinator.shutil, "disk_usage", side_effect=tracking_disk_usage
+            ):
+                instance._check_disk_space()
+            self.assertEqual(1, len(checked_paths))
+            worktree_root = str(pathlib.Path(approved["worktree_root"]))
+            self.assertTrue(
+                checked_paths[0].startswith(worktree_root)
+                or checked_paths[0] == str(pathlib.Path(worktree_root).parent),
+                f"expected worktree_root path, got {checked_paths[0]}",
+            )
+            self.assertNotEqual(checked_paths[0], str(root / "state"))
+
+    def test_disk_space_backoff_caps_at_maximum(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-cap")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-cap",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=10 * 1024 * 1024)
+            now = 10000
+            for _ in range(10):
+                with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                    with mock.patch.object(coordinator.time, "time", return_value=now):
+                        result = instance._disk_space_wait_result(state, "disk-cap", paths)
+                self.assertEqual("disk_space_wait", result["action"])
+                delay = state["disk_space_wait"]["not_before"] - now
+                self.assertLessEqual(delay, coordinator._DISK_SPACE_MAX_RETRY_DELAY_SECONDS)
+                now = state["disk_space_wait"]["not_before"] + 1
+            self.assertGreater(state["disk_space_wait"]["round"], 3)
+
+    def test_tick_low_disk_blocks_author_runner_and_parks_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            counters = {"authors": 0, "reviews": 0, "cleanups": 0, "worktrees": 0}
+            client = FakeClient()
+            backend = FakeBackend()
+            instance = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "review_cycle": 1,
+                "crash_injected": False,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            backend.claim("task-1", ttl_seconds=28800)
+            state["run_id"] = str(backend.runs[-1]["id"])
+            instance._save(paths, state)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                result = instance.tick()
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual("scheduled", backend.task["status"])
+
+    def test_tick_restart_with_space_reclaims_and_proceeds_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            counters = {"authors": 0, "reviews": 0, "cleanups": 0, "worktrees": 0}
+            client = FakeClient()
+            backend = FakeBackend()
+            instance = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "review_cycle": 1,
+                "crash_injected": True,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            backend.claim("task-1", ttl_seconds=28800)
+            state["run_id"] = str(backend.runs[-1]["id"])
+            instance._save(paths, state)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                result = instance.tick()
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual(0, counters["authors"])
+
+            plenty = shutil.disk_usage(str(root))
+            plenty = plenty._replace(free=50 * 1024 ** 3)
+            restarted = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            future = result["state"]["disk_space_wait"]["not_before"] + 1
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=plenty):
+                with mock.patch.object(coordinator.time, "time", return_value=future):
+                    result = restarted.tick()
+            self.assertEqual(1, counters["authors"])
+            self.assertNotIn("disk_space_wait", result["state"])
+
+    def test_disk_space_wait_rejects_wrong_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-phase")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-phase",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "pre_review_ci_green",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "disk_space_wait": {
+                    "schema_version": 1,
+                    "phase": "claimed",
+                    "not_before": 999999,
+                    "round": 0,
+                    "claim_parked": False,
+                    "reclaim_pending": False,
+                    "reclaim_token": "a" * 64,
+                },
+            }
+            instance._ensure_route(state, paths)
+            with self.assertRaises(coordinator.DeliveryError):
+                instance._disk_space_wait_result(state, "disk-phase", paths)
+
+    def test_disk_space_notice_is_stable_across_repeated_ticks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            client = FakeClient()
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-notice")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-notice",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=1000):
+                    instance._disk_space_wait_result(state, "disk-notice", paths)
+            wait_notices = [
+                e for e in client.stages
+                if isinstance(e, dict)
+                and e.get("type") == "mission.notice"
+                and e.get("payload", {}).get("code") == "disk_space_wait"
+            ]
+            self.assertEqual(1, len(wait_notices))
+            first_id = wait_notices[0]["correlation"]["producer_event_id"]
+
+            client.stages.clear()
+            with mock.patch.object(coordinator.time, "time", return_value=1001):
+                instance._disk_space_wait_result(state, "disk-notice", paths)
+            wait_notices = [
+                e for e in client.stages
+                if isinstance(e, dict)
+                and e.get("type") == "mission.notice"
+                and e.get("payload", {}).get("code") == "disk_space_wait"
+            ]
+            self.assertEqual(1, len(wait_notices))
+            self.assertEqual(first_id, wait_notices[0]["correlation"]["producer_event_id"])
+
+    def test_v4_profile_disk_space_wait_compat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-v4")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-v4",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "author_commit_count": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "mission_goal": "test goal",
+                "mission_goal_sha256": hashlib.sha256(b"test goal").hexdigest(),
+                "delivery_mode": "none",
+            }
+            instance._ensure_route(state, paths)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=1000):
+                    result = instance._disk_space_wait_result(state, "disk-v4", paths)
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual(0, instance._quality_failures(state))
+            self.assertEqual("claimed", state["disk_space_wait"]["phase"])
+
+
+    def test_crash_after_wait_checkpoint_before_parking_reconciles_on_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            backend = FakeBackend()
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("disk-crash")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-crash",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            instance._ensure_route(state, paths)
+            backend.claim("task-1", ttl_seconds=28800)
+            state["run_id"] = str(backend.runs[-1]["id"])
+            route_before = instance._current_route(state)
+            state["disk_space_wait"] = {
+                "schema_version": 1,
+                "phase": "claimed",
+                "not_before": time.time() + 9999,
+                "round": 0,
+                "claim_parked": False,
+                "reclaim_pending": False,
+                "reclaim_token": hashlib.sha256(b"crash-test").hexdigest(),
+            }
+            instance._save(paths, state)
+            self.assertEqual("running", backend.task["status"])
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state("disk-crash", paths)
+            with mock.patch.object(coordinator.time, "time", return_value=time.time() + 1):
+                result = restarted._disk_space_wait_result(recovered, "disk-crash", paths)
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertTrue(recovered["disk_space_wait"]["claim_parked"])
+            self.assertEqual("scheduled", backend.task["status"])
+            self.assertEqual(0, restarted._quality_failures(recovered))
+            self.assertEqual(route_before, restarted._current_route(recovered))
+
+    def test_low_disk_blocks_post_verify_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("disk-pv")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "disk-pv",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "merged",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "candidate_sha": "candidate-sha",
+                "merge_sha": "merge-sha",
+            }
+            instance._ensure_route(state, paths)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=1000):
+                    result = instance._disk_space_wait_result(state, "disk-pv", paths)
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual("merged", state["disk_space_wait"]["phase"])
+            self.assertEqual(0, instance._quality_failures(state))
+
+    def test_tick_notice_producer_id_stable_across_restarts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            counters = {"authors": 0, "reviews": 0, "cleanups": 0, "worktrees": 0}
+            client = FakeClient()
+            backend = FakeBackend()
+            inst = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = inst._paths("mission-a7-3")
+            paths["directory"].mkdir(parents=True, exist_ok=True)
+            state = {
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "claimed",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "review_cycle": 1,
+                "crash_injected": True,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            }
+            inst._ensure_route(state, paths)
+            backend.claim("task-1", ttl_seconds=28800)
+            state["run_id"] = str(backend.runs[-1]["id"])
+            inst._save(paths, state)
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            now = time.time()
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                with mock.patch.object(coordinator.time, "time", return_value=now):
+                    r1 = inst.tick()
+            self.assertEqual("disk_space_wait", r1["action"])
+            wait_notices_1 = [
+                e for e in client.stages
+                if isinstance(e, dict)
+                and e.get("type") == "mission.notice"
+                and e.get("payload", {}).get("code") == "disk_space_wait"
+            ]
+            self.assertEqual(1, len(wait_notices_1))
+            first_id = wait_notices_1[0]["correlation"]["producer_event_id"]
+
+            client.stages.clear()
+            restarted = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            with mock.patch.object(coordinator.time, "time", return_value=now + 1):
+                r2 = restarted.tick()
+            self.assertEqual("disk_space_wait", r2["action"])
+            wait_notices_2 = [
+                e for e in client.stages
+                if isinstance(e, dict)
+                and e.get("type") == "mission.notice"
+                and e.get("payload", {}).get("code") == "disk_space_wait"
+            ]
+            self.assertEqual(1, len(wait_notices_2))
+            self.assertEqual(first_id, wait_notices_2[0]["correlation"]["producer_event_id"])
+            self.assertEqual(0, counters["authors"])
+
+
+
+    def test_tick_new_phase_low_disk_creates_no_worktree_and_no_handoff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved["required_files"] = ["Cli.cs"]
+            counters = {"authors": 0, "reviews": 0, "cleanups": 0, "worktrees": 0}
+            client = FakeClient()
+            backend = FakeBackend()
+            inst = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            low = shutil.disk_usage(str(root))
+            low = low._replace(free=100 * 1024 * 1024)
+            with mock.patch.object(coordinator.shutil, "disk_usage", return_value=low):
+                result = inst.tick()
+            self.assertEqual("disk_space_wait", result["action"])
+            self.assertEqual(0, counters["worktrees"])
+            self.assertEqual(0, counters["authors"])
+            self.assertEqual(0, backend.claims)
+            self.assertEqual("new", result["state"]["phase"])
+            self.assertEqual("new", result["state"]["disk_space_wait"]["phase"])
+
 
 
 if __name__ == "__main__":

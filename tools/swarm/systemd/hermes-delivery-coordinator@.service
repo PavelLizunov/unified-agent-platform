@@ -3,6 +3,7 @@ Description=UAP delivery coordinator (%i)
 After=network-online.target
 Wants=network-online.target
 ConditionPathExists=%h/.config/uap/delivery-%i.json
+ConditionPathIsMountPoint=/home/uap/worktrees
 
 [Service]
 Type=oneshot
