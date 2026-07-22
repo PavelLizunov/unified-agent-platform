@@ -53,7 +53,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 
 | Type | Required payload | Projection effect |
 |---|---|---|
-| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile` | status becomes `active`, stage `accepted` |
+| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile`, `execution_class`, `expected_changed_files` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
@@ -123,6 +123,17 @@ one project name. The selection resumes the original source message, survives re
 receipt, so a delayed Telegram retry cannot create a second mission. Before a project is selected, `отмена`,
 `отменить` or `/cancel` durably discard only that uncommitted draft; replay is idempotent and no mission is created.
 No model is used for repository selection.
+
+Central may additionally classify an explicit **docs-only** execution goal (for example, “Обнови только README”)
+as `execution_class: routine_docs` with `expected_changed_files: 2`. This is a closed deterministic admission rule,
+not a model judgment and not authority supplied by the browser or Telegram payload. The coordinator durably binds
+both fields before execution, uses the existing standard Luna/Sol route, and accepts the result only when the actual
+cumulative Git candidate changes at most two Markdown files or files below `docs/`. Any scope violation is cleaned
+through the existing disposable-worktree boundary and consumes the single automatic correction; the next generation
+uses the existing quality escalation. A routine mission has at most two author/review generations. Missing or
+ambiguous classification preserves the profile's previous conservative route and retry budget. Owner-gated flags are
+never removed by this optimization. Spark remains outside coding delivery until a separate exact-model canary and
+policy decision approve it.
 
 Workspace forwards its existing stable optimistic message identity and selected project to the Central session
 stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice

@@ -66,7 +66,7 @@ PAYLOAD_FIELDS = {
     "mission.accepted": {
         "goal", "project_id", "project_label", "project_repository",
         "dispatch_profile", "delivery_mode", "parent_mission_id",
-        "capability",
+        "capability", "execution_class", "expected_changed_files",
         "input_platform", "input_source_key_sha256", "input_source_message_sha256",
     },
     "mission.notice": {
@@ -99,7 +99,7 @@ _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation"
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _MAX_DELIVERY_SUMMARY_CHARS = 700
 _ID_PAYLOAD_FIELDS = {
-    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
+    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "execution_class", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
     "environment", "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -136,7 +136,7 @@ _EXECUTION_INTENT = re.compile(
     r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
     r"сдела\w*|реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
     r"созда\w*|настро\w*|интегр\w*|переимен\w*|обнов\w*|протест\w*|"
-    r"запуст\w*|выполн\w*|почин\w*|собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+    r"запуст\w*|выполн\w*|почин\w*|собер\w*|внес\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
     re.IGNORECASE,
 )
 _DISCUSSION_INTENT = re.compile(
@@ -147,10 +147,17 @@ _DISCUSSION_INTENT = re.compile(
     re.IGNORECASE,
 )
 _DISCUSS_THEN_EXECUTE = re.compile(
-    r"\b(?:and|then)\s+(?:implement|fix|modify|add|remove|configure|integrate|"
-    r"test|run|execute)\b|(?:\bи\b|\bзатем\b)\s+(?:реализ\w*|исправ\w*|"
-    r"измени\w*|добав\w*|удали\w*|настро\w*|интегр\w*|протест\w*|"
-    r"запуст\w*|выполн\w*)",
+    r"\b(?:and|then)\s+(?:implement|fix|modify|add|remove|create|configure|integrate|"
+    r"rename|update|build|test|run|execute)\b|(?:\bи\b|\bзатем\b)\s+(?:сдела\w*|"
+    r"реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|созда\w*|настро\w*|"
+    r"интегр\w*|переимен\w*|обнов\w*|протест\w*|запуст\w*|выполн\w*|"
+    r"почин\w*|собер\w*|внес\w*)",
+    re.IGNORECASE,
+)
+_ROUTINE_DOCS_ONLY = re.compile(
+    r"\b(?:only\s+(?:the\s+)?(?:readme(?:\.md)?|docs?|documentation)|"
+    r"(?:readme(?:\.md)?|docs?|documentation)\s+only)\b|"
+    r"\bтолько\s+(?:файл\s+)?(?:readme(?:\.md)?|docs|документац\w*|документ\w*)\b",
     re.IGNORECASE,
 )
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
@@ -264,6 +271,16 @@ def is_execution_goal(text: object) -> bool:
     ):
         return False
     return bool(_EXECUTION_INTENT.search(normalized))
+
+
+def routine_docs_file_limit(text: object) -> int | None:
+    """Return the closed small-change cap only for an explicit docs-only goal."""
+    if not isinstance(text, str):
+        return None
+    normalized = " ".join(text.split())[:4_000]
+    if not is_execution_goal(normalized) or not _ROUTINE_DOCS_ONLY.search(normalized):
+        return None
+    return 2
 
 
 class MissionError(ValueError):
@@ -742,6 +759,14 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise MissionError("invalid payload.offset")
             continue
+        if name == "expected_changed_files":
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 1 <= value <= 2
+            ):
+                raise MissionError("invalid payload.expected_changed_files")
+            continue
         if name in {
             "input_tokens", "cached_input_tokens", "output_tokens",
             "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
@@ -799,6 +824,16 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.accepted" and "delivery_mode" in payload:
         if payload.get("delivery_mode") not in {"none", "deploy"}:
             raise MissionError("invalid mission delivery mode")
+    if event_type == "mission.accepted":
+        execution_class = payload.get("execution_class")
+        expected_changed_files = payload.get("expected_changed_files")
+        if (execution_class, expected_changed_files) != (None, None) and (
+            execution_class != "routine_docs"
+            or not isinstance(expected_changed_files, int)
+            or isinstance(expected_changed_files, bool)
+            or not 1 <= expected_changed_files <= 2
+        ):
+            raise MissionError("invalid mission execution class")
     if event_type == "mission.accepted" and "capability" in payload:
         if payload.get("capability") != _MEDIA_CAPABILITY:
             raise MissionError("invalid mission capability")
@@ -929,6 +964,8 @@ def empty_projection() -> dict[str, Any]:
         "dispatch_profile": None,
         "capability": None,
         "delivery_mode": None,
+        "execution_class": None,
+        "expected_changed_files": None,
         "parent_mission_id": None,
         "input_platform": None,
         "input_source_key_sha256": None,
@@ -987,6 +1024,8 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 dispatch_profile=payload.get("dispatch_profile"),
                 capability=payload.get("capability"),
                 delivery_mode=payload.get("delivery_mode"),
+                execution_class=payload.get("execution_class"),
+                expected_changed_files=payload.get("expected_changed_files"),
                 parent_mission_id=payload.get("parent_mission_id"),
                 input_platform=payload.get("input_platform"),
                 input_source_key_sha256=payload.get("input_source_key_sha256"),
@@ -3105,6 +3144,12 @@ class MissionStore:
                 source_message_id.encode("utf-8")
             ).hexdigest(),
         }
+        routine_limit = routine_docs_file_limit(goal)
+        if routine_limit is not None:
+            arguments.update(
+                execution_class="routine_docs",
+                expected_changed_files=routine_limit,
+            )
         try:
             result = self.accept(goal, **arguments)
         except MissionError as error:
@@ -3131,6 +3176,8 @@ class MissionStore:
         dispatch_profile: str | None = None,
         delivery_mode: str | None = None,
         capability: str | None = None,
+        execution_class: str | None = None,
+        expected_changed_files: int | None = None,
         project_id: str | None = None,
         project_label: str | None = None,
         project_repository: str | None = None,
@@ -3157,6 +3204,13 @@ class MissionStore:
             raise MissionError("invalid mission delivery mode")
         if capability is not None and capability != _MEDIA_CAPABILITY:
             raise MissionError("invalid mission capability")
+        if (execution_class, expected_changed_files) != (None, None) and (
+            execution_class != "routine_docs"
+            or not isinstance(expected_changed_files, int)
+            or isinstance(expected_changed_files, bool)
+            or not 1 <= expected_changed_files <= 2
+        ):
+            raise MissionError("invalid mission execution class")
         if parent_mission_id is not None:
             parent_mission_id = _require_id(parent_mission_id, "parent_mission_id")
             if parent_mission_id == mission_id:
@@ -3207,6 +3261,21 @@ class MissionStore:
                 and first["payload"].get("dispatch_profile") == dispatch_profile
                 and first["payload"].get("delivery_mode") == delivery_mode
                 and first["payload"].get("capability") == capability
+                and (
+                    first["payload"].get("execution_class") == execution_class
+                    or (
+                        first["payload"].get("execution_class") is None
+                        and execution_class == "routine_docs"
+                    )
+                )
+                and (
+                    first["payload"].get("expected_changed_files")
+                    == expected_changed_files
+                    or (
+                        first["payload"].get("expected_changed_files") is None
+                        and expected_changed_files is not None
+                    )
+                )
                 and first["payload"].get("project_id") == project_id
                 and (
                     first["payload"].get("project_label") == project_label
@@ -3240,6 +3309,11 @@ class MissionStore:
             payload["delivery_mode"] = delivery_mode
         if capability is not None:
             payload["capability"] = capability
+        if execution_class is not None:
+            payload.update(
+                execution_class=execution_class,
+                expected_changed_files=expected_changed_files,
+            )
         if parent_mission_id is not None:
             payload["parent_mission_id"] = parent_mission_id
         if input_source_key_sha256 is not None:

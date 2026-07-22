@@ -3503,6 +3503,87 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with self.assertRaisesRegex(coordinator.DeliveryError, "schema 4 forbids"):
                 coordinator.load_profile(path)
 
+    def test_routine_docs_uses_standard_route_and_enforces_actual_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(
+                allowed_path_prefixes=["."],
+                max_changed_files=60,
+                route_flags=["durable_state", "multi_platform", "security_boundary"],
+                delivery_mode="none",
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-docs")
+            state = instance._load_state("mission-routine-docs", paths)
+            mission = {
+                "mission_id": "mission-routine-docs",
+                "goal": "Обнови только README",
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+            }
+            instance._bind_mission_goal(state, mission, paths)
+
+            signals = instance._route_signals(state)
+            self.assertEqual(2, signals["changed_files"])
+            self.assertEqual([], signals["flags"])
+            route = instance._ensure_route(state, paths)
+            self.assertEqual("gpt-5.6-luna", route["author"]["model"])
+            self.assertEqual("medium", route["author"]["reasoning_effort"])
+            self.assertEqual("gpt-5.6-sol", route["reviewer"]["model"])
+            self.assertEqual(1, instance._correction_budget(state))
+            self.assertEqual(2, instance._review_budget_limit(state))
+            self.assertEqual(
+                ["README.md", "docs/usage.txt"],
+                instance._validate_execution_scope(
+                    state, {"README.md", "docs/usage.txt"}
+                ),
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine docs"):
+                instance._validate_execution_scope(state, {"src/runtime.py"})
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine docs"):
+                instance._validate_execution_scope(
+                    state, {"README.md", "docs/a.md", "docs/b.md"}
+                )
+
+            recovered = instance._load_state("mission-routine-docs", paths)
+            self.assertEqual("routine_docs", recovered["execution_class"])
+            self.assertEqual(route, instance._ensure_route(recovered, paths))
+            recovered["prior_author_failures"] = 1
+            escalated = instance._ensure_route(recovered, paths)
+            self.assertEqual("gpt-5.6-sol", escalated["author"]["model"])
+            self.assertEqual("gpt-5.6-terra", escalated["reviewer"]["model"])
+
+            changed = dict(mission, expected_changed_files=1)
+            with self.assertRaisesRegex(coordinator.DeliveryError, "execution class changed"):
+                instance._bind_mission_goal(recovered, changed, paths)
+
+            legacy = {
+                "prior_author_failures": 0,
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+            }
+            legacy_signals = instance._route_signals(legacy)
+            self.assertEqual(60, legacy_signals["changed_files"])
+            self.assertEqual(approved["route_flags"], legacy_signals["flags"])
+
+            owner_profile = dict(approved)
+            owner_profile["route_flags"] = ["architecture_change", "durable_state"]
+            owner_instance = coordinator.DeliveryCoordinator(
+                owner_profile, FakeClient(), FakeBackend(), root / "owner-state"
+            )
+            owner_signals = owner_instance._route_signals(state)
+            self.assertEqual(["architecture_change"], owner_signals["flags"])
+            self.assertEqual(
+                "owner_approval_required",
+                coordinator.flow_contract.choose_delivery_route(
+                    owner_instance.policy, owner_signals
+                )["status"],
+            )
+
     def test_registered_flow_pilot_profile_is_closed_and_reusable(self):
         registered = ROOT / "tools/swarm/profiles/delivery-flow-pilot-registered-v4.json"
         value = json.loads(registered.read_text(encoding="utf-8"))
