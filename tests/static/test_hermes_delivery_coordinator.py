@@ -9778,6 +9778,43 @@ class TestCancelledCleanup(unittest.TestCase):
             self.assertEqual(1, backend.completes)
             self.assertEqual(1, backend.archives)
 
+    def test_cancelled_after_merge_skips_failed_pr_finalization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-cancelled-after-merge"
+            backend = CancelledBackend(status="done")
+            instance, _, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "task_completed",
+                    "root_task_id": "t-1",
+                    "run_id": "7",
+                    "pr_number": 42,
+                    "pr_head_sha": "candidate-sha",
+                    "pr_base_branch": "main",
+                    "candidate_sha": "candidate-sha",
+                    "merge_sha": "merge-sha",
+                }],
+            )
+            with mock.patch.object(
+                instance, "_finalize_failed_pr"
+            ) as finalize, mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+
+            finalize.assert_not_called()
+            cleanup.assert_called_once()
+            self.assertFalse(cleanup.call_args.kwargs["preserve_remote"])
+            self.assertFalse(cleanup.call_args.kwargs["require_claim"])
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertEqual(0, backend.claims)
+            self.assertEqual(0, backend.completes)
+            self.assertEqual(1, backend.archives)
+
     def test_running_task_full_flow(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

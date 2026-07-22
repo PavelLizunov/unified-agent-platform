@@ -3275,7 +3275,10 @@ class DeliveryCoordinator:
                 self._ensure_claimed(state)
                 self._save(paths, state)
             preserve_remote = False
-            if state.get("pr_number") is not None:
+            if (
+                state.get("pr_number") is not None
+                and state.get("merge_sha") is None
+            ):
                 preserve_remote = self._finalize_failed_pr(
                     state, require_claim=require_claim
                 )
