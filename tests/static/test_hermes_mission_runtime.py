@@ -51,6 +51,10 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Какие риски у настройки этого проекта?",
         "Analyze the repository and tell me how we should integrate this",
         "Find the latest test API documentation",
+        (
+            "Давай вернёмся к задаче по суфлёру. Найди файл handoff с описанием "
+            "тестов и скажи, что ты его нашёл. После этого мы продолжим."
+        ),
         "/discuss Настройка проекта",
         "/discuss Задай 3–5 коротких вопросов, которые нужны, чтобы настроить этот проект.",
     ):

@@ -219,6 +219,10 @@ def main() -> None:
         assert "candidate.unlink()" in gateway
         assert "len(transcripts) != len(audio_paths)" in gateway
         assert "goal_text = redact_sensitive_text(goal_text, force=True)" in gateway
+        assert "and not is_execution_goal(goal_text)" in gateway
+        assert "event.message_type = MessageType.TEXT" in gateway
+        assert "event._uap_owner_goal = False" in gateway
+        assert "return await self._handle_message(event)" in gateway
         assert "MissionProjectRequired" in gateway
         assert "MissionIntakeCancelled" in gateway
         assert 'canonical == "cancel"' in gateway
