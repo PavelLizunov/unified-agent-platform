@@ -1686,6 +1686,7 @@ data:
     from collections import OrderedDict
     from contextlib import contextmanager
     from datetime import datetime, timezone
+    from decimal import Decimal, ROUND_HALF_UP
     from pathlib import Path
     from typing import Any, Awaitable, Callable
 
@@ -1741,7 +1742,12 @@ data:
             "question_id", "text", "source_message_id", "source_platform",
         },
         "task.upsert": {"task_id", "title", "status", "assignee"},
-        "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
+        "worker.upsert": {
+            "worker_id", "status", "run_id", "profile", "model", "effort",
+            "input_tokens", "cached_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
+            "command_calls", "failed_commands", "web_search_calls",
+        },
         "terminal.append": {"stream", "text", "offset"},
         "delivery.upsert": {
             "kind", "status", "url", "summary", "environment", "artifact_sha256",
@@ -1830,6 +1836,15 @@ data:
     _ALLOWED_WORKER_MODELS = {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
     _ALLOWED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
     _ROLE_LABELS = {"author": "Автор", "reviewer": "Ревьюер"}
+    _API_PRICE_DATE = "22.07.2026"
+    _API_PRICES = {
+        # input, cached input, cache write, output; USD per million tokens
+        "gpt-5.6-sol": tuple(map(Decimal, ("5", "0.5", "6.25", "30"))),
+        "gpt-5.6-terra": tuple(map(Decimal, ("2.5", "0.25", "3.125", "15"))),
+        "gpt-5.6-luna": tuple(map(Decimal, ("1", "0.1", "1.25", "6"))),
+    }
+    _WEB_SEARCH_USD = Decimal("0.01")
+    _LONG_CONTEXT_TOKENS = 272_000
     _STAGE_LABELS = {
         "accepted": "Цель принята",
         "planning": "Планирование",
@@ -2393,7 +2408,11 @@ data:
                 if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                     raise MissionError("invalid payload.offset")
                 continue
-            if name in ("input_tokens", "output_tokens"):
+            if name in {
+                "input_tokens", "cached_input_tokens", "output_tokens",
+                "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
+                "command_calls", "failed_commands", "web_search_calls",
+            }:
                 if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                     raise MissionError(f"invalid payload.{name}")
                 continue
@@ -2407,6 +2426,13 @@ data:
         if event_type == "worker.upsert" and "effort" in payload:
             if payload["effort"] not in _ALLOWED_EFFORTS:
                 raise MissionError("worker effort is not in the closed Codex effort enum")
+        if event_type == "worker.upsert":
+            if payload.get("cached_input_tokens", 0) > payload.get("input_tokens", 0):
+                raise MissionError("worker cached input exceeds total input")
+            if payload.get("reasoning_output_tokens", 0) > payload.get("output_tokens", 0):
+                raise MissionError("worker reasoning output exceeds total output")
+            if payload.get("failed_commands", 0) > payload.get("command_calls", 0):
+                raise MissionError("worker failed commands exceed command calls")
         if event_type == "mission.stage":
             if payload.get("stage") not in STAGES:
                 raise MissionError("invalid mission stage")
@@ -2784,7 +2810,9 @@ data:
         if view.get("error"):
             lines.append(f"Ошибка: {view['error']}")
         if status in ("failed", "cancelled"):
-            lines.extend(_role_telemetry_lines(view.get("workers", [])))
+            workers = view.get("workers", [])
+            lines.extend(_role_telemetry_lines(workers))
+            lines.extend(_usage_statistics_lines(workers))
         lines.append(
             "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
                 tasks=len(view.get("tasks", [])),
@@ -2870,6 +2898,106 @@ data:
         return lines
 
 
+    def _metric(worker: dict[str, Any], name: str) -> int | None:
+        value = worker.get(name)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+    def _format_token_count(value: int) -> str:
+        if value >= 1_000_000:
+            text = f"{value / 1_000_000:.2f}".rstrip("0").rstrip(".")
+            return f"{text.replace('.', ',')} млн"
+        if value >= 1_000:
+            text = f"{value / 1_000:.1f}".rstrip("0").rstrip(".")
+            return f"{text.replace('.', ',')} тыс."
+        return str(value)
+
+
+    def _api_cost_range(workers: list[dict[str, Any]]) -> tuple[Decimal, Decimal] | None:
+        low = Decimal(0)
+        high = Decimal(0)
+        million = Decimal(1_000_000)
+        for worker in workers:
+            prices = _API_PRICES.get(worker.get("model"))
+            input_tokens = _metric(worker, "input_tokens")
+            cached_tokens = _metric(worker, "cached_input_tokens")
+            output_tokens = _metric(worker, "output_tokens")
+            max_input = _metric(worker, "max_request_input_tokens")
+            if (
+                prices is None or input_tokens is None or cached_tokens is None
+                or output_tokens is None or max_input is None or max_input <= 0
+                or max_input > _LONG_CONTEXT_TOKENS or cached_tokens > input_tokens
+            ):
+                return None
+            input_price, cached_price, cache_write_price, output_price = prices
+            fresh_tokens = Decimal(input_tokens - cached_tokens)
+            cached_tokens_decimal = Decimal(cached_tokens)
+            output_tokens_decimal = Decimal(output_tokens)
+            searches = Decimal(_metric(worker, "web_search_calls") or 0)
+            fixed = (
+                cached_tokens_decimal * cached_price
+                + output_tokens_decimal * output_price
+            ) / million + searches * _WEB_SEARCH_USD
+            low += fixed + fresh_tokens * input_price / million
+            high += fixed + fresh_tokens * cache_write_price / million
+        return low, high
+
+
+    def _usage_statistics_lines(workers: list[dict[str, Any]]) -> list[str]:
+        telemetry = [
+            worker for worker in workers
+            if isinstance(worker, dict) and worker.get("profile") in _ROLE_LABELS
+        ]
+        measured = [
+            worker for worker in telemetry
+            if _metric(worker, "input_tokens") is not None
+            and _metric(worker, "output_tokens") is not None
+        ]
+        if not measured or len(measured) != len(telemetry):
+            return []
+
+        total_input = sum(_metric(worker, "input_tokens") or 0 for worker in measured)
+        total_output = sum(_metric(worker, "output_tokens") or 0 for worker in measured)
+        parts = [f"вход {_format_token_count(total_input)}"]
+        if all(_metric(worker, "cached_input_tokens") is not None for worker in measured):
+            cached = sum(_metric(worker, "cached_input_tokens") or 0 for worker in measured)
+            if cached <= total_input:
+                percent = (
+                    Decimal(cached) * 100 / Decimal(total_input)
+                    if total_input
+                    else Decimal(0)
+                ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+                parts.extend((
+                    f"runtime-кэш {_format_token_count(cached)} ({str(percent).replace('.', ',')}%)",
+                    f"новый вход {_format_token_count(total_input - cached)}",
+                ))
+        parts.append(f"выход {_format_token_count(total_output)}")
+        requests = [_metric(worker, "model_requests") for worker in measured]
+        if all(value is not None for value in requests):
+            parts.append(f"запросы к моделям {sum(value or 0 for value in requests)}")
+        lines = ["Статистика финальных прогонов: " + " · ".join(parts)]
+
+        command_calls = sum(_metric(worker, "command_calls") or 0 for worker in measured)
+        failed_commands = sum(_metric(worker, "failed_commands") or 0 for worker in measured)
+        searches = sum(_metric(worker, "web_search_calls") or 0 for worker in measured)
+        if command_calls or failed_commands or searches:
+            lines.append(
+                f"Инструменты: shell {command_calls} · ненулевой код {failed_commands} · web search {searches}"
+            )
+
+        estimate = _api_cost_range(measured)
+        if estimate is not None:
+            low, high = (
+                value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                for value in estimate
+            )
+            low_text = str(low).replace(".", ",")
+            high_text = str(high).replace(".", ",")
+            amount = f"${low_text}" if low == high else f"${low_text}–${high_text}"
+            lines.append(f"API-эквивалент: {amount} · прайс OpenAI {_API_PRICE_DATE}")
+        return lines
+
+
     def _completion_result(view: dict[str, Any]) -> str:
         """Render one bounded owner result from the already verified projection."""
         def compact(value: Any, limit: int) -> str:
@@ -2936,13 +3064,18 @@ data:
         elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
         if elapsed:
             lines.append(f"Время: {elapsed}")
-        lines.extend(_role_telemetry_lines(view.get("workers", [])))
-        result = "\n".join(lines)
-        return (
-            result
-            if len(result) <= _MAX_COMPLETION_RESULT_CHARS
-            else result[:_MAX_COMPLETION_RESULT_CHARS - 1].rstrip() + "…"
-        )
+        workers = view.get("workers", [])
+        telemetry_lines = _role_telemetry_lines(workers) + _usage_statistics_lines(workers)
+        body = "\n".join(lines)
+        suffix = "\n".join(telemetry_lines)
+        result = body + ("\n" + suffix if suffix else "")
+        if len(result) <= _MAX_COMPLETION_RESULT_CHARS:
+            return result
+        if suffix and len(suffix) + 2 < _MAX_COMPLETION_RESULT_CHARS:
+            available = _MAX_COMPLETION_RESULT_CHARS - len(suffix) - 1
+            body = body[:available - 1].rstrip() + "…"
+            return body + "\n" + suffix
+        return result[:_MAX_COMPLETION_RESULT_CHARS - 1].rstrip() + "…"
 
 
     def completion_ready(view: dict[str, Any]) -> bool:

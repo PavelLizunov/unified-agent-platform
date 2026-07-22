@@ -1265,7 +1265,11 @@ class MissionAdapterTests(unittest.TestCase):
                     {"type": "worker.upsert", "payload": {
                         "worker_id": "author", "status": "completed",
                         "profile": "author", "model": "gpt-5.6-sol",
-                        "effort": "high", "input_tokens": 100, "output_tokens": 50,
+                        "effort": "high", "input_tokens": 100,
+                        "cached_input_tokens": 80, "output_tokens": 50,
+                        "reasoning_output_tokens": 30, "model_requests": 4,
+                        "max_request_input_tokens": 40, "command_calls": 7,
+                        "failed_commands": 1, "web_search_calls": 2,
                     }},
                     {"type": "gate.upsert", "payload": {
                         "gate_id": "cleanup", "status": "passed",
@@ -1282,6 +1286,13 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertEqual("author", we["correlation"]["worker_id"])
         self.assertEqual("gpt-5.6-sol", we["payload"]["model"])
         self.assertEqual(100, we["payload"]["input_tokens"])
+        self.assertEqual(80, we["payload"]["cached_input_tokens"])
+        self.assertEqual(30, we["payload"]["reasoning_output_tokens"])
+        self.assertEqual(4, we["payload"]["model_requests"])
+        self.assertEqual(40, we["payload"]["max_request_input_tokens"])
+        self.assertEqual(7, we["payload"]["command_calls"])
+        self.assertEqual(1, we["payload"]["failed_commands"])
+        self.assertEqual(2, we["payload"]["web_search_calls"])
         # Deterministic replay
         events2 = adapter.project_task_snapshot(mission_id, task_id, snapshot, "")
         w2 = [e for e in events2 if e["type"] == "worker.upsert"

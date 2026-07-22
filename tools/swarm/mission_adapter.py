@@ -39,7 +39,12 @@ PAYLOAD_FIELDS = {
         "kind", "status", "url", "summary", "environment",
         "artifact_sha256", "deployed_revision",
     },
-    "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
+    "worker.upsert": {
+        "worker_id", "status", "run_id", "profile", "model", "effort",
+        "input_tokens", "cached_input_tokens", "output_tokens",
+        "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
+        "command_calls", "failed_commands", "web_search_calls",
+    },
 }
 MAX_LOG_BYTES = 1024 * 1024
 MAX_EVENT_JSON_BYTES = 65_536
@@ -711,12 +716,22 @@ def _worker_metadata_events(
             if not isinstance(payload[key], str) or not payload[key]:
                 raise AdapterError("worker mission event payload is invalid")
         if event_type == "worker.upsert":
-            for field in ("input_tokens", "output_tokens"):
+            for field in (
+                "input_tokens", "cached_input_tokens", "output_tokens",
+                "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
+                "command_calls", "failed_commands", "web_search_calls",
+            ):
                 value = payload.get(field)
                 if value is not None and (
                     not isinstance(value, int) or isinstance(value, bool) or value < 0
                 ):
                     raise AdapterError("worker mission event payload is invalid")
+            if payload.get("cached_input_tokens", 0) > payload.get("input_tokens", 0):
+                raise AdapterError("worker mission event payload is invalid")
+            if payload.get("reasoning_output_tokens", 0) > payload.get("output_tokens", 0):
+                raise AdapterError("worker mission event payload is invalid")
+            if payload.get("failed_commands", 0) > payload.get("command_calls", 0):
+                raise AdapterError("worker mission event payload is invalid")
             for field in ("run_id", "profile", "model", "effort"):
                 value = payload.get(field)
                 if value is not None and (not isinstance(value, str) or not value):

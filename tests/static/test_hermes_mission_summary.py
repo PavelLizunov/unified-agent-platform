@@ -139,20 +139,82 @@ def test_completion_elapsed_from_updated_at() -> None:
     assert "\u0412\u0440\u0435\u043c\u044f:" not in m._completion_result(_view(goal="G", status="completed"))
 
 
-def test_completion_role_telemetry_and_no_cost() -> None:
+def test_completion_role_telemetry_usage_and_api_equivalent() -> None:
     v = _view(goal="G", status="completed", workers=[
         {"worker_id": "author", "status": "completed", "profile": "author",
-         "model": "gpt-5.6-sol", "effort": "high", "input_tokens": 5000, "output_tokens": 2000},
+         "model": "gpt-5.6-sol", "effort": "xhigh",
+         "input_tokens": 8419465, "cached_input_tokens": 8159232,
+         "output_tokens": 21094, "reasoning_output_tokens": 11403,
+         "model_requests": 60, "max_request_input_tokens": 209447,
+         "command_calls": 47, "failed_commands": 9, "web_search_calls": 4},
         {"worker_id": "reviewer", "status": "completed", "profile": "reviewer",
-         "model": "gpt-5.6-terra", "effort": "high"},
+         "model": "gpt-5.6-terra", "effort": "xhigh",
+         "input_tokens": 1645218, "cached_input_tokens": 1517056,
+         "output_tokens": 9627, "reasoning_output_tokens": 6213,
+         "model_requests": 21, "max_request_input_tokens": 121312,
+         "command_calls": 17, "failed_commands": 4, "web_search_calls": 2},
     ])
     r = m._completion_result(v)
-    assert "\u0410\u0432\u0442\u043e\u0440 (\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043e\u043d): gpt-5.6-sol \u00b7 effort high \u00b7 5000 in / 2000 out" in r
-    assert "\u0420\u0435\u0432\u044c\u044e\u0435\u0440 (\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043e\u043d): gpt-5.6-terra \u00b7 effort high" in r
-    assert "$" not in r and "cost" not in r.lower()
+    assert "\u0410\u0432\u0442\u043e\u0440 (\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043e\u043d): gpt-5.6-sol \u00b7 effort xhigh" in r
+    assert "\u0420\u0435\u0432\u044c\u044e\u0435\u0440 (\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043e\u043d): gpt-5.6-terra \u00b7 effort xhigh" in r
+    assert "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432: \u0432\u0445\u043e\u0434 10,06 \u043c\u043b\u043d" in r
+    assert "runtime-\u043a\u044d\u0448 9,68 \u043c\u043b\u043d (96,1%)" in r
+    assert "\u043d\u043e\u0432\u044b\u0439 \u0432\u0445\u043e\u0434 388,4 \u0442\u044b\u0441." in r
+    assert "\u0432\u044b\u0445\u043e\u0434 30,7 \u0442\u044b\u0441." in r
+    assert "\u0437\u0430\u043f\u0440\u043e\u0441\u044b \u043a \u043c\u043e\u0434\u0435\u043b\u044f\u043c 81" in r
+    assert "\u0418\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u044b: shell 64 \u00b7 \u043d\u0435\u043d\u0443\u043b\u0435\u0432\u043e\u0439 \u043a\u043e\u0434 13 \u00b7 web search 6" in r
+    assert "API-\u044d\u043a\u0432\u0438\u0432\u0430\u043b\u0435\u043d\u0442: $6,92\u2013$7,32 \u00b7 \u043f\u0440\u0430\u0439\u0441 OpenAI 22.07.2026" in r
     r2 = m._completion_result(_view(goal="G", status="completed",
                                     workers=[{"worker_id": "w", "status": "done"}]))
     assert "\u0410\u0432\u0442\u043e\u0440 (" not in r2
+    assert "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432:" not in r2
+
+
+def test_completion_keeps_usage_statistics_when_details_are_truncated() -> None:
+    v = _view(
+        goal="G", status="completed",
+        deliveries=[
+            {"kind": "pull_request", "status": "merged", "summary": "S" * 700,
+             "url": "https://example.test/pr/" + "p" * 600},
+            {"kind": "default_branch", "status": "verified",
+             "url": "https://example.test/commit/" + "c" * 600},
+        ],
+        changes=[{"path": f"src/{index:02d}-{'x' * 110}.py"} for index in range(20)],
+        workers=[
+            {"worker_id": "author", "status": "completed", "profile": "author",
+             "model": "gpt-5.6-sol", "effort": "high", "input_tokens": 1000,
+             "cached_input_tokens": 800, "output_tokens": 100,
+             "model_requests": 2, "max_request_input_tokens": 700},
+            {"worker_id": "reviewer", "status": "completed", "profile": "reviewer",
+             "model": "gpt-5.6-terra", "effort": "high", "input_tokens": 500,
+             "cached_input_tokens": 400, "output_tokens": 50,
+             "model_requests": 1, "max_request_input_tokens": 400},
+        ],
+    )
+    result = m._completion_result(v)
+    assert len(result) <= m._MAX_COMPLETION_RESULT_CHARS
+    assert "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432:" in result
+    assert "API-\u044d\u043a\u0432\u0438\u0432\u0430\u043b\u0435\u043d\u0442:" in result
+
+
+def test_completion_does_not_price_partial_or_long_context_telemetry() -> None:
+    partial = _view(goal="G", status="completed", workers=[
+        {"worker_id": "author", "status": "completed", "profile": "author",
+         "model": "gpt-5.6-sol", "input_tokens": 100, "output_tokens": 20},
+        {"worker_id": "reviewer", "status": "completed", "profile": "reviewer",
+         "model": "gpt-5.6-terra"},
+    ])
+    assert "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432:" not in m._completion_result(partial)
+
+    long_context = _view(goal="G", status="completed", workers=[
+        {"worker_id": "author", "status": "completed", "profile": "author",
+         "model": "gpt-5.6-sol", "input_tokens": 300000,
+         "cached_input_tokens": 250000, "output_tokens": 1000,
+         "model_requests": 1, "max_request_input_tokens": 300000},
+    ])
+    rendered = m._completion_result(long_context)
+    assert "\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430 \u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0445 \u043f\u0440\u043e\u0433\u043e\u043d\u043e\u0432:" in rendered
+    assert "API-\u044d\u043a\u0432\u0438\u0432\u0430\u043b\u0435\u043d\u0442:" not in rendered
 
 
 def test_store_end_to_end_label_telemetry_timestamps() -> None:
