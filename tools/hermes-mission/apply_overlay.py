@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     "gateway/run.py": "858f18c6864240f1797c2f5d23a71f5933625c24f406f7b177ae7db0bcc3ad9b",
-    "gateway/platforms/api_server.py": "e89f7474d334906c60530c0e1179c54bfe13a1fd777a14a8f3e04882d4afd822",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -893,7 +893,8 @@ def connect(
             "    MissionError, MissionProjectRequired, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
             "    image_generation_prompt, is_execution_goal, notify_subscribers, owner_key_valid,\n"
             "    producer_key_valid, project_setup_execution_goal, project_setup_system_prompt,\n"
-            "    project_setup_target, public_intake_projects, sanitize_producer_submission,\n"
+            "    project_setup_target, project_setup_target_from_system_prompt,\n"
+            "    public_intake_projects, sanitize_producer_submission,\n"
             "    terminal_request_allowed,\n"
             ")",
             "mission imports",
@@ -904,6 +905,23 @@ def connect(
             "        self._session_db: Optional[Any] = None  # Lazy-init SessionDB for session continuity\n"
             "        self._mission_store: Optional[MissionStore] = None",
             "mission store",
+        )
+        text = replace(
+            text,
+            '''        model = body.get("model") or self._model_name
+        system_prompt = body.get("system_prompt")''',
+            '''        model = body.get("model") or self._model_name
+        system_prompt = body.get("system_prompt")
+        try:
+            if body.get("setup_project_id") is not None:
+                system_prompt = project_setup_system_prompt(
+                    project_setup_target("workspace", body.get("setup_project_id"))
+                )
+        except MissionError as error:
+            return web.json_response(
+                _openai_error(str(error), code="project_setup_failed"), status=400
+            )''',
+            "setup-bound session creation",
         )
         stream_marker = '''    async def _handle_session_chat_stream(self, request: "web.Request") -> "web.StreamResponse":'''
         if text.count(stream_marker) != 1:
@@ -924,6 +942,10 @@ def connect(
             if body.get("setup_project_id") is not None:
                 setup_target = project_setup_target(
                     "workspace", body.get("setup_project_id")
+                )
+            elif session_entry is not None:
+                setup_target = project_setup_target_from_system_prompt(
+                    "workspace", session_entry.get("system_prompt")
                 )
             store = self._missions()
             continuation = bool(
@@ -1056,6 +1078,14 @@ def connect(
                 f"{setup_prompt}\\n\\n{system_prompt}" if system_prompt else setup_prompt
             )''',
             "ordinary Workspace mission intake",
+        )
+        stream_and_tail = replace(
+            stream_and_tail,
+            '''        session_id = request.match_info["session_id"]
+        _, err = self._get_existing_session_or_404(session_id)''',
+            '''        session_id = request.match_info["session_id"]
+        session_entry, err = self._get_existing_session_or_404(session_id)''',
+            "setup session binding lookup",
         )
         text = before_stream + stream_marker + stream_and_tail
         methods = '''    def _missions(self) -> MissionStore:

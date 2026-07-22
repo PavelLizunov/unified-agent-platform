@@ -45,7 +45,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v75-vpnctl-deploy"
+        "v76-setup-session-binding"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]

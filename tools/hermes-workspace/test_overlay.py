@@ -266,6 +266,8 @@ def main() -> None:
         ) in sessions
         assert "if (!CENTRAL_ONLY && localSession)" in sessions
         assert "if (!CENTRAL_ONLY && getLocalSession(sessionKey))" in sessions
+        assert "setup_project_id: setupProjectId || undefined" in sessions
+        assert "uap_project_setup=" in sessions
 
         chat_screen = (clone / "src/screens/chat/chat-screen.tsx").read_text()
         new_chat = chat_screen[chat_screen.index("if (isNewChat) {") :]
@@ -289,7 +291,7 @@ def main() -> None:
         )
         sessions_path.write_text(previous_sessions, encoding="utf-8")
         assert hashlib.sha256(sessions_path.read_bytes()).hexdigest() == (
-            "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577"
+            "75f30477f71b088646364aac40ed8d6654da5f98d7f429dd714546c69364e5ce"
         )
         previous_sessions_check = run(clone, "--check")
         assert previous_sessions_check.returncode == 0
@@ -374,10 +376,15 @@ def main() -> None:
         assert "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" in claude_api
         assert "project_id?: string" in claude_api
         assert "setup_project_id?: string" in claude_api
-        create_session = claude_api.index("export async function createSession")
+        create_session = claude_api[
+            claude_api.index("export async function createSession"):
+            claude_api.index("export async function updateSession")
+        ]
+        assert "setup_project_id?: string" in create_session
+        create_session_start = claude_api.index("export async function createSession")
         update_session = claude_api.index("export async function updateSession")
         assert "if (!CENTRAL_ONLY && getCapabilities().dashboard.available)" in (
-            claude_api[create_session:update_session]
+            claude_api[create_session_start:update_session]
         )
 
         send_stream_path = clone / "src/routes/api/send-stream.ts"
