@@ -231,12 +231,19 @@ def main() -> None:
         assert 'source_message_id = body.get("source_message_id")' in stream_handler
         assert "is_execution_goal(user_message)" in stream_handler
         assert "project_setup_target(" in stream_handler
+        assert "project_setup_target_from_system_prompt(" in stream_handler
         assert "project_setup_system_prompt(setup_target)" in stream_handler
         assert "project_setup_execution_goal(" in stream_handler
         assert 'platform="workspace"' in stream_handler
         assert "project_id=intake_project_id" in stream_handler
         assert '"projects": error.projects' in stream_handler
         assert 'code="mission_intake_failed"' in stream_handler
+        create_session_handler = api[
+            api.index("    async def _handle_create_session("):
+            api.index("    async def _handle_get_session(")
+        ]
+        assert 'body.get("setup_project_id")' in create_session_handler
+        assert "project_setup_system_prompt(" in create_session_handler
         assert 'owner_event["type"] == "mission.answer"' in stream_handler
         assert "Ответ принят для задачи" in stream_handler
         assert 'f"{mission_id}:{source_message_id}"' in stream_handler

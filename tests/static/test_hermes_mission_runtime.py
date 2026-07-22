@@ -91,8 +91,15 @@ def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> No
     with mock.patch.dict(os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True):
         target = missions.project_setup_target("workspace", "existing")
         prompt = missions.project_setup_system_prompt(target)
+        assert "UAP_SETUP_PROJECT_ID: existing" in prompt
         assert "PavelLizunov/existing" in prompt
         assert "только на чтение" in prompt and "setup_required" in prompt
+        assert missions.project_setup_target_from_system_prompt(
+            "workspace", prompt
+        )["project_id"] == "existing"
+        assert missions.project_setup_target_from_system_prompt(
+            "workspace", "ordinary prompt"
+        ) is None
         goal = missions.project_setup_execution_goal(target, "настраивай")
         assert "project_id=existing" in goal
         assert "status=setup_required" in goal

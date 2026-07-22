@@ -586,11 +586,15 @@ def project_setup_target(platform: str, project_id: object) -> dict[str, Any]:
     return target
 
 
+_SETUP_PROJECT_MARKER = "UAP_SETUP_PROJECT_ID: "
+
+
 def project_setup_system_prompt(target: dict[str, Any]) -> str:
     """Build server-owned read-only context for an existing-project setup chat."""
     tests = ", ".join(target.get("test_targets", [])) or "не определены"
     return (
         "SERVER-OWNED PROJECT SETUP CONTEXT\n"
+        f"{_SETUP_PROJECT_MARKER}{target['project_id']}\n"
         f"Проект: {target['label']}\n"
         f"Репозиторий: {target['repository']}\n"
         f"Описание: {target['summary']}\n"
@@ -601,6 +605,20 @@ def project_setup_system_prompt(target: dict[str, Any]) -> str:
         "владельца на настройку перехватывается сервером и создаёт отдельную "
         "проверяемую UAP mission."
     )
+
+
+def project_setup_target_from_system_prompt(
+    platform: str, system_prompt: object
+) -> dict[str, Any] | None:
+    """Recover a server-owned setup binding persisted with the session."""
+    if not isinstance(system_prompt, str):
+        return None
+    for line in system_prompt.splitlines():
+        if line.startswith(_SETUP_PROJECT_MARKER):
+            return project_setup_target(
+                platform, line.removeprefix(_SETUP_PROJECT_MARKER).strip()
+            )
+    return None
 
 
 def project_setup_execution_goal(target: dict[str, Any], owner_text: str) -> str:

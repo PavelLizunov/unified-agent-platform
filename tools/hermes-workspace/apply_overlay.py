@@ -40,9 +40,9 @@ PATCHED_FILES = {
 "src/routes/api/playground-admin.ts": "b83ced3b20dabf4b0ba7604f28b326ab25202cf5efc44060d7b141e8d7544f06",
 "src/routes/api/playground-npc.ts": "7d626539973696cda605222a3408c83bcbdfcbbd32763be6936cebf1ab8ad5f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
-"src/routes/api/sessions.ts": "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
+"src/routes/api/sessions.ts": "559e5731c69f7f8b2d0214ae98555738ca0ba968c10b0df4cbc767e275dca277",
 "src/routes/api/send-stream.ts": "75368d06701cff843f51f5fcb58163889602fad228c0bed645e3d3630c9fce62",
-"src/server/claude-api.ts": "ef12ed9cc4d760e809b4ff9339e55a235674dae43ce0fa4a20d9e41003621abf",  # gitleaks:allow -- pinned patched SHA-256
+"src/server/claude-api.ts": "21b29443860152f497399cdd8a11c22835b1d8b956b29d0ff543818569b08342",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
@@ -61,6 +61,8 @@ LEGACY_FILES = {
 PREVIOUS_PATCHED_FILES = {
 "src/routes/api/sessions.ts": (
     "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
+    "75f30477f71b088646364aac40ed8d6654da5f98d7f429dd714546c69364e5ce",
+    "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
 ),
 "src/routes/api/send-stream.ts": (
     "ec312e605aadce46748087c392c9a414ff228a5f16c65b2a80d6a71cd40466e2",
@@ -71,6 +73,7 @@ PREVIOUS_PATCHED_FILES = {
     "039dc37395d4255712403d259d3ee7a2254506e71bcfd3e77548e527af100942",  # gitleaks:allow -- pinned previous patched SHA-256
     "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned previous patched SHA-256
     "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
+    "ef12ed9cc4d760e809b4ff9339e55a235674dae43ce0fa4a20d9e41003621abf",  # gitleaks:allow -- pinned previous patched SHA-256
 ),
 "src/components/mobile-hamburger-menu.tsx": (
     "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
@@ -365,6 +368,34 @@ export const Route""", "sessions central-only flag")
             return json({""", "sessions unpersisted")
         text = replace(text, "          if (localSession) {", "          if (!CENTRAL_ONLY && localSession) {", "sessions local update")
         text = replace(text, "        if (getLocalSession(sessionKey)) {", "        if (!CENTRAL_ONLY && getLocalSession(sessionKey)) {", "sessions local delete")
+        text = replace(text, """          const body = (await request.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >
+
+          const requestedLabel =""", """          const body = (await request.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >
+          const setupCookie = (request.headers.get('cookie') || '')
+            .split(';')
+            .map((part) => part.trim())
+            .find((part) => part.startsWith('uap_project_setup='))
+          const setupProjectId = setupCookie
+            ? decodeURIComponent(setupCookie.slice('uap_project_setup='.length))
+            : ''
+
+          const requestedLabel =""", "setup session cookie")
+        text = replace(text, """          const session = await createSession({
+            id: friendlyId || randomUUID(),
+            title: label,
+            model,
+          })""", """          const session = await createSession({
+            id: friendlyId || randomUUID(),
+            title: label,
+            model,
+            setup_project_id: setupProjectId || undefined,
+          })""", "setup-bound session creation")
     elif rel == "src/screens/chat/chat-screen.tsx":
         text = replace(text, """        if (!isPortableMode) {
           void createSessionForMessage(threadId).catch((err: unknown) => {
@@ -511,6 +542,10 @@ const _authHeaders""", "central-only session source")
     const resp = await createDashboardSession(opts || {})""", """}): Promise<ClaudeSession> {
   if (!CENTRAL_ONLY && getCapabilities().dashboard.available) {
     const resp = await createDashboardSession(opts || {})""", "central-only session creation")
+        text = replace(text, """  model?: string
+}): Promise<ClaudeSession> {""", """  model?: string
+  setup_project_id?: string
+}): Promise<ClaudeSession> {""", "setup session request type")
         return replace(text, """    attachments?: Array<Record<string, unknown>>
   },""", """    attachments?: Array<Record<string, unknown>>
     source_message_id?: string
@@ -734,12 +769,43 @@ def upgrade_legacy(rel, text):
 
 def upgrade_previous(rel, text):
     if rel == "src/routes/api/sessions.ts":
-        return replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
+        if "if (capabilities.dashboard.available && !capabilities.enhancedChat)" in text:
+            text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
             if (CENTRAL_ONLY) {
               return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
             }
             return json({""", """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
             return json({""", "central session creation upgrade")
+        if "setup_project_id: setupProjectId || undefined" not in text:
+            text = replace(text, """          const body = (await request.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >
+
+          const requestedLabel =""", """          const body = (await request.json().catch(() => ({}))) as Record<
+            string,
+            unknown
+          >
+          const setupCookie = (request.headers.get('cookie') || '')
+            .split(';')
+            .map((part) => part.trim())
+            .find((part) => part.startsWith('uap_project_setup='))
+          const setupProjectId = setupCookie
+            ? decodeURIComponent(setupCookie.slice('uap_project_setup='.length))
+            : ''
+
+          const requestedLabel =""", "setup session cookie upgrade")
+            text = replace(text, """          const session = await createSession({
+            id: friendlyId || randomUUID(),
+            title: label,
+            model,
+          })""", """          const session = await createSession({
+            id: friendlyId || randomUUID(),
+            title: label,
+            model,
+            setup_project_id: setupProjectId || undefined,
+          })""", "setup-bound session creation upgrade")
+        return text
     if rel == "src/routes/api/send-stream.ts":
         if "project_id: CENTRAL_ONLY ? projectId : undefined" in text:
             text = replace(text, """        const projectId = projectCookie
@@ -799,6 +865,13 @@ def upgrade_previous(rel, text):
                   setup_project_id: CENTRAL_ONLY && setupProjectId ? setupProjectId : undefined,
                 },""", "project selection forwarding upgrade")
     if rel == "src/server/claude-api.ts":
+        if "  setup_project_id?: string\n}): Promise<ClaudeSession>" not in text:
+            text = replace(text, """  model?: string
+}): Promise<ClaudeSession> {""", """  model?: string
+  setup_project_id?: string
+}): Promise<ClaudeSession> {""", "setup session request type upgrade")
+        if "    project_id?: string\n    setup_project_id?: string\n" in text:
+            return text
         if "    project_id?: string\n" in text:
             return replace(text, """    project_id?: string
 """, """    project_id?: string
