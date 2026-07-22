@@ -300,6 +300,45 @@ def main() -> None:
         assert ".then(({ sessionKey, friendlyId }) => {" in new_chat[create_first:send_first]
         assert "Central session identity mismatch" in new_chat
         assert "setPendingGeneration(false)" in new_chat
+        assert "if (statusQuery.data?.ok !== true) return" in chat_screen
+        assert "[runPaletteSlashCommand, statusQuery.data?.ok]" in chat_screen
+
+        chat_screen_path = clone / "src/screens/chat/chat-screen.tsx"
+        previous_chat_screen = chat_screen.replace(
+            """  useEffect(() => {
+    if (statusQuery.data?.ok !== true) return
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand, statusQuery.data?.ok])""",
+            """  useEffect(() => {
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand])""",
+            1,
+        )
+        chat_screen_path.write_text(previous_chat_screen, encoding="utf-8")
+        assert hashlib.sha256(chat_screen_path.read_bytes()).hexdigest() == (
+            "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da"
+        )
+        previous_chat_check = run(clone, "--check")
+        assert previous_chat_check.returncode == 0
+        assert "src/screens/chat/chat-screen.tsx: previous-needs-overlay" in (
+            previous_chat_check.stdout
+        )
+        assert run(clone).returncode == 0
+        assert hashlib.sha256(chat_screen_path.read_bytes()).hexdigest() == (
+            "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77"
+        )
 
         sessions_path = clone / "src/routes/api/sessions.ts"
         previous_sessions = sessions.replace(

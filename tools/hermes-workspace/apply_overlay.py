@@ -47,7 +47,7 @@ PATCHED_FILES = {
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
-"src/screens/chat/chat-screen.tsx": "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da",
+"src/screens/chat/chat-screen.tsx": "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77",
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 "src/components/settings/settings-sidebar.tsx": "4e8e540d7b5e1a2dd42847249a5431f8372a01fc2d847ae9c962dce98e85300d",
 "src/routes/settings/index.tsx": "3f4ccf742d4cb98adabc563c555cd2fee6b7f42d736b8cd19aa2b57b9712f87b",
@@ -74,6 +74,9 @@ PREVIOUS_PATCHED_FILES = {
     "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned previous patched SHA-256
     "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
     "ef12ed9cc4d760e809b4ff9339e55a235674dae43ce0fa4a20d9e41003621abf",  # gitleaks:allow -- pinned previous patched SHA-256
+),
+"src/screens/chat/chat-screen.tsx": (
+    "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da",
 ),
 "src/components/mobile-hamburger-menu.tsx": (
     "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
@@ -486,6 +489,24 @@ export const Route""", "sessions central-only flag")
           })
         }
         return""", "central session before first message")
+        text = replace(text, """  useEffect(() => {
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand])""", """  useEffect(() => {
+    if (statusQuery.data?.ok !== true) return
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand, statusQuery.data?.ok])""", "pending command waits for backend")
     elif rel == "src/routes/api/send-stream.ts":
         text = replace(text, """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
 
@@ -769,6 +790,25 @@ def upgrade_legacy(rel, text):
     raise SystemExit(f"no legacy upgrade for {rel}")
 
 def upgrade_previous(rel, text):
+    if rel == "src/screens/chat/chat-screen.tsx":
+        return replace(text, """  useEffect(() => {
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand])""", """  useEffect(() => {
+    if (statusQuery.data?.ok !== true) return
+    const pendingCommand = window.sessionStorage.getItem(
+      CHAT_PENDING_COMMAND_STORAGE_KEY,
+    )
+    if (!pendingCommand) return
+
+    window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
+    runPaletteSlashCommand(pendingCommand)
+  }, [runPaletteSlashCommand, statusQuery.data?.ok])""", "pending command waits for backend upgrade")
     if rel == "src/routes/api/sessions.ts":
         if "if (CENTRAL_ONLY) {\n              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE" in text:
             text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
