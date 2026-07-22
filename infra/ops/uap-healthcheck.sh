@@ -157,6 +157,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -x "$EGRESS_PROXY" "
 bad=$(kubectl -n "$NS" get pods --no-headers 2>/dev/null | awk '
   { name=$1; ready=$2; status=$3
     if (status=="Completed" || status=="Succeeded") next
+    if (status=="Terminating") next
     if (status!="Running") { print name" ("status")"; next }
     n=split(ready,a,"/"); if (n==2 && a[1]!=a[2]) print name" ("ready" ready)"
   }')
