@@ -916,12 +916,36 @@ class DeliveryCoordinator:
         digest = hashlib.sha256(goal.encode("utf-8")).hexdigest()
         stored_goal = state.get("mission_goal")
         stored_digest = state.get("mission_goal_sha256")
+        changed = False
         if stored_goal is None and stored_digest is None:
             state.update(mission_goal=goal, mission_goal_sha256=digest)
-            self._save(paths, state)
-            return
-        if stored_goal != goal or stored_digest != digest:
+            changed = True
+        elif stored_goal != goal or stored_digest != digest:
             raise DeliveryError("mission goal changed after the durable execution checkpoint")
+        execution_class = mission.get("execution_class")
+        expected_changed_files = mission.get("expected_changed_files")
+        if (execution_class, expected_changed_files) != (None, None) and (
+            execution_class != "routine_docs"
+            or not isinstance(expected_changed_files, int)
+            or isinstance(expected_changed_files, bool)
+            or not 1 <= expected_changed_files <= 2
+        ):
+            raise DeliveryError("mission execution class is invalid")
+        if "execution_class" not in state and "expected_changed_files" not in state:
+            state.update(
+                execution_class=execution_class,
+                expected_changed_files=expected_changed_files,
+            )
+            changed = True
+        elif (
+            state.get("execution_class") != execution_class
+            or state.get("expected_changed_files") != expected_changed_files
+        ):
+            raise DeliveryError(
+                "mission execution class changed after the durable checkpoint"
+            )
+        if changed:
+            self._save(paths, state)
 
     def _path_allowed(self, relative: str) -> bool:
         parts = pathlib.PurePosixPath(relative).parts
@@ -958,6 +982,44 @@ class DeliveryCoordinator:
                 raise DeliveryError("candidate escaped the repository profile path boundary")
         return sorted(files)
 
+    @staticmethod
+    def _routine_docs_limit(state: dict[str, Any]) -> int | None:
+        execution_class = state.get("execution_class")
+        expected_changed_files = state.get("expected_changed_files")
+        if (execution_class, expected_changed_files) == (None, None):
+            return None
+        if (
+            execution_class != "routine_docs"
+            or not isinstance(expected_changed_files, int)
+            or isinstance(expected_changed_files, bool)
+            or not 1 <= expected_changed_files <= 2
+        ):
+            raise DeliveryError("durable mission execution class is invalid")
+        return expected_changed_files
+
+    def _validate_execution_scope(
+        self,
+        state: dict[str, Any],
+        files: set[str],
+        *,
+        exact_legacy: bool = False,
+    ) -> list[str]:
+        validated = self._validate_changed_scope(files, exact_legacy=exact_legacy)
+        routine_limit = self._routine_docs_limit(state)
+        if routine_limit is None:
+            return validated
+        if len(validated) > routine_limit or any(
+            not (
+                item.casefold().endswith(".md")
+                or pathlib.PurePosixPath(item).parts[0].casefold() == "docs"
+            )
+            for item in validated
+        ):
+            raise DeliveryError(
+                "routine docs candidate escaped its two-file Markdown/docs boundary"
+            )
+        return validated
+
     def _candidate_files(
         self, state: dict[str, Any], *, required: bool = True
     ) -> list[str]:
@@ -973,7 +1035,7 @@ class DeliveryCoordinator:
             or len(values) != len(set(values))
         ):
             raise DeliveryError("durable candidate file set is missing or invalid")
-        validated = self._validate_changed_scope(set(values))
+        validated = self._validate_execution_scope(state, set(values))
         if values != validated:
             raise DeliveryError("durable candidate file set is not canonical")
         committed = self._committed_candidate_files(state)
@@ -991,19 +1053,31 @@ class DeliveryCoordinator:
             "--no-renames", "-z", base, candidate, "--",
         ])
         files = {item for item in result.stdout.split("\0") if item}
-        return self._validate_changed_scope(files)
+        return self._validate_execution_scope(state, files)
 
     def _route_signals(self, state: dict[str, Any]) -> dict[str, Any]:
-        changed_files = (
-            len(self.profile["required_files"])
-            if self.profile["schema_version"] == 3
-            else self.profile["max_changed_files"]
-        )
+        routine_limit = self._routine_docs_limit(state)
+        if routine_limit is None:
+            changed_files = (
+                len(self.profile["required_files"])
+                if self.profile["schema_version"] == 3
+                else self.profile["max_changed_files"]
+            )
+            flags = self.profile["route_flags"]
+        else:
+            changed_files = routine_limit
+            complex_flags = set(
+                self.policy["delivery_model_policy"]["complex_flags"]
+            )
+            flags = [
+                flag for flag in self.profile["route_flags"]
+                if flag not in complex_flags
+            ]
         return {
             "schema_version": 1,
             "changed_files": changed_files,
             "prior_quality_failures": self._quality_failures(state),
-            "flags": self.profile["route_flags"],
+            "flags": flags,
         }
 
     @staticmethod
@@ -2221,8 +2295,13 @@ class DeliveryCoordinator:
             raise DeliveryError("durable review escalation answer is invalid")
         return value
 
+    def _correction_budget(self, state: dict[str, Any]) -> int:
+        return 1 if self._routine_docs_limit(state) is not None else self.profile["max_review_cycles"]
+
     def _review_budget_limit(self, state: dict[str, Any]) -> int:
-        base = self.profile["max_review_cycles"] + 1
+        base = self._correction_budget(state) + 1
+        if self._routine_docs_limit(state) is not None:
+            return base
         escalation = self._review_escalation(state)
         return base * 2 if escalation and escalation["status"] == "continued" else base
 
@@ -3358,7 +3437,8 @@ class DeliveryCoordinator:
         events = paths["directory"] / f"author-{cycle}.jsonl"
         candidate = self._git(paths["author"], "rev-parse", "HEAD")
         cumulative = self._worktree_candidate_files(state, paths["author"])
-        candidate_files = self._validate_changed_scope(
+        candidate_files = self._validate_execution_scope(
+            state,
             cumulative, exact_legacy=self.profile["schema_version"] == 3
         )
         if self.profile["schema_version"] == 4:
@@ -3442,8 +3522,9 @@ class DeliveryCoordinator:
             cycle = state["review_cycle"]
             events = paths["directory"] / f"author-{cycle}.jsonl"
             try:
-                self._validate_changed_scope(changed)
-                self._validate_changed_scope(
+                self._validate_execution_scope(state, changed)
+                self._validate_execution_scope(
+                    state,
                     self._worktree_candidate_files(state, paths["author"]),
                     exact_legacy=self.profile["schema_version"] == 3,
                 )
@@ -3513,7 +3594,7 @@ class DeliveryCoordinator:
         failure = _bounded_diagnostic(str(error), "author checks failed")
         self._quality_failures(state)
         state["prior_author_failures"] = state.get("prior_author_failures", 0) + 1
-        if retryable and state["review_cycle"] <= self.profile["max_review_cycles"]:
+        if retryable and state["review_cycle"] <= self._correction_budget(state):
             state.update(
                 phase="needs_fix",
                 review_cycle=state["review_cycle"] + 1,
@@ -3608,16 +3689,23 @@ class DeliveryCoordinator:
         last = paths["directory"] / f"author-{cycle}-last.txt"
         findings = _sanitize_findings(state.get("review_findings", []))
         owner_answers = self._owner_answers(state)
-        scope_prompt = (
-            f"Exact allowed files: {json.dumps(self.profile['required_files'])}\n"
-            if self.profile["schema_version"] == 3
-            else (
+        routine_limit = self._routine_docs_limit(state)
+        if self.profile["schema_version"] == 3:
+            scope_prompt = (
+                f"Exact allowed files: {json.dumps(self.profile['required_files'])}\n"
+            )
+        elif routine_limit is not None:
+            scope_prompt = (
+                f"Routine documentation boundary: change at most {routine_limit} files, "
+                "and change only Markdown files or files below docs/.\n"
+            )
+        else:
+            scope_prompt = (
                 "Repository path boundary: "
                 f"{json.dumps(self.profile['allowed_path_prefixes'])}; "
                 f"change at most {self.profile['max_changed_files']} files. "
                 "Choose the smallest file set needed for the goal.\n"
             )
-        )
         prompt = (
             "Implement the owner-approved mission in this exact repository. "
             "Read and obey all repository instructions. Do not commit, push, open a PR, merge, tag, release, "
@@ -3692,8 +3780,9 @@ class DeliveryCoordinator:
                 _private_text(last, _bounded_diagnostic(raw_last.read_text(encoding="utf-8")))
         changed = self._changed_files(paths["author"])
         try:
-            self._validate_changed_scope(changed)
-            self._validate_changed_scope(
+            self._validate_execution_scope(state, changed)
+            self._validate_execution_scope(
+                state,
                 self._worktree_candidate_files(state, paths["author"]),
                 exact_legacy=self.profile["schema_version"] == 3,
             )
@@ -4140,7 +4229,10 @@ class DeliveryCoordinator:
         state["prior_review_rejections"] = state.get("prior_review_rejections", 0) + 1
         if cycle >= self._review_budget_limit(state):
             state["review_findings"] = verification["findings"]
-            if self._review_escalation(state) is None:
+            if (
+                self._routine_docs_limit(state) is None
+                and self._review_escalation(state) is None
+            ):
                 self._begin_review_escalation(state, paths)
                 return False
             state["phase"] = "review_rejected"
@@ -4486,7 +4578,7 @@ class DeliveryCoordinator:
         self._quality_failures(state)
         state["pre_review_ci_checks" if pre_review else "ci_checks"] = summaries
         state["prior_ci_failures"] = state.get("prior_ci_failures", 0) + 1
-        if state["review_cycle"] <= self.profile["max_review_cycles"]:
+        if state["review_cycle"] <= self._correction_budget(state):
             state.update(
                 phase="needs_fix",
                 review_cycle=state["review_cycle"] + 1,

@@ -1,8 +1,16 @@
 # Current Status
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ## Phase
+
+- **Routine docs routing is implemented offline (2026-07-23; ADR-038).** Explicit docs-only ordinary goals now
+  carry a durable Central `routine_docs` class and a two-file expectation. The coordinator maps only that closed
+  class to the existing Luna-medium/Sol-low standard route, verifies the actual cumulative candidate is limited to
+  Markdown or `docs/`, permits one automatic correction, and escalates on a quality failure. Ambiguous or legacy
+  missions retain the existing conservative profile route; owner-gated flags remain fail-closed. Spark is not a
+  delivery author. Hermetic runtime/coordinator/deployment tests are green; live rollout and canary evidence are not
+  yet claimed in this entry.
 
 - **First-class vpnctl deployment is live-proven (2026-07-22; ADR-037).** The registered `vpnctl` profile
   declares `delivery_mode: deploy` and one closed `vpnctld-systemd-v1` driver. The coordinator durably binds the

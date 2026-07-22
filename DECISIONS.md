@@ -737,3 +737,24 @@
 - **Не разрешено:** общий deploy shell, произвольный host из profile/browser/prompt, новый deployment service,
   автоматическое включение каждого Proxmox гостя в tailnet, release mode или deploy других проектов по аналогии без
   отдельного reviewed driver/profile contract.
+
+## ADR-038 — Детерминированный routine-docs маршрут без нового дирижёра
+
+- **Контекст:** schema-v4 profiles задают максимальную границу репозитория, а не размер конкретной задачи. Поэтому
+  `max_changed_files >= 6` и статические complex flags отправляли даже просьбу «обнови только README» по дорогому
+  Sol/Terra `xhigh` маршруту и оставляли до восьми model generations. Это безопасно, но не соответствует принципу
+  минимального достаточного исполнения.
+- **Решение:** Central без модели распознаёт только явную формулировку docs-only и записывает в неизменяемый
+  `mission.accepted` закрытые поля `execution_class: routine_docs` и `expected_changed_files: 2`. Coordinator связывает
+  их с durable state до model/Git side effects, использует уже утверждённый стандартный Luna `medium` → Sol `low`
+  маршрут и максимум две generations. Фактический cumulative candidate обязан содержать не более двух Markdown
+  файлов либо путей под `docs/`; нарушение очищается только в уже защищённом disposable worktree и считается quality
+  failure, после чего применяется существующая escalation.
+- **Безопасность и совместимость:** из route signals удаляются только static complex flags; owner-gate flags
+  сохраняются. Неоднозначная цель, обычный код, schema/protocol/runtime/deploy задача и legacy mission сохраняют
+  прежний profile-derived conservative route и retry budget. Класс и лимит неизменяемы после restart.
+- **Отклонено:** новый conductor/service, LLM-классификатор до durable intake, отключение независимого review или
+  обязательных project checks, доверие заявленному размеру без post-author Git проверки. `gpt-5.3-codex-spark` пока
+  остаётся research-only: включение в coding delivery требует отдельного exact runtime canary и явного расширения
+  OpenAI allowlist. Отдельный QA-agent не вводится; обязательные gates остаются детерминированными repo-contract
+  проверками.

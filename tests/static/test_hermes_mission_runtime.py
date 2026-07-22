@@ -69,6 +69,75 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         assert missions.is_execution_goal(execution), execution
     assert not missions.is_execution_goal(None)
 
+    for execution in (
+        "Посмотри код и внеси правку",
+        "Look at the implementation and then update it",
+    ):
+        assert missions.is_execution_goal(execution), execution
+    assert missions.routine_docs_file_limit("Обнови только README") == 2
+    assert missions.routine_docs_file_limit("Update README only") == 2
+    assert missions.routine_docs_file_limit("Обнови README и код") is None
+    assert missions.routine_docs_file_limit("Исправь простой баг") is None
+
+
+def test_routine_docs_class_is_durable_and_closed() -> None:
+    routes = json.dumps({
+        "workspace": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.ingest_owner_goal(
+            "Обнови только README",
+            platform="workspace",
+            source_message_id="routine-docs-1",
+            session_id="routine-session",
+        )
+        assert created
+        assert accepted["payload"]["execution_class"] == "routine_docs"
+        assert accepted["payload"]["expected_changed_files"] == 2
+        projection = store.projection(accepted["mission_id"])
+        assert projection["execution_class"] == "routine_docs"
+        assert projection["expected_changed_files"] == 2
+
+        replay, replay_created = store.ingest_owner_goal(
+            "Обнови только README",
+            platform="workspace",
+            source_message_id="routine-docs-1",
+            session_id="routine-session",
+        )
+        assert not replay_created and replay == accepted
+
+        ordinary, ordinary_created = store.ingest_owner_goal(
+            "Исправь простой баг",
+            platform="workspace",
+            source_message_id="ordinary-code-1",
+            session_id="routine-session",
+        )
+        assert ordinary_created
+        assert "execution_class" not in ordinary["payload"]
+
+        for index, (execution_class, expected_changed_files) in enumerate((
+            ("routine_docs", None),
+            (None, 2),
+            ("routine_docs", 3),
+            ("arbitrary", 1),
+        )):
+            try:
+                store.accept(
+                    "Invalid execution class",
+                    mission_id=f"mission-invalid-class-{index}",
+                    execution_class=execution_class,
+                    expected_changed_files=expected_changed_files,
+                )
+                raise AssertionError("invalid mission execution class was accepted")
+            except missions.MissionError as error:
+                assert "execution class" in str(error)
+
 
 def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> None:
     catalog = json.dumps({
@@ -3352,6 +3421,7 @@ def test_disk_space_notice_contract_through_runtime_validation_and_store() -> No
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_conversational_admission_requires_explicit_execution_intent()
+    test_routine_docs_class_is_durable_and_closed()
     test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()
