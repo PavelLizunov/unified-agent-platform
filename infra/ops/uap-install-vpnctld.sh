@@ -32,6 +32,11 @@ health_ready() {
   curl -fsS --retry 12 --retry-connrefused --retry-delay 2 \
     --connect-timeout 2 --max-time 40 "$HEALTH" >/dev/null
 }
+cleanup_deploy_residue() {
+  rm -f "$ARCHIVE"
+  find /opt/vpnctl -mindepth 1 -maxdepth 1 -type d \
+    -name '.uap-rollback.*' -exec rm -rf -- {} +
+}
 installed_artifact_sha() {
   tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
     -cf - -C /opt/vpnctl vpnctld assets | sha256sum | awk '{print $1}'
@@ -41,6 +46,7 @@ if [ -f "$RECORD" ]; then
   if [ "$OLD_REV" = "$REVISION" ] && [ -n "$OLD_ARTIFACT" ] && \
      [ "$(installed_artifact_sha)" = "$OLD_ARTIFACT" ] && \
      systemctl is-active --quiet vpnctld && curl -fsS --max-time 10 "$HEALTH" >/dev/null; then
+    cleanup_deploy_residue
     printf '{"schema_version":1,"status":"verified","driver":"vpnctld-systemd-v1","environment":"vpnctl-production","target":"vpnctld","health_url":"http://vpnctld:18402/api/v1/health","deployed_revision":"%s","artifact_sha256":"%s"}\n' "$REVISION" "$OLD_ARTIFACT"
     exit 0
   fi
@@ -121,5 +127,5 @@ chown root:root "$RECORD.tmp"
 chmod 0644 "$RECORD.tmp"
 mv -f "$RECORD.tmp" "$RECORD"
 rm -rf "$BACKUP" "$BUILD"
-rm -f "$ARCHIVE"
+cleanup_deploy_residue
 printf '{"schema_version":1,"status":"verified","driver":"vpnctld-systemd-v1","environment":"vpnctl-production","target":"vpnctld","health_url":"http://vpnctld:18402/api/v1/health","deployed_revision":"%s","artifact_sha256":"%s"}\n' "$REVISION" "$ARTIFACT_SHA"
