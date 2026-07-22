@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import unittest
@@ -14,10 +15,11 @@ INSTALLER = ROOT / "infra" / "ops" / "uap-install-vpnctld.sh"
 
 class VpnctldDeployContractTests(unittest.TestCase):
     def test_shell_contracts_parse_and_fail_closed_without_arguments(self):
+        shell = ["wsl", "sh"] if os.name == "nt" else ["sh"]
         for path in (WRAPPER, DISPATCH, INSTALLER):
             with self.subTest(path=path.name):
                 syntax = subprocess.run(
-                    ["wsl", "sh", "-n", path.relative_to(ROOT).as_posix()],
+                    [*shell, "-n", path.relative_to(ROOT).as_posix()],
                     cwd=ROOT,
                     capture_output=True,
                     text=True,
@@ -25,7 +27,7 @@ class VpnctldDeployContractTests(unittest.TestCase):
                 )
                 self.assertEqual(0, syntax.returncode, syntax.stderr)
                 rejected = subprocess.run(
-                    ["wsl", "sh", path.relative_to(ROOT).as_posix()],
+                    [*shell, path.relative_to(ROOT).as_posix()],
                     cwd=ROOT,
                     capture_output=True,
                     text=True,
