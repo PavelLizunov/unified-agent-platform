@@ -19,6 +19,7 @@ Files (all in `infra/ops/`):
 | File | Role |
 |---|---|
 | `uap-healthcheck.sh` | the checks + the Telegram POST |
+| `proxmox-machines.txt` | reviewed Proxmox identity and Tailscale policy |
 | `uap-healthcheck.service` | `Type=oneshot`, sources `/etc/uap/healthcheck.env` |
 | `uap-healthcheck.timer` | `OnCalendar=*:0/20` (every 20 min) |
 
@@ -34,7 +35,11 @@ Files (all in `infra/ops/`):
    HTTP code. `000` = connect failed = egress down.
 4. **Pods** — no `uap-system` pod is non-`Running` or not-`Ready` (`Completed`/`Succeeded` job pods
    are ignored, e.g. the nightly backup pod).
-5. **Proxmox VM backups** — after `05:00 Europe/Moscow`, VMIDs `102/201/202/203` each need a non-empty
+5. **Proxmox/Tailscale inventory** — compares the live Proxmox cluster to the reviewed
+   `proxmox-machines.txt`. A new VM, removed VM, changed name/node or missing/offline required
+   Tailscale peer alerts without mutating the guest. `lan-only`, `legacy`, `game`, stopped VMs and
+   templates are explicit reviewed states, not accidental omissions.
+6. **Proxmox VM backups** — after `05:00 Europe/Moscow`, VMIDs `102/201/202/203` each need a non-empty
    archive newer than 26h on `backup-pve2`. A healthy result sends one daily Telegram report with each
    archive size, total size and free target space; a state file prevents 20-minute duplicates.
 
@@ -70,6 +75,7 @@ Mirrors the existing `ops-backup` timer (user unit + linger). From a checkout of
 
 ```sh
 install -D -m 0700 infra/ops/uap-healthcheck.sh          "$HOME/bin/uap-healthcheck.sh"
+install -D -m 0644 infra/ops/proxmox-machines.txt        "$HOME/.config/uap/proxmox-machines.txt"
 install -D -m 0644 infra/ops/uap-healthcheck.service     "$HOME/.config/systemd/user/uap-healthcheck.service"
 install -D -m 0644 infra/ops/uap-healthcheck.timer       "$HOME/.config/systemd/user/uap-healthcheck.timer"
 
@@ -119,6 +125,7 @@ All optional; set in `/etc/uap/healthcheck.env` (systemd re-reads it each run):
 | `PVE_BACKUP_MAX_AGE_H` | `26` | daily cadence or allowed delay changes |
 | `PVE_REPORT_AFTER` | `0500` | report time changes (in `PVE_REPORT_TZ`) |
 | `PVE_REPORT_TZ` | `Europe/Moscow` | backup schedule timezone changes |
+| `PVE_INVENTORY_FILE` | `$HOME/.config/uap/proxmox-machines.txt` | reviewed inventory location |
 
 Change the interval by editing `OnCalendar` in `uap-healthcheck.timer` (e.g. `*:0/15` for 15 min),
 then `systemctl --user daemon-reload && systemctl --user restart uap-healthcheck.timer`.
@@ -126,3 +133,11 @@ then `systemctl --user daemon-reload && systemctl --user restart uap-healthcheck
 The Proxmox report depends on ops-1 reaching `pve-ninitux` with the existing
 `~/.ssh/uap_proxmox_admin` key. It never creates another Telegram credential; delivery reuses the
 existing 0600 healthcheck environment file.
+
+## Adding or reclassifying a Proxmox machine
+
+Every Proxmox VM/LXC belongs in `infra/ops/proxmox-machines.txt`. A newly discovered machine alerts
+until a reviewed PR records its exact type, VMID, name, node and one management policy. Use `tailnet`
+only for active UAP build/test/deploy targets; the other policies explicitly document why no peer is
+required. Copy the reviewed file to ops-1 with the normal install command above. The healthcheck does
+not install Tailscale or accept a new device automatically.

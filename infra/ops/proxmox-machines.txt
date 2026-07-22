@@ -1,0 +1,26 @@
+# type|vmid|name|node|management|tailnet-name
+#
+# management:
+#   tailnet  - always-on managed target; the healthcheck requires this exact online peer
+#   lan-only - intentionally reachable only through the Proxmox/LAN control path
+#   legacy   - retained machine outside the active UAP execution fleet
+#   game     - unrelated workload outside the active UAP execution fleet
+#   stopped  - retained powered-off VM
+#   template - Proxmox template, never a Tailscale peer
+qemu|100|windows-brat|pve-ninitux|tailnet|windows-brat
+qemu|101|debian-xfce|pve-ninitux|tailnet|debian-xfce
+qemu|102|uap-build-1|pve-ninitux3|tailnet|uap-build-1
+lxc|103|vpnr-deb12|pve-ninitux2|lan-only|-
+lxc|104|vpnr-alpine|pve-ninitux2|lan-only|-
+qemu|110|deb12|pve-ninitux3|stopped|-
+qemu|115|vintage-story|pve-ninitux|stopped|-
+qemu|118|site-and-git|pve-ninitux3|legacy|-
+qemu|119|vpnctld|pve-ninitux3|tailnet|vpnctld
+qemu|120|claude-dev|pve-ninitux|legacy|-
+qemu|123|anthropic-bridge|pve-ninitux3|legacy|-
+qemu|130|game-host|pve-ninitux|game|-
+qemu|201|uap-home-1|pve-ninitux|tailnet|uap-home-1
+qemu|202|uap-home-2|pve-ninitux3|tailnet|uap-home-2
+qemu|203|uap-ops-1|pve-ninitux|tailnet|uap-ops-1
+lxc|210|ingress|pve-ninitux3|lan-only|-
+qemu|9000|ubuntu-cloud|pve-ninitux|template|-
