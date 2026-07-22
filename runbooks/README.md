@@ -38,6 +38,7 @@ Some runbooks are Russian, some English — the platform docs are bilingual; the
 | [restore-drill.md](restore-drill.md) | Verify k3s etcd snapshots actually restore — on a disposable VM only. | Proving recoverability / running a DR drill. |
 | [subfleet-integration.md](subfleet-integration.md) | subfleet (Rust bridge + token-service) as LiteLLM's model backend over a Claude/Codex subscription. | Deploying or repointing the subscription model backend. |
 | [uap-ops-node.md](uap-ops-node.md) | Create / bootstrap the disposable `uap-ops-1` operator VM (tofu, ansible, flux, kubectl, sops, gh). | Setting up or rebuilding the deploy box. |
+| [vpnctld-deploy.md](vpnctld-deploy.md) | Deploy the exact merged `vpnctl` revision to the production `vpnctld` systemd service with a restricted key, rollback and health gate. | Provisioning or diagnosing the single approved vpnctl production deploy path. |
 | [uap-ops-services-backup.md](uap-ops-services-backup.md) | Daily backup + recovery for ops-1 non-GitOps services (Vaultwarden, etc.). | Protecting or restoring ops-1 stateful services. |
 | [validation-matrix.md](validation-matrix.md) | The checks required before marking bootstrap/stability work done (local gate + smoke). | Gating any infra change before handoff. |
 | [vibe-coding-acceptance.md](vibe-coding-acceptance.md) | GOAL: end-to-end vibe-coding acceptance test (idea → Hermes codes on build-1 → verify → push), objective scoring. | Proving the full agent user-cycle works. |

@@ -709,3 +709,27 @@
 - **Отклонено:** стартовать mission на каждое сообщение; спрашивать подтверждение перед каждой ясной командой; делать
   `setup_required` selectable; автоматически объявлять произвольный существующий репозиторий `ready` по model-generated
   profile; отдельный setup dashboard/agent/service.
+
+## ADR-037 — First-class deploy vpnctl через один закрытый systemd driver
+
+- **Контекст:** registered-профиль `vpnctl` завершал работу после merge и fresh-main проверки с
+  `delivery_mode: none`, хотя проект имеет реальный production daemon `vpnctld` на Proxmox VM 119. Прятать deploy в
+  произвольную check-команду нельзя: Central не смог бы доказать environment, точную развернутую ревизию, artifact
+  identity, health и rollback.
+- **Решение:** schema-v4 профиль разрешает `delivery_mode: deploy` только с точным server-owned driver
+  `vpnctld-systemd-v1`, target `vpnctld`, environment `vpnctl-production` и фиксированным health endpoint. После
+  exact-head merge и fresh-main post-verify coordinator durably записывает deployment plan, выполняет не более двух
+  restart-safe попыток и требует один закрытый JSON result. Terminal success дополнительно требует deployment gate,
+  exact merged/deployed revision и SHA-256 полного установленного payload (`vpnctld` + assets).
+- **Удалённая граница:** build-1 передаёт exact `git archive` через отдельный forced-command SSH key. На VM сборка
+  выполняется непривилегированным пользователем; root helper может заменить только daemon/assets, проверяет локальный
+  health и автоматически возвращает предыдущий payload при любой ошибке активации. Повтор того же
+  revision+artifact идемпотентен. Модель не задаёт hostname, command, path, credential или environment.
+- **Сеть и наблюдение:** production target включается в Tailscale как отдельный managed deploy endpoint. Из-за
+  наблюдаемого Cloudflare/DPI netmap timeout `tailscaled` использует существующий VLESS-egress
+  `192.168.0.202:30880`; service port разрешён только на `tailscale0` и LAN. Repo-owned Proxmox catalog и существующий
+  `uap-healthcheck.timer` обнаруживают новые/исчезнувшие VM и обязательные tailnet peers, но не подключают неизвестные
+  гости автоматически.
+- **Не разрешено:** общий deploy shell, произвольный host из profile/browser/prompt, новый deployment service,
+  автоматическое включение каждого Proxmox гостя в tailnet, release mode или deploy других проектов по аналогии без
+  отдельного reviewed driver/profile contract.

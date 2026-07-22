@@ -506,6 +506,11 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
   the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.
+  The next completion boundary is the first real deploy profile. ADR-037 keeps it narrow: only `vpnctl` may use the
+  closed `vpnctld-systemd-v1` driver, which deploys the exact merged revision to VM 119, verifies the complete
+  installed payload and local health, and rolls back automatically. Source, Central projection and remote scripts are
+  implemented; restricted-key provisioning, protected PR/Flux rollout and one ordinary-goal live canary remain before
+  this deploy boundary can be called complete. Other deploy targets and all release modes remain fail-closed.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.

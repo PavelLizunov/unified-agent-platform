@@ -74,6 +74,15 @@ def test_completion_gates_deploy_and_fail_closed() -> None:
     assert "\u043d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445" in m._completion_result(_view(goal="G", status="completed", gates=[]))
     dep = m._completion_result(_view(goal="G", status="completed", delivery_mode="none"))
     assert "\u043d\u0435 \u043d\u0430\u0441\u0442\u0440\u043e\u0435\u043d \u0434\u043b\u044f \u044d\u0442\u043e\u0433\u043e \u043f\u0440\u043e\u0435\u043a\u0442\u0430" in dep
+    deployed = m._completion_result(_view(
+        goal="G", status="completed", delivery_mode="deploy",
+        deliveries=[{
+            "kind": "deployment", "status": "verified",
+            "environment": "vpnctl-production", "deployed_revision": "a" * 40,
+        }],
+    ))
+    assert "\u0414\u0435\u043f\u043b\u043e\u0439: vpnctl-production" in deployed
+    assert "aaaaaaaaaaaa" in deployed and "\u043f\u0440\u043e\u0432\u0435\u0440\u0435\u043d" in deployed
 
 
 def test_completion_uses_delivery_summary_and_never_echoes_goal() -> None:

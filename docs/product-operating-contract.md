@@ -1,7 +1,8 @@
 # Product Operating Contract
 
-Status: **accepted by the owner on 2026-07-14**. The current deployment now has a GitHub-attested completion
-certificate for the exact registered no-deploy pilot boundary. This document still defines the wider target product
+Status: **accepted by the owner on 2026-07-14**. The current deployment has a GitHub-attested completion
+certificate for the exact registered no-deploy pilot boundary; the first closed production deploy driver for
+`vpnctl` is implemented and awaiting its live acceptance certificate. This document still defines the wider target product
 behaviour; section 8 records the capabilities not covered by that exact proof.
 
 The closed schema-v3 subject binds an ordinary Telegram goal, the required ordinary Workspace answer, both channel
@@ -150,10 +151,12 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    owner-gate profile remains available only for deliberate privileged-flow diagnostics. These campaigns prove both
    owner entry channels only for exact registered profiles; generic arbitrary-repository intake and route-profile
    creation from an unconstrained owner goal remain outside that proof.
-   The registered pilot now also carries immutable `delivery_mode: none`; Central requires explicit
-   `delivery: not_applicable` evidence instead of treating fresh-main verification as a deploy. Actual `deploy` and
-   `release` modes remain fail-closed until their artifact, environment and deployed-revision gates are implemented
-   and proven live.
+   No-deploy profiles carry immutable `delivery_mode: none`; Central requires explicit `delivery: not_applicable`
+   evidence instead of treating fresh-main verification as a deploy. The registered `vpnctl` profile now has the
+   first closed `delivery_mode: deploy` implementation: exact merged revision, production environment, installed
+   payload SHA-256, bounded retry, rollback and health verification are terminal gates. Until its ordinary-goal live
+   canary and completion bundle pass, this remains implemented-but-unproven production source. `release` and all
+   other deploy targets remain fail-closed.
 3. Workspace now uses the Central cursor contract for the selected mission and passed a live 20-event reconnect
    canary. Its Central timeline remains intentionally bounded; direct logs may still be needed for full raw tool detail.
 4. Central retains the latest 100 unbound terminal mission histories, never prunes the currently bound mission, and
@@ -205,8 +208,8 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    Telegram cursors/projection identities and the answer platform. The master-only GitHub-hosted workflow independently
    re-ran the semantic verifier and issued SLSA provenance for byte digest `92178a9b...`, bound to merge `a127994...`,
    `refs/heads/master` and the exact workflow identity. This is the final two-channel certificate for the exact
-   registered owner-gated no-deploy pilot. It is not evidence for arbitrary repository/profile discovery, actual
-   deploy/release modes, complete chat transcripts, HA or a platform-wide GPU/local-runtime hard deny. Exact
+   registered owner-gated no-deploy pilot. It is not evidence for arbitrary repository/profile discovery, the new
+   vpnctl deploy path, other deploy/release modes, complete chat transcripts, HA or a platform-wide GPU/local-runtime hard deny. Exact
    attestation evidence:
    `docs/evidence/signed-completion-attestation-2026-07-19.md`.
 10. The first live Telegram success notification exposed only a generic result. Current source replaces that constant

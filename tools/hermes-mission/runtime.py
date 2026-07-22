@@ -33,6 +33,7 @@ STAGES = (
     "reviewing",
     "delivering",
     "verifying",
+    "deploying",
     "complete",
 )
 TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
@@ -76,7 +77,10 @@ PAYLOAD_FIELDS = {
     "task.upsert": {"task_id", "title", "status", "assignee"},
     "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
     "terminal.append": {"stream", "text", "offset"},
-    "delivery.upsert": {"kind", "status", "url", "summary"},
+    "delivery.upsert": {
+        "kind", "status", "url", "summary", "environment", "artifact_sha256",
+        "deployed_revision",
+    },
     "artifact.upsert": {
         "artifact_id", "kind", "name", "media_type", "size_bytes", "sha256",
     },
@@ -90,7 +94,7 @@ _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _MAX_DELIVERY_SUMMARY_CHARS = 700
 _ID_PAYLOAD_FIELDS = {
     "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
-    "run_id", "status", "stream", "task_id", "worker_id",
+    "environment", "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
@@ -153,6 +157,7 @@ _GATE_LABELS = {
     "review": "независимое ревью",
     "ci": "CI",
     "post-verify": "проверка после слияния",
+    "deployment": "деплой",
     "cleanup": "очистка",
     "execution": "выполнение",
 }
@@ -167,6 +172,7 @@ _STAGE_LABELS = {
     "reviewing": "Независимая проверка",
     "delivering": "PR, CI и слияние",
     "verifying": "Проверка после слияния",
+    "deploying": "Развёртывание",
     "complete": "Готово",
 }
 _STATUS_LABELS = {
@@ -431,7 +437,8 @@ def registered_intake_projects(platform: str) -> list[dict[str, Any]]:
             summary = _require_source_value(item.get("summary"), "project summary")
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
                 raise MissionError("invalid project repository")
-            if item.get("delivery_mode") != "none":
+            delivery_mode = item.get("delivery_mode")
+            if delivery_mode not in {"none", "deploy"}:
                 raise MissionError("unsupported mission delivery mode")
             status = item.get("status", "ready")
             category = item.get("category", "registered")
@@ -489,7 +496,7 @@ def registered_intake_projects(platform: str) -> list[dict[str, Any]]:
                     "summary": summary,
                     "aliases": normalized_aliases,
                     "dispatch_profile": dispatch_profile,
-                    "delivery_mode": "none",
+                    "delivery_mode": delivery_mode,
                     "category": category,
                     "status": status,
                     "test_targets": test_targets,
@@ -524,7 +531,7 @@ def registered_intake_projects(platform: str) -> list[dict[str, Any]]:
         }:
             raise MissionError("invalid mission intake routes")
         mode = target.get("delivery_mode")
-        if mode != "none":
+        if mode not in {"none", "deploy"}:
             raise MissionError("unsupported mission delivery mode")
         normalized[route_platform] = {
             "dispatch_profile": _require_id(
@@ -746,7 +753,7 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.accepted" and "dispatch_profile" in payload:
         _require_id(payload.get("dispatch_profile"), "dispatch_profile")
     if event_type == "mission.accepted" and "delivery_mode" in payload:
-        if payload.get("delivery_mode") != "none":
+        if payload.get("delivery_mode") not in {"none", "deploy"}:
             raise MissionError("invalid mission delivery mode")
     if event_type == "mission.accepted" and "capability" in payload:
         if payload.get("capability") != _MEDIA_CAPABILITY:
@@ -792,6 +799,26 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             or len(summary) > _MAX_DELIVERY_SUMMARY_CHARS
         ):
             raise MissionError("invalid delivery summary")
+        deployment_fields = {"environment", "artifact_sha256", "deployed_revision"}
+        if payload.get("kind") == "deployment":
+            if (
+                payload.get("status") not in {"verified", "failed"}
+                or not isinstance(payload.get("environment"), str)
+                or not _ID.fullmatch(payload["environment"])
+                or not isinstance(payload.get("deployed_revision"), str)
+                or not re.fullmatch(r"[0-9a-f]{40,64}", payload["deployed_revision"])
+                or (
+                    payload.get("status") == "verified"
+                    and not re.fullmatch(r"[0-9a-f]{64}", str(payload.get("artifact_sha256") or ""))
+                )
+                or (
+                    payload.get("status") == "failed"
+                    and "artifact_sha256" in payload
+                )
+            ):
+                raise MissionError("invalid deployment delivery")
+        elif deployment_fields & payload.keys():
+            raise MissionError("deployment identity belongs only to deployment delivery")
     if event_type == "artifact.upsert":
         if (
             payload.get("kind") != "image"
@@ -1193,6 +1220,14 @@ def _completion_result(view: dict[str, Any]) -> str:
         lines.append("Проверки: нет данных о проверках")
     if view.get("delivery_mode") == "none":
         lines.append("Деплой: не настроен для этого проекта")
+    elif view.get("delivery_mode") == "deploy":
+        deployment = deliveries.get("deployment", {})
+        environment = deployment.get("environment")
+        revision = deployment.get("deployed_revision")
+        if deployment.get("status") == "verified" and environment and revision:
+            lines.append(
+                f"Деплой: {compact(environment, 128)} · ревизия {compact(revision, 12)} · проверен"
+            )
     paths = sorted({
         item.get("path")
         for item in view.get("changes", [])
@@ -1251,7 +1286,13 @@ def completion_ready(view: dict[str, Any]) -> bool:
     mode = view.get("delivery_mode")
     if mode is None:
         return True
-    return mode == "none" and deliveries.get("delivery") == "not_applicable"
+    if mode == "none":
+        return deliveries.get("delivery") == "not_applicable"
+    return (
+        mode == "deploy"
+        and gates.get("deployment") == "passed"
+        and deliveries.get("deployment") == "verified"
+    )
 
 
 def rejection_ready(view: dict[str, Any]) -> bool:
@@ -1290,10 +1331,17 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         "tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed",
     }:
         return deliveries == {"pull_request": "failed"}
-    return gates == {
+    if gates == {
         "tests": "passed", "review": "passed", "ci": "passed",
         "post-verify": "failed", "cleanup": "passed",
-    } and deliveries == {"pull_request": "merged"}
+    }:
+        return deliveries == {"pull_request": "merged"}
+    return gates == {
+        "tests": "passed", "review": "passed", "ci": "passed",
+        "post-verify": "passed", "deployment": "failed", "cleanup": "passed",
+    } and deliveries == {
+        "pull_request": "merged", "default_branch": "verified", "deployment": "failed",
+    }
 
 
 def _rejection_terminal(view: dict[str, Any]) -> tuple[str, dict[str, str]] | None:
@@ -1315,6 +1363,10 @@ def _rejection_terminal(view: dict[str, Any]) -> tuple[str, dict[str, str]] | No
     if gates.get("post-verify") == "failed":
         return "central:auto-post-verify-failed:v1", {
             "error": "Проверка после слияния не прошла после автоматического исправления",
+        }
+    if gates.get("deployment") == "failed":
+        return "central:auto-deployment-failed:v1", {
+            "error": "Деплой точной слитой ревизии не прошёл после автоматических повторов",
         }
     if gates.get("ci") == "failed":
         return "central:auto-ci-failed:v1", {
@@ -2876,7 +2928,7 @@ class MissionStore:
             project_repository = _require_source_value(project_repository, "project_repository")
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", project_repository):
                 raise MissionError("invalid project repository")
-        if delivery_mode is not None and delivery_mode != "none":
+        if delivery_mode is not None and delivery_mode not in {"none", "deploy"}:
             raise MissionError("invalid mission delivery mode")
         if capability is not None and capability != _MEDIA_CAPABILITY:
             raise MissionError("invalid mission capability")

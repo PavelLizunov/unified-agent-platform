@@ -790,7 +790,7 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             "{}",
             '{"workspace":true}',
             '{"workspace":{"dispatch_profile":"first"}}',
-            '{"workspace":{"dispatch_profile":"first","delivery_mode":"deploy"}}',
+            '{"workspace":{"dispatch_profile":"first","delivery_mode":"release"}}',
             '{"workspace":{"dispatch_profile":"first","delivery_mode":"none","model":"sol"}}',
             '{"workspace":"first","workspace":"second"}',
             '{"workspace":"first"," workspace ":"second"}',
@@ -1912,7 +1912,6 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
             number,
         )
         assert store.complete_if_ready(mission_id) is None
-
         publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, number + 1)
         assert store.complete_if_ready(mission_id) is None
         publish(
@@ -2018,6 +2017,73 @@ def test_central_auto_completion_requires_the_full_delivery_contract() -> None:
         assert asyncio.run(missions.notify_subscribers(store, completed[0], retry_sender)) == 0
         assert retry == [("43", expected_terminal_text)]
         assert store.complete_if_ready(mission_id) is None
+
+
+def test_deployment_delivery_is_closed_and_required_for_deploy_mode() -> None:
+    event = {
+        "schema_version": 1,
+        "mission_id": "mission-deploy",
+        "type": "delivery.upsert",
+        "source": "build1-flow",
+        "correlation": {"producer_event_id": "deploy:verified"},
+        "payload": {
+            "kind": "deployment",
+            "status": "verified",
+            "url": "http://vpnctld:18402/api/v1/health",
+            "environment": "vpnctl-production",
+            "artifact_sha256": "a" * 64,
+            "deployed_revision": "b" * 40,
+        },
+    }
+    missions._validate_submission("mission-deploy", event)
+    for mutate in (
+        lambda payload: payload.pop("artifact_sha256"),
+        lambda payload: payload.update(deployed_revision="bad"),
+        lambda payload: payload.update(kind="default_branch"),
+    ):
+        changed = json.loads(json.dumps(event))
+        mutate(changed["payload"])
+        try:
+            missions._validate_submission("mission-deploy", changed)
+            raise AssertionError("invalid deployment evidence was accepted")
+        except missions.MissionError:
+            pass
+
+    base = {
+        "status": "active",
+        "question": None,
+        "tasks": [{"status": "done"}],
+        "workers": [{"worker_id": "task:run:1", "status": "completed"}],
+        "delivery_mode": "deploy",
+        "gates": [
+            {"gate_id": name, "status": "passed"}
+            for name in ("tests", "review", "ci", "post-verify", "deployment", "cleanup")
+        ],
+        "deliveries": [
+            {"kind": "pull_request", "status": "merged"},
+            {"kind": "default_branch", "status": "verified"},
+            event["payload"],
+        ],
+    }
+    assert missions.completion_ready(base)
+    incomplete = json.loads(json.dumps(base))
+    incomplete["deliveries"].pop()
+    assert not missions.completion_ready(incomplete)
+
+    failed = json.loads(json.dumps(base))
+    failed["gates"] = [
+        {"gate_id": name, "status": status}
+        for name, status in (
+            ("tests", "passed"), ("review", "passed"), ("ci", "passed"),
+            ("post-verify", "passed"), ("deployment", "failed"),
+            ("cleanup", "passed"),
+        )
+    ]
+    failed["deliveries"][-1] = {**event["payload"], "status": "failed"}
+    failed["deliveries"][-1].pop("artifact_sha256")
+    assert missions.rejection_ready(failed)
+    terminal = missions._rejection_terminal(failed)
+    assert terminal and terminal[0] == "central:auto-deployment-failed:v1"
 
 
 def test_auto_completion_accepts_only_scheduled_capacity_history() -> None:
@@ -3173,6 +3239,7 @@ def main() -> None:
     test_terminal_authority_is_loopback_only()
     test_owner_answer_capability_is_separate_from_the_producer_key()
     test_central_auto_completion_requires_the_full_delivery_contract()
+    test_deployment_delivery_is_closed_and_required_for_deploy_mode()
     test_auto_completion_accepts_only_scheduled_capacity_history()
     test_completion_ready_depends_only_on_delivery_contract()
     test_auto_completion_snapshot_and_terminal_insert_are_one_transaction()

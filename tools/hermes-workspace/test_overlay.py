@@ -340,6 +340,8 @@ def main() -> None:
         ).read_text()
         assert "Платформа может менять код" in project_settings
         assert "Проверки:" in project_settings
+        assert "После слияния: автоматический деплой и проверка production" in project_settings
+        assert "vpnctl production" in project_settings
         assert "Control-plane, Proxmox и ops-сервер" in project_settings
         assert "project.status === 'ready'" in project_settings
         assert "Создать и подготовить" in project_settings

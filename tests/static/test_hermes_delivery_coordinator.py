@@ -3587,7 +3587,17 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(repo, project_value["repo"])
             self.assertEqual(["."], project_value["allowed_path_prefixes"])
             self.assertEqual(required_ci, set(project_value["required_ci_checks"]))
-            self.assertEqual("none", project_value["delivery_mode"])
+            expected_mode = (
+                "deploy" if filename == "delivery-vpnctl-registered-v4.json" else "none"
+            )
+            self.assertEqual(expected_mode, project_value["delivery_mode"])
+            if expected_mode == "deploy":
+                self.assertEqual({
+                    "driver": "vpnctld-systemd-v1",
+                    "environment": "vpnctl-production",
+                    "health_url": "http://vpnctld:18402/api/v1/health",
+                    "target": "vpnctld",
+                }, project_value["deployment"])
             self.assertIs(project_value["completion_evidence"], True)
             with tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
@@ -3602,11 +3612,24 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             path = root / "delivery-invalid.json"
-            for mode in ("deploy", "release", "", None):
+            for mode in ("release", ""):
                 invalid = reusable_profile(root)
                 invalid["delivery_mode"] = mode
                 path.write_text(json.dumps(invalid), encoding="utf-8")
                 with self.assertRaisesRegex(coordinator.DeliveryError, "delivery_mode"):
+                    coordinator.load_profile(path)
+
+            for deployment in (
+                None,
+                {"driver": "shell", "environment": "vpnctl-production",
+                 "target": "vpnctld", "health_url": "http://vpnctld:18402/api/v1/health"},
+                {"driver": "vpnctld-systemd-v1", "environment": "vpnctl-production",
+                 "target": "other", "health_url": "http://vpnctld:18402/api/v1/health"},
+            ):
+                invalid = reusable_profile(root)
+                invalid.update(delivery_mode="deploy", deployment=deployment)
+                path.write_text(json.dumps(invalid), encoding="utf-8")
+                with self.assertRaises(coordinator.DeliveryError):
                     coordinator.load_profile(path)
 
             invalid = reusable_profile(root)
@@ -9612,6 +9635,118 @@ class TestCancelledCleanup(unittest.TestCase):
             self.assertIsNone(instance.tick())
             self.assertEqual(completes, backend.completes)
             self.assertEqual(archives, backend.archives)
+
+    def test_vpnctld_deploy_attempt_is_exact_retryable_and_restart_safe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value = reusable_profile(root)
+            value.update(
+                delivery_mode="deploy",
+                deployment={
+                    "driver": "vpnctld-systemd-v1",
+                    "environment": "vpnctl-production",
+                    "target": "vpnctld",
+                    "health_url": "http://vpnctld:18402/api/v1/health",
+                },
+            )
+            profile_path = root / "profile.json"
+            profile_path.write_text(json.dumps(value), encoding="utf-8")
+            revision = "a" * 40
+            result = {
+                "schema_version": 1,
+                "status": "verified",
+                "driver": "vpnctld-systemd-v1",
+                "environment": "vpnctl-production",
+                "target": "vpnctld",
+                "health_url": "http://vpnctld:18402/api/v1/health",
+                "deployed_revision": revision,
+                "artifact_sha256": "b" * 64,
+            }
+            responses = [
+                subprocess.CompletedProcess([], 1, stdout="", stderr="temporary failure"),
+                subprocess.CompletedProcess([], 0, stdout=json.dumps(result) + "\n", stderr=""),
+            ]
+            commands = []
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                return responses.pop(0)
+
+            instance = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(profile_path), FakeClient(), FakeBackend(),
+                root / "state", runner=runner,
+            )
+            paths = instance._paths("mission-deploy")
+            state = {
+                "mission_id": "mission-deploy", "phase": "verified",
+                "default_sha": revision,
+            }
+            instance._deployment_plan(state, paths)
+            self.assertFalse(instance._run_deployment_attempt(state, paths))
+            self.assertEqual("deploy_retry_wait", state["phase"])
+            self.assertEqual(1, state["deployment_attempts"])
+            state["phase"] = "deploy_pending"
+            state.pop("deployment_not_before")
+            self.assertTrue(instance._run_deployment_attempt(state, paths))
+            self.assertEqual("deployed", state["phase"])
+            self.assertEqual(2, state["deployment_attempts"])
+            self.assertEqual(result, state["deployment_result"])
+            for command in commands:
+                self.assertEqual(coordinator._VPNCTLD_DEPLOY_BIN, command[0])
+                self.assertEqual(revision, command[-1])
+
+            resume_responses = [
+                subprocess.CompletedProcess([], 0, stdout=json.dumps(result) + "\n", stderr="")
+            ]
+            resumed = coordinator.DeliveryCoordinator(
+                coordinator.load_profile(profile_path), FakeClient(), FakeBackend(),
+                root / "resume-state", runner=lambda *_args, **_kwargs: resume_responses.pop(0),
+            )
+            resume_paths = resumed._paths("mission-resume")
+            resume_state = {
+                "mission_id": "mission-resume", "phase": "deploy_running",
+                "default_sha": revision, "deployment_attempts": 1,
+                "deployment_plan": {
+                    "schema_version": 1, **value["deployment"], "revision": revision,
+                },
+            }
+            self.assertTrue(
+                resumed._run_deployment_attempt(resume_state, resume_paths, resume=True)
+            )
+            self.assertEqual(1, resume_state["deployment_attempts"])
+
+    def test_deployment_failure_contract_preserves_merged_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            value = reusable_profile(root)
+            value.update(
+                delivery_mode="deploy",
+                deployment={
+                    "driver": "vpnctld-systemd-v1",
+                    "environment": "vpnctl-production",
+                    "target": "vpnctld",
+                    "health_url": "http://vpnctld:18402/api/v1/health",
+                },
+            )
+            instance = coordinator.DeliveryCoordinator(
+                value, FakeClient(), FakeBackend(), root / "state"
+            )
+            revision = "a" * 40
+            result, summary, events = instance._failure_contract({
+                "failure_kind": "deployment",
+                "pr_url": "https://github.com/PavelLizunov/VPNRouter/pull/1",
+                "deployment_plan": {
+                    "schema_version": 1, **value["deployment"], "revision": revision,
+                },
+            })
+            self.assertEqual("deployment_failed", result)
+            self.assertIn("exact merged revision", summary)
+            deliveries = [event["payload"] for event in events
+                          if event["type"] == "delivery.upsert"]
+            self.assertEqual("merged", deliveries[0]["status"])
+            self.assertEqual("verified", deliveries[1]["status"])
+            self.assertEqual("failed", deliveries[2]["status"])
+            self.assertEqual(revision, deliveries[2]["deployed_revision"])
 
 
 if __name__ == "__main__":

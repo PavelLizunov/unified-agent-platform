@@ -162,11 +162,11 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         "schema_version", "sha256", "mission", "runtime", "route", "execution",
         "source", "author", "reviewer", "delivery", "gates", "cleanup", "central",
     }
-    if schema_version in {2, 3}:
+    if schema_version in {2, 3, 4, 5}:
         top.add("input")
-    if schema_version == 3:
+    if schema_version in {3, 5}:
         top.update({"interaction", "channels"})
-    if set(value) != top or schema_version not in {1, 2, 3}:
+    if set(value) != top or schema_version not in {1, 2, 3, 4, 5}:
         raise ContractError("completion evidence has an invalid schema")
     digest = _required_text(value, "sha256", "completion_evidence")
     unsigned = {key: item for key, item in value.items() if key != "sha256"}
@@ -216,11 +216,15 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         },
         "central": {"status", "sequence", "projection_id", "result"},
     }
-    if schema_version in {2, 3}:
+    if schema_version in {4, 5}:
+        expected["delivery"].update({
+            "environment", "artifact_sha256", "deployed_revision", "health_url",
+        })
+    if schema_version in {2, 3, 4, 5}:
         expected["input"] = {
             "platform", "source_key_sha256", "source_message_sha256",
         }
-    if schema_version == 3:
+    if schema_version in {3, 5}:
         expected["interaction"] = {"owner_answers"}
         expected["channels"] = {"workspace", "telegram"}
     parts: dict[str, dict[str, Any]] = {}
@@ -235,7 +239,7 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
     delivery, gates = parts["delivery"], parts["gates"]
     cleanup, central = parts["cleanup"], parts["central"]
     execution = parts["execution"]
-    if schema_version in {2, 3}:
+    if schema_version in {2, 3, 4, 5}:
         input_lineage = parts["input"]
         if input_lineage["platform"] not in {"workspace", "telegram"}:
             raise ContractError("completion evidence input platform is invalid")
@@ -291,7 +295,7 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         or len(answers) != len(set(answers))
     ):
         raise ContractError("completion evidence owner answers are invalid")
-    if schema_version == 3:
+    if schema_version in {3, 5}:
         interactions = parts["interaction"]["owner_answers"]
         if (
             not isinstance(interactions, list)
@@ -427,13 +431,28 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         raise ContractError("completion evidence route is outside the approved policy")
 
     if (
-        delivery["mode"] != "none"
-        or delivery["applicability"] != "not_applicable"
-        or isinstance(delivery["pr_number"], bool)
+        isinstance(delivery["pr_number"], bool)
         or not isinstance(delivery["pr_number"], int)
         or delivery["pr_number"] <= 0
     ):
         raise ContractError("completion evidence delivery identity is invalid")
+    if schema_version in {1, 2, 3}:
+        if (
+            delivery["mode"] != "none"
+            or delivery["applicability"] != "not_applicable"
+        ):
+            raise ContractError("completion evidence delivery identity is invalid")
+    else:
+        if (
+            delivery["mode"] != "deploy"
+            or delivery["applicability"] != "verified"
+            or source["repo"] != "PavelLizunov/vpnctl"
+            or delivery["environment"] != "vpnctl-production"
+            or delivery["health_url"] != "http://vpnctld:18402/api/v1/health"
+            or delivery["deployed_revision"] != source["default_sha"]
+            or not re.fullmatch(r"[0-9a-f]{64}", str(delivery["artifact_sha256"] or ""))
+        ):
+            raise ContractError("completion evidence deployment identity is invalid")
     if delivery["pr_url"] != (
         f"https://github.com/{source['repo']}/pull/{delivery['pr_number']}"
     ):

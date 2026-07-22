@@ -52,11 +52,13 @@ _PROFILE_FIELDS = {
     "claim_ttl_seconds", "command_timeout_seconds", "ci_timeout_seconds",
     "crash_after_author_commit_once", "codex_bin", "gh_bin", "codex_home",
     "post_verify_repair", "delivery_mode", "completion_evidence",
+    "deployment",
 }
 _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
     "goal", "required_files", "allowed_path_prefixes", "max_changed_files",
     "crash_after_author_commit_once", "route_flags", "codex_bin", "gh_bin",
     "codex_home", "post_verify_repair", "delivery_mode", "completion_evidence",
+    "deployment",
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
@@ -72,6 +74,8 @@ _PRE_REVIEW_CI_SUMMARY = (
 _PRE_REVIEW_GATE_VERSION = 1
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed twice on the exact merged revision"
+_DEPLOYMENT_RESULT = "deployment_failed"
+_DEPLOYMENT_SUMMARY = "Deployment failed twice for the exact merged revision"
 _LEGACY_POST_VERIFY_PHASES = {
     "post_verify_repair_pending",
     "post_verify_repair_waiting",
@@ -108,6 +112,10 @@ _DISK_SPACE_MIN_FREE_BYTES = 40 * 1024 * 1024 * 1024
 _DISK_SPACE_RETRY_DELAY_SECONDS = 300
 _DISK_SPACE_MAX_RETRY_DELAY_SECONDS = 3600
 _CI_RETRY_DELAY_SECONDS = 60
+_DEPLOY_RETRY_DELAY_SECONDS = 60
+_DEPLOY_MAX_ATTEMPTS = 2
+_VPNCTLD_DEPLOY_DRIVER = "vpnctld-systemd-v1"
+_VPNCTLD_DEPLOY_BIN = "/home/uap/bin/uap-deploy-vpnctld"
 _CI_RETRY_FIELDS = {
     "schema_version", "gate", "candidate_sha", "run_ids", "baseline_attempts",
     "requested_run_ids", "status", "not_before",
@@ -175,7 +183,7 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
     if missing := conditional - profile.keys():
         raise DeliveryError(f"missing profile fields: {', '.join(sorted(missing))}")
     forbidden = (
-        {"allowed_path_prefixes", "max_changed_files", "delivery_mode"}
+        {"allowed_path_prefixes", "max_changed_files", "delivery_mode", "deployment"}
         if version == 3
         else {"goal", "required_files"}
     )
@@ -191,8 +199,42 @@ def load_profile(path: str | pathlib.Path) -> dict[str, Any]:
         profile[name] = _required_text(profile.get(name), name)
     if version == 3:
         profile["goal"] = _required_text(profile.get("goal"), "goal")
-    elif "delivery_mode" in profile and profile["delivery_mode"] != "none":
-        raise DeliveryError("profile.delivery_mode only supports explicit none")
+    else:
+        delivery_mode = profile.get("delivery_mode")
+        if delivery_mode not in {None, "none", "deploy"}:
+            raise DeliveryError("profile.delivery_mode must be none or deploy")
+        deployment = profile.get("deployment")
+        if delivery_mode in {None, "none"}:
+            if deployment is not None:
+                raise DeliveryError("profile.deployment requires delivery_mode deploy")
+        else:
+            fields = {"driver", "environment", "target", "health_url"}
+            if not isinstance(deployment, dict) or set(deployment) != fields:
+                raise DeliveryError(
+                    "profile.deployment must contain driver, environment, target, and health_url"
+                )
+            if deployment.get("driver") != _VPNCTLD_DEPLOY_DRIVER:
+                raise DeliveryError("profile.deployment.driver is not approved")
+            environment = _required_text(
+                deployment.get("environment"), "deployment.environment"
+            )
+            target = _required_text(deployment.get("target"), "deployment.target")
+            health_url = _required_text(
+                deployment.get("health_url"), "deployment.health_url"
+            )
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}", environment):
+                raise DeliveryError("profile.deployment.environment is invalid")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", target):
+                raise DeliveryError("profile.deployment.target is invalid")
+            expected_health = f"http://{target}:18402/api/v1/health"
+            if health_url != expected_health:
+                raise DeliveryError("profile.deployment.health_url is not approved")
+            profile["deployment"] = {
+                "driver": _VPNCTLD_DEPLOY_DRIVER,
+                "environment": environment,
+                "target": target,
+                "health_url": health_url,
+            }
     route_flags = profile.get("route_flags", [])
     if (
         not isinstance(route_flags, list)
@@ -2673,6 +2715,41 @@ class DeliveryCoordinator:
             ]
             append_telemetry(events)
             return _POST_VERIFY_RESULT, _POST_VERIFY_SUMMARY, events
+        if state.get("failure_kind") == "deployment":
+            pr_url = state.get("pr_url")
+            plan = state.get("deployment_plan")
+            if (
+                not isinstance(pr_url, str)
+                or not pr_url
+                or not isinstance(plan, dict)
+            ):
+                raise DeliveryError("deployment failure has no merged delivery identity")
+            events = [
+                {"type": "gate.upsert", "payload": {"gate_id": "tests", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "review", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "ci", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "post-verify", "status": "passed"}},
+                {"type": "gate.upsert", "payload": {"gate_id": "deployment", "status": "failed"}},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "pull_request", "status": "merged", "url": pr_url,
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "default_branch", "status": "verified",
+                    "url": (
+                        f"https://github.com/{self.profile['repo']}/commit/"
+                        f"{plan['revision']}"
+                    ),
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "deployment", "status": "failed",
+                    "url": plan["health_url"],
+                    "environment": plan["environment"],
+                    "deployed_revision": plan["revision"],
+                }},
+                {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
+            ]
+            append_telemetry(events)
+            return _DEPLOYMENT_RESULT, _DEPLOYMENT_SUMMARY, events
         if state.get("failure_kind") == "pre_review_ci":
             return finish(
                 _CI_RESULT,
@@ -2796,10 +2873,14 @@ class DeliveryCoordinator:
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
         if state["phase"] in {
-            "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed"
+            "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed",
+            "deployment_failed",
         }:
             preserve_remote = False
-            if state.get("pr_number") is not None and state.get("failure_kind") != "post_verify":
+            if (
+                state.get("pr_number") is not None
+                and state.get("failure_kind") not in {"post_verify", "deployment"}
+            ):
                 preserve_remote = self._finalize_failed_pr(state)
             self._cleanup(state, paths, preserve_remote=preserve_remote)
             if preserve_remote:
@@ -4808,6 +4889,131 @@ class DeliveryCoordinator:
         self._save(paths, state)
         return True
 
+    def _deployment_plan(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> dict[str, Any]:
+        deployment = self.profile.get("deployment")
+        revision = state.get("default_sha")
+        if (
+            self.profile.get("delivery_mode") != "deploy"
+            or not isinstance(deployment, dict)
+            or not isinstance(revision, str)
+            or not re.fullmatch(r"[0-9a-f]{40,64}", revision)
+        ):
+            raise DeliveryError("deployment has no approved exact merged revision")
+        expected = {
+            "schema_version": 1,
+            "driver": deployment["driver"],
+            "environment": deployment["environment"],
+            "target": deployment["target"],
+            "health_url": deployment["health_url"],
+            "revision": revision,
+        }
+        stored = state.get("deployment_plan")
+        if stored is None:
+            state["deployment_plan"] = expected
+            state["phase"] = "deploy_pending"
+            self._save(paths, state)
+            return expected
+        if stored != expected:
+            raise DeliveryError("durable deployment plan changed")
+        return stored
+
+    @staticmethod
+    def _deployment_result(value: Any, plan: dict[str, Any]) -> dict[str, Any]:
+        fields = {
+            "schema_version", "status", "driver", "environment", "target",
+            "health_url", "deployed_revision", "artifact_sha256",
+        }
+        if not isinstance(value, dict) or set(value) != fields:
+            raise DeliveryError("deployment driver returned an invalid result schema")
+        if (
+            value.get("schema_version") != 1
+            or value.get("status") != "verified"
+            or value.get("driver") != plan["driver"]
+            or value.get("environment") != plan["environment"]
+            or value.get("target") != plan["target"]
+            or value.get("health_url") != plan["health_url"]
+            or value.get("deployed_revision") != plan["revision"]
+            or not re.fullmatch(r"[0-9a-f]{64}", str(value.get("artifact_sha256") or ""))
+        ):
+            raise DeliveryError("deployment driver result does not match the durable plan")
+        return value
+
+    def _record_deployment_failure(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        error: Exception,
+    ) -> None:
+        attempts = state.get("deployment_attempts")
+        if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+            raise DeliveryError("deployment attempt counter is invalid")
+        diagnostic = _bounded_diagnostic(str(error))
+        state.setdefault("deployment_first_failure", diagnostic)
+        if attempts < _DEPLOY_MAX_ATTEMPTS:
+            state.update(
+                phase="deploy_retry_wait",
+                deployment_not_before=time.time() + _DEPLOY_RETRY_DELAY_SECONDS,
+            )
+        else:
+            state.update(
+                phase="deployment_failed",
+                failure_kind="deployment",
+                failure_error=diagnostic,
+            )
+            state.pop("deployment_not_before", None)
+        self._save(paths, state)
+
+    def _run_deployment_attempt(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        *,
+        resume: bool = False,
+    ) -> bool:
+        plan = self._deployment_plan(state, paths)
+        attempts = state.get("deployment_attempts", 0)
+        expected_phase = "deploy_running" if resume else "deploy_pending"
+        if (
+            isinstance(attempts, bool)
+            or not isinstance(attempts, int)
+            or attempts < 0
+            or attempts > _DEPLOY_MAX_ATTEMPTS
+            or state.get("phase") != expected_phase
+            or (resume and attempts < 1)
+            or (not resume and attempts >= _DEPLOY_MAX_ATTEMPTS)
+        ):
+            raise DeliveryError("deployment attempt counter is invalid")
+        if not resume:
+            attempts += 1
+        state.update(phase="deploy_running", deployment_attempts=attempts)
+        state.pop("deployment_not_before", None)
+        self._save(paths, state)
+        try:
+            result = self._run(
+                [
+                    _VPNCTLD_DEPLOY_BIN,
+                    "--source", str(paths["verify"]),
+                    "--revision", plan["revision"],
+                ],
+                cwd=paths["verify"],
+            )
+            lines = [line for line in result.stdout.splitlines() if line.strip()]
+            if len(lines) != 1:
+                raise DeliveryError("deployment driver did not return one result")
+            try:
+                parsed = json.loads(lines[0])
+            except json.JSONDecodeError as error:
+                raise DeliveryError("deployment driver returned invalid JSON") from error
+            state["deployment_result"] = self._deployment_result(parsed, plan)
+        except DeliveryError as error:
+            self._record_deployment_failure(state, paths, error)
+            return False
+        state["phase"] = "deployed"
+        self._save(paths, state)
+        return True
+
     @staticmethod
     def _telemetry_worker_event(
         role: str, telemetry: dict[str, Any] | None
@@ -4875,6 +5081,28 @@ class DeliveryCoordinator:
                 "type": "delivery.upsert",
                 "payload": {"kind": "delivery", "status": "not_applicable"},
             })
+        elif self.profile.get("delivery_mode") == "deploy":
+            plan = state.get("deployment_plan")
+            if not isinstance(plan, dict):
+                raise DeliveryError("completed deployment has no durable plan")
+            result = self._deployment_result(state.get("deployment_result"), plan)
+            events.extend([
+                {
+                    "type": "gate.upsert",
+                    "payload": {"gate_id": "deployment", "status": "passed"},
+                },
+                {
+                    "type": "delivery.upsert",
+                    "payload": {
+                        "kind": "deployment",
+                        "status": "verified",
+                        "url": result["health_url"],
+                        "environment": result["environment"],
+                        "artifact_sha256": result["artifact_sha256"],
+                        "deployed_revision": result["deployed_revision"],
+                    },
+                },
+            ])
         if cleanup:
             events.append({"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}})
         return events
@@ -4886,8 +5114,6 @@ class DeliveryCoordinator:
         terminal: dict[str, Any],
         channels: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self.profile.get("delivery_mode") != "none":
-            raise DeliveryError("completion evidence requires an implemented delivery applicability")
         self._validate_review(state)
         source_checkout = pathlib.Path(self.profile["source_checkout"])
         worktrees_removed = not any(
@@ -4971,6 +5197,40 @@ class DeliveryCoordinator:
             and channel_converged
         ):
             evidence_version = 3
+        delivery_mode = self.profile.get("delivery_mode")
+        if delivery_mode == "deploy":
+            if evidence_version == 1:
+                raise DeliveryError("deployment evidence requires durable input lineage")
+            evidence_version = 5 if evidence_version == 3 else 4
+            plan = state.get("deployment_plan")
+            if not isinstance(plan, dict):
+                raise DeliveryError("deployment evidence has no durable plan")
+            deployment_result = self._deployment_result(state.get("deployment_result"), plan)
+            delivery_evidence = {
+                "mode": "deploy",
+                "applicability": "verified",
+                "pr_number": state.get("pr_number"),
+                "pr_url": state.get("pr_url"),
+                "pr_head_sha": state.get("pr_head_sha"),
+                "pr_base_branch": state.get("pr_base_branch"),
+                "ci_run_ids": sorted(set(ci_run_ids)),
+                "environment": deployment_result["environment"],
+                "artifact_sha256": deployment_result["artifact_sha256"],
+                "deployed_revision": deployment_result["deployed_revision"],
+                "health_url": deployment_result["health_url"],
+            }
+        elif delivery_mode == "none":
+            delivery_evidence = {
+                "mode": "none",
+                "applicability": "not_applicable",
+                "pr_number": state.get("pr_number"),
+                "pr_url": state.get("pr_url"),
+                "pr_head_sha": state.get("pr_head_sha"),
+                "pr_base_branch": state.get("pr_base_branch"),
+                "ci_run_ids": sorted(set(ci_run_ids)),
+            }
+        else:
+            raise DeliveryError("completion evidence has an unsupported delivery mode")
         bundle: dict[str, Any] = {
             "schema_version": evidence_version,
             "mission": {
@@ -5034,15 +5294,7 @@ class DeliveryCoordinator:
                     "source_attestation_sha256"
                 ),
             },
-            "delivery": {
-                "mode": self.profile.get("delivery_mode"),
-                "applicability": "not_applicable",
-                "pr_number": state.get("pr_number"),
-                "pr_url": state.get("pr_url"),
-                "pr_head_sha": state.get("pr_head_sha"),
-                "pr_base_branch": state.get("pr_base_branch"),
-                "ci_run_ids": sorted(set(ci_run_ids)),
-            },
+            "delivery": delivery_evidence,
             "gates": {
                 "required_ci_checks": sorted(self.profile["required_ci_checks"]),
                 "pre_review_ci_checks": state.get("pre_review_ci_checks"),
@@ -5063,9 +5315,9 @@ class DeliveryCoordinator:
                 "result": terminal.get("result"),
             },
         }
-        if evidence_version >= 2:
+        if evidence_version in {2, 3, 4, 5}:
             bundle["input"] = input_lineage
-        if evidence_version == 3:
+        if evidence_version in {3, 5}:
             bundle["interaction"] = {
                 "owner_answers": sorted(
                     answer_lineage,
@@ -5336,7 +5588,7 @@ class DeliveryCoordinator:
             self._bind_mission_goal(state, mission, paths)
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
-                "post_verify_failed", "rejection_task_completed",
+                "post_verify_failed", "deployment_failed", "rejection_task_completed",
             }:
                 return self._finish_rejection(state, paths)
             if mission.get("status") == "completed":
@@ -5604,6 +5856,45 @@ class DeliveryCoordinator:
                     }
 
             if state["phase"] == "verified":
+                self._assert_claim(state)
+                if self.profile.get("delivery_mode") != "deploy":
+                    state["phase"] = "cleanup_pending"
+                    self._save(paths, state)
+                else:
+                    self._deployment_plan(state, paths)
+
+            if state["phase"] == "deploy_retry_wait":
+                not_before = state.get("deployment_not_before")
+                if (
+                    isinstance(not_before, bool)
+                    or not isinstance(not_before, (int, float))
+                    or not math.isfinite(float(not_before))
+                ):
+                    raise DeliveryError("deployment retry deadline is invalid")
+                if time.time() < float(not_before):
+                    return {
+                        "action": "deploy_retry_wait",
+                        "mission_id": mission_id,
+                        "state": state,
+                    }
+                state["phase"] = "deploy_pending"
+                state.pop("deployment_not_before", None)
+                self._save(paths, state)
+
+            if state["phase"] in {"deploy_pending", "deploy_running"}:
+                self._assert_claim(state)
+                self._publish_stage(state, "deploying", 95)
+                resumed = state["phase"] == "deploy_running"
+                if not self._run_deployment_attempt(state, paths, resume=resumed):
+                    if state["phase"] == "deployment_failed":
+                        return self._finish_rejection(state, paths)
+                    return {
+                        "action": state["phase"],
+                        "mission_id": mission_id,
+                        "state": state,
+                    }
+
+            if state["phase"] == "deployed":
                 self._assert_claim(state)
                 state["phase"] = "cleanup_pending"
                 self._save(paths, state)
