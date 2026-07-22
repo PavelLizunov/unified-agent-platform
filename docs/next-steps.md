@@ -258,13 +258,17 @@ not add an application service, workflow engine or mission database.
    or owner question. This does not prove a naturally occurring provider envelope, `capacity_wait`, burst exhaustion or
    whole-route fallback. See the [rollout evidence](evidence/automatic-capacity-observation-rollout-2026-07-18.md) and
    [live campaign](evidence/ordinary-telegram-capacity-recovery-2026-07-18.md).
-7. **Delivery applicability — EXPLICIT `none`; DEPLOY/RELEASE STILL FAIL-CLOSED (2026-07-18).** The registered pilot's
+7. **Delivery applicability — ✅ FIRST PRODUCTION DEPLOY PASS (2026-07-22).** The registered pilot's
    server-owned route and schema-v4 profile carry immutable `delivery_mode: none`; Central requires the coordinator's
-   `delivery: not_applicable` event before terminal completion. Legacy missions remain compatible. A configured
-   `deploy` or `release` mode is rejected until exact artifact, environment, deployed-revision and health evidence is
-   implemented, so fresh-main verification is no longer allowed to imply deployment for the registered target.
-   Exact rollout evidence:
-   [registered delivery applicability](evidence/registered-delivery-applicability-rollout-2026-07-18.md).
+   `delivery: not_applicable` event before terminal completion. Legacy missions remain compatible. Fresh-main
+   verification is not allowed to imply deployment. The exact registered `vpnctl` profile now uses the
+   only approved deploy driver, `vpnctld-systemd-v1`: ordinary Workspace mission
+   `mission-intake-e2d2812bf5197db2a0c68754f2351b20` merged PR #127, deployed exact revision `770dce0...` once to
+   `vpnctl-production`, verified the complete artifact digest and HTTP health, then completed cleanup and a closed
+   evidence bundle. The canary first exposed adapter/Central deployment-schema drift; PR #397 fixed it and the natural
+   timer converged without replaying deployment. All other deploy drivers and `release` remain fail-closed. Evidence:
+   [registered delivery applicability](evidence/registered-delivery-applicability-rollout-2026-07-18.md) and
+   [vpnctl production deploy](evidence/vpnctl-production-deploy-live-canary-2026-07-22.md).
 8. **Ordinary bound Telegram answer — ✅ LIVE PASS (2026-07-19).** A normal
    Telegram message on the chat/topic bound to a `waiting_owner` mission now answers that mission's exact open
    question instead of accepting another goal. The Telegram message ID is persisted in `mission.answer`; restart and
@@ -506,11 +510,12 @@ These make "the agent ships unreviewed code" actually safe; they gate A4.
   Central source now also serializes accepted missions per exact profile: an existing nonterminal projected task
   blocks admission of later candidates, and a restart-safe component test releases the oldest successor only after
   the predecessor is terminal. A live two-mission run is still required before claiming operational queue proof.
-  The next completion boundary is the first real deploy profile. ADR-037 keeps it narrow: only `vpnctl` may use the
-  closed `vpnctld-systemd-v1` driver, which deploys the exact merged revision to VM 119, verifies the complete
-  installed payload and local health, and rolls back automatically. Source, Central projection and remote scripts are
-  implemented; restricted-key provisioning, protected PR/Flux rollout and one ordinary-goal live canary remain before
-  this deploy boundary can be called complete. Other deploy targets and all release modes remain fail-closed.
+  ADR-037's first real deploy boundary is complete: only `vpnctl` may use the closed `vpnctld-systemd-v1` driver,
+  which deployed exact merge `770dce0...` to VM 119, verified the complete installed payload and local health, and
+  would roll back automatically. The ordinary-goal canary, completion bundle and post-deploy projection recovery all
+  passed. The next delivery-expansion work is project-by-project: a target receives `deploy` only after its exact
+  environment, least-privilege driver, rollback and health contract are reviewed; otherwise `none` remains correct.
+  Other deploy targets and all release modes remain fail-closed.
 - **B1 (3rd node + failover)** is deferred indefinitely for budget; do not treat it as active owner work.
 - **B3 remaining DR proof** now centers on off-homelab age-key escrow; Proxmox VM backup/restore and the R2 canary Secret
   restore drill is already green.

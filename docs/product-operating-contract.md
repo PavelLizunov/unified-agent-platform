@@ -1,8 +1,8 @@
 # Product Operating Contract
 
 Status: **accepted by the owner on 2026-07-14**. The current deployment has a GitHub-attested completion
-certificate for the exact registered no-deploy pilot boundary; the first closed production deploy driver for
-`vpnctl` is implemented and awaiting its live acceptance certificate. This document still defines the wider target product
+certificate for the exact registered no-deploy pilot boundary and a verified live completion bundle for the first
+closed production deploy driver, `vpnctl`/`vpnctld-systemd-v1`. This document still defines the wider target product
 behaviour; section 8 records the capabilities not covered by that exact proof.
 
 The closed schema-v3 subject binds an ordinary Telegram goal, the required ordinary Workspace answer, both channel
@@ -154,9 +154,12 @@ build-1 execution evidence. The remaining gaps are not accepted end-state behavi
    No-deploy profiles carry immutable `delivery_mode: none`; Central requires explicit `delivery: not_applicable`
    evidence instead of treating fresh-main verification as a deploy. The registered `vpnctl` profile now has the
    first closed `delivery_mode: deploy` implementation: exact merged revision, production environment, installed
-   payload SHA-256, bounded retry, rollback and health verification are terminal gates. Until its ordinary-goal live
-   canary and completion bundle pass, this remains implemented-but-unproven production source. `release` and all
-   other deploy targets remain fail-closed.
+   payload SHA-256, bounded retry, rollback and health verification are terminal gates. Ordinary Workspace mission
+   `mission-intake-e2d2812bf5197db2a0c68754f2351b20` passed that complete path for PR #127 and exact production
+   revision `770dce0...`; its schema-v4 bundle also proves cleanup and one deployment attempt. The negative
+   post-deploy projection attempt and PR #397 correction are preserved in
+   `docs/evidence/vpnctl-production-deploy-live-canary-2026-07-22.md`. `release` and all other deploy targets remain
+   fail-closed.
 3. Workspace now uses the Central cursor contract for the selected mission and passed a live 20-event reconnect
    canary. Its Central timeline remains intentionally bounded; direct logs may still be needed for full raw tool detail.
 4. Central retains the latest 100 unbound terminal mission histories, never prunes the currently bound mission, and

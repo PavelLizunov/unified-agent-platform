@@ -1,0 +1,223 @@
+{
+  "author": {
+    "head_sha": "b49ebb74a60c1b2622c6e0c6a095cdbcf5ca57a5",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh",
+    "route_decision_id": "40b63edef21afb3d271d10bb80a47f840bf5005e9fb54f09e462922884e07320",
+    "sandbox": "workspace-write",
+    "session_id": "019f8934-887b-7fb1-bbb9-bd292b217a6f",
+    "tree_sha": "0fa276963ef753589a426f9137676814baa08dd8"
+  },
+  "central": {
+    "projection_id": "9be1419491fd887e",
+    "result": "GET /api/v1/health возвращает минимальный status/version; документация теперь содержит production-проверку и границы liveness, а runtime-контракт закреплён точным регрессионным тестом. Focused tests, fmt, check и clippy прошли.\nPR: https://github.com/PavelLizunov/vpnctl/pull/127\nMerge-коммит: https://github.com/PavelLizunov/vpnctl/commit/770dce039235c3f895ed0020cb4f050c66a31659\nПроверки: тесты, независимое ревью, CI, проверка после слияния, деплой, очистка — пройдены\nДеплой: vpnctl-production · ревизия 770dce03923… · проверен\nИзменённые файлы (2): README.md, daemon/tests/sub_endpoint.rs\nВремя: 38м 2с\nАвтор (финальный прогон): gpt-5.6-sol · effort xhigh · 1923393 in / 9652 out\nРевьюер (финальный прогон): gpt-5.6-terra · effort xhigh · 440907 in / 4940 out",
+    "sequence": 26,
+    "status": "completed"
+  },
+  "cleanup": {
+    "kanban_gc_ran": true,
+    "local_branch_deleted": true,
+    "remote_branch_deleted": true,
+    "task_archived": true,
+    "worktrees_removed": true
+  },
+  "delivery": {
+    "applicability": "verified",
+    "artifact_sha256": "a538a378c6f55da2ff5f0a84ee01e8ed2b422bb60bf273d2c76de889719ce456",
+    "ci_run_ids": [
+      29909605783
+    ],
+    "deployed_revision": "770dce039235c3f895ed0020cb4f050c66a31659",
+    "environment": "vpnctl-production",
+    "health_url": "http://vpnctld:18402/api/v1/health",
+    "mode": "deploy",
+    "pr_base_branch": "main",
+    "pr_head_sha": "b49ebb74a60c1b2622c6e0c6a095cdbcf5ca57a5",
+    "pr_number": 127,
+    "pr_url": "https://github.com/PavelLizunov/vpnctl/pull/127"
+  },
+  "execution": {
+    "root_task_id": "t_39656ad4",
+    "run_id": "70"
+  },
+  "gates": {
+    "ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo fmt --check",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "layout-check (script smoke, soft-fail)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo test",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "gitleaks",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "e2e (testcontainers — Docker required)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo clippy -D warnings",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo-mutants (protocols, soft-fail)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo check",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo deny",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "post_verify_checks": [
+      {
+        "command": "/usr/local/bin/cargo check --workspace --all-targets",
+        "exit_code": 0
+      },
+      {
+        "command": "/usr/local/bin/cargo fmt --all -- --check",
+        "exit_code": 0
+      },
+      {
+        "command": "/usr/local/bin/cargo clippy --workspace --all-targets -- -D warnings",
+        "exit_code": 0
+      },
+      {
+        "command": "/usr/local/bin/cargo test --workspace --all-targets",
+        "exit_code": 0
+      },
+      {
+        "command": "/usr/local/bin/cargo deny check",
+        "exit_code": 0
+      }
+    ],
+    "pre_review_ci_checks": [
+      {
+        "name": "workflow:CI",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo fmt --check",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "layout-check (script smoke, soft-fail)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo test",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "gitleaks",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "e2e (testcontainers — Docker required)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo clippy -D warnings",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo-mutants (protocols, soft-fail)",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo check",
+        "outcome": "SUCCESS"
+      },
+      {
+        "name": "cargo deny",
+        "outcome": "SUCCESS"
+      }
+    ],
+    "required_ci_checks": [
+      "cargo check",
+      "cargo clippy -D warnings",
+      "cargo deny",
+      "cargo fmt --check",
+      "cargo test",
+      "e2e (testcontainers — Docker required)",
+      "gitleaks"
+    ]
+  },
+  "input": {
+    "platform": "workspace",
+    "source_key_sha256": "e2d2812bf5197db2a0c68754f2351b20c7db165e7f0974092798c22dae76c01e",
+    "source_message_sha256": "24fd1710258a00df34d6438dbe714feaec6c9fb7e37607b963dc02f9dfef7060"
+  },
+  "mission": {
+    "dispatch_profile": "build1-vpnctl-registered-v4",
+    "goal_sha256": "9c852d921ad92d4ec03f1df179fc5164275b91c2a04b8377f048efa35bd8b9da",
+    "mission_id": "mission-intake-e2d2812bf5197db2a0c68754f2351b20",
+    "owner_answer_sha256s": [],
+    "parent_mission_id": null
+  },
+  "reviewer": {
+    "head_sha": "b49ebb74a60c1b2622c6e0c6a095cdbcf5ca57a5",
+    "model": "gpt-5.6-terra",
+    "reasoning_effort": "xhigh",
+    "reviewed_sha": "b49ebb74a60c1b2622c6e0c6a095cdbcf5ca57a5",
+    "route_decision_id": "40b63edef21afb3d271d10bb80a47f840bf5005e9fb54f09e462922884e07320",
+    "sandbox": "read-only",
+    "session_id": "019f893f-049a-7c51-b5aa-7d1202deebdd",
+    "source_attestation_sha256": "532ed0d088389a415c43c5773799b5a9e3c7c61dc14ddea613b32920616732cd",
+    "tree_sha": "0fa276963ef753589a426f9137676814baa08dd8"
+  },
+  "route": {
+    "author_model": "gpt-5.6-sol",
+    "decision_id": "40b63edef21afb3d271d10bb80a47f840bf5005e9fb54f09e462922884e07320",
+    "policy_id": "openai-autonomy-v2",
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "reviewer_model": "gpt-5.6-terra",
+    "route": "complex"
+  },
+  "runtime": {
+    "coordinator_sha256": "2fca0a8c81739962eeff1e47a5285cdab22892f49427760f051fc6c5130324b5",
+    "invocations": {
+      "chain_sha256": "41d36883830e3e3bd5d1ab2fd24c2c79857eb04f2374cf695568ed76f06a2edb",
+      "count": 10,
+      "first": {
+        "invocation_id": "0d539a764a7a4b13950dd1ff90ffaf5d",
+        "unit": "hermes-delivery-coordinator@vpnctl-registered-v4.service"
+      },
+      "last": {
+        "invocation_id": "5b0cefb15a03433cb7d2070012f28751",
+        "unit": "hermes-delivery-coordinator@vpnctl-registered-v4.service"
+      }
+    },
+    "policy_sha256": "9f5a110961635a501c31d7323b2656be54c15092eca47d3f551a31ce0156cfca",
+    "profile_sha256": "8107fe703627ff3951de8c18abbd53a727e616b76df811d3fc5428c010355c94"
+  },
+  "schema_version": 4,
+  "sha256": "78b04981326f82c6d1ec3c4a3ed72815c8ad9352fdebdecc02e1946db9527966",
+  "source": {
+    "base_sha": "8e91a39cab8112c2ad6ea1fa9cbd744ce538fadc",
+    "candidate_ancestor_of_merge": true,
+    "candidate_files": [
+      "README.md",
+      "daemon/tests/sub_endpoint.rs"
+    ],
+    "candidate_sha": "b49ebb74a60c1b2622c6e0c6a095cdbcf5ca57a5",
+    "default_sha": "770dce039235c3f895ed0020cb4f050c66a31659",
+    "merge_ancestor_of_default": true,
+    "merge_sha": "770dce039235c3f895ed0020cb4f050c66a31659",
+    "repo": "PavelLizunov/vpnctl"
+  }
+}
