@@ -475,6 +475,52 @@ class RejectionClient(FakeClient):
         return dict(self.mission)
 
 
+class ReviewEscalationClient(RejectionClient):
+    def __init__(self):
+        super().__init__()
+        self.events = {}
+
+    def list_missions(self, _profile, *, reconcile=False):
+        if self.mission["status"] == "failed":
+            return []
+        return [self.mission] if reconcile else []
+
+    def publish(self, mission_id, event):
+        producer_id = event["correlation"]["producer_event_id"]
+        previous = self.events.get(producer_id)
+        if previous is not None:
+            self.assert_same_event(previous, event)
+            return
+        self.events[producer_id] = event
+        if event["type"] == "mission.question":
+            self.stages.append(event)
+            self.mission.update(
+                status="waiting_owner",
+                question=dict(event["payload"]),
+                answer=None,
+            )
+            return
+        super().publish(mission_id, event)
+
+    @staticmethod
+    def assert_same_event(previous, event):
+        if previous != event:
+            raise AssertionError("producer event changed across retry")
+
+    def answer(self, text):
+        question = self.mission["question"]
+        self.mission.update(
+            status="active",
+            question=None,
+            answer={
+                "question_id": question["question_id"],
+                "text": text,
+                "source_message_id": "workspace-review-answer-1",
+                "source_platform": "workspace",
+            },
+        )
+
+
 class HermeticCoordinator(coordinator.DeliveryCoordinator):
     def __init__(self, *args, counters: dict, **kwargs):
         super().__init__(*args, **kwargs)
@@ -7506,7 +7552,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ],
             )
 
-    def test_cycle_eight_accepts_or_terminates_without_a_ninth_tick_review(self):
+    def test_cycle_eight_accepts_or_pauses_once_for_owner_context(self):
         for verdict in ("accept", "reject"):
             with self.subTest(verdict=verdict), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
@@ -7514,7 +7560,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 approved.update(
                     codex_bin="codex", codex_home=str(root / "codex"), max_review_cycles=7
                 )
-                client = FakeClient() if verdict == "accept" else RejectionClient()
+                client = FakeClient() if verdict == "accept" else ReviewEscalationClient()
                 client.mission["tasks"] = [{"task_id": "task-1"}]
                 backend = FakeBackend() if verdict == "accept" else RejectionBackend()
                 if isinstance(backend, RejectionBackend):
@@ -7522,10 +7568,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
                 counters = {"authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0}
                 review_calls = 0
+                review_prompts = []
 
-                def runner(command, **_kwargs):
+                def runner(command, **kwargs):
                     nonlocal review_calls
                     review_calls += 1
+                    review_prompts.append(kwargs["input"])
                     last = pathlib.Path(
                         command[command.index("--output-last-message") + 1]
                     )
@@ -7584,20 +7632,105 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 ):
                     result = instance.tick()
 
-                self.assertEqual("complete", result["action"])
                 self.assertEqual(1, review_calls)
                 self.assertEqual(0, counters["authors"])
                 self.assertEqual(8, result["state"]["review_cycle"])
+                self.assertIn(
+                    "internal JSON source-attestation marker",
+                    review_prompts[0],
+                )
                 if verdict == "accept":
+                    self.assertEqual("complete", result["action"])
                     self.assertEqual("completed", client.get_mission("mission-a7-3")["status"])
                 else:
-                    self.assertEqual("review_rejected", result["state"]["outcome"])
+                    self.assertEqual("review_escalation_pending", result["action"])
+                    self.assertEqual("waiting_owner", client.mission["status"])
+                    self.assertEqual("scheduled", backend.task["status"])
+                    self.assertIn("still broken", client.mission["question"]["text"])
                 with mock.patch.object(instance, "_review", side_effect=AssertionError("ninth review")):
                     repeated = instance.tick()
                 if verdict == "accept":
                     self.assertEqual("complete", repeated["action"])
                 else:
-                    self.assertIsNone(repeated)
+                    self.assertEqual("waiting_owner", repeated["action"])
+                    self.assertEqual(
+                        1,
+                        sum(event["type"] == "mission.question" for event in client.events.values()),
+                    )
+
+    def test_exhausted_review_answer_resumes_or_stops_the_exact_parked_claim(self):
+        for answer, expected_phase, expected_cycle, expected_status in (
+            ("Use the hardware matrix from the attached report", "needs_fix", 5, "continued"),
+            ("СТОП", "review_rejected", 4, "stopped"),
+        ):
+            with self.subTest(answer=answer), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved["max_review_cycles"] = 3
+                client = ReviewEscalationClient()
+                backend = RejectionBackend()
+                backend.fail_after_complete_once = False
+                backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+                instance = coordinator.DeliveryCoordinator(
+                    approved, client, backend, root / "state"
+                )
+                paths = instance._paths("mission-a7-3")
+                state = {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": "pre_review_ci_green",
+                    "branch": "codex/a7-3-vpnrouter-deadbeef",
+                    "candidate_sha": "candidate-sha",
+                    "review_cycle": 4,
+                    "review_findings": ["hardware-matrix coverage is missing"],
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                    "owner_answers": [],
+                }
+
+                instance._begin_review_escalation(state, paths)
+                self.assertEqual("scheduled", backend.task["status"])
+                self.assertEqual("waiting_owner", client.mission["status"])
+                client.answer(answer)
+                instance._resume_owner_answer(
+                    state, client.get_mission("mission-a7-3"), paths
+                )
+
+                self.assertEqual(expected_phase, state["phase"])
+                self.assertEqual(expected_cycle, state["review_cycle"])
+                self.assertEqual(expected_status, state["review_escalation"]["status"])
+                self.assertEqual("running", backend.task["status"])
+                self.assertEqual("8", state["run_id"])
+                self.assertEqual(1, len(state["owner_answers"]))
+                if expected_status == "continued":
+                    self.assertEqual(8, instance._review_budget_limit(state))
+
+    def test_terminal_review_notice_surfaces_findings_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = ReviewEscalationClient()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, RejectionBackend(), root / "state"
+            )
+            state = {
+                "mission_id": "mission-a7-3",
+                "root_task_id": "task-1",
+                "review_findings": ["hardware-matrix coverage is missing"],
+                "pr_url": "https://github.com/example/repo/pull/42",
+            }
+
+            instance._publish_review_findings_notice(state)
+            instance._publish_review_findings_notice(state)
+
+            notices = [
+                event for event in client.events.values()
+                if event["type"] == "mission.notice"
+                and event["payload"].get("code") == "review_findings"
+            ]
+            self.assertEqual(1, len(notices))
+            self.assertIn("hardware-matrix coverage is missing", notices[0]["payload"]["message"])
+            self.assertIn(state["pr_url"], notices[0]["payload"]["message"])
 
     def test_failed_author_checks_checkpoint_one_bounded_retry(self):
         with tempfile.TemporaryDirectory() as directory:

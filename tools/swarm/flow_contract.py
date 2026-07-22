@@ -1304,8 +1304,8 @@ def validate_review(
     _validate_checks(summary.get("checks"), "summary.checks")
     _validate_checks(verification.get("checks"), "verification.checks")
     cycles = verification.get("review_cycle")
-    if not isinstance(cycles, int) or not 1 <= cycles <= 8:
-        raise ContractError("verification.review_cycle must be between 1 and 8")
+    if not isinstance(cycles, int) or not 1 <= cycles <= 16:
+        raise ContractError("verification.review_cycle must be between 1 and 16")
     if not ci_green:
         raise ContractError("required CI is not green")
 

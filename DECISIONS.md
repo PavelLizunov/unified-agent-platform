@@ -539,7 +539,11 @@
   только redacted bounded diagnostics и завершается после локальной очистки без несуществующего PR evidence. После
   создания PR coordinator повторно использует тот же PR/branch: номер PR, head SHA и base branch являются durable
   identity, а repair push использует exact-head lease. Обычный профиль сохраняет три bounded correction retries;
-  сложный профиль может зафиксировать до семи, а canonical contract fail-closed отклоняет `review_cycle > 8`.
+  сложный профиль может зафиксировать до семи. Если первый полный бюджет независимого ревью исчерпан, coordinator
+  один раз паркует точный Kanban claim и публикует `mission.question` с bounded-находками: дополнительный контекст
+  владельца разрешает ещё один такой же bounded-бюджет, точный ответ `СТОП` или повторное исчерпание ведёт в прежний
+  terminal failure. Это не делает владельца reviewer'ом и не применяется к integrity, author-check, CI,
+  post-verify или deployment failures. Canonical contract fail-closed отклоняет `review_cycle > 16`.
   GitHub не предоставляет server-side compare-and-swap для unsafe PR-close, поэтому после исчерпания профильного
   bounded budget coordinator с действующим Kanban claim
   повторно проверяет identity и сохраняет
