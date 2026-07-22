@@ -1,0 +1,36 @@
+{
+  "allowed_path_prefixes": ["."],
+  "assignee": "coordinator-codex-auto-local-llm-lab",
+  "author_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
+  ],
+  "branch_prefix": "codex/registered-local-llm-lab",
+  "ci_timeout_seconds": 7200,
+  "claim_ttl_seconds": 36000,
+  "command_timeout_seconds": 3600,
+  "commit_message": "feat: deliver registered Local LLM lab mission",
+  "completion_evidence": true,
+  "default_branch": "main",
+  "delivery_mode": "none",
+  "dispatch_profile": "build1-local-llm-lab-registered-v4",
+  "max_changed_files": 60,
+  "max_review_cycles": 7,
+  "post_verify_checks": [
+    ["/usr/bin/git", "-C", "{verify_worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
+  ],
+  "pull_request_body": "Implements one registered Local LLM Evaluation Lab mission through the autonomous UAP delivery contract.",
+  "pull_request_title": "feat: deliver registered Local LLM lab mission",
+  "remote": "https://github.com/PavelLizunov/local-llm-evaluation-lab.git",
+  "repo": "PavelLizunov/local-llm-evaluation-lab",
+  "required_ci_checks": ["test"],
+  "review_checks": [
+    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+    ["/usr/bin/python3", "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]
+  ],
+  "route_flags": ["multi_platform"],
+  "schema_version": 4,
+  "source_checkout": "/home/uap/local-llm-evaluation-lab",
+  "worktree_root": "/home/uap/worktrees/local-llm-lab-registered-v4"
+}

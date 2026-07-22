@@ -3540,6 +3540,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             coordinator.load_profile(path)
 
         registered_projects = {
+            "delivery-local-llm-lab-registered-v4.json": (
+                "build1-local-llm-lab-registered-v4",
+                "PavelLizunov/local-llm-evaluation-lab",
+                {"test"},
+            ),
             "delivery-uap-registered-v4.json": (
                 "build1-uap-registered-v4",
                 "PavelLizunov/unified-agent-platform",
@@ -3620,6 +3625,27 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "deploy" if filename == "delivery-vpnctl-registered-v4.json" else "none"
             )
             self.assertEqual(expected_mode, project_value["delivery_mode"])
+            if filename == "delivery-local-llm-lab-registered-v4.json":
+                exact_checks = [
+                    ["/usr/bin/git", "-C", "{worktree}", "diff", "--check"],
+                    [
+                        "/usr/bin/python3", "-m", "unittest", "discover",
+                        "-s", "tests", "-p", "test_*.py",
+                    ],
+                ]
+                self.assertEqual(exact_checks, project_value["author_checks"])
+                self.assertEqual(exact_checks, project_value["review_checks"])
+                self.assertEqual(
+                    [
+                        [
+                            "/usr/bin/git", "-C", "{verify_worktree}",
+                            "diff", "--check",
+                        ],
+                        exact_checks[1],
+                    ],
+                    project_value["post_verify_checks"],
+                )
+                self.assertEqual(["multi_platform"], project_value["route_flags"])
             if expected_mode == "deploy":
                 self.assertEqual({
                     "driver": "vpnctld-systemd-v1",
