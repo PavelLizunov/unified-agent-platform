@@ -1325,10 +1325,12 @@ def _codex_rollout_context(
     expected_sandbox: str,
     expected_worktree: str | pathlib.Path,
     source_attestation: dict[str, Any] | None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     session_meta: list[dict[str, Any]] = []
     turn_context: list[dict[str, Any]] = []
     user_texts: list[str] = []
+    model_requests = 0
+    max_request_input_tokens = 0
     with open(path, encoding="utf-8") as handle:
         for line_number, raw_line in enumerate(handle, 1):
             try:
@@ -1347,6 +1349,20 @@ def _codex_rollout_context(
                     for item in payload.get("content", []):
                         if isinstance(item, dict) and isinstance(item.get("text"), str):
                             user_texts.append(item["text"])
+            elif (
+                event.get("type") == "event_msg"
+                and event["payload"].get("type") == "token_count"
+            ):
+                info = event["payload"].get("info")
+                last_usage = info.get("last_token_usage") if isinstance(info, dict) else None
+                input_tokens = (
+                    last_usage.get("input_tokens")
+                    if isinstance(last_usage, dict)
+                    else None
+                )
+                if isinstance(input_tokens, int) and not isinstance(input_tokens, bool):
+                    model_requests += 1
+                    max_request_input_tokens = max(max_request_input_tokens, input_tokens)
     if len(session_meta) != 1 or not turn_context:
         raise ContractError("rollout must contain exactly one session_meta and one turn_context")
     if any(context != turn_context[0] for context in turn_context[1:]):
@@ -1389,6 +1405,8 @@ def _codex_rollout_context(
         "model_provider": model_provider,
         "sandbox": actual_sandbox,
         "codex_cli_version": _required_text(meta, "cli_version", "rollout.session_meta"),
+        "model_requests": model_requests,
+        "max_request_input_tokens": max_request_input_tokens,
     }
     if expected_reasoning_effort is not None:
         result["reasoning_effort"] = actual_reasoning_effort
@@ -1534,6 +1552,8 @@ def summarize_codex_events(
             "codex_rollout_prompt_sha256" if source is not None else "post_turn_clean_head"
         ),
         "source_attestation_sha256": runtime.get("source_attestation_sha256"),
+        "model_requests": runtime["model_requests"],
+        "max_request_input_tokens": runtime["max_request_input_tokens"],
         **repo,
         "session_id": session_id,
         "status": "completed",

@@ -3388,14 +3388,14 @@ def main() -> None:
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
     test_failure_terminal_commits_before_telegram_and_retries_delivery()
     test_disk_space_notice_contract_through_runtime_validation_and_store()
+    test_worker_upsert_schema_accepts_telemetry_fields()
+    test_worker_upsert_schema_rejects_invalid_tokens()
+    test_accepted_schema_project_label_repository()
     print("hermes mission runtime checks passed")
 
 
-if __name__ == "__main__":
-    main()
-
 def test_worker_upsert_schema_accepts_telemetry_fields() -> None:
-    """worker.upsert accepts model, effort, input_tokens, output_tokens."""
+    """worker.upsert accepts bounded runtime usage and activity counters."""
     with tempfile.TemporaryDirectory() as temp:
         store = missions.MissionStore(Path(temp) / "missions.sqlite3")
         store.accept("Schema test", mission_id="mission-schema-worker")
@@ -3405,11 +3405,18 @@ def test_worker_upsert_schema_accepts_telemetry_fields() -> None:
             "correlation": {"producer_event_id": "schema:w1"},
             "payload": {"worker_id": "w1", "status": "completed",
                         "model": "gpt-5.6-sol", "effort": "high",
-                        "input_tokens": 1000, "output_tokens": 500},
+                        "input_tokens": 1000, "cached_input_tokens": 800,
+                        "output_tokens": 500, "reasoning_output_tokens": 300,
+                        "model_requests": 6, "max_request_input_tokens": 400,
+                        "command_calls": 9, "failed_commands": 2,
+                        "web_search_calls": 1},
         })
         view = store.projection("mission-schema-worker")
         assert view["workers"][0]["model"] == "gpt-5.6-sol"
         assert view["workers"][0]["input_tokens"] == 1000
+        assert view["workers"][0]["cached_input_tokens"] == 800
+        assert view["workers"][0]["model_requests"] == 6
+        assert view["workers"][0]["command_calls"] == 9
 
 
 def test_worker_upsert_schema_rejects_invalid_tokens() -> None:
@@ -3428,6 +3435,21 @@ def test_worker_upsert_schema_rejects_invalid_tokens() -> None:
                 raise AssertionError(f"invalid input_tokens {bad_value} was accepted")
             except missions.MissionError:
                 pass
+        for payload in (
+            {"input_tokens": 10, "cached_input_tokens": 11},
+            {"output_tokens": 10, "reasoning_output_tokens": 11},
+            {"command_calls": 2, "failed_commands": 3},
+        ):
+            try:
+                store.append_producer("mission-schema-reject", {
+                    "schema_version": 1, "mission_id": "mission-schema-reject",
+                    "type": "worker.upsert", "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"schema:cross:{sorted(payload.items())}"},
+                    "payload": {"worker_id": "w1", "status": "completed", **payload},
+                })
+                raise AssertionError(f"invalid telemetry relation {payload} was accepted")
+            except missions.MissionError:
+                pass
 
 
 def test_accepted_schema_project_label_repository() -> None:
@@ -3443,3 +3465,7 @@ def test_accepted_schema_project_label_repository() -> None:
             raise AssertionError("invalid project_repository was accepted")
         except missions.MissionError:
             pass
+
+
+if __name__ == "__main__":
+    main()

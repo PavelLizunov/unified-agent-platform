@@ -1240,6 +1240,14 @@ class FlowContractTests(unittest.TestCase):
                 "effort": "xhigh",
                 "sandbox_policy": {"type": "workspace-write", "network_access": False},
             }},
+            {"type": "event_msg", "payload": {
+                "type": "token_count",
+                "info": {"last_token_usage": {"input_tokens": 8}},
+            }},
+            {"type": "event_msg", "payload": {
+                "type": "token_count",
+                "info": {"last_token_usage": {"input_tokens": 10}},
+            }},
         ]
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
             for event in events:
@@ -1259,6 +1267,8 @@ class FlowContractTests(unittest.TestCase):
                     reasoning_effort="xhigh",
                     rollout=rollout, sandbox="workspace-write", worktree=".", head="aaa",
                 )
+                self.assertEqual(2, result["model_requests"])
+                self.assertEqual(10, result["max_request_input_tokens"])
                 with self.assertRaisesRegex(flow.ContractError, "runtime model mismatch"):
                     flow.summarize_codex_events(
                         path, component="author", model="gpt-5.6-luna",

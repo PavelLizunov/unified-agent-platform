@@ -8909,7 +8909,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "default_sha": "dsha", "candidate_files": ["src/a.py"],
                 "author_telemetry": {
                     "model": "gpt-5.6-sol", "reasoning_effort": "xhigh",
-                    "usage": {"input_tokens": 1000, "output_tokens": 200},
+                    "usage": {
+                        "input_tokens": 1000, "cached_input_tokens": 800,
+                        "output_tokens": 200, "reasoning_output_tokens": 120,
+                    },
+                    "model_requests": 7, "max_request_input_tokens": 300,
+                    "failed_commands": 2,
+                    "tool_calls": {"command_execution": 11, "web_search": 3},
                 },
                 "author_summary": {
                     "owner_result": "Implemented and verified the requested change."
@@ -8936,7 +8942,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("gpt-5.6-sol", author["payload"]["model"])
             self.assertEqual("xhigh", author["payload"]["effort"])
             self.assertEqual(1000, author["payload"]["input_tokens"])
+            self.assertEqual(800, author["payload"]["cached_input_tokens"])
             self.assertEqual(200, author["payload"]["output_tokens"])
+            self.assertEqual(120, author["payload"]["reasoning_output_tokens"])
+            self.assertEqual(7, author["payload"]["model_requests"])
+            self.assertEqual(300, author["payload"]["max_request_input_tokens"])
+            self.assertEqual(11, author["payload"]["command_calls"])
+            self.assertEqual(2, author["payload"]["failed_commands"])
+            self.assertEqual(3, author["payload"]["web_search_calls"])
             self.assertEqual("gpt-5.6-terra", reviewer["payload"]["model"])
             self.assertEqual(500, reviewer["payload"]["input_tokens"])
             self.assertNotIn("output_tokens", reviewer["payload"])

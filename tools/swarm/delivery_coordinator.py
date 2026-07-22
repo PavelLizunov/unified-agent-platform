@@ -5062,10 +5062,26 @@ class DeliveryCoordinator:
             payload["effort"] = effort
         usage = telemetry.get("usage")
         if isinstance(usage, dict):
-            for field in ("input_tokens", "output_tokens"):
+            for field in (
+                "input_tokens", "cached_input_tokens", "output_tokens",
+                "reasoning_output_tokens",
+            ):
                 value = usage.get(field)
                 if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                     payload[field] = value
+        for field in ("model_requests", "max_request_input_tokens", "failed_commands"):
+            value = telemetry.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                payload[field] = value
+        tool_calls = telemetry.get("tool_calls")
+        if isinstance(tool_calls, dict):
+            for target, source in (
+                ("command_calls", "command_execution"),
+                ("web_search_calls", "web_search"),
+            ):
+                value = tool_calls.get(source)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    payload[target] = value
         return {"type": "worker.upsert", "payload": payload}
 
     def _events(self, state: dict[str, Any], *, cleanup: bool) -> list[dict[str, Any]]:
