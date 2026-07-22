@@ -46,7 +46,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v80-russian-voice-error"
+        "v81-project-notification-targets"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -70,6 +70,8 @@ def main() -> None:
         "UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions"
         in managed_config
     )
+    assert "HERMES_MISSION_TELEGRAM_CHAT_ID=-1004377555987" in managed_config
+    assert "HERMES_MISSION_TELEGRAM_THREAD_ID=2" in managed_config
     assert (
         "cp /opt/hermes/hermes_cli/kanban.py "
         "/mission-runtime/root/hermes_cli/kanban.py"

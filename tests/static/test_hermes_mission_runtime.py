@@ -458,7 +458,7 @@ def test_notification_can_repeat_after_delivery_before_checkpoint() -> None:
     asyncio.run(scenario())
 
 
-def test_notification_checkpoint_cannot_cross_a_mission_rebind() -> None:
+def test_notification_checkpoint_isolated_across_a_mission_rebind() -> None:
     async def scenario() -> None:
         with tempfile.TemporaryDirectory() as temp:
             store = missions.MissionStore(Path(temp) / "missions.sqlite3")
@@ -514,10 +514,10 @@ def test_notification_checkpoint_cannot_cross_a_mission_rebind() -> None:
                 stale_sends.append(text)
 
             try:
-                assert await missions.notify_subscribers(store, old_event, sender) == 0
+                assert await missions.notify_subscribers(store, old_event, sender) == 1
             finally:
                 store.pending_subscriptions = pending_subscriptions
-            assert stale_sends == []
+            assert len(stale_sends) == 1
 
             pending = store.pending_subscriptions(new_mission, old_event["sequence"])
             assert len(pending) == 1 and pending[0]["last_notified_sequence"] == 0
@@ -2476,6 +2476,14 @@ def test_terminal_retention_preserves_recent_and_bound_missions() -> None:
                 },
             )
         store.bind("mission-retention-2", "telegram", "42")
+        terminal_sequence = store.projection("mission-retention-2")["sequence"]
+        subscription = store.pending_subscriptions(
+            "mission-retention-2", terminal_sequence
+        )[0]
+        token = store.claim_notification(subscription, terminal_sequence)
+        assert token and store.finish_notification(
+            subscription, terminal_sequence, token, delivered=True
+        )
         store.bind("mission-retention-1", "telegram", "42")
 
         assert store.prune_terminal(keep=2) == 1
@@ -2706,7 +2714,7 @@ def test_terminal_notification_outbox_survives_lease_and_restart() -> None:
             connection = sqlite3.connect(database)
             try:
                 connection.execute(
-                    """UPDATE mission_subscriptions
+                    """UPDATE mission_notification_targets
                        SET notification_lease_until = 0
                        WHERE mission_id = ?""",
                     (mission_id,),
@@ -2865,6 +2873,12 @@ def test_existing_subscription_table_gets_notification_lease_columns() -> None:
                        PRIMARY KEY (platform, chat_id, thread_id)
                    )"""
             )
+            connection.execute(
+                """INSERT INTO mission_subscriptions(
+                       platform, chat_id, thread_id, mission_id,
+                       last_notified_sequence
+                   ) VALUES ('telegram', '42', '7', 'mission-existing', 9)"""
+            )
             connection.commit()
         finally:
             connection.close()
@@ -2881,6 +2895,92 @@ def test_existing_subscription_table_gets_notification_lease_columns() -> None:
             "notification_lease_sequence",
             "notification_lease_until",
         } <= columns
+        connection = sqlite3.connect(database)
+        try:
+            target_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(mission_notification_targets)"
+                )
+            }
+        finally:
+            connection.close()
+        assert {
+            "platform", "chat_id", "thread_id", "mission_id",
+            "last_notified_sequence", "notification_lease",
+            "notification_lease_sequence", "notification_lease_until",
+        } <= target_columns
+        connection = sqlite3.connect(database)
+        try:
+            assert connection.execute(
+                """SELECT mission_id, last_notified_sequence
+                   FROM mission_notification_targets
+                   WHERE platform = 'telegram' AND chat_id = '42' AND thread_id = '7'"""
+            ).fetchone() == ("mission-existing", 9)
+        finally:
+            connection.close()
+
+
+def test_workspace_mission_uses_default_telegram_target_without_stealing_binding() -> None:
+    async def scenario() -> None:
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+            os.environ,
+            {
+                "HERMES_MISSION_TELEGRAM_CHAT_ID": "-10042",
+                "HERMES_MISSION_TELEGRAM_THREAD_ID": "7",
+            },
+            clear=True,
+        ):
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            source_key_sha = hashlib.sha256(b"workspace:session:message").hexdigest()
+            mission_id = f"mission-intake-{source_key_sha[:32]}"
+            store.accept(
+                "Deliver from Workspace",
+                mission_id=mission_id,
+                project_id="local-llm-lab",
+                project_label="Local LLM Evaluation Lab",
+                project_repository="PavelLizunov/local-llm-evaluation-lab",
+                input_platform="workspace",
+                input_source_key_sha256=source_key_sha,
+                input_source_message_sha256=hashlib.sha256(b"goal").hexdigest(),
+            )
+            assert store.bound_mission("telegram", "-10042", "7") is None
+            assert store.channel_evidence(mission_id)["telegram"] == {
+                "subscriber_count": 1,
+                "cursor": 0,
+                "projection_id": None,
+            }
+
+            other = "mission-other-project"
+            store.accept("Deliver another project", mission_id=other)
+            store.bind(other, "telegram", "-10042", "7")
+            assert store.bound_mission("telegram", "-10042", "7") == other
+
+            event, _ = store.append_central(
+                mission_id,
+                {
+                    "schema_version": 1,
+                    "mission_id": mission_id,
+                    "type": "mission.stage",
+                    "source": "central-hermes",
+                    "correlation": {},
+                    "payload": {"stage": "testing", "progress_percent": 50},
+                },
+            )
+            sent: list[str] = []
+
+            async def send(_target: dict, text: str) -> None:
+                sent.append(text)
+
+            assert await missions.notify_subscribers(store, event, send) == 1
+            assert len(sent) == 1
+            assert sent[0].startswith(
+                "#local_llm_lab · Local LLM Evaluation Lab "
+                "(PavelLizunov/local-llm-evaluation-lab)"
+            )
+            assert store.channel_evidence(mission_id)["telegram"]["cursor"] == 2
+
+    asyncio.run(scenario())
 
 
 def test_repair_mission_inherits_and_restores_telegram_binding() -> None:
@@ -3254,7 +3354,7 @@ def main() -> None:
     test_producer_retry_and_notification_checkpoint_are_idempotent()
     test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
     test_notification_can_repeat_after_delivery_before_checkpoint()
-    test_notification_checkpoint_cannot_cross_a_mission_rebind()
+    test_notification_checkpoint_isolated_across_a_mission_rebind()
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
     test_registered_owner_intake_is_deterministic_and_fail_closed()
@@ -3283,6 +3383,7 @@ def main() -> None:
     test_terminal_retention_preserves_active_repair_chain()
     test_terminal_retention_preserves_parent_until_repair_notification()
     test_existing_subscription_table_gets_notification_lease_columns()
+    test_workspace_mission_uses_default_telegram_target_without_stealing_binding()
     test_repair_mission_inherits_and_restores_telegram_binding()
     test_terminal_failure_contracts_include_preserved_pr_ci_and_post_verify()
     test_failure_terminal_commits_before_telegram_and_retries_delivery()

@@ -1064,12 +1064,23 @@ def _headline(view: dict[str, Any]) -> str:
     return f"Задача {_short_mission_id(view.get('mission_id'))}"
 
 
+def _project_tag(view: dict[str, Any]) -> str | None:
+    """Return a searchable Telegram hashtag from trusted catalog identity."""
+    project_id = view.get("project_id")
+    if not isinstance(project_id, str):
+        return None
+    tag = re.sub(r"[^A-Za-z0-9_]", "_", project_id).strip("_")
+    return f"#{tag}" if tag else None
+
+
 def telegram_text(view: dict[str, Any]) -> str:
     """Render the compact Telegram view from the exact Workspace projection."""
     status = view.get("status") or "unknown"
     stage = view.get("stage") or "unknown"
+    headline = _headline(view)
+    project_tag = _project_tag(view)
     lines = [
-        _headline(view),
+        f"{project_tag} · {headline}" if project_tag else headline,
         f"ID: {_short_mission_id(view.get('mission_id'))}",
         f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
         f"Статус: {_STATUS_LABELS.get(status, status)}",
@@ -1478,6 +1489,17 @@ class MissionStore:
                     notification_lease_until REAL NOT NULL DEFAULT 0,
                     PRIMARY KEY (platform, chat_id, thread_id)
                 );
+                CREATE TABLE IF NOT EXISTS mission_notification_targets (
+                    platform TEXT NOT NULL,
+                    chat_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    mission_id TEXT NOT NULL,
+                    last_notified_sequence INTEGER NOT NULL DEFAULT 0,
+                    notification_lease TEXT,
+                    notification_lease_sequence INTEGER NOT NULL DEFAULT 0,
+                    notification_lease_until REAL NOT NULL DEFAULT 0,
+                    PRIMARY KEY (platform, chat_id, thread_id, mission_id)
+                );
                 CREATE TABLE IF NOT EXISTS mission_subscription_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     platform TEXT NOT NULL,
@@ -1568,6 +1590,20 @@ class MissionStore:
                     """ALTER TABLE mission_subscriptions
                        ADD COLUMN notification_lease_until REAL NOT NULL DEFAULT 0"""
                 )
+            # Existing channel bindings remain the current mission for ordinary
+            # answers. Notification cursors become many-to-many so concurrent
+            # project missions cannot displace one another's updates.
+            connection.execute(
+                """INSERT OR IGNORE INTO mission_notification_targets(
+                       platform, chat_id, thread_id, mission_id,
+                       last_notified_sequence, notification_lease,
+                       notification_lease_sequence, notification_lease_until
+                   )
+                   SELECT platform, chat_id, thread_id, mission_id,
+                          last_notified_sequence, notification_lease,
+                          notification_lease_sequence, notification_lease_until
+                   FROM mission_subscriptions"""
+            )
             onboarding_columns = {
                 row["name"]
                 for row in connection.execute(
@@ -1592,6 +1628,32 @@ class MissionStore:
             "correlation": json.loads(row["correlation_json"]),
             "payload": json.loads(row["payload_json"]),
         }
+
+    @staticmethod
+    def _watch_target(
+        connection: sqlite3.Connection,
+        mission_id: str,
+        platform: str,
+        chat_id: str,
+        thread_id: str,
+    ) -> None:
+        connection.execute(
+            """INSERT INTO mission_notification_targets(
+                   platform, chat_id, thread_id, mission_id
+               ) VALUES (?, ?, ?, ?)
+               ON CONFLICT(platform, chat_id, thread_id, mission_id) DO NOTHING""",
+            (platform, chat_id, thread_id, mission_id),
+        )
+
+    @staticmethod
+    def _default_workspace_telegram_target() -> tuple[str, str] | None:
+        chat_id = os.environ.get("HERMES_MISSION_TELEGRAM_CHAT_ID", "").strip()
+        thread_id = os.environ.get("HERMES_MISSION_TELEGRAM_THREAD_ID", "").strip()
+        if not chat_id:
+            return None
+        if len(chat_id) > 256 or len(thread_id) > 256:
+            raise MissionError("invalid default Telegram notification target")
+        return chat_id, thread_id
 
     def events(self, mission_id: str, after: int = 0) -> list[dict[str, Any]]:
         mission_id = _require_id(mission_id, "mission_id")
@@ -1822,7 +1884,7 @@ class MissionStore:
         view = self.projection(mission_id)
         with self._db() as connection:
             rows = connection.execute(
-                """SELECT last_notified_sequence FROM mission_subscriptions
+                """SELECT last_notified_sequence FROM mission_notification_targets
                    WHERE mission_id = ? AND platform = 'telegram'""",
                 (mission_id,),
             ).fetchall()
@@ -2143,6 +2205,14 @@ class MissionStore:
             row["mission_id"]
             for row in connection.execute("SELECT mission_id FROM mission_subscriptions")
         }
+        protected.update(
+            row["mission_id"]
+            for row in connection.execute(
+                "SELECT mission_id, last_notified_sequence FROM mission_notification_targets"
+            )
+            if row["mission_id"] in views
+            and row["last_notified_sequence"] < views[row["mission_id"]]["sequence"]
+        )
         for mission_id, view in views.items():
             parent = view.get("parent_mission_id")
             # A terminal repair keeps the Telegram binding until its terminal
@@ -2177,6 +2247,10 @@ class MissionStore:
             )
             connection.execute(
                 "DELETE FROM mission_events WHERE mission_id = ?", (mission_id,)
+            )
+            connection.execute(
+                "DELETE FROM mission_notification_targets WHERE mission_id = ?",
+                (mission_id,),
             )
             connection.execute(
                 "DELETE FROM mission_intake_selection_receipts WHERE mission_id = ?",
@@ -3064,12 +3138,21 @@ class MissionStore:
         now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
             rows = connection.execute(
-                """SELECT * FROM mission_subscriptions
-                   WHERE mission_id = ? AND platform = 'telegram'""",
+                """SELECT subscriptions.*,
+                          COALESCE(targets.notification_lease_until, 0)
+                              AS target_notification_lease_until
+                   FROM mission_subscriptions AS subscriptions
+                   LEFT JOIN mission_notification_targets AS targets
+                     ON targets.platform = subscriptions.platform
+                    AND targets.chat_id = subscriptions.chat_id
+                    AND targets.thread_id = subscriptions.thread_id
+                    AND targets.mission_id = subscriptions.mission_id
+                   WHERE subscriptions.mission_id = ?
+                     AND subscriptions.platform = 'telegram'""",
                 (parent_mission_id,),
             ).fetchall()
             if rows:
-                if any(row["notification_lease_until"] > now for row in rows):
+                if any(row["target_notification_lease_until"] > now for row in rows):
                     raise MissionError("repair parent notification in progress")
                 return
             inherited = connection.execute(
@@ -3124,8 +3207,17 @@ class MissionStore:
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
-                """SELECT * FROM mission_subscriptions
-                   WHERE mission_id = ? AND platform = 'telegram'""",
+                """SELECT subscriptions.*,
+                          COALESCE(targets.notification_lease_until, 0)
+                              AS target_notification_lease_until
+                   FROM mission_subscriptions AS subscriptions
+                   LEFT JOIN mission_notification_targets AS targets
+                     ON targets.platform = subscriptions.platform
+                    AND targets.chat_id = subscriptions.chat_id
+                    AND targets.thread_id = subscriptions.thread_id
+                    AND targets.mission_id = subscriptions.mission_id
+                   WHERE subscriptions.mission_id = ?
+                     AND subscriptions.platform = 'telegram'""",
                 (parent_mission_id,),
             ).fetchall()
             if not rows:
@@ -3147,9 +3239,19 @@ class MissionStore:
                     ),
                 ).fetchone()
                 if current:
+                    for row in connection.execute(
+                        """SELECT platform, chat_id, thread_id
+                           FROM mission_subscriptions
+                           WHERE mission_id = ? AND platform = 'telegram'""",
+                        (child_mission_id,),
+                    ).fetchall():
+                        self._watch_target(
+                            connection, child_mission_id,
+                            row["platform"], row["chat_id"], row["thread_id"],
+                        )
                     return
                 raise MissionError("repair parent has no Telegram subscription")
-            if any(row["notification_lease_until"] > now for row in rows):
+            if any(row["target_notification_lease_until"] > now for row in rows):
                 raise MissionError("repair parent notification in progress")
             for row in rows:
                 updated = connection.execute(
@@ -3167,6 +3269,10 @@ class MissionStore:
                 )
                 if updated.rowcount != 1:
                     raise MissionError("repair subscription inheritance lost its binding")
+                self._watch_target(
+                    connection, child_mission_id,
+                    row["platform"], row["chat_id"], row["thread_id"],
+                )
                 self._subscription_history(
                     connection, row, parent_mission_id, child_mission_id,
                     "repair-inherit", child_mission_id,
@@ -3196,6 +3302,10 @@ class MissionStore:
             )
             if updated.rowcount != 1:
                 raise MissionError("repair subscription restoration lost its binding")
+            self._watch_target(
+                connection, parent_mission_id,
+                row["platform"], row["chat_id"], row["thread_id"],
+            )
             self._subscription_history(
                 connection, row, child_mission_id, parent_mission_id,
                 "repair-restore", child_mission_id,
@@ -3270,7 +3380,7 @@ class MissionStore:
             if not previous:
                 raise MissionError("mission not found")
             telegram = connection.execute(
-                """SELECT last_notified_sequence FROM mission_subscriptions
+                """SELECT last_notified_sequence FROM mission_notification_targets
                    WHERE mission_id = ? AND platform = 'telegram'""",
                 (mission_id,),
             ).fetchall()
@@ -3311,7 +3421,7 @@ class MissionStore:
                 if dispatch_profile is not None and profile != dispatch_profile:
                     continue
                 if connection.execute(
-                    """SELECT 1 FROM mission_subscriptions
+                    """SELECT 1 FROM mission_notification_targets
                        WHERE mission_id = ? AND platform = 'telegram'
                          AND last_notified_sequence < ? LIMIT 1""",
                     (terminal["mission_id"], terminal["sequence"]),
@@ -3444,7 +3554,39 @@ class MissionStore:
                     producer_id,
                 ),
             )
+            if (
+                event["type"] == "mission.accepted"
+                and event["payload"].get("input_platform") == "workspace"
+            ):
+                target = self._default_workspace_telegram_target()
+                if target is not None:
+                    self._watch_target(
+                        connection, mission_id, "telegram", target[0], target[1]
+                    )
         return event, True
+
+    def watch(
+        self,
+        mission_id: str,
+        platform: str,
+        chat_id: str,
+        thread_id: str | None = None,
+    ) -> None:
+        """Idempotently add a notification recipient without changing answer routing."""
+        mission_id = _require_id(mission_id, "mission_id")
+        platform = _require_id(platform, "platform")
+        chat_id = str(chat_id or "").strip()
+        thread_id = str(thread_id or "").strip()
+        if not chat_id or len(chat_id) > 256 or len(thread_id) > 256:
+            raise MissionError("invalid mission notification target")
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if not connection.execute(
+                "SELECT 1 FROM mission_events WHERE mission_id = ? LIMIT 1",
+                (mission_id,),
+            ).fetchone():
+                raise MissionError("mission not found")
+            self._watch_target(connection, mission_id, platform, chat_id, thread_id)
 
     def bind(
         self,
@@ -3473,12 +3615,26 @@ class MissionStore:
                 raise MissionError("mission not found")
             project([self._row(row) for row in rows])
             current = connection.execute(
-                """SELECT mission_id, last_notified_sequence, notification_lease_until
-                   FROM mission_subscriptions
-                   WHERE platform = ? AND chat_id = ? AND thread_id = ?""",
+                """SELECT subscriptions.mission_id,
+                          COALESCE(targets.last_notified_sequence, 0)
+                              AS last_notified_sequence,
+                          COALESCE(targets.notification_lease_until, 0)
+                              AS notification_lease_until
+                   FROM mission_subscriptions AS subscriptions
+                   LEFT JOIN mission_notification_targets AS targets
+                     ON targets.platform = subscriptions.platform
+                    AND targets.chat_id = subscriptions.chat_id
+                    AND targets.thread_id = subscriptions.thread_id
+                    AND targets.mission_id = subscriptions.mission_id
+                   WHERE subscriptions.platform = ?
+                     AND subscriptions.chat_id = ?
+                     AND subscriptions.thread_id = ?""",
                 (platform, chat_id, thread_id),
             ).fetchone()
             if current and current["mission_id"] == mission_id:
+                self._watch_target(
+                    connection, mission_id, platform, chat_id, thread_id
+                )
                 return
             if current and reason == "owner-intake":
                 target_order = connection.execute(
@@ -3529,6 +3685,7 @@ class MissionStore:
                        notification_lease_until = 0""",
                 (platform, chat_id, thread_id, mission_id),
             )
+            self._watch_target(connection, mission_id, platform, chat_id, thread_id)
             self._subscription_history(
                 connection,
                 {"platform": platform, "chat_id": chat_id, "thread_id": thread_id},
@@ -3556,7 +3713,7 @@ class MissionStore:
             if not isinstance(parent_mission_id, str):
                 return
             if connection.execute(
-                """SELECT 1 FROM mission_subscriptions
+                """SELECT 1 FROM mission_notification_targets
                    WHERE mission_id = ? AND platform = 'telegram'
                      AND last_notified_sequence < ? LIMIT 1""",
                 (mission_id, view["sequence"]),
@@ -3586,7 +3743,7 @@ class MissionStore:
     def pending_subscriptions(self, mission_id: str, sequence: int) -> list[dict[str, Any]]:
         with self._db() as connection:
             rows = connection.execute(
-                """SELECT * FROM mission_subscriptions
+                """SELECT * FROM mission_notification_targets
                    WHERE mission_id = ? AND last_notified_sequence < ?""",
                 (mission_id, sequence),
             ).fetchall()
@@ -3597,7 +3754,7 @@ class MissionStore:
         now = datetime.now(timezone.utc).timestamp()
         with self._db() as connection:
             updated = connection.execute(
-                """UPDATE mission_subscriptions
+                """UPDATE mission_notification_targets
                    SET notification_lease = ?, notification_lease_sequence = ?,
                        notification_lease_until = ?
                    WHERE platform = ? AND chat_id = ? AND thread_id = ?
@@ -3629,7 +3786,7 @@ class MissionStore:
         with self._db() as connection:
             if delivered:
                 updated = connection.execute(
-                    """UPDATE mission_subscriptions
+                    """UPDATE mission_notification_targets
                        SET last_notified_sequence = ?,
                            notification_lease = NULL,
                            notification_lease_sequence = 0,
@@ -3649,7 +3806,7 @@ class MissionStore:
                 )
             else:
                 updated = connection.execute(
-                    """UPDATE mission_subscriptions
+                    """UPDATE mission_notification_targets
                        SET notification_lease = NULL,
                            notification_lease_sequence = 0,
                            notification_lease_until = 0
@@ -3668,7 +3825,7 @@ class MissionStore:
             if updated.rowcount == 1:
                 return True
             current = connection.execute(
-                """SELECT last_notified_sequence FROM mission_subscriptions
+                """SELECT last_notified_sequence FROM mission_notification_targets
                    WHERE platform = ? AND chat_id = ? AND thread_id = ?
                      AND mission_id = ?""",
                 (
