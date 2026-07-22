@@ -19,6 +19,7 @@ PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
 PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
 PREVIOUS_PROJECT_CATALOG_UI_COMMIT = "95343b3ba3891c15dd80d9b911c66c013dcada69"
 PREVIOUS_HIDE_COMMIT = "99a55da4c93b4d861241237b12bda05a8916ecf2"
+PREVIOUS_SETUP_BINDING_COMMIT = "f60af5edd278e0886b7b0d531c189f78b698838a"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -301,6 +302,42 @@ def main() -> None:
         previous_sessions_checked = run(clone, "--check")
         assert previous_sessions_checked.returncode == 0
         assert "src/routes/api/sessions.ts: exact-patched" in previous_sessions_checked.stdout
+
+        production_previous_script = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_SETUP_BINDING_COMMIT}:tools/hermes-workspace/apply_overlay.py",
+            ],
+            cwd=REPO_ROOT,
+            text=True,
+            encoding="utf-8",
+        )
+        production_previous_namespace = {
+            "__name__": "production_previous_workspace_overlay",
+            "__file__": str(TOOL),
+        }
+        exec(
+            compile(production_previous_script, "production_previous_workspace_overlay.py", "exec"),
+            production_previous_namespace,
+        )
+        upstream_sessions = subprocess.check_output(
+            ["git", "show", f"{COMMIT}:src/routes/api/sessions.ts"],
+            cwd=clone,
+            text=True,
+            encoding="utf-8",
+        )
+        production_previous_sessions = production_previous_namespace["transform"](
+            "src/routes/api/sessions.ts",
+            upstream_sessions,
+        )
+        sessions_path.write_text(production_previous_sessions, encoding="utf-8")
+        production_previous_hash = hashlib.sha256(sessions_path.read_bytes()).hexdigest()
+        assert production_previous_hash == (
+            "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c"
+        ), production_previous_hash
+        production_previous_upgrade = run(clone)
+        assert production_previous_upgrade.returncode == 0, production_previous_upgrade.stderr
+        assert "src/routes/api/sessions.ts: exact-patched" in run(clone, "--check").stdout
 
         send_stream = (clone / "src/routes/api/send-stream.ts").read_text()
         central_stream = send_stream.index("if (CENTRAL_ONLY) {\n          chatMode = 'enhanced-claude'")
