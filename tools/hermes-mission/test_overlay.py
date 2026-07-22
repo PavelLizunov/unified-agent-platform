@@ -120,6 +120,10 @@ def main() -> None:
         assert 'CommandDef("help", "Показать короткую справку"' in commands
         assert 'if canonical == "mission"' in gateway
         assert 'if canonical == "projects"' in gateway
+        assert (
+            "session_entry = self.session_store.get_or_create_session(source)\n"
+            '            source_message_id = str(event.message_id or "").strip()'
+        ) in gateway
         assert "Проекты в GitHub" in gateway
         assert "профиль проверок готовится" in gateway
         assert "Hermes сам создаст задачу" in gateway

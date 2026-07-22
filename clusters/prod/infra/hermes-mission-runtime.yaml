@@ -33,7 +33,7 @@ data:
         "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-        "gateway/run.py": "858f18c6864240f1797c2f5d23a71f5933625c24f406f7b177ae7db0bcc3ad9b",
+        "gateway/run.py": "d44db58f782550a9919e3535c8379d2541479f98bd83c04f37ead4d972cc7470",
         "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
@@ -727,6 +727,7 @@ data:
                     media_topic_pairs,
                 )
 
+                session_entry = self.session_store.get_or_create_session(source)
                 source_message_id = str(event.message_id or "").strip()
                 store = MissionStore.default()
                 try:
