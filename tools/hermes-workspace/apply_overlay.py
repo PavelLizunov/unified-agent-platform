@@ -769,7 +769,7 @@ def upgrade_legacy(rel, text):
 
 def upgrade_previous(rel, text):
     if rel == "src/routes/api/sessions.ts":
-        if "if (capabilities.dashboard.available && !capabilities.enhancedChat)" in text:
+        if "if (CENTRAL_ONLY) {\n              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE" in text:
             text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {
             if (CENTRAL_ONLY) {
               return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE }, { status: 503 })
