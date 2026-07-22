@@ -49,8 +49,19 @@ class VpnctldDeployContractTests(unittest.TestCase):
         self.assertIn("flock -x 9", installer)
         self.assertIn("installed_artifact_sha", installer)
         self.assertIn("tar --sort=name", installer)
-        self.assertIn("rollback", installer)
+        self.assertIn("restore_backup", installer)
+        self.assertIn("systemctl stop vpnctld", installer)
+        self.assertIn("mv -f \"$TEMP_BINARY\" /opt/vpnctl/vpnctld", installer)
+        self.assertIn("--retry-connrefused", installer)
+        self.assertIn("rollback verification failed", installer)
         self.assertIn("http://127.0.0.1:18402/api/v1/health", installer)
+        activation = installer.index('install_binary "$NEW_BIN"')
+        self.assertLess(installer.rindex("systemctl stop vpnctld", 0, activation), activation)
+        restore = installer.index("restore_backup()")
+        self.assertLess(
+            installer.index("systemctl stop vpnctld", restore),
+            installer.index('install_binary "$BACKUP/vpnctld"', restore),
+        )
 
 
 if __name__ == "__main__":

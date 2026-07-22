@@ -28,6 +28,10 @@ flock -x 9
 STATE_DIR=/var/lib/vpnctl
 RECORD=$STATE_DIR/uap-deployment-v1
 HEALTH=http://127.0.0.1:18402/api/v1/health
+health_ready() {
+  curl -fsS --retry 12 --retry-connrefused --retry-delay 2 \
+    --connect-timeout 2 --max-time 40 "$HEALTH" >/dev/null
+}
 installed_artifact_sha() {
   tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
     -cf - -C /opt/vpnctl vpnctld assets | sha256sum | awk '{print $1}'
@@ -59,27 +63,55 @@ NEW_BIN=$BUILD/target/release/vpnctld
 BACKUP=$(mktemp -d /opt/vpnctl/.uap-rollback.XXXXXX)
 cp -a /opt/vpnctl/vpnctld "$BACKUP/vpnctld"
 cp -a /opt/vpnctl/assets "$BACKUP/assets"
-rollback() {
-  cp -a "$BACKUP/vpnctld" /opt/vpnctl/vpnctld
-  rm -rf /opt/vpnctl/assets
-  cp -a "$BACKUP/assets" /opt/vpnctl/assets
-  systemctl restart vpnctld || true
+install_binary() {
+  SOURCE=$1
+  TEMP_BINARY=/opt/vpnctl/.vpnctld.uap.$$
+  rm -f "$TEMP_BINARY"
+  install -o root -g root -m 0755 "$SOURCE" "$TEMP_BINARY" || return 1
+  mv -f "$TEMP_BINARY" /opt/vpnctl/vpnctld
 }
-trap 'rollback' EXIT HUP INT TERM
+restore_backup() {
+  trap - EXIT HUP INT TERM
+  systemctl stop vpnctld || true
+  install_binary "$BACKUP/vpnctld" || return 1
+  rm -rf /opt/vpnctl/assets.restore
+  cp -a "$BACKUP/assets" /opt/vpnctl/assets.restore || return 1
+  rm -rf /opt/vpnctl/assets
+  mv /opt/vpnctl/assets.restore /opt/vpnctl/assets || return 1
+  systemctl start vpnctld || return 1
+  health_ready
+}
+rollback_exit() {
+  STATUS=$?
+  trap - EXIT HUP INT TERM
+  restore_backup || true
+  exit "$STATUS"
+}
+rollback_signal() {
+  trap - EXIT HUP INT TERM
+  restore_backup || true
+  exit 2
+}
+trap rollback_exit EXIT
+trap rollback_signal HUP INT TERM
 
-install -o root -g root -m 0755 "$NEW_BIN" /opt/vpnctl/vpnctld
 rm -rf /opt/vpnctl/assets.new
 cp -a "$BUILD/daemon/assets" /opt/vpnctl/assets.new
 chown -R root:root /opt/vpnctl/assets.new
 find /opt/vpnctl/assets.new -type d -exec chmod 0755 {} +
 find /opt/vpnctl/assets.new -type f -exec chmod 0644 {} +
+systemctl stop vpnctld
+install_binary "$NEW_BIN"
 rm -rf /opt/vpnctl/assets
 mv /opt/vpnctl/assets.new /opt/vpnctl/assets
-if ! systemctl restart vpnctld || ! curl -fsS --retry 12 --retry-delay 2 --max-time 10 "$HEALTH" >/dev/null; then
-  rollback
-  trap - EXIT HUP INT TERM
-  rm -rf "$BACKUP"
-  printf '%s\n' "vpnctld-install: activation failed and was rolled back" >&2
+if ! systemctl start vpnctld || ! health_ready; then
+  if restore_backup; then
+    rm -rf "$BACKUP" "$BUILD"
+    rm -f "$ARCHIVE"
+    printf '%s\n' "vpnctld-install: activation failed and was rolled back" >&2
+  else
+    printf '%s\n' "vpnctld-install: activation failed and rollback verification failed" >&2
+  fi
   exit 2
 fi
 trap - EXIT HUP INT TERM
