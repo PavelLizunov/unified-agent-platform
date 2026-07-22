@@ -102,10 +102,11 @@ def main() -> None:
         second = run(clone)
         assert second.returncode == 0 and "overlay already applied" in second.stdout, second.stderr
         checked = run(clone, "--check")
-        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 8, checked.stderr
+        assert checked.returncode == 0 and checked.stdout.count("exact-patched") == 9, checked.stderr
 
         commands = (clone / "hermes_cli/commands.py").read_text(encoding="utf-8")
         gateway = (clone / "gateway/run.py").read_text(encoding="utf-8")
+        telegram = (clone / "plugins/platforms/telegram/adapter.py").read_text(encoding="utf-8")
         api = (clone / "gateway/platforms/api_server.py").read_text(encoding="utf-8")
         kanban_cli = (clone / "hermes_cli/kanban.py").read_text(encoding="utf-8")
         kanban = (clone / "hermes_cli/kanban_db.py").read_text(encoding="utf-8")
@@ -209,6 +210,10 @@ def main() -> None:
         assert "store.ingest_owner_turn(" in gateway
         assert "_enrich_message_with_transcription(" in gateway
         assert "event.message_type in (MessageType.VOICE, MessageType.AUDIO)" in gateway
+        assert 'getattr(event, "_uap_media_download_failed", False)' in gateway
+        assert "download_telegram_file(msg.voice)" in telegram
+        assert "download_telegram_file(msg.audio)" in telegram
+        assert "event._uap_media_download_failed = True" in telegram
         assert "candidate.parent == audio_cache" in gateway
         assert "candidate.unlink()" in gateway
         assert "len(transcripts) != len(audio_paths)" in gateway
@@ -653,6 +658,7 @@ def main() -> None:
             "hermes_cli/main.py",
             "gateway/run.py",
             "gateway/platforms/api_server.py",
+            "plugins/platforms/telegram/adapter.py",
         ):
             target = image_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -662,7 +668,7 @@ def main() -> None:
         image_apply = run(image_root, "--source-commit", COMMIT)
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
-        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 8
+        assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 9
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")

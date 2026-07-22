@@ -310,7 +310,7 @@ export function MissionOverviewCard() {
           >
             {missions.map((item) => (
               <option key={item.mission_id} value={item.mission_id}>
-                {item.mission_id}
+                {item.project_label || item.project_repository?.split('/').pop() || 'Задача'} · {(item.goal || '').replace(/\s+/g, ' ').slice(0, 48)} · {stageLabels[item.stage] || item.stage} {item.progress_percent}% · {item.mission_id.slice(-8)}
               </option>
             ))}
           </select>

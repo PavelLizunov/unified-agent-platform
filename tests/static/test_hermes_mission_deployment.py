@@ -35,6 +35,7 @@ def main() -> None:
         "mountPath: /opt/hermes/hermes_cli/kanban.py",
         "mountPath: /opt/hermes/gateway/run.py",
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
+        "mountPath: /opt/hermes/plugins/platforms/telegram/adapter.py",
     ):
         assert fragment in deployment, fragment
 
@@ -45,7 +46,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v78-detailed-progress"
+        "v79-voice-download-retry"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -80,6 +81,14 @@ def main() -> None:
     assert (
         "cp /mission-runtime/root/hermes_cli/uap_media.py "
         "/mission-runtime/uap_media.py"
+    ) in bootstrap_script
+    assert (
+        "cp /opt/hermes/plugins/platforms/telegram/adapter.py "
+        "/mission-runtime/root/plugins/platforms/telegram/adapter.py"
+    ) in bootstrap_script
+    assert (
+        "cp /mission-runtime/root/plugins/platforms/telegram/adapter.py "
+        "/mission-runtime/telegram_adapter.py"
     ) in bootstrap_script
     assert (
         "cp /opt/hermes/hermes_cli/kanban_db.py "
@@ -324,6 +333,12 @@ def main() -> None:
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/main.py",
         "subPath": "main.py",
+        "readOnly": True,
+    } in gateway["volumeMounts"]
+    assert {
+        "name": "mission-runtime",
+        "mountPath": "/opt/hermes/plugins/platforms/telegram/adapter.py",
+        "subPath": "telegram_adapter.py",
         "readOnly": True,
     } in gateway["volumeMounts"]
     mission_runtime = next(

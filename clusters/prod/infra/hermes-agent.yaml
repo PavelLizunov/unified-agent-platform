@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v78-detailed-progress"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v79-voice-download-retry"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -157,13 +157,14 @@ spec:
               /opt/hermes/.venv/bin/python /config/runtime-compat.py /runtime-compat
               # 2d) ADR-030: stage the exact pinned mission overlay in a second emptyDir.
               # The overlay fingerprints upstream before modifying it and fails closed on drift.
-              mkdir -p /mission-runtime/root/hermes_cli /mission-runtime/root/gateway/platforms
+              mkdir -p /mission-runtime/root/hermes_cli /mission-runtime/root/gateway/platforms /mission-runtime/root/plugins/platforms/telegram
               cp /opt/hermes/hermes_cli/commands.py /mission-runtime/root/hermes_cli/commands.py
               cp /opt/hermes/hermes_cli/kanban.py /mission-runtime/root/hermes_cli/kanban.py
               cp /opt/hermes/hermes_cli/kanban_db.py /mission-runtime/root/hermes_cli/kanban_db.py
               cp /opt/hermes/hermes_cli/main.py /mission-runtime/root/hermes_cli/main.py
               cp /opt/hermes/gateway/run.py /mission-runtime/root/gateway/run.py
               cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
+              cp /opt/hermes/plugins/platforms/telegram/adapter.py /mission-runtime/root/plugins/platforms/telegram/adapter.py
               /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
                 --source-commit 7c1a029553d87c43ecff8a3821336bc95872213b
               cp /mission-runtime/root/hermes_cli/commands.py /mission-runtime/commands.py
@@ -174,6 +175,7 @@ spec:
               cp /mission-runtime/root/hermes_cli/uap_media.py /mission-runtime/uap_media.py
               cp /mission-runtime/root/gateway/run.py /mission-runtime/gateway_run.py
               cp /mission-runtime/root/gateway/platforms/api_server.py /mission-runtime/api_server.py
+              cp /mission-runtime/root/plugins/platforms/telegram/adapter.py /mission-runtime/telegram_adapter.py
               # 3) seed Codex creds ONCE — after first boot hermes refreshes its own
               #    /opt/data/auth.json, so never clobber it (single-use refresh tokens).
               if [ ! -f /opt/data/auth.json ]; then
@@ -310,6 +312,7 @@ spec:
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/uap_media.py, subPath: uap_media.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/run.py, subPath: gateway_run.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/gateway/platforms/api_server.py, subPath: api_server.py, readOnly: true }
+            - { name: mission-runtime, mountPath: /opt/hermes/plugins/platforms/telegram/adapter.py, subPath: telegram_adapter.py, readOnly: true }
             - { name: stt-runtime, mountPath: /opt/uap-stt, readOnly: true }
           resources:
             # home-2 resized to 6c/8GB (2026-07). Bumped so a stray heavy task (browser/build) in the pod

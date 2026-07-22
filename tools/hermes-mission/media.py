@@ -8,6 +8,7 @@ returns a typed ``imageGeneration`` item with a durable ``savedPath``.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import shutil
@@ -27,6 +28,27 @@ _ALLOWED_TYPES = {
 
 class MediaGenerationError(RuntimeError):
     """The media turn failed before a trustworthy artifact was committed."""
+
+
+async def download_telegram_file(source: Any) -> tuple[Any, bytearray]:
+    """Download one Telegram attachment with bounded transient retries."""
+    timeouts = {
+        "read_timeout": 30.0,
+        "write_timeout": 30.0,
+        "connect_timeout": 15.0,
+        "pool_timeout": 15.0,
+    }
+    for attempt in range(3):
+        try:
+            file_obj = await source.get_file(**timeouts)
+            return file_obj, await file_obj.download_as_bytearray(**timeouts)
+        except Exception as error:
+            retryable = error.__class__.__name__.lower() in {
+                "connectionerror", "networkerror", "timedout", "timeouterror"
+            } or isinstance(error, OSError)
+            if not retryable or attempt == 2:
+                raise
+            await asyncio.sleep(2**attempt)
 
 
 def _runtime_is_openai_only() -> bool:

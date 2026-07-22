@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -498,6 +499,63 @@ def test_media_topic_edit_request_fails_closed() -> None:
                 assert "editing is unavailable" in str(error)
 
 
+def test_telegram_download_retries_transient_failure_only() -> None:
+    class TimedOut(Exception):
+        pass
+
+    class FakeFile:
+        calls = 0
+
+        async def download_as_bytearray(self, **timeouts):
+            self.calls += 1
+            assert timeouts == {
+                "read_timeout": 30.0,
+                "write_timeout": 30.0,
+                "connect_timeout": 15.0,
+                "pool_timeout": 15.0,
+            }
+            if self.calls < 3:
+                raise TimedOut("temporary Telegram timeout")
+            return bytearray(b"voice")
+
+    class TransientSource:
+        calls = 0
+
+        async def get_file(self, **timeouts):
+            self.calls += 1
+            assert timeouts == {
+                "read_timeout": 30.0,
+                "write_timeout": 30.0,
+                "connect_timeout": 15.0,
+                "pool_timeout": 15.0,
+            }
+            return file
+
+    file = FakeFile()
+    source = TransientSource()
+    with mock.patch.object(media.asyncio, "sleep", new=mock.AsyncMock()) as sleep:
+        _, body = asyncio.run(media.download_telegram_file(source))
+    assert body == b"voice"
+    assert source.calls == 3
+    assert file.calls == 3
+    assert sleep.await_count == 2
+
+    class PermanentSource:
+        calls = 0
+
+        async def get_file(self, **_timeouts):
+            self.calls += 1
+            raise ValueError("invalid Telegram file")
+
+    permanent = PermanentSource()
+    try:
+        asyncio.run(media.download_telegram_file(permanent))
+        raise AssertionError("permanent download error must fail")
+    except ValueError:
+        pass
+    assert permanent.calls == 1
+
+
 if __name__ == "__main__":
     test_media_mission_is_durable_and_does_not_generate_twice()
     test_topic_routes_ordinary_text_to_media()
@@ -511,4 +569,5 @@ if __name__ == "__main__":
     test_malformed_media_topics_config_fails_closed()
     test_malformed_config_blocks_owner_turn_with_zero_side_effects()
     test_media_topic_edit_request_fails_closed()
+    test_telegram_download_retries_transient_failure_only()
     print("hermes-media-ok")

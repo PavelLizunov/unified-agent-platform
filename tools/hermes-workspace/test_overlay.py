@@ -14,7 +14,7 @@ COMMIT = "c1e6ed979dcb8dddf79c5b163150c6c23c4dce0c"
 LEGACY_UAP_COMMIT = "9cd5040cfe6215cccef74a7f883099b1db8edd80"
 PREVIOUS_UAP_COMMIT = "6bf941356dd00b41c34b12681abf4d5296c0f2f6"
 CURSOR_REPLAY_COMMIT = "037af9a7a090d6ae41ee5d0d59e89315f0ef87bb"
-PREVIOUS_PROGRESS_COMMIT = "57e8deb2527133492b3640f05906705348b127b2"
+PREVIOUS_PROGRESS_COMMIT = "9ef15aa750e40ef3d70cc578bdcf66e84c002187"
 PREVIOUS_PROJECTS_COMMIT = "35c79703c4f3401d09ce7bcc3d936a4b062d96d9"
 PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
 PREVIOUS_PROJECT_CATALOG_UI_COMMIT = "95343b3ba3891c15dd80d9b911c66c013dcada69"
@@ -580,6 +580,9 @@ def main() -> None:
         assert "Следующая автоматическая попытка" in mission_card
         assert "Последнее обновление" in mission_card
         assert "updated_at" in mission_card
+        assert "item.project_label || item.project_repository?.split('/').pop()" in mission_card
+        assert ".replace(/\\s+/g, ' ').slice(0, 48)" in mission_card
+        assert "item.mission_id.slice(-8)" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
         assert "Подробнее о задаче" in mission_card
@@ -667,7 +670,7 @@ def main() -> None:
         )
         vulnerable_card_path.write_bytes(previous_progress_card)
         assert hashlib.sha256(previous_progress_card).hexdigest() == (
-            "7b244d5739f0fe30f85470e90362c5f2e2ee8dd4bc8fe140ed0aea0cee6b82fa"
+            "3b0fe465c716052bc8b3c094d5c3d8a28613a9bf7a2ab2e8e103aa186a46398b"
         )
         previous_progress_check = run(clone, "--check")
         assert previous_progress_check.returncode == 0

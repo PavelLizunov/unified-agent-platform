@@ -19,14 +19,16 @@ FILES = {
     "hermes_cli/main.py": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
     "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
     "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
+    "plugins/platforms/telegram/adapter.py": "e5d5c7a7b168ce3503aa19f763d0b913eec8314ae57d6606584a82705021f302",
 }
 PATCHED_FILES = {
     "hermes_cli/commands.py": "23ba06478a1489c1aba7f61c2b49ce4ea134c1e6713cead2e3224dbe6f1036ae",
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "d44db58f782550a9919e3535c8379d2541479f98bd83c04f37ead4d972cc7470",
+    "gateway/run.py": "f7ec3952f063065b2b013d2749fdf7039f0c576854e1165cf7a9cb36182a3557",
     "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
+    "plugins/platforms/telegram/adapter.py": "bb63f8d562d1cd2ecedeca09d20a379a8632d31435e03c7b3bd4d07b9183e827",
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -580,6 +582,30 @@ def connect(
     raise SystemExit(main())''',
             "module exit propagation",
         )
+    if relative == "plugins/platforms/telegram/adapter.py":
+        text = replace(
+            text,
+            '''                file_obj = await msg.voice.get_file()
+                audio_bytes = await file_obj.download_as_bytearray()''',
+            '''                from hermes_cli.uap_media import download_telegram_file
+                file_obj, audio_bytes = await download_telegram_file(msg.voice)''',
+            "bounded Telegram voice download retry",
+        )
+        text = replace(
+            text,
+            '''                file_obj = await msg.audio.get_file()
+                audio_bytes = await file_obj.download_as_bytearray()''',
+            '''                from hermes_cli.uap_media import download_telegram_file
+                file_obj, audio_bytes = await download_telegram_file(msg.audio)''',
+            "bounded Telegram audio download retry",
+        )
+        return replace(
+            text,
+            '''        named = f" ({display_name})" if display_name else ""''',
+            '''        event._uap_media_download_failed = True
+        named = f" ({display_name})" if display_name else ""''',
+            "failed Telegram media marker",
+        )
     if relative == "gateway/run.py":
         owner_help = (
             "Напишите обычным сообщением, что нужно сделать. "
@@ -707,6 +733,9 @@ def connect(
 
         if canonical == "voice":
             return await self._handle_voice_command(event)
+
+        if getattr(event, "_uap_media_download_failed", False):
+            return None
 
         if (
             not command
