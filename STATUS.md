@@ -686,6 +686,16 @@ are absent from the cluster sections above. Landed after the 2026-06-30 hardenin
   repositories, full cross-channel history or a self-diagnosing single-mission repair of the first goal. Exact
   evidence: `docs/evidence/ordinary-workspace-autonomous-delivery-2026-07-18.md` and
   `docs/evidence/ordinary-telegram-capacity-recovery-2026-07-18.md`.
+- **Bounded routine-docs routing accepted live (2026-07-23).** PR #414 fixed the profile-derived complexity floor for
+  explicit README/docs-only owner goals without adding a new conductor: Central durably binds `routine_docs` plus a
+  two-file expectation, the coordinator selects Luna/medium -> independent Sol/low, permits at most two generations,
+  and checks the actual cumulative Git paths after author execution. Mission
+  `mission-intake-f1b23aa34b02ff6fdb70113d345d065d` completed target PR #14 in one 3m56s systemd invocation with one
+  Markdown file, all five existing gates and cleanup. Runtime telemetry measured 137,943 input tokens, 105,216 cached
+  input tokens (76.3%) and 1,692 output tokens. Ambiguous/code tasks remain conservative; required repository CI is
+  unchanged; Spark and a separate QA actor are not claimed. The canary also exposed a cancellation-after-merge restart
+  defect; this follow-up adds the regression and preserves the repaired operational residue. Exact evidence:
+  `docs/evidence/routine-docs-routing-live-canary-2026-07-23.md`.
 - **Workspace durable mission replay accepted live (2026-07-18).** PR #256 replaced selected-mission snapshot-only
   observation with authenticated Central cursor replay and a sequence-validated timeline. Its first live rollout
   exposed a null first-render race; the failure is preserved, PR #257 fixed it and added an exact vulnerable-asset
