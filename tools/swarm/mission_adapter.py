@@ -35,7 +35,10 @@ REQUIRED_PAYLOAD = {
 }
 PAYLOAD_FIELDS = {
     **REQUIRED_PAYLOAD,
-    "delivery.upsert": {"kind", "status", "url", "summary"},
+    "delivery.upsert": {
+        "kind", "status", "url", "summary", "environment",
+        "artifact_sha256", "deployed_revision",
+    },
     "worker.upsert": {"worker_id", "status", "run_id", "profile", "model", "effort", "input_tokens", "output_tokens"},
 }
 MAX_LOG_BYTES = 1024 * 1024
@@ -723,11 +726,32 @@ def _worker_metadata_events(
                 payload.get("kind") == "delivery"
                 and payload.get("status") == "not_applicable"
             )
+            deployment = payload.get("kind") == "deployment"
             summary = payload.get("summary")
+            deployment_fields = {
+                "environment", "artifact_sha256", "deployed_revision",
+            }
             if (
                 (not_applicable and "url" in payload)
                 or (not not_applicable and not isinstance(payload.get("url"), str))
                 or (isinstance(payload.get("url"), str) and not payload["url"])
+                or (
+                    deployment
+                    and (
+                        payload.get("status") != "verified"
+                        or not deployment_fields <= set(payload)
+                        or not isinstance(payload.get("environment"), str)
+                        or not re.fullmatch(
+                            r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}",
+                            payload["environment"],
+                        )
+                        or not isinstance(payload.get("artifact_sha256"), str)
+                        or not re.fullmatch(r"[0-9a-f]{64}", payload["artifact_sha256"])
+                        or not isinstance(payload.get("deployed_revision"), str)
+                        or not re.fullmatch(r"[0-9a-f]{40}", payload["deployed_revision"])
+                    )
+                )
+                or (not deployment and bool(deployment_fields & set(payload)))
                 or (
                     summary is not None
                     and (
