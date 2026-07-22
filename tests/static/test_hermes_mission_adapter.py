@@ -1289,6 +1289,81 @@ class MissionAdapterTests(unittest.TestCase):
         self.assertEqual(we["correlation"]["producer_event_id"],
                          w2[0]["correlation"]["producer_event_id"])
 
+    def test_verified_deployment_metadata_projects_exact_attestation(self):
+        mission_id = self.document["mission_id"]
+        payload = {
+            "kind": "deployment",
+            "status": "verified",
+            "url": "http://vpnctld:18402/api/v1/health",
+            "environment": "vpnctl-production",
+            "artifact_sha256": "a" * 64,
+            "deployed_revision": "b" * 40,
+        }
+        snapshot = {
+            "task": {
+                "id": "t", "title": "T", "status": "done",
+                "assignee": "p", "created_by": "central-hermes",
+                "tenant": mission_id,
+            },
+            "runs": [{
+                "id": 1, "profile": "p", "status": "completed",
+                "outcome": "success",
+                "metadata": {"mission_events": [
+                    {"type": "delivery.upsert", "payload": payload},
+                ]},
+            }],
+        }
+
+        events = adapter.project_task_snapshot(mission_id, "t", snapshot, "")
+        deployment = next(
+            event for event in events
+            if event["type"] == "delivery.upsert"
+        )
+        self.assertEqual(payload, deployment["payload"])
+
+    def test_deployment_metadata_malformed_fails_closed(self):
+        mission_id = self.document["mission_id"]
+        good = {
+            "kind": "deployment",
+            "status": "verified",
+            "url": "http://vpnctld:18402/api/v1/health",
+            "environment": "vpnctl-production",
+            "artifact_sha256": "a" * 64,
+            "deployed_revision": "b" * 40,
+        }
+        bad_payloads = []
+        for missing in ("url", "environment", "artifact_sha256", "deployed_revision"):
+            bad_payloads.append({key: value for key, value in good.items() if key != missing})
+        bad_payloads.extend((
+            {**good, "status": "failed"},
+            {**good, "environment": "vpnctl production"},
+            {**good, "artifact_sha256": "A" * 64},
+            {**good, "deployed_revision": "b" * 39},
+            {
+                "kind": "default_branch", "status": "verified",
+                "url": "https://example.invalid/commit/abc",
+                "environment": "vpnctl-production",
+            },
+        ))
+        for payload in bad_payloads:
+            snapshot = {
+                "task": {
+                    "id": "t", "title": "T", "status": "done",
+                    "assignee": "p", "created_by": "central-hermes",
+                    "tenant": mission_id,
+                },
+                "runs": [{
+                    "id": 1, "profile": "p", "status": "completed",
+                    "outcome": "success",
+                    "metadata": {"mission_events": [
+                        {"type": "delivery.upsert", "payload": payload},
+                    ]},
+                }],
+            }
+            with self.subTest(payload=payload):
+                with self.assertRaises(adapter.AdapterError):
+                    adapter.project_task_snapshot(mission_id, "t", snapshot, "")
+
     def test_worker_upsert_metadata_malformed_fails_closed(self):
         mission_id = self.document["mission_id"]
         for bad_payload in (
