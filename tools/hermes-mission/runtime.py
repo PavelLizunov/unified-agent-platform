@@ -750,7 +750,7 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.notice":
         if payload.get("code") not in {
             "capacity_wait", "capacity_recovered", "execution_reconciling",
-            "disk_space_wait", "disk_space_recovered",
+            "disk_space_wait", "disk_space_recovered", "progress_detail",
         }:
             raise MissionError("invalid mission notice code")
         next_attempt = payload.get("next_attempt_at")

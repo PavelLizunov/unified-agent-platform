@@ -381,6 +381,27 @@ def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
             assert view["notice"] == reconciling["payload"]
             assert "От вас ничего не требуется." in missions.telegram_text(view)
 
+            progress = {
+                **notice,
+                "correlation": {
+                    **notice["correlation"],
+                    "producer_event_id": "flow:mission-capacity:progress",
+                },
+                "payload": {
+                    "code": "progress_detail",
+                    "message": (
+                        "Цикл 3 из 7. Автор gpt-5.6-terra исправляет замечания. "
+                        "Следом — автоматические проверки и CI."
+                    ),
+                    "owner_action_required": False,
+                },
+            }
+            store.append_producer("mission-capacity", progress)
+            view = store.projection("mission-capacity")
+            rendered = missions.telegram_text(view)
+            assert progress["payload"]["message"] in rendered
+            assert "От вас ничего не требуется." in rendered
+
             invalid = {
                 **notice,
                 "correlation": {
@@ -3230,6 +3251,7 @@ def main() -> None:
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()
+    test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
     test_notification_can_repeat_after_delivery_before_checkpoint()
     test_notification_checkpoint_cannot_cross_a_mission_rebind()
     test_producer_cannot_end_mission_or_decrease_progress()

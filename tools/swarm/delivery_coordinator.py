@@ -2512,6 +2512,19 @@ class DeliveryCoordinator:
         )
         self.client.publish(state["mission_id"], event)
 
+    def _publish_progress_notice(self, state: dict[str, Any], message: str) -> None:
+        event = mission_adapter._producer_event(
+            state["mission_id"],
+            "mission.notice",
+            {
+                "code": "progress_detail",
+                "message": message,
+                "owner_action_required": False,
+            },
+            {"task_id": state["root_task_id"]},
+        )
+        self.client.publish(state["mission_id"], event)
+
     def _reconcile(
         self,
         *,
@@ -3750,6 +3763,14 @@ class DeliveryCoordinator:
         if state["phase"] == "candidate_pushed":
             self._ensure_candidate_pr(state, paths)
         if state["phase"] == "candidate_pr_open":
+            if state.get("mission_id") and state.get("root_task_id"):
+                reviewer = self._actor(state, "reviewer")
+                self._publish_progress_notice(
+                    state,
+                    f"Кандидат {state['candidate_sha'][:8]} находится в черновике "
+                    f"PR #{state['pr_number']}. Выполняется обязательный CI. "
+                    f"Следом — независимая проверка {reviewer['model']}.",
+                )
             self._wait_candidate_ci(state, paths)
         if state["phase"] != "pre_review_ci_green":
             raise DeliveryError("pre-review platform gate did not reach green")
@@ -4987,6 +5008,14 @@ class DeliveryCoordinator:
             raise DeliveryError("deployment attempt counter is invalid")
         if not resume:
             attempts += 1
+        if state.get("mission_id") and state.get("root_task_id"):
+            self._publish_progress_notice(
+                state,
+                f"Развёртывается ревизия {plan['revision'][:8]} в "
+                f"{plan['environment']}, попытка {attempts} из "
+                f"{_DEPLOY_MAX_ATTEMPTS}. Следом — проверка состояния "
+                "сервиса и итог.",
+            )
         state.update(phase="deploy_running", deployment_attempts=attempts)
         state.pop("deployment_not_before", None)
         self._save(paths, state)
@@ -5707,6 +5736,12 @@ class DeliveryCoordinator:
                 disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                 if disk_wait is not None:
                     return disk_wait
+                self._publish_progress_notice(
+                    state,
+                    f"Повторно проверяется основная ветка на точной ревизии "
+                    f"{state['merge_sha'][:8]}, попытка 2 из 2. "
+                    "Следом — очистка временных ресурсов и итог.",
+                )
                 if not self._run_post_verify_attempt(state, paths):
                     if state["phase"] == "post_verify_failed":
                         return self._finish_rejection(state, paths)
@@ -5751,6 +5786,19 @@ class DeliveryCoordinator:
                     disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                     if disk_wait is not None:
                         return disk_wait
+                    actor = self._actor(state, "author")
+                    findings = _sanitize_findings(state.get("review_findings", []))
+                    action = (
+                        f"исправляет замечания предыдущей проверки ({len(findings)})"
+                        if findings else "готовит изменения"
+                    )
+                    self._publish_progress_notice(
+                        state,
+                        f"Цикл {state['review_cycle']} из "
+                        f"{self.profile['max_review_cycles']}. "
+                        f"Автор {actor['model']} {action}. "
+                        "Следом — автоматические проверки и CI.",
+                    )
                     author = self._author(state, paths)
                     if author is False:
                         return {
@@ -5799,6 +5847,15 @@ class DeliveryCoordinator:
                 disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                 if disk_wait is not None:
                     return disk_wait
+                reviewer = self._actor(state, "reviewer")
+                self._publish_progress_notice(
+                    state,
+                    f"CI кандидата {state['candidate_sha'][:8]} пройден. "
+                    f"Ревьюер {reviewer['model']} проверяет точный commit, "
+                    f"цикл {state['review_cycle']} из "
+                    f"{self.profile['max_review_cycles']}. Следом — слияние "
+                    "либо автоматическое исправление замечаний.",
+                )
                 review = self._review(state, paths)
                 if review is None:
                     return {
@@ -5819,6 +5876,12 @@ class DeliveryCoordinator:
             try:
                 if state["phase"] == "pr_open":
                     self._assert_claim(state)
+                    self._publish_progress_notice(
+                        state,
+                        f"Независимое ревью commit {state['candidate_sha'][:8]} "
+                        f"принято. PR #{state['pr_number']} проходит финальный CI; "
+                        "после него — точное слияние и проверка основной ветки.",
+                    )
                     self._wait_ci(state)
                     self._validate_review(state)
                     state["phase"] = "ci_green"
@@ -5848,6 +5911,12 @@ class DeliveryCoordinator:
                 disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                 if disk_wait is not None:
                     return disk_wait
+                self._publish_progress_notice(
+                    state,
+                    f"Слияние завершено. Проверяется основная ветка на точной "
+                    f"ревизии {state['merge_sha'][:8]}, попытка 1 из 2. "
+                    "Следом — очистка временных ресурсов и итог.",
+                )
                 if not self._run_post_verify_attempt(state, paths):
                     return {
                         "action": state["phase"],
