@@ -25,8 +25,8 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "283ffbde1cbc3a5fb18918568b5bb444970a89760f26869605aabe37fd56e486",
-    "gateway/platforms/api_server.py": "0d3899fe70c9cd02e71920e20edca99b2c3a0ce5e63fecd9f96fbe7dc93bee71",  # gitleaks:allow -- pinned patched SHA-256
+    "gateway/run.py": "858f18c6864240f1797c2f5d23a71f5933625c24f406f7b177ae7db0bcc3ad9b",
+    "gateway/platforms/api_server.py": "e89f7474d334906c60530c0e1179c54bfe13a1fd777a14a8f3e04882d4afd822",  # gitleaks:allow -- pinned patched SHA-256
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -714,9 +714,35 @@ def connect(
             and source.platform
             and source.platform.value == "telegram"
         ):
-            from hermes_cli.uap_missions import is_controlled_research_goal
+            from hermes_cli.uap_missions import (
+                MissionError, MissionStore, image_generation_prompt, is_execution_goal,
+                media_topic_pairs,
+            )
 
-            event._uap_owner_goal = not is_controlled_research_goal(event.text or "")
+            source_message_id = str(event.message_id or "").strip()
+            store = MissionStore.default()
+            try:
+                continuation = bool(
+                    source_message_id
+                    and store.owner_turn_continues_mission(
+                        platform="telegram",
+                        source_message_id=source_message_id,
+                        session_id=session_entry.session_id,
+                        chat_id=str(source.chat_id or ""),
+                        thread_id=str(source.thread_id or ""),
+                    )
+                )
+            except MissionError:
+                continuation = True
+            event._uap_owner_goal = bool(
+                event.message_type in (MessageType.VOICE, MessageType.AUDIO)
+                or image_generation_prompt(event.text or "")
+                or (
+                    str(source.chat_id or ""), str(source.thread_id or "")
+                ) in media_topic_pairs()
+                or is_execution_goal(event.text or "")
+                or continuation
+            )
 
         if self._draining:''',
             "ordinary Telegram mission intake marker",
@@ -865,8 +891,10 @@ def connect(
             "from agent.redact import redact_sensitive_text\n"
             "from hermes_cli.uap_missions import (\n"
             "    MissionError, MissionProjectRequired, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-            "    is_controlled_research_goal, notify_subscribers, owner_key_valid, producer_key_valid,\n"
-            "    public_intake_projects, sanitize_producer_submission, terminal_request_allowed,\n"
+            "    image_generation_prompt, is_execution_goal, notify_subscribers, owner_key_valid,\n"
+            "    producer_key_valid, project_setup_execution_goal, project_setup_system_prompt,\n"
+            "    project_setup_target, public_intake_projects, sanitize_producer_submission,\n"
+            "    terminal_request_allowed,\n"
             ")",
             "mission imports",
         )
@@ -891,17 +919,46 @@ def connect(
         if err is not None:
             return err
         source_message_id = body.get("source_message_id")
-        if source_message_id is not None and not is_controlled_research_goal(user_message):
-            try:
-                if not isinstance(user_message, str):
-                    raise MissionError("mission intake requires a text goal")
-                store = self._missions()
-                owner_event, _ = store.ingest_owner_turn(
-                    redact_sensitive_text(user_message, force=True),
+        setup_target = None
+        try:
+            if body.get("setup_project_id") is not None:
+                setup_target = project_setup_target(
+                    "workspace", body.get("setup_project_id")
+                )
+            store = self._missions()
+            continuation = bool(
+                source_message_id is not None
+                and store.owner_turn_continues_mission(
                     platform="workspace",
                     source_message_id=source_message_id,
                     session_id=session_id,
-                    project_id=body.get("project_id"),
+                )
+            )
+        except MissionError as error:
+            return web.json_response(
+                _openai_error(str(error), code="project_setup_failed"), status=400
+            )
+        if source_message_id is not None and (
+            continuation
+            or is_execution_goal(user_message)
+            or image_generation_prompt(user_message) is not None
+        ):
+            try:
+                if not isinstance(user_message, str):
+                    raise MissionError("mission intake requires a text goal")
+                intake_text = user_message
+                intake_project_id = body.get("project_id")
+                if setup_target is not None and not continuation:
+                    intake_text = project_setup_execution_goal(
+                        setup_target, user_message
+                    )
+                    intake_project_id = "uap"
+                owner_event, _ = store.ingest_owner_turn(
+                    redact_sensitive_text(intake_text, force=True),
+                    platform="workspace",
+                    source_message_id=source_message_id,
+                    session_id=session_id,
+                    project_id=intake_project_id,
                 )
                 mission_id = owner_event["mission_id"]
                 view = store.projection(mission_id)
@@ -992,7 +1049,12 @@ def connect(
                     "X-Hermes-Session-Id": session_id,
                 },
             )
-        system_prompt = body.get("system_message") or body.get("instructions")''',
+        system_prompt = body.get("system_message") or body.get("instructions")
+        if setup_target is not None:
+            setup_prompt = project_setup_system_prompt(setup_target)
+            system_prompt = (
+                f"{setup_prompt}\\n\\n{system_prompt}" if system_prompt else setup_prompt
+            )''',
             "ordinary Workspace mission intake",
         )
         text = before_stream + stream_marker + stream_and_tail

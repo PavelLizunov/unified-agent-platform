@@ -101,6 +101,18 @@ Log in to Workspace and verify chat, central dashboard-backed Profiles, and Kanb
 build-1 local-model, or Update Center navigation is present. A dashboard 401 must trigger one in-memory
 password-session refresh; credentials and cookies must never appear in logs.
 
+### Conversational admission and existing-project setup
+
+- In `Настройки → Проекты и доступы`, a `setup_required` card must show `Настроить в чате`. The action sets only the
+  HttpOnly `uap_project_setup` catalog identifier and opens `/chat/new`; it never makes the project selectable.
+- In a normal or setup chat, `посмотри`, `можем ли`, `какие риски` and `/discuss` must produce an ordinary model answer
+  without a mission receipt. An explicit `исправь`, `интегрируй`, `настрой`, `/run` or `/mission` must produce exactly
+  one Central mission receipt. `посмотри и исправь` is execution; an answer to an open mission question still resumes
+  that mission even when it contains no action verb.
+- A setup discussion must name the exact catalog repository and state that inspection is read-only. An explicit setup
+  command must create the work against ready project `uap`, while the target remains `setup_required` until the
+  reviewable profile, timer and live canary pass. Selecting any ready project clears the setup cookie.
+
 Central-only navigation smoke (browser — these routes are client-side, so the SPA shell still answers HTTP 200
 and the redirect to `/dashboard` happens in the UI, not at curl):
 

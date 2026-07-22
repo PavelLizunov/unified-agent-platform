@@ -198,7 +198,8 @@ def main() -> None:
         )
         assert 'requested.startswith("answer ")' in gateway
         assert "store.answer(" in gateway
-        assert 'event._uap_owner_goal = not is_controlled_research_goal' in gateway
+        assert 'is_execution_goal(event.text or "")' in gateway
+        assert "store.owner_turn_continues_mission(" in gateway
         assert 'platform="telegram"' in gateway
         assert 'source_message_id = str(event.message_id or "").strip()' in gateway
         assert "store.ingest_owner_turn(" in gateway
@@ -228,9 +229,12 @@ def main() -> None:
         ]
         assert 'source_message_id = body.get("source_message_id")' not in synchronous_handler
         assert 'source_message_id = body.get("source_message_id")' in stream_handler
-        assert 'not is_controlled_research_goal(user_message)' in stream_handler
+        assert "is_execution_goal(user_message)" in stream_handler
+        assert "project_setup_target(" in stream_handler
+        assert "project_setup_system_prompt(setup_target)" in stream_handler
+        assert "project_setup_execution_goal(" in stream_handler
         assert 'platform="workspace"' in stream_handler
-        assert 'project_id=body.get("project_id")' in stream_handler
+        assert "project_id=intake_project_id" in stream_handler
         assert '"projects": error.projects' in stream_handler
         assert 'code="mission_intake_failed"' in stream_handler
         assert 'owner_event["type"] == "mission.answer"' in stream_handler

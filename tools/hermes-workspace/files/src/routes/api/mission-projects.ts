@@ -3,13 +3,14 @@ import { isAuthenticated } from '../../server/auth-middleware'
 import { gatewayFetch } from '../../server/gateway-capabilities'
 
 const COOKIE = 'uap_mission_project'
+const SETUP_COOKIE = 'uap_project_setup'
 const PROJECT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/
 
-function selectedProject(request: Request): string {
+function cookieValue(request: Request, cookieName: string): string {
   const cookie = request.headers.get('cookie') || ''
   for (const part of cookie.split(';')) {
     const [name, ...value] = part.trim().split('=')
-    if (name === COOKIE) return decodeURIComponent(value.join('='))
+    if (name === cookieName) return decodeURIComponent(value.join('='))
   }
   return ''
 }
@@ -35,13 +36,19 @@ export const Route = createFileRoute('/api/mission-projects')({
         }
         try {
           const projects = await catalog()
-          const selected = selectedProject(request)
+          const selected = cookieValue(request, COOKIE)
+          const setup = cookieValue(request, SETUP_COOKIE)
           return Response.json({
             projects,
             selected_project_id: projects.some(
               (project) => project.project_id === selected && project.status === 'ready',
             )
               ? selected
+              : null,
+            setup_project_id: projects.some(
+              (project) => project.project_id === setup && project.status === 'setup_required',
+            )
+              ? setup
               : null,
           })
         } catch (error) {
@@ -57,6 +64,7 @@ export const Route = createFileRoute('/api/mission-projects')({
         }
         const body = (await request.json().catch(() => null)) as {
           project_id?: unknown
+          mode?: unknown
         } | null
         const projectId = body?.project_id
         if (typeof projectId !== 'string' || !PROJECT_ID.test(projectId)) {
@@ -68,19 +76,40 @@ export const Route = createFileRoute('/api/mission-projects')({
           if (!project) {
             return Response.json({ error: 'Проект не зарегистрирован' }, { status: 403 })
           }
+          if (body?.mode === 'setup') {
+            if (project.status !== 'setup_required') {
+              return Response.json({ error: 'Проект не требует настройки' }, { status: 409 })
+            }
+            return Response.json(
+              { ok: true, setup_project_id: projectId },
+              {
+                headers: {
+                  'Set-Cookie': `${SETUP_COOKIE}=${encodeURIComponent(projectId)}; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict`,
+                },
+              },
+            )
+          }
+          if (body?.mode !== undefined && body.mode !== 'select') {
+            return Response.json({ error: 'Invalid project action' }, { status: 400 })
+          }
           if (project.status !== 'ready') {
             return Response.json(
               { error: 'Для проекта ещё не настроен проверенный автономный профиль' },
               { status: 409 },
             )
           }
+          const headers = new Headers()
+          headers.append(
+            'Set-Cookie',
+            `${COOKIE}=${encodeURIComponent(projectId)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`,
+          )
+          headers.append(
+            'Set-Cookie',
+            `${SETUP_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`,
+          )
           return Response.json(
             { ok: true, selected_project_id: projectId },
-            {
-              headers: {
-                'Set-Cookie': `${COOKIE}=${encodeURIComponent(projectId)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`,
-              },
-            },
+            { headers },
           )
         } catch (error) {
           return Response.json(

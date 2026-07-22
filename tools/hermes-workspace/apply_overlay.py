@@ -41,8 +41,8 @@ PATCHED_FILES = {
 "src/routes/api/playground-npc.ts": "7d626539973696cda605222a3408c83bcbdfcbbd32763be6936cebf1ab8ad5f7",
 "src/routes/api/models.ts": "68d1c6f451801c4943394faf13c21e9cae48bfdc5056d011ead05ca387beeb1e",
 "src/routes/api/sessions.ts": "f1fa702405ce65cbf937a8883c5f7f13bc19c681b5e7fae10cdf15122328267c",
-"src/routes/api/send-stream.ts": "ec312e605aadce46748087c392c9a414ff228a5f16c65b2a80d6a71cd40466e2",
-"src/server/claude-api.ts": "039dc37395d4255712403d259d3ee7a2254506e71bcfd3e77548e527af100942",  # gitleaks:allow -- pinned patched SHA-256
+"src/routes/api/send-stream.ts": "75368d06701cff843f51f5fcb58163889602fad228c0bed645e3d3630c9fce62",
+"src/server/claude-api.ts": "ef12ed9cc4d760e809b4ff9339e55a235674dae43ce0fa4a20d9e41003621abf",  # gitleaks:allow -- pinned patched SHA-256
 "src/server/kanban-backend.ts": "a52f43a7082bf642f778347819b51f213dccf7215bd892d3cb87c5a92c9d638e",
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
@@ -63,10 +63,12 @@ PREVIOUS_PATCHED_FILES = {
     "751be9381f02aa2f0a0d8a39639aa81ca12f4864d8749eb455782a270404a577",
 ),
 "src/routes/api/send-stream.ts": (
+    "ec312e605aadce46748087c392c9a414ff228a5f16c65b2a80d6a71cd40466e2",
     "6127483b81d22ab3d91fa5b318e4e4423dfb41619e82364cfe3e21446252828b",
     "8cdcb90478dbd7c41839e6f4229b83bf5e5c5526f06528b2fdbd82700c3b54de",  # gitleaks:allow -- pinned previous patched SHA-256
 ),
 "src/server/claude-api.ts": (
+    "039dc37395d4255712403d259d3ee7a2254506e71bcfd3e77548e527af100942",  # gitleaks:allow -- pinned previous patched SHA-256
     "d984cf1500364c7313bda428a97f4353bab3a24263f9cb199ca40f490672374a",  # gitleaks:allow -- pinned previous patched SHA-256
     "15edfd328c3757fba773af30329959bf345347daab3a93d6abdb7e533ce6dc92",  # gitleaks:allow -- pinned previous patched SHA-256
 ),
@@ -102,9 +104,11 @@ PREVIOUS_ADDED_FILES = {
         "d727dfa55ac2eb266bff72cb87ea8d4c4c5b3482447fcf5fc14cb2a519de2977",
     ),
     "src/routes/api/mission-projects.ts": (
+        "9e68a9e8e704cdccb39061e173e3c5ae7c841f450906b08787fcb1ab6dc01ce1",
         "e24378c6bd13f6bd4af0da76a7353b192e1c5ebcfb6aa6feb294ef7dea7a053b",
     ),
     "src/components/settings/project-permissions.tsx": (
+        "0fdbaf45acdadcad6a6657e33aea1f1adc63804fc5f5e45714ba3b47d010bd74",
         "ffb920cb09279eabc136e91131771b26df8d0b47636b11784ae2657aea4ca093",
         "c9399af7536897389786c80b2710d01ed4670d4683fd62268b5255a090296877",
         "22b99cd0f61079d631d821b45817a37d35fe474166269408b7bc417b72f10f9a",
@@ -472,16 +476,17 @@ function readString""", "send stream central-only flag")
         const projectId = projectCookie
           ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
           : ''
+        const setupCookie = (request.headers.get('cookie') || '')
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('uap_project_setup='))
+        const setupProjectId = setupCookie
+          ? decodeURIComponent(setupCookie.slice('uap_project_setup='.length))
+          : ''
         if (CENTRAL_ONLY && !sourceMessageId) {
           return new Response(
             JSON.stringify({ ok: false, error: 'message identity required' }),
             { status: 400, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        if (CENTRAL_ONLY && !projectId) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'Выберите проект в Настройки → Проекты и доступы' }),
-            { status: 409, headers: { 'Content-Type': 'application/json' } },
           )
         }
         const thinking =""", "ordinary goal identity")
@@ -491,7 +496,8 @@ function readString""", "send stream central-only flag")
         return replace(text, """                  attachments: attachments || undefined,
                 },""", """                  attachments: attachments || undefined,
                   source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
-                  project_id: CENTRAL_ONLY ? projectId : undefined,
+                  project_id: CENTRAL_ONLY && projectId ? projectId : undefined,
+                  setup_project_id: CENTRAL_ONLY && setupProjectId ? setupProjectId : undefined,
                 },""", "ordinary goal forwarding")
     elif rel == "src/server/claude-api.ts":
         text = replace(text, """} from './claude-dashboard-api'
@@ -509,6 +515,7 @@ const _authHeaders""", "central-only session source")
   },""", """    attachments?: Array<Record<string, unknown>>
     source_message_id?: string
     project_id?: string
+    setup_project_id?: string
   },""", "ordinary goal request type")
     elif rel == "src/server/kanban-backend.ts":
         text = replace(text, """export type KanbanBackendId = 'local' | 'claude' | 'hermes-proxy'""", """const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'
@@ -734,6 +741,30 @@ def upgrade_previous(rel, text):
             return json({""", """          if (!CENTRAL_ONLY && capabilities.dashboard.available && !capabilities.enhancedChat) {
             return json({""", "central session creation upgrade")
     if rel == "src/routes/api/send-stream.ts":
+        if "project_id: CENTRAL_ONLY ? projectId : undefined" in text:
+            text = replace(text, """        const projectId = projectCookie
+          ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
+          : ''""", """        const projectId = projectCookie
+          ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
+          : ''
+        const setupCookie = (request.headers.get('cookie') || '')
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('uap_project_setup='))
+        const setupProjectId = setupCookie
+          ? decodeURIComponent(setupCookie.slice('uap_project_setup='.length))
+          : ''""", "setup project cookie upgrade")
+            text = replace(text, """        if (CENTRAL_ONLY && !projectId) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'Выберите проект в Настройки → Проекты и доступы' }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
+          )
+        }
+""", "", "discussion without selected project upgrade")
+            return replace(text, """                  project_id: CENTRAL_ONLY ? projectId : undefined,
+""", """                  project_id: CENTRAL_ONLY && projectId ? projectId : undefined,
+                  setup_project_id: CENTRAL_ONLY && setupProjectId ? setupProjectId : undefined,
+""", "setup project forwarding upgrade")
         if "Central session stream unavailable" in text:
             text = replace(text, """        if (CENTRAL_ONLY && chatMode === 'portable') {
           return new Response(JSON.stringify({ ok: false, error: 'Central session stream unavailable' }), {
@@ -754,21 +785,25 @@ def upgrade_previous(rel, text):
         const projectId = projectCookie
           ? decodeURIComponent(projectCookie.slice('uap_mission_project='.length))
           : ''
+        const setupCookie = (request.headers.get('cookie') || '')
+          .split(';')
+          .map((part) => part.trim())
+          .find((part) => part.startsWith('uap_project_setup='))
+        const setupProjectId = setupCookie
+          ? decodeURIComponent(setupCookie.slice('uap_project_setup='.length))
+          : ''
         if (CENTRAL_ONLY && !sourceMessageId) {""", "project selection cookie upgrade")
-        text = replace(text, """        }
-        const thinking =""", """        }
-        if (CENTRAL_ONLY && !projectId) {
-          return new Response(
-            JSON.stringify({ ok: false, error: 'Выберите проект в Настройки → Проекты и доступы' }),
-            { status: 409, headers: { 'Content-Type': 'application/json' } },
-          )
-        }
-        const thinking =""", "missing project selection upgrade")
         return replace(text, """                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
                 },""", """                  source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined,
-                  project_id: CENTRAL_ONLY ? projectId : undefined,
+                  project_id: CENTRAL_ONLY && projectId ? projectId : undefined,
+                  setup_project_id: CENTRAL_ONLY && setupProjectId ? setupProjectId : undefined,
                 },""", "project selection forwarding upgrade")
     if rel == "src/server/claude-api.ts":
+        if "    project_id?: string\n" in text:
+            return replace(text, """    project_id?: string
+""", """    project_id?: string
+    setup_project_id?: string
+""", "setup project request type upgrade")
         if "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" not in text:
             text = replace(text, """} from './claude-dashboard-api'
 
@@ -784,6 +819,7 @@ const _authHeaders""", "central-only session source upgrade")
         return replace(text, """    source_message_id?: string
   },""", """    source_message_id?: string
     project_id?: string
+    setup_project_id?: string
   },""", "project selection request type upgrade")
     if rel == "src/components/mobile-hamburger-menu.tsx":
         text = replace(text, "const HERMESWORLD_ENABLED = import.meta.env.VITE_HERMESWORLD_ENABLED !== '0'\n\nexport const MOBILE_HAMBURGER_NAV_ITEMS = [", "const CENTRAL_ONLY_BLOCKED_NAV_IDS = new Set(['playground', 'terminal', 'jobs', 'conductor', 'operations', 'swarm', 'swarm2', 'files', 'tasks', 'agents'])\n\nexport const MOBILE_HAMBURGER_NAV_ITEMS = [", "hamburger blocked ids upgrade")
