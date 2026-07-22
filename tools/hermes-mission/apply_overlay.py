@@ -26,7 +26,7 @@ PATCHED_FILES = {
     "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
     "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
     "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-    "gateway/run.py": "f7ec3952f063065b2b013d2749fdf7039f0c576854e1165cf7a9cb36182a3557",
+    "gateway/run.py": "64153621271347a881695090f75150277a4f47c4c6a10de5b5c4b38c03222d7d",
     "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
     "plugins/platforms/telegram/adapter.py": "86722e5ce3d686d9b2046e38e2f2e871408c35798d066e3296ab6721de8a03ee",
 }
@@ -796,6 +796,7 @@ def connect(
             '''        if getattr(event, "_uap_owner_goal", False):
             from agent.redact import redact_sensitive_text
             from hermes_cli.uap_missions import (
+                image_generation_prompt, is_execution_goal,
                 MissionError, MissionIntakeCancelled, MissionProjectRequired,
                 MissionStore, notify_subscribers, telegram_text,
             )
@@ -848,6 +849,20 @@ def connect(
                 # The transcript is untrusted owner text. Redact before either
                 # durable store sees it; STT has no authority beyond media decode.
                 goal_text = redact_sensitive_text(goal_text, force=True)
+                if (
+                    event.message_type in (MessageType.VOICE, MessageType.AUDIO)
+                    and not continuation
+                    and image_generation_prompt(goal_text) is None
+                    and not is_execution_goal(goal_text)
+                ):
+                    # Voice is only a transport. Once transcribed, ordinary
+                    # conversation must follow the same admission rule as text.
+                    event.text = goal_text
+                    event.message_type = MessageType.TEXT
+                    event.media_urls = []
+                    event.media_types = []
+                    event._uap_owner_goal = False
+                    return await self._handle_message(event)
                 store = MissionStore.default()
                 accepted, _ = store.ingest_owner_turn(
                     goal_text,
