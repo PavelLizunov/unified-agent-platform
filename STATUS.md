@@ -4,14 +4,19 @@ Last updated: 2026-07-22
 
 ## Phase
 
-- **First-class vpnctl deployment is being closed (2026-07-22; ADR-037).** The registered `vpnctl` profile now
+- **First-class vpnctl deployment is live-proven (2026-07-22; ADR-037).** The registered `vpnctl` profile
   declares `delivery_mode: deploy` and one closed `vpnctld-systemd-v1` driver. The coordinator durably binds the
   exact merged revision, performs bounded restart-safe deployment attempts, accepts only an exact structured result,
   records the production environment and complete installed-payload digest, and requires deployment plus health
   verification before terminal success. The remote protocol uses a forced-command key, unprivileged build, fixed
   root installer and automatic rollback. VM 119 (`vpnctld`) is now online in the tailnet as `100.88.198.106`; the
-  existing VLESS-egress workaround is required for reliable Tailscale control-plane netmaps. Repository and live
-  verification are still in progress; no completed deploy claim is made by this checkpoint.
+  existing VLESS-egress workaround is required for reliable Tailscale control-plane netmaps. Ordinary Workspace
+  mission `mission-intake-e2d2812bf5197db2a0c68754f2351b20` completed Sol/Terra delivery, PR #127, CI and exact
+  merge `770dce0...`, deployed that revision once to `vpnctl-production`, returned HTTP 200 health, then converged
+  through cleanup and a verified schema-v4 completion bundle. The initial post-deploy projection failure is retained:
+  PR #397 closed the adapter schema drift, after which the natural timer completed Central without repeating the
+  production mutation. Exact proof:
+  `docs/evidence/vpnctl-production-deploy-live-canary-2026-07-22.md`.
 
 - **One-click onboarding certificate and driver provenance live-proven (2026-07-20; ADR-035).** Clean Workspace
   request `project-onboarding-3b9c8d6a8d46515b61136feb2ec6d5b7` created private Rust repository
@@ -113,8 +118,8 @@ Last updated: 2026-07-22
   ready projects. Build-1 has persistent one-minute timers for each registered profile; the Linux projects run local
   checks on build-1, while Suflyor's required build gate runs on GitHub Windows and Slipstream's required CI builds
   Linux x86/ARM, Windows x86/ARM and macOS Intel/ARM artifacts. This remains a registered-profile boundary: a GitHub
-  repository is not executable merely because it appears in inventory. Most profiles are no-deploy; `vpnctl` is the
-  first source-approved deploy profile and remains pending live acceptance. The historical
+  repository is not executable merely because it appears in inventory. Most profiles intentionally declare no deploy;
+  `vpnctl` is the first source-approved and live-accepted production deploy profile. The historical
   standalone `boosty_api_rs` entry is read-only because its active implementation is part of `vpnctl`; full cross-channel chat transcript
   replication is not claimed. Telegram voice/audio now enters the same intake through checksum-pinned
   GigaAM-v3 e2e CTC Q4 on the always-on M4 Mac. Deterministic 20-second chunking removes the former 25-second ingress
@@ -220,14 +225,15 @@ Last updated: 2026-07-22
   It then cleans disposable state and records terminal failure. PR #217 merged and the schema-v3 live profile used
   `openai-autonomy-v2` for the successful seventh canary. The later Telegram-bound acceptance canary passed on the
   corrected runtime; channel/session work beyond the authoritative mission projection remains a separate product gap.
-- **Delivery applicability is explicit for registered profiles (2026-07-18; extended 2026-07-22).** No-deploy routes
+- **Delivery applicability is explicit for registered profiles (2026-07-18; live deploy accepted 2026-07-22).** No-deploy routes
   declare immutable `delivery_mode: none`, and Central requires the coordinator's `delivery: not_applicable` event so
   fresh-main post-verify cannot masquerade as deployment. Existing missions without the field preserve their legacy
   completion contract. ADR-037 adds only the exact `vpnctld-systemd-v1` deploy route with artifact, environment,
-  deployed-revision, rollback and health gates; it is not accepted live yet. `release` and every other deploy driver
-  still fail before mission acceptance/profile activation.
-  Exact PR/CI/Flux/build-1 rollout evidence:
-  `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md`.
+  deployed-revision, rollback and health gates. Its ordinary Workspace canary deployed exact merge `770dce0...`
+  once and completed with verified environment, digest and HTTP health evidence. `release` and every other deploy
+  driver still fail before mission acceptance/profile activation. Exact evidence:
+  `docs/evidence/registered-delivery-applicability-rollout-2026-07-18.md` and
+  `docs/evidence/vpnctl-production-deploy-live-canary-2026-07-22.md`.
 - **Canonical completion evidence is deployed and the first live bundle passed (2026-07-18).** The registered
   schema-v4 profile opts into one owner-only `completion-evidence.json` written only after Central terminal, cleanup
   and Kanban archive. Its closed schema binds the mission and immutable goal digest to canonical profile/policy/runtime
