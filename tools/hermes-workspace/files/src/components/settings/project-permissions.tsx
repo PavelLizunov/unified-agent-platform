@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { CHAT_PENDING_COMMAND_STORAGE_KEY } from '@/screens/chat/chat-events'
 
 type Project = {
   project_id: string
@@ -176,6 +177,10 @@ export function ProjectPermissions() {
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || 'Не удалось открыть настройку проекта')
+      window.sessionStorage.setItem(
+        CHAT_PENDING_COMMAND_STORAGE_KEY,
+        '/discuss Задай 3–5 коротких вопросов, которые нужны, чтобы настроить этот проект. Не используй инструменты и не начинай анализ до моих ответов.',
+      )
       window.location.assign('/chat/new')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось открыть настройку проекта')
