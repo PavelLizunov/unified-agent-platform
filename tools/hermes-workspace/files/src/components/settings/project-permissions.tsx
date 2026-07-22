@@ -74,6 +74,7 @@ export function ProjectPermissions() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [settingUp, setSettingUp] = useState('')
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
   const [name, setName] = useState('')
@@ -155,6 +156,24 @@ export function ProjectPermissions() {
       setError(reason instanceof Error ? reason.message : 'Не удалось начать подготовку проекта')
     } finally {
       setCreating(false)
+    }
+  }
+
+  async function startSetup(projectId: string) {
+    setSettingUp(projectId)
+    setError('')
+    try {
+      const response = await fetch('/api/mission-projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, mode: 'setup' }),
+      })
+      const payload = await response.json()
+      if (!response.ok) throw new Error(payload.error || 'Не удалось открыть настройку проекта')
+      window.location.assign('/chat/new')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Не удалось открыть настройку проекта')
+      setSettingUp('')
     }
   }
 
@@ -305,6 +324,20 @@ export function ProjectPermissions() {
                   <span className="mt-1 block text-xs text-primary-600">
                     Проверки: {project.test_targets.map((target) => targetLabels[target] || target).join(' · ')}
                   </span>
+                ) : null}
+                {project.status === 'setup_required' ? (
+                  <Button
+                    type="button"
+                    className="mt-3"
+                    disabled={Boolean(settingUp)}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      void startSetup(project.project_id)
+                    }}
+                  >
+                    {settingUp === project.project_id ? 'Открываю чат…' : 'Настроить в чате'}
+                  </Button>
                 ) : null}
               </span>
             </label>

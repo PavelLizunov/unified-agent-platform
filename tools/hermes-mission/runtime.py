@@ -120,6 +120,29 @@ _MUTATION_INTENT = re.compile(
     r"собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
     re.IGNORECASE,
 )
+_EXECUTION_INTENT = re.compile(
+    r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
+    r"create|configure|integrate|rename|update|test|run|start|execute|"
+    r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
+    r"сдела\w*|реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
+    r"созда\w*|настро\w*|интегр\w*|переимен\w*|обнов\w*|протест\w*|"
+    r"запуст\w*|выполн\w*|почин\w*|собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+    re.IGNORECASE,
+)
+_DISCUSSION_INTENT = re.compile(
+    r"\b(?:can\s+we|could\s+we|is\s+it\s+possible|what\s+(?:are|is)|"
+    r"how\s+(?:should|would|can)|think\s+about|assess|analy[sz]e|review|look\s+at)\b|"
+    r"(?:можем\s+ли|можно\s+ли|стоит\s+ли|есть\s+ли|как\s+лучше|какие\s+\w*риски|"
+    r"подумай\w*|оцен\w*|проанализ\w*|посмотр\w*|обсуд\w*)",
+    re.IGNORECASE,
+)
+_DISCUSS_THEN_EXECUTE = re.compile(
+    r"\b(?:and|then)\s+(?:implement|fix|modify|add|remove|configure|integrate|"
+    r"test|run|execute)\b|(?:\bи\b|\bзатем\b)\s+(?:реализ\w*|исправ\w*|"
+    r"измени\w*|добав\w*|удали\w*|настро\w*|интегр\w*|протест\w*|"
+    r"запуст\w*|выполн\w*)",
+    re.IGNORECASE,
+)
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -196,6 +219,30 @@ def is_controlled_research_goal(text: object) -> bool:
     return bool(_RESEARCH_INTENT.search(normalized)) and not _MUTATION_INTENT.search(
         normalized
     )
+
+
+def is_execution_goal(text: object) -> bool:
+    """Conservatively distinguish an explicit action from discussion."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())[:4_000]
+    if not normalized:
+        return False
+    lowered = normalized.casefold()
+    if lowered.startswith(("/discuss", "обсудим:", "давай обсудим")):
+        return False
+    if lowered.startswith(("/run", "/mission")):
+        return True
+    if (
+        (
+            _RESEARCH_INTENT.search(normalized)
+            or _DISCUSSION_INTENT.search(normalized)
+            or normalized.endswith("?")
+        )
+        and not _DISCUSS_THEN_EXECUTE.search(normalized)
+    ):
+        return False
+    return bool(_EXECUTION_INTENT.search(normalized))
 
 
 class MissionError(ValueError):
@@ -514,6 +561,55 @@ def public_intake_projects(platform: str) -> list[dict[str, Any]]:
         }
         for project in registered_intake_projects(platform)
     ]
+
+
+def project_setup_target(platform: str, project_id: object) -> dict[str, Any]:
+    """Resolve one catalog-owned project that is eligible for setup discussion."""
+    project_id = _require_id(project_id, "setup_project_id")
+    matches = [
+        project
+        for project in registered_intake_projects(platform)
+        if project["project_id"] == project_id
+    ]
+    if len(matches) != 1:
+        raise MissionError("project is not registered")
+    target = matches[0]
+    if target["status"] != "setup_required":
+        raise MissionError("project does not require setup")
+    return target
+
+
+def project_setup_system_prompt(target: dict[str, Any]) -> str:
+    """Build server-owned read-only context for an existing-project setup chat."""
+    tests = ", ".join(target.get("test_targets", [])) or "не определены"
+    return (
+        "SERVER-OWNED PROJECT SETUP CONTEXT\n"
+        f"Проект: {target['label']}\n"
+        f"Репозиторий: {target['repository']}\n"
+        f"Описание: {target['summary']}\n"
+        f"Предварительные площадки проверок: {tests}\n"
+        "Статус: setup_required. Это этап обсуждения: изучай репозиторий только "
+        "на чтение, объясняй архитектуру, проверки, риски и предлагаемый профиль. "
+        "Не утверждай, что проект настроен, и не меняй его статус. Явная команда "
+        "владельца на настройку перехватывается сервером и создаёт отдельную "
+        "проверяемую UAP mission."
+    )
+
+
+def project_setup_execution_goal(target: dict[str, Any], owner_text: str) -> str:
+    """Turn explicit setup approval into a reviewable UAP configuration mission."""
+    owner_text = " ".join(str(owner_text).split())
+    return (
+        f"Настрой существующий проект {target['label']} "
+        f"({target['repository']}, project_id={target['project_id']}) для автономной "
+        "работы через Central Hermes. Сначала выполни read-only аудит репозитория и "
+        "его CI. Затем добавь минимальный server-owned schema-v4 delivery profile, "
+        "точные проверки и необходимые catalog/runtime изменения через обычный UAP "
+        "PR, независимое review и CI. Сохраняй status=setup_required, пока профиль, "
+        "runner/timer и реальный canary не проверены; только после этого переведи "
+        "проект в ready. Не создавай новые credentials и не расширяй execution "
+        f"boundary без отдельного согласия владельца. Команда владельца: {owner_text}"
+    )[:_MAX_OWNER_GOAL_CHARS]
 
 
 def registered_intake_target(
@@ -2194,6 +2290,49 @@ class MissionStore:
                 (platform, scope_key, source_message_id),
             ).fetchone()
         return dict(row) if row else None
+
+    def owner_turn_continues_mission(
+        self,
+        *,
+        platform: str,
+        source_message_id: str,
+        session_id: str | None = None,
+        chat_id: str | None = None,
+        thread_id: str | None = None,
+    ) -> bool:
+        """Return whether a non-imperative turn belongs to existing mission intake."""
+        platform = _require_id(platform, "intake platform")
+        source_message_id = _require_source_value(
+            source_message_id, "source_message_id"
+        )
+        session_id = _require_source_value(
+            session_id, "session_id", optional=True
+        )
+        chat_id = _require_source_value(chat_id, "chat_id", optional=True)
+        thread_id = _require_source_value(
+            thread_id, "thread_id", optional=True
+        )
+        scope_key = self._intake_scope(platform, session_id, chat_id, thread_id)
+        if (
+            self._intake_selection_receipt(platform, scope_key, source_message_id)
+            or self._intake_cancel_receipt(platform, scope_key, source_message_id)
+            or self._intake_draft(platform, scope_key)
+        ):
+            return True
+        if chat_id:
+            if self._bound_answer_receipt(
+                platform, chat_id, thread_id, source_message_id
+            ):
+                return True
+            mission_id = self.bound_mission(platform, chat_id, thread_id)
+            if mission_id:
+                view = self.projection(mission_id)
+                return view.get("status") == "waiting_owner"
+            return False
+        return bool(
+            self._session_answer_receipt(session_id, source_message_id)
+            or self._session_open_question(session_id)
+        )
 
     def _intake_cancel_receipt(
         self, platform: str, scope_key: str, source_message_id: str

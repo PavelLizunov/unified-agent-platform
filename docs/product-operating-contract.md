@@ -13,13 +13,18 @@ runtime hard deny.
 
 - The owner provides a goal and may discuss material product, performance or technology trade-offs.
 - The owner is **not** a developer, reviewer, operator or test runner in the delivery loop.
-- UAP turns the goal into a mission and carries it to the repository-specific Definition of Done.
+- UAP keeps questions, feasibility checks and trade-off discussion in chat. An explicit execution request turns the
+  agreed goal into a mission and carries it to the repository-specific Definition of Done; `/run` and `/discuss` are
+  deterministic escape hatches when wording is intentionally unusual.
 - The owner chooses from server-registered projects in Workspace or names one in Telegram; repository paths, models
   and commands are never accepted from the owner message. If the project is ambiguous, the platform asks one
   deterministic clarification and resumes the original goal.
 - UAP asks the owner only when a decision is irreversible, materially changes the product, requires new credentials
   or external authority, creates real destructive risk, or no safe allowed route can make progress.
 - Existing repository contracts and recorded preferences are used before asking a repeated question.
+- A cataloged `setup_required` project can be discussed from its Workspace card. The chat receives only server-owned
+  repository metadata and remains read-only; an explicit setup command creates a reviewable UAP mission. The project
+  stays unavailable for coding intake until its exact profile, runner and canary have made the catalog status `ready`.
 
 ## 2. One product, one mission plane
 

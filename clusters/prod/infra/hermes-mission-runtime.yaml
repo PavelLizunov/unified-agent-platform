@@ -33,8 +33,8 @@ data:
         "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
         "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-        "gateway/run.py": "283ffbde1cbc3a5fb18918568b5bb444970a89760f26869605aabe37fd56e486",
-        "gateway/platforms/api_server.py": "0d3899fe70c9cd02e71920e20edca99b2c3a0ce5e63fecd9f96fbe7dc93bee71",  # gitleaks:allow -- pinned patched SHA-256
+        "gateway/run.py": "858f18c6864240f1797c2f5d23a71f5933625c24f406f7b177ae7db0bcc3ad9b",
+        "gateway/platforms/api_server.py": "e89f7474d334906c60530c0e1179c54bfe13a1fd777a14a8f3e04882d4afd822",  # gitleaks:allow -- pinned patched SHA-256
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -722,9 +722,35 @@ data:
                 and source.platform
                 and source.platform.value == "telegram"
             ):
-                from hermes_cli.uap_missions import is_controlled_research_goal
+                from hermes_cli.uap_missions import (
+                    MissionError, MissionStore, image_generation_prompt, is_execution_goal,
+                    media_topic_pairs,
+                )
 
-                event._uap_owner_goal = not is_controlled_research_goal(event.text or "")
+                source_message_id = str(event.message_id or "").strip()
+                store = MissionStore.default()
+                try:
+                    continuation = bool(
+                        source_message_id
+                        and store.owner_turn_continues_mission(
+                            platform="telegram",
+                            source_message_id=source_message_id,
+                            session_id=session_entry.session_id,
+                            chat_id=str(source.chat_id or ""),
+                            thread_id=str(source.thread_id or ""),
+                        )
+                    )
+                except MissionError:
+                    continuation = True
+                event._uap_owner_goal = bool(
+                    event.message_type in (MessageType.VOICE, MessageType.AUDIO)
+                    or image_generation_prompt(event.text or "")
+                    or (
+                        str(source.chat_id or ""), str(source.thread_id or "")
+                    ) in media_topic_pairs()
+                    or is_execution_goal(event.text or "")
+                    or continuation
+                )
 
             if self._draining:''',
                 "ordinary Telegram mission intake marker",
@@ -873,8 +899,10 @@ data:
                 "from agent.redact import redact_sensitive_text\n"
                 "from hermes_cli.uap_missions import (\n"
                 "    MissionError, MissionProjectRequired, MissionStore, NOTIFICATION_SEND_TIMEOUT_SECONDS,\n"
-                "    is_controlled_research_goal, notify_subscribers, owner_key_valid, producer_key_valid,\n"
-                "    public_intake_projects, sanitize_producer_submission, terminal_request_allowed,\n"
+                "    image_generation_prompt, is_execution_goal, notify_subscribers, owner_key_valid,\n"
+                "    producer_key_valid, project_setup_execution_goal, project_setup_system_prompt,\n"
+                "    project_setup_target, public_intake_projects, sanitize_producer_submission,\n"
+                "    terminal_request_allowed,\n"
                 ")",
                 "mission imports",
             )
@@ -899,17 +927,46 @@ data:
             if err is not None:
                 return err
             source_message_id = body.get("source_message_id")
-            if source_message_id is not None and not is_controlled_research_goal(user_message):
-                try:
-                    if not isinstance(user_message, str):
-                        raise MissionError("mission intake requires a text goal")
-                    store = self._missions()
-                    owner_event, _ = store.ingest_owner_turn(
-                        redact_sensitive_text(user_message, force=True),
+            setup_target = None
+            try:
+                if body.get("setup_project_id") is not None:
+                    setup_target = project_setup_target(
+                        "workspace", body.get("setup_project_id")
+                    )
+                store = self._missions()
+                continuation = bool(
+                    source_message_id is not None
+                    and store.owner_turn_continues_mission(
                         platform="workspace",
                         source_message_id=source_message_id,
                         session_id=session_id,
-                        project_id=body.get("project_id"),
+                    )
+                )
+            except MissionError as error:
+                return web.json_response(
+                    _openai_error(str(error), code="project_setup_failed"), status=400
+                )
+            if source_message_id is not None and (
+                continuation
+                or is_execution_goal(user_message)
+                or image_generation_prompt(user_message) is not None
+            ):
+                try:
+                    if not isinstance(user_message, str):
+                        raise MissionError("mission intake requires a text goal")
+                    intake_text = user_message
+                    intake_project_id = body.get("project_id")
+                    if setup_target is not None and not continuation:
+                        intake_text = project_setup_execution_goal(
+                            setup_target, user_message
+                        )
+                        intake_project_id = "uap"
+                    owner_event, _ = store.ingest_owner_turn(
+                        redact_sensitive_text(intake_text, force=True),
+                        platform="workspace",
+                        source_message_id=source_message_id,
+                        session_id=session_id,
+                        project_id=intake_project_id,
                     )
                     mission_id = owner_event["mission_id"]
                     view = store.projection(mission_id)
@@ -1000,7 +1057,12 @@ data:
                         "X-Hermes-Session-Id": session_id,
                     },
                 )
-            system_prompt = body.get("system_message") or body.get("instructions")''',
+            system_prompt = body.get("system_message") or body.get("instructions")
+            if setup_target is not None:
+                setup_prompt = project_setup_system_prompt(setup_target)
+                system_prompt = (
+                    f"{setup_prompt}\\n\\n{system_prompt}" if system_prompt else setup_prompt
+                )''',
                 "ordinary Workspace mission intake",
             )
             text = before_stream + stream_marker + stream_and_tail
@@ -1652,6 +1714,29 @@ data:
         r"собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
         re.IGNORECASE,
     )
+    _EXECUTION_INTENT = re.compile(
+        r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
+        r"create|configure|integrate|rename|update|test|run|start|execute|"
+        r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
+        r"сдела\w*|реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
+        r"созда\w*|настро\w*|интегр\w*|переимен\w*|обнов\w*|протест\w*|"
+        r"запуст\w*|выполн\w*|почин\w*|собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+        re.IGNORECASE,
+    )
+    _DISCUSSION_INTENT = re.compile(
+        r"\b(?:can\s+we|could\s+we|is\s+it\s+possible|what\s+(?:are|is)|"
+        r"how\s+(?:should|would|can)|think\s+about|assess|analy[sz]e|review|look\s+at)\b|"
+        r"(?:можем\s+ли|можно\s+ли|стоит\s+ли|есть\s+ли|как\s+лучше|какие\s+\w*риски|"
+        r"подумай\w*|оцен\w*|проанализ\w*|посмотр\w*|обсуд\w*)",
+        re.IGNORECASE,
+    )
+    _DISCUSS_THEN_EXECUTE = re.compile(
+        r"\b(?:and|then)\s+(?:implement|fix|modify|add|remove|configure|integrate|"
+        r"test|run|execute)\b|(?:\bи\b|\bзатем\b)\s+(?:реализ\w*|исправ\w*|"
+        r"измени\w*|добав\w*|удали\w*|настро\w*|интегр\w*|протест\w*|"
+        r"запуст\w*|выполн\w*)",
+        re.IGNORECASE,
+    )
     _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
     _COMPLETION_DELIVERIES = {
         "pull_request": "merged",
@@ -1728,6 +1813,30 @@ data:
         return bool(_RESEARCH_INTENT.search(normalized)) and not _MUTATION_INTENT.search(
             normalized
         )
+
+
+    def is_execution_goal(text: object) -> bool:
+        """Conservatively distinguish an explicit action from discussion."""
+        if not isinstance(text, str):
+            return False
+        normalized = " ".join(text.split())[:4_000]
+        if not normalized:
+            return False
+        lowered = normalized.casefold()
+        if lowered.startswith(("/discuss", "обсудим:", "давай обсудим")):
+            return False
+        if lowered.startswith(("/run", "/mission")):
+            return True
+        if (
+            (
+                _RESEARCH_INTENT.search(normalized)
+                or _DISCUSSION_INTENT.search(normalized)
+                or normalized.endswith("?")
+            )
+            and not _DISCUSS_THEN_EXECUTE.search(normalized)
+        ):
+            return False
+        return bool(_EXECUTION_INTENT.search(normalized))
 
 
     class MissionError(ValueError):
@@ -2046,6 +2155,55 @@ data:
             }
             for project in registered_intake_projects(platform)
         ]
+
+
+    def project_setup_target(platform: str, project_id: object) -> dict[str, Any]:
+        """Resolve one catalog-owned project that is eligible for setup discussion."""
+        project_id = _require_id(project_id, "setup_project_id")
+        matches = [
+            project
+            for project in registered_intake_projects(platform)
+            if project["project_id"] == project_id
+        ]
+        if len(matches) != 1:
+            raise MissionError("project is not registered")
+        target = matches[0]
+        if target["status"] != "setup_required":
+            raise MissionError("project does not require setup")
+        return target
+
+
+    def project_setup_system_prompt(target: dict[str, Any]) -> str:
+        """Build server-owned read-only context for an existing-project setup chat."""
+        tests = ", ".join(target.get("test_targets", [])) or "не определены"
+        return (
+            "SERVER-OWNED PROJECT SETUP CONTEXT\n"
+            f"Проект: {target['label']}\n"
+            f"Репозиторий: {target['repository']}\n"
+            f"Описание: {target['summary']}\n"
+            f"Предварительные площадки проверок: {tests}\n"
+            "Статус: setup_required. Это этап обсуждения: изучай репозиторий только "
+            "на чтение, объясняй архитектуру, проверки, риски и предлагаемый профиль. "
+            "Не утверждай, что проект настроен, и не меняй его статус. Явная команда "
+            "владельца на настройку перехватывается сервером и создаёт отдельную "
+            "проверяемую UAP mission."
+        )
+
+
+    def project_setup_execution_goal(target: dict[str, Any], owner_text: str) -> str:
+        """Turn explicit setup approval into a reviewable UAP configuration mission."""
+        owner_text = " ".join(str(owner_text).split())
+        return (
+            f"Настрой существующий проект {target['label']} "
+            f"({target['repository']}, project_id={target['project_id']}) для автономной "
+            "работы через Central Hermes. Сначала выполни read-only аудит репозитория и "
+            "его CI. Затем добавь минимальный server-owned schema-v4 delivery profile, "
+            "точные проверки и необходимые catalog/runtime изменения через обычный UAP "
+            "PR, независимое review и CI. Сохраняй status=setup_required, пока профиль, "
+            "runner/timer и реальный canary не проверены; только после этого переведи "
+            "проект в ready. Не создавай новые credentials и не расширяй execution "
+            f"boundary без отдельного согласия владельца. Команда владельца: {owner_text}"
+        )[:_MAX_OWNER_GOAL_CHARS]
 
 
     def registered_intake_target(
@@ -3726,6 +3884,49 @@ data:
                     (platform, scope_key, source_message_id),
                 ).fetchone()
             return dict(row) if row else None
+
+        def owner_turn_continues_mission(
+            self,
+            *,
+            platform: str,
+            source_message_id: str,
+            session_id: str | None = None,
+            chat_id: str | None = None,
+            thread_id: str | None = None,
+        ) -> bool:
+            """Return whether a non-imperative turn belongs to existing mission intake."""
+            platform = _require_id(platform, "intake platform")
+            source_message_id = _require_source_value(
+                source_message_id, "source_message_id"
+            )
+            session_id = _require_source_value(
+                session_id, "session_id", optional=True
+            )
+            chat_id = _require_source_value(chat_id, "chat_id", optional=True)
+            thread_id = _require_source_value(
+                thread_id, "thread_id", optional=True
+            )
+            scope_key = self._intake_scope(platform, session_id, chat_id, thread_id)
+            if (
+                self._intake_selection_receipt(platform, scope_key, source_message_id)
+                or self._intake_cancel_receipt(platform, scope_key, source_message_id)
+                or self._intake_draft(platform, scope_key)
+            ):
+                return True
+            if chat_id:
+                if self._bound_answer_receipt(
+                    platform, chat_id, thread_id, source_message_id
+                ):
+                    return True
+                mission_id = self.bound_mission(platform, chat_id, thread_id)
+                if mission_id:
+                    view = self.projection(mission_id)
+                    return view.get("status") == "waiting_owner"
+                return False
+            return bool(
+                self._session_answer_receipt(session_id, source_message_id)
+                or self._session_open_question(session_id)
+            )
 
         def _intake_cancel_receipt(
             self, platform: str, scope_key: str, source_message_id: str

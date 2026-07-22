@@ -45,6 +45,66 @@ def test_research_only_goal_bypasses_coding_mission_intake() -> None:
     assert not missions.is_controlled_research_goal(None)
 
 
+def test_conversational_admission_requires_explicit_execution_intent() -> None:
+    for discussion in (
+        "Посмотри сценарий и скажи, можем ли мы это интегрировать в суфлёр?",
+        "Какие риски у настройки этого проекта?",
+        "Analyze the repository and tell me how we should integrate this",
+        "Find the latest test API documentation",
+        "/discuss Настройка проекта",
+    ):
+        assert not missions.is_execution_goal(discussion), discussion
+    for execution in (
+        "Интегрируй новую модель в суфлёр",
+        "Посмотри сценарий и исправь найденные проблемы",
+        "Configure this existing project",
+        "Сделай эту интеграцию",
+        "/run теперь делаем это",
+    ):
+        assert missions.is_execution_goal(execution), execution
+    assert not missions.is_execution_goal(None)
+
+
+def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> None:
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "uap", "label": "UAP",
+                "repository": "PavelLizunov/unified-agent-platform",
+                "summary": "Platform", "aliases": ["platform"],
+                "dispatch_profile": "build1-uap-registered-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+            {
+                "project_id": "existing", "label": "Existing Project",
+                "repository": "PavelLizunov/existing", "summary": "Existing app",
+                "aliases": ["existing app"], "dispatch_profile": None,
+                "delivery_mode": "none", "platforms": ["workspace"],
+                "category": "active-maintained", "status": "setup_required",
+                "test_targets": ["github-linux"],
+            },
+        ],
+    })
+    with mock.patch.dict(os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True):
+        target = missions.project_setup_target("workspace", "existing")
+        prompt = missions.project_setup_system_prompt(target)
+        assert "PavelLizunov/existing" in prompt
+        assert "только на чтение" in prompt and "setup_required" in prompt
+        goal = missions.project_setup_execution_goal(target, "настраивай")
+        assert "project_id=existing" in goal
+        assert "status=setup_required" in goal
+        assert "реальный canary" in goal
+        for invalid in ("uap", "missing", "../existing"):
+            try:
+                missions.project_setup_target("workspace", invalid)
+                raise AssertionError(f"invalid setup target was accepted: {invalid}")
+            except missions.MissionError:
+                pass
+
+
 def test_project_onboarding_is_idempotent_restart_safe_and_forward_only() -> None:
     with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
         os.environ, {"HERMES_MISSION_PROJECTS": ""}
@@ -1272,6 +1332,13 @@ def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
                 },
             },
         )
+        assert store.owner_turn_continues_mission(
+            platform="telegram",
+            source_message_id="telegram-answer-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
 
         answer, answer_created = store.ingest_owner_turn(
             "Yes, preserve it",
@@ -1315,6 +1382,13 @@ def test_bound_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
         assert len(store.list(100)) == 1
 
         restarted = missions.MissionStore(database)
+        assert restarted.owner_turn_continues_mission(
+            platform="telegram",
+            source_message_id="telegram-answer-1",
+            session_id="session-telegram",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
         replay, replay_created = restarted.ingest_owner_turn(
             "Yes, preserve it",
             platform="telegram",
@@ -1449,6 +1523,11 @@ def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None
                 },
             },
         )
+        assert store.owner_turn_continues_mission(
+            platform="workspace",
+            source_message_id="workspace-answer-1",
+            session_id="session-workspace",
+        )
 
         answer, answer_created = store.ingest_owner_turn(
             "Yes, preserve it",
@@ -1468,6 +1547,11 @@ def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None
         assert len(store.list(100)) == 1
 
         restarted = missions.MissionStore(database)
+        assert restarted.owner_turn_continues_mission(
+            platform="workspace",
+            source_message_id="workspace-answer-1",
+            session_id="session-workspace",
+        )
         replay, replay_created = restarted.ingest_owner_turn(
             "Yes, preserve it",
             platform="workspace",
@@ -3068,6 +3152,8 @@ def test_disk_space_notice_contract_through_runtime_validation_and_store() -> No
 
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
+    test_conversational_admission_requires_explicit_execution_intent()
+    test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()
     test_producer_retry_and_notification_checkpoint_are_idempotent()

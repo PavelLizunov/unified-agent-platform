@@ -371,6 +371,13 @@ not add an application service, workflow engine or mission database.
     ready and selected at 100%. No owner approval or manual delivery command occurred after submission. Go/Python/Web
     presets and concurrent onboarding remain outside live proof. See the
     [exact evidence](evidence/one-click-project-onboarding-live-canary-2026-07-20.md).
+18. **Conversational admission and existing-project setup chat — SOURCE IMPLEMENTED, LIVE PROOF PENDING.** ADR-036
+    reuses the existing research bypass, Central MissionStore and Workspace project catalog. Discussion no longer
+    implies a coding mission; explicit mutation intent still starts immediately, and pending owner answers keep their
+    durable route. A `setup_required` project can open a catalog-bound read-only chat, whose explicit setup approval
+    creates a normal reviewable UAP mission. The target remains fail-closed until its profile/timer/canary make it
+    `ready`. Required live proof: Workspace build/HTTP, one no-mission discussion, one exact mission command, one setup
+    discussion and one accepted setup mission; arbitrary-repository activation is not claimed before its own canary.
 
 No generic shell command, arbitrary repository path, model ID or credential is accepted from mission payload. A
 mission without an exact configured profile remains unclaimed and visible rather than falling back. Workspace and

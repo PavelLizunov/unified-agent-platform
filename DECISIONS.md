@@ -684,3 +684,28 @@
   и production credentials. В первой версии macOS означает только disposable GitHub-hosted runner. Отдельный
   onboarding dashboard, per-request service instance, новый workflow engine и model-generated catalog/profile
   отклонены.
+
+## ADR-036 — Conversational admission и setup-чат существующего проекта
+
+- **Контекст:** ordinary Workspace/Telegram intake после ADR-032 превращает почти любое сообщение владельца в coding
+  mission. Поэтому вопросы «посмотри», «можем ли», «какие риски» нельзя обсудить до старта работы. Одновременно полный
+  GitHub inventory показывает `setup_required`-репозитории, но интерфейс только блокирует их и не даёт начать настройку.
+- **Решение:** текстовый owner turn создаёт mission только при консервативно распознанной явной команде на изменение
+  (`исправь`, `интегрируй`, `настрой`, `запусти` и эквиваленты) либо при явном `/run`/`/mission`. Остальные сообщения идут
+  в обычный Central Hermes chat; `/discuss` является явным escape hatch. Ответ на уже открытый mission question,
+  незавершённый выбор проекта и media capability сохраняют прежний детерминированный intake независимо от формулировки.
+  Это небольшой server-owned lexical gate, а не model classifier и не новый router.
+- **Настройка существующего проекта:** карточка `setup_required` получает действие «Настроить в чате». Workspace хранит
+  только HttpOnly `setup_project_id`, Central повторно разрешает его по authoritative catalog и добавляет в чат
+  server-owned read-only context: точный repository, summary и test targets. Обсуждение может читать и анализировать
+  репозиторий, но не меняет catalog status и не получает execution profile.
+- **Разрешение на выполнение:** явная команда внутри setup-чата создаёт обычную mission в готовом проекте `uap` с
+  server-generated goal на настройку указанного репозитория. Результат остаётся repo-owned reviewable изменением:
+  schema-v4 profile, точные checks, catalog/runtime, PR, независимое review и CI. `setup_required → ready` разрешён только
+  после установки runner/timer и реального canary; модель не может напрямую сгенерировать и активировать профиль.
+- **Граница:** cookie или текст браузера не задают repository path, shell commands, credentials, profile либо статус.
+  Не создаются новый service, workflow engine, setup database и второй mission plane. Голосовой legacy intake пока
+  сохраняет прежнее поведение; единый admission для расшифрованного голоса требует отдельного проверенного изменения.
+- **Отклонено:** стартовать mission на каждое сообщение; спрашивать подтверждение перед каждой ясной командой; делать
+  `setup_required` selectable; автоматически объявлять произвольный существующий репозиторий `ready` по model-generated
+  profile; отдельный setup dashboard/agent/service.

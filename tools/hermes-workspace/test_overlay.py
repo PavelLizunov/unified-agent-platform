@@ -308,13 +308,16 @@ def main() -> None:
         assert "message identity required" in send_stream
         assert "message: CENTRAL_ONLY ? message : scopedMessage" in send_stream
         assert "source_message_id: CENTRAL_ONLY ? sourceMessageId : undefined" in send_stream
-        assert "project_id: CENTRAL_ONLY ? projectId : undefined" in send_stream
-        assert "Выберите проект в Настройки → Проекты и доступы" in send_stream
+        assert "project_id: CENTRAL_ONLY && projectId ? projectId : undefined" in send_stream
+        assert "setup_project_id: CENTRAL_ONLY && setupProjectId ? setupProjectId : undefined" in send_stream
+        assert "Выберите проект в Настройки → Проекты и доступы" not in send_stream
 
         project_api = (clone / "src/routes/api/mission-projects.ts").read_text()
         assert "gatewayFetch('/api/mission-projects?platform=workspace'" in project_api
         assert "Проект не зарегистрирован" in project_api
         assert "project.status !== 'ready'" in project_api
+        assert "body?.mode === 'setup'" in project_api
+        assert "uap_project_setup" in project_api
         assert "HttpOnly; SameSite=Strict" in project_api
         onboarding_api = (
             clone / "src/routes/api/project-onboarding.ts"
@@ -344,6 +347,8 @@ def main() -> None:
         assert "GitHub macOS" in project_settings
         assert "window.setInterval" in project_settings
         assert "onboarding.progress_percent" in project_settings
+        assert "Настроить в чате" in project_settings
+        assert "window.location.assign('/chat/new')" in project_settings
         status_position = project_settings.index(
             "{statusLabels[project.status] || project.status}"
         )
@@ -366,6 +371,7 @@ def main() -> None:
         assert "source_message_id?: string" in claude_api
         assert "const CENTRAL_ONLY = process.env.HERMES_CENTRAL_ONLY === '1'" in claude_api
         assert "project_id?: string" in claude_api
+        assert "setup_project_id?: string" in claude_api
         create_session = claude_api.index("export async function createSession")
         update_session = claude_api.index("export async function updateSession")
         assert "if (!CENTRAL_ONLY && getCapabilities().dashboard.available)" in (
