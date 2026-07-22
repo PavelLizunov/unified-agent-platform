@@ -3029,6 +3029,35 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 second["correlation"]["producer_event_id"],
             )
 
+    def test_progress_notice_is_detailed_owner_free_and_restart_idempotent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, FakeBackend(), root / "state"
+            )
+            state = {
+                "mission_id": "progress-notice",
+                "root_task_id": "task-1",
+            }
+            message = (
+                "Цикл 3 из 7. Автор gpt-5.6-terra исправляет замечания. "
+                "Следом — автоматические проверки и CI."
+            )
+
+            instance._publish_progress_notice(state, message)
+            instance._publish_progress_notice(state, message)
+
+            first, second = client.stages
+            self.assertEqual("mission.notice", first["type"])
+            self.assertEqual("progress_detail", first["payload"]["code"])
+            self.assertEqual(message, first["payload"]["message"])
+            self.assertFalse(first["payload"]["owner_action_required"])
+            self.assertEqual(
+                first["correlation"]["producer_event_id"],
+                second["correlation"]["producer_event_id"],
+            )
+
     def test_zero_exit_truncated_reviewer_stream_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)

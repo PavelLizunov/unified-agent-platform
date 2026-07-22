@@ -514,6 +514,8 @@ def main() -> None:
         assert "Хронология" in mission_card
         assert "От вас ничего не требуется." in mission_card
         assert "Следующая автоматическая попытка" in mission_card
+        assert "Последнее обновление" in mission_card
+        assert "updated_at" in mission_card
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
         assert "Подробнее о задаче" in mission_card

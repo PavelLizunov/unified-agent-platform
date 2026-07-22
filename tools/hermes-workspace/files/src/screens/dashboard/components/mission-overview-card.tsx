@@ -10,6 +10,7 @@ export type MissionView = {
   status: string
   stage: string
   progress_percent: number
+  updated_at?: string | null
   project_label?: string | null
   project_repository?: string | null
   notice?: {
@@ -67,6 +68,7 @@ const stageLabels: Record<string, string> = {
   reviewing: 'Независимая проверка',
   delivering: 'PR, CI и слияние',
   verifying: 'Проверка после слияния',
+  deploying: 'Развёртывание',
   complete: 'Готово',
 }
 const statusLabels: Record<string, string> = {
@@ -152,6 +154,12 @@ export function selectMission(
   )
 }
 
+function formattedUpdatedAt(value?: string | null) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toLocaleString('ru-RU')
+}
+
 function rows(items: Array<Item>, primary: string, secondary: string) {
   if (!items.length) return <span className="text-xs opacity-60">Нет</span>
   return (
@@ -223,6 +231,7 @@ export function MissionOverviewCard() {
   const projectTitle = mission?.project_label
     ? `${mission.project_label}${mission.project_repository ? ` (${mission.project_repository})` : ''}`
     : mission?.project_repository || mission?.goal || mission?.mission_id
+  const updatedAt = formattedUpdatedAt(mission?.updated_at)
 
   async function submitAnswer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -288,6 +297,9 @@ export function MissionOverviewCard() {
           <div className="text-xs opacity-65">
             Этап: {stageLabels[mission.stage] || mission.stage} · {mission.progress_percent}% · Статус: {statusLabels[mission.status] || mission.status}
           </div>
+          {updatedAt ? (
+            <div className="text-xs opacity-55">Последнее обновление: {updatedAt}</div>
+          ) : null}
         </div>
         {missions.length > 1 ? (
           <select
