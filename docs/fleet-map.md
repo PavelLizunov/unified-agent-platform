@@ -55,8 +55,15 @@ live/UI-тесты — ТОЛЬКО на тест-VM, НИКОГДА на owner 
 ## Proxmox-хосты (гипервизоры)
 - **pve-ninitux** (`192.168.0.169`) — держит ЯДРО (uap-home-1) + VPNRouter тест-VM (windows-brat, debian-xfce).
   Он же — power-control тест-VM (scoped token `root@pam!claude-testvm`, роль PVEVMAdmin на /vms/100,101).
+- **pve-ninitux2** (`192.168.0.170`) — отдельный backup-диск/NFS target и лёгкие LXC-тестеры
+  `vpnr-deb12`/`vpnr-alpine`; сами LXC пока доступны только через LAN/Proxmox control path.
 - **pve-ninitux3** — держит ВОРКЕР (uap-home-2) + СТРОЙКУ (uap-build-1, 16GB). Отсюда и теснота: build-1 съедает
-  память хоста, поэтому home-2 не расширить дальше 8GB и тяжёлое лучше слать на уже-выделенный build-1.
+  память хоста, поэтому home-2 не расширить дальше 8GB и тяжёлое лучше слать на уже-выделенный build-1. Здесь же
+  работает `vpnctld` (VMID 119, `192.168.0.236`), production deploy target проекта `vpnctl`.
+
+Полный проверяемый список VM/LXC и политика tailnet находятся в `infra/ops/proxmox-machines.txt`. Существующий
+`uap-healthcheck.timer` на ops-1 каждые 20 минут сверяет его с Proxmox и Tailscale; новая или переехавшая машина
+вызывает alert до явной классификации.
 
 ## Почему так разнесено (логика UAP)
 1. **Критичность изолирована:** etcd + эгресс (уронят всё) — на стабильном ЯДРЕ; ВОРКЕР держит то, что может падать.

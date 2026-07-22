@@ -30,6 +30,8 @@ jobs:
         run: python tests/static/secret_scan.py .
       - name: IaC static validation
         run: python tests/static/validate_iac.py .
+      - name: Ops healthcheck parser self-test
+        run: PVE_INVENTORY_FILE=infra/ops/proxmox-machines.txt sh infra/ops/uap-healthcheck.sh --self-test
       - name: Hermes unit tests (hermetic, offline; test_*.py only — NOT *.py, which imports the live-endpoint scripts)
         run: python -m unittest discover -s hermes/tests -p 'test_*.py'
       - name: Static fixture tests (regression tests for validate_iac/secret_scan logic)

@@ -1,5 +1,5 @@
 [Unit]
-Description=UAP healthcheck (platform alerts + daily Proxmox backup report) -> Telegram
+Description=UAP healthcheck (platform, Proxmox/Tailscale inventory, backups) -> Telegram
 Wants=network-online.target
 After=network-online.target
 
