@@ -62,6 +62,8 @@ _REQUIRED_PROFILE_FIELDS = _PROFILE_FIELDS - {
 }
 _REJECTION_RESULT = "review_rejected"
 _REJECTION_SUMMARY = "Independent review rejected the candidate"
+_REVIEW_ESCALATION_QUESTION_PREFIX = "review-exhausted:"
+_REVIEW_ESCALATION_STOP = "СТОП"
 _AUTHOR_CHECKS_RESULT = "author_checks_failed"
 _AUTHOR_CHECKS_SUMMARY = "Author checks failed after the approved cycle limit"
 _EXECUTION_STATE_RESULT = "execution_state_failed"
@@ -2172,6 +2174,161 @@ class DeliveryCoordinator:
             validated.append(dict(answer))
         return validated
 
+    def _review_escalation(self, state: dict[str, Any]) -> dict[str, Any] | None:
+        value = state.get("review_escalation")
+        if value is None:
+            return None
+        fields = {
+            "schema_version", "question_id", "question_text", "candidate_sha",
+            "review_cycle", "next_review_cycle", "findings", "status",
+            "answer_sha256", "claim_parked", "reclaim_pending", "reclaim_token",
+        }
+        if not isinstance(value, dict) or set(value) != fields:
+            raise DeliveryError("durable review escalation is invalid")
+        answer_sha256 = value.get("answer_sha256")
+        if (
+            value.get("schema_version") != 1
+            or not isinstance(value.get("question_id"), str)
+            or not value["question_id"].startswith(_REVIEW_ESCALATION_QUESTION_PREFIX)
+            or len(value["question_id"]) > 128
+            or not isinstance(value.get("question_text"), str)
+            or not value["question_text"]
+            or len(value["question_text"]) > _MAX_CHECK_FAILURE_CHARS
+            or not isinstance(value.get("candidate_sha"), str)
+            or not value["candidate_sha"]
+            or isinstance(value.get("review_cycle"), bool)
+            or not isinstance(value.get("review_cycle"), int)
+            or value["review_cycle"] < 1
+            or value.get("next_review_cycle") != value["review_cycle"] + 1
+            or value.get("status") not in {"pending", "continued", "stopped"}
+            or not isinstance(value.get("claim_parked"), bool)
+            or not isinstance(value.get("reclaim_pending"), bool)
+            or not isinstance(value.get("reclaim_token"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["reclaim_token"]) is None
+        ):
+            raise DeliveryError("durable review escalation is invalid")
+        findings = _sanitize_findings(value.get("findings"))
+        if findings != value["findings"] or not findings:
+            raise DeliveryError("durable review escalation findings are invalid")
+        if (
+            value["status"] == "pending" and answer_sha256 is not None
+            or value["status"] != "pending"
+            and (
+                not isinstance(answer_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", answer_sha256) is None
+            )
+        ):
+            raise DeliveryError("durable review escalation answer is invalid")
+        return value
+
+    def _review_budget_limit(self, state: dict[str, Any]) -> int:
+        base = self.profile["max_review_cycles"] + 1
+        escalation = self._review_escalation(state)
+        return base * 2 if escalation and escalation["status"] == "continued" else base
+
+    @staticmethod
+    def _review_findings_digest(findings: list[str]) -> str:
+        return "\n".join(
+            f"{index}. {' '.join(finding.split())[:900]}"
+            for index, finding in enumerate(findings[:3], start=1)
+        )
+
+    def _begin_review_escalation(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        if self._review_escalation(state) is not None:
+            raise DeliveryError("review escalation may be used only once")
+        findings = _sanitize_findings(state.get("review_findings"))
+        digest = self._review_findings_digest(findings)
+        identity = flow_contract.canonical_sha256({
+            "mission_id": state["mission_id"],
+            "candidate_sha": state["candidate_sha"],
+            "review_cycle": state["review_cycle"],
+            "findings": findings,
+        })
+        question_id = f"{_REVIEW_ESCALATION_QUESTION_PREFIX}{identity[:24]}"
+        question_text = (
+            f"Независимое ревью не приняло результат после {state['review_cycle']} циклов. "
+            f"Главные замечания:\n{digest}\n"
+            "Пришлите дополнительный контекст или указания — задача получит ещё один "
+            f"ограниченный бюджет исправлений. Чтобы остановить задачу, ответьте ровно {_REVIEW_ESCALATION_STOP}."
+        )
+        state.update(
+            phase="review_escalation_pending",
+            review_escalation={
+                "schema_version": 1,
+                "question_id": question_id,
+                "question_text": question_text,
+                "candidate_sha": state["candidate_sha"],
+                "review_cycle": state["review_cycle"],
+                "next_review_cycle": state["review_cycle"] + 1,
+                "findings": findings,
+                "status": "pending",
+                "answer_sha256": None,
+                "claim_parked": False,
+                "reclaim_pending": False,
+                "reclaim_token": identity,
+            },
+        )
+        self._save(paths, state)
+        self._ensure_review_escalation_question(state, paths)
+
+    def _ensure_review_escalation_question(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        escalation = self._review_escalation(state)
+        if (
+            state.get("phase") != "review_escalation_pending"
+            or escalation is None
+            or escalation["status"] != "pending"
+        ):
+            raise DeliveryError("review escalation question is outside its checkpoint")
+        self._park_scheduled_claim(
+            state,
+            paths,
+            escalation,
+            label="review escalation",
+            reason="waiting for owner context after exhausted review",
+        )
+        self.client.publish(
+            state["mission_id"],
+            mission_adapter._producer_event(
+                state["mission_id"],
+                "mission.question",
+                {
+                    "question_id": escalation["question_id"],
+                    "text": escalation["question_text"],
+                },
+                {"task_id": state["root_task_id"]},
+            ),
+        )
+
+    def _publish_review_findings_notice(self, state: dict[str, Any]) -> None:
+        if state.get("review_findings") is None:
+            return
+        findings = _sanitize_findings(state["review_findings"])
+        if not findings:
+            return
+        message = (
+            "Независимое ревью окончательно отклонило результат:\n"
+            f"{self._review_findings_digest(findings)}"
+        )
+        if state.get("pr_url"):
+            message += f"\nЧерновик PR сохранён: {state['pr_url']}"
+        self.client.publish(
+            state["mission_id"],
+            mission_adapter._producer_event(
+                state["mission_id"],
+                "mission.notice",
+                {
+                    "code": "review_findings",
+                    "message": _bounded_diagnostic(message),
+                    "owner_action_required": False,
+                },
+                {"task_id": state["root_task_id"]},
+            ),
+        )
+
     def _load_state(
         self,
         mission_id: str,
@@ -2197,6 +2354,7 @@ class DeliveryCoordinator:
             state.setdefault("effective_route_decisions", {})
             state.setdefault("owner_answers", [])
             self._owner_answers(state)
+            self._review_escalation(state)
             self._ci_retry_state(state)
             migrated = False
             if "review_findings" in state:
@@ -2387,7 +2545,9 @@ class DeliveryCoordinator:
         mission: dict[str, Any],
         paths: dict[str, pathlib.Path],
     ) -> None:
-        if state.get("phase") not in {"new", "waiting_owner", "owner_answer_pending"}:
+        if state.get("phase") not in {
+            "new", "waiting_owner", "owner_answer_pending", "review_escalation_pending",
+        }:
             raise DeliveryError("owner answer arrived after execution started")
         answer = mission.get("answer")
         if (
@@ -2462,6 +2622,47 @@ class DeliveryCoordinator:
             }
         ):
             raise DeliveryError("owner answer does not reference the exact Kanban root")
+        review_escalation = self._review_escalation(state)
+        if state.get("phase") == "review_escalation_pending":
+            if (
+                review_escalation is None
+                or review_escalation["question_id"] != entry["question_id"]
+            ):
+                raise DeliveryError("owner answer does not match the review escalation")
+            desired_status = (
+                "stopped"
+                if text.strip().casefold() == _REVIEW_ESCALATION_STOP.casefold()
+                else "continued"
+            )
+            if review_escalation["status"] == "pending":
+                review_escalation.update(
+                    status=desired_status,
+                    answer_sha256=entry["sha256"],
+                )
+            elif (
+                review_escalation["status"] != desired_status
+                or review_escalation["answer_sha256"] != entry["sha256"]
+            ):
+                raise DeliveryError("review escalation answer changed after its checkpoint")
+            state["owner_answers"] = answers
+            self._save(paths, state)
+            self._resume_scheduled_claim(
+                state,
+                paths,
+                review_escalation,
+                label="review escalation",
+                reason="owner answered exhausted review",
+            )
+            if desired_status == "stopped":
+                state["phase"] = "review_rejected"
+            else:
+                state.update(
+                    phase="needs_fix",
+                    review_cycle=review_escalation["next_review_cycle"],
+                )
+            state.pop("owner_question", None)
+            self._save(paths, state)
+            return
         if owner_gate is not None:
             owner_gate.update(status="approved", answer_sha256=entry["sha256"])
         state.update(
@@ -2885,6 +3086,8 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
+        if state["phase"] == "review_rejected":
+            self._publish_review_findings_notice(state)
         if state["phase"] in {
             "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed",
             "deployment_failed",
@@ -3812,7 +4015,9 @@ class DeliveryCoordinator:
             "Independently review this exact read-only candidate for correctness, regressions, security, and tests. "
             "Read repository instructions. Do not edit files, commit, push, or trust the author transcript. "
             f"The exact candidate file set is {json.dumps(candidate_files)}. "
-            "Return accept only when no actionable finding remains. " + marker
+            "Return accept only when no actionable finding remains. "
+            "The following value is an internal JSON source-attestation marker; do not compare it "
+            "with candidate file hashes or report it as a finding. " + marker
         )
         self._assert_claim(
             state, min_remaining_seconds=self.profile["command_timeout_seconds"]
@@ -3933,11 +4138,12 @@ class DeliveryCoordinator:
             self._save(paths, state)
             return True
         state["prior_review_rejections"] = state.get("prior_review_rejections", 0) + 1
-        if cycle > self.profile["max_review_cycles"]:
-            state.update(
-                phase="review_rejected",
-                review_findings=verification["findings"],
-            )
+        if cycle >= self._review_budget_limit(state):
+            state["review_findings"] = verification["findings"]
+            if self._review_escalation(state) is None:
+                self._begin_review_escalation(state, paths)
+                return False
+            state["phase"] = "review_rejected"
             self._save(paths, state)
             return False
         state.update(phase="needs_fix", review_cycle=cycle + 1, review_findings=verification["findings"])
@@ -5631,6 +5837,25 @@ class DeliveryCoordinator:
             if mission.get("status") == "cancelled":
                 return self._finish_cancelled(state, paths)
             self._bind_mission_goal(state, mission, paths)
+            review_escalation = self._review_escalation(state)
+            if (
+                state.get("phase") == "review_escalation_pending"
+                and review_escalation is not None
+                and review_escalation["status"] == "pending"
+                and mission.get("status") != "waiting_owner"
+                and not isinstance(mission.get("answer"), dict)
+            ):
+                self._ensure_review_escalation_question(state, paths)
+                mission = self.client.get_mission(mission_id)
+                if (
+                    mission.get("status") != "waiting_owner"
+                    and not isinstance(mission.get("answer"), dict)
+                ):
+                    return {
+                        "action": "review_escalation_pending",
+                        "mission_id": mission_id,
+                        "state": state,
+                    }
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
                 "post_verify_failed", "deployment_failed", "rejection_task_completed",
@@ -5652,6 +5877,21 @@ class DeliveryCoordinator:
             if mission.get("status") == "failed":
                 raise DeliveryError(f"mission is terminal: {mission.get('status')}")
             if mission.get("status") == "waiting_owner":
+                if state.get("phase") == "review_escalation_pending":
+                    question = mission.get("question")
+                    if (
+                        review_escalation is None
+                        or review_escalation["status"] != "pending"
+                        or not isinstance(question, dict)
+                        or question.get("question_id") != review_escalation["question_id"]
+                        or question.get("text") != review_escalation["question_text"]
+                    ):
+                        raise DeliveryError("Central review escalation question changed")
+                    return {
+                        "action": "waiting_owner",
+                        "mission_id": mission_id,
+                        "state": state,
+                    }
                 return self._wait_for_owner(state, mission, paths)
             if state.get("phase") == "waiting_owner" and mission.get("answer") is None:
                 raise DeliveryError("owner question cleared without a durable answer")
@@ -5667,10 +5907,15 @@ class DeliveryCoordinator:
                     item["question_id"] == answer.get("question_id")
                     for item in self._owner_answers(state)
                 )
-                if state.get("phase") in {"new", "waiting_owner", "owner_answer_pending"}:
+                if state.get("phase") in {
+                    "new", "waiting_owner", "owner_answer_pending",
+                    "review_escalation_pending",
+                }:
                     self._resume_owner_answer(state, mission, paths)
                 elif not consumed:
                     raise DeliveryError("owner answer has no durable execution checkpoint")
+                if state.get("phase") == "review_rejected":
+                    return self._finish_rejection(state, paths)
             self._ensure_route(state, paths)
             ambiguous = self._ambiguous_state(state)
             if ambiguous is not None:
@@ -5811,7 +6056,7 @@ class DeliveryCoordinator:
                     self._publish_progress_notice(
                         state,
                         f"Цикл {state['review_cycle']} из "
-                        f"{self.profile['max_review_cycles']}. "
+                        f"{self._review_budget_limit(state)}. "
                         f"Автор {actor['model']} {action}. "
                         "Следом — автоматические проверки и CI.",
                     )
@@ -5869,7 +6114,7 @@ class DeliveryCoordinator:
                     f"CI кандидата {state['candidate_sha'][:8]} пройден. "
                     f"Ревьюер {reviewer['model']} проверяет точный commit, "
                     f"цикл {state['review_cycle']} из "
-                    f"{self.profile['max_review_cycles']}. Следом — слияние "
+                    f"{self._review_budget_limit(state)}. Следом — слияние "
                     "либо автоматическое исправление замечаний.",
                 )
                 review = self._review(state, paths)
