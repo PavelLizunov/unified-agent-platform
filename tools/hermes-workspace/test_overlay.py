@@ -20,6 +20,7 @@ PREVIOUS_PERMISSIONS_COMMIT = "fd33c10d4949c2a63b01ea1d2c1c85a161e3fb1e"
 PREVIOUS_PROJECT_CATALOG_UI_COMMIT = "95343b3ba3891c15dd80d9b911c66c013dcada69"
 PREVIOUS_HIDE_COMMIT = "99a55da4c93b4d861241237b12bda05a8916ecf2"
 PREVIOUS_SETUP_BINDING_COMMIT = "f60af5edd278e0886b7b0d531c189f78b698838a"
+PREVIOUS_SETUP_KICKOFF_COMMIT = "8648040e9748f005986be9a87eee3c4d52a13b8e"
 UPSTREAM = "https://github.com/outsourc-e/hermes-workspace"
 
 
@@ -177,6 +178,27 @@ def main() -> None:
         )
         previous_project_ui_upgrade = run(clone)
         assert previous_project_ui_upgrade.returncode == 0
+        assert "previous-needs-overlay" not in run(clone, "--check").stdout
+
+        production_setup_ui = subprocess.check_output(
+            [
+                "git", "show",
+                f"{PREVIOUS_SETUP_KICKOFF_COMMIT}:tools/hermes-workspace/files/"
+                "src/components/settings/project-permissions.tsx",
+            ],
+            cwd=REPO_ROOT,
+        )
+        previous_project_ui_path.write_bytes(production_setup_ui)
+        assert hashlib.sha256(production_setup_ui).hexdigest() == (
+            "1d368904c3ee2fababb105b42cfa0539666bf7ddbe5580592c777d568f0194a0"
+        )
+        production_setup_check = run(clone, "--check")
+        assert production_setup_check.returncode == 0
+        assert "src/components/settings/project-permissions.tsx: previous-needs-overlay" in (
+            production_setup_check.stdout
+        )
+        production_setup_upgrade = run(clone)
+        assert production_setup_upgrade.returncode == 0
         assert "previous-needs-overlay" not in run(clone, "--check").stdout
 
         assignees = (clone / "src/routes/api/claude-tasks-assignees.ts").read_text()
@@ -389,6 +411,9 @@ def main() -> None:
         assert "window.setInterval" in project_settings
         assert "onboarding.progress_percent" in project_settings
         assert "Настроить в чате" in project_settings
+        assert "CHAT_PENDING_COMMAND_STORAGE_KEY" in project_settings
+        assert "/discuss Задай 3–5 коротких вопросов" in project_settings
+        assert "Не используй инструменты" in project_settings
         assert "window.location.assign('/chat/new')" in project_settings
         status_position = project_settings.index(
             "{statusLabels[project.status] || project.status}"

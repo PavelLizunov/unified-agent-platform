@@ -52,6 +52,7 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Analyze the repository and tell me how we should integrate this",
         "Find the latest test API documentation",
         "/discuss Настройка проекта",
+        "/discuss Задай 3–5 коротких вопросов, которые нужны, чтобы настроить этот проект.",
     ):
         assert not missions.is_execution_goal(discussion), discussion
     for execution in (
