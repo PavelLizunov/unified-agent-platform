@@ -213,6 +213,7 @@ def main() -> None:
         assert 'getattr(event, "_uap_media_download_failed", False)' in gateway
         assert "download_telegram_file(msg.voice)" in telegram
         assert "download_telegram_file(msg.audio)" in telegram
+        assert "Telegram не отдал файл после 3 автоматических попыток" in telegram
         assert "event._uap_media_download_failed = True" in telegram
         assert "candidate.parent == audio_cache" in gateway
         assert "candidate.unlink()" in gateway

@@ -36,7 +36,7 @@ data:
         "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
         "gateway/run.py": "f7ec3952f063065b2b013d2749fdf7039f0c576854e1165cf7a9cb36182a3557",
         "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
-        "plugins/platforms/telegram/adapter.py": "bb63f8d562d1cd2ecedeca09d20a379a8632d31435e03c7b3bd4d07b9183e827",
+        "plugins/platforms/telegram/adapter.py": "86722e5ce3d686d9b2046e38e2f2e871408c35798d066e3296ab6721de8a03ee",
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
@@ -606,6 +606,18 @@ data:
                 '''                from hermes_cli.uap_media import download_telegram_file
                     file_obj, audio_bytes = await download_telegram_file(msg.audio)''',
                 "bounded Telegram audio download retry",
+            )
+            text = replace(
+                text,
+                '''            await msg.reply_text(
+                    f"\\u26a0\\ufe0f Couldn't download your {kind}{named} "
+                    f"({exc.__class__.__name__}). Please try sending it again."
+                )''',
+                '''            await msg.reply_text(
+                    "\\u26a0\\ufe0f Telegram не отдал файл после 3 автоматических попыток. "
+                    "Отправьте его ещё раз или напишите текстом."
+                )''',
+                "Russian Telegram media failure",
             )
             return replace(
                 text,
