@@ -63,13 +63,13 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 | `terminal.append` | `stream`, `text` | appends bounded terminal/tool output |
 | `change.upsert` | `path`, `status` | records a changed artifact |
 | `gate.upsert` | `gate_id`, `status` | records test, review, CI or verification state |
-| `delivery.upsert` | `kind`, `status`, `url` | records PR, deploy or release evidence |
+| `delivery.upsert` | `kind`, `status`, `url`; deployment also binds `environment`, `artifact_sha256`, `deployed_revision` | records PR, deploy or release evidence |
 | `artifact.upsert` | `artifact_id`, `kind`, `name`, `media_type`, `size_bytes`, `sha256` | records bounded Central-owned media metadata; build-1 producers cannot publish it |
 | `mission.completed` | `result` | terminal success; stage `complete`, progress 100 |
 | `mission.failed` | `error` | terminal failure |
 | `mission.cancelled` | `reason` | terminal cancellation |
 
-Stages are `accepted`, `planning`, `implementing`, `testing`, `reviewing`, `delivering`, `verifying` and `complete`.
+Stages are `accepted`, `planning`, `implementing`, `testing`, `reviewing`, `delivering`, `verifying`, `deploying` and `complete`.
 Progress is an integer from 0 through 100 and may not decrease. Terminal events are final; later events are invalid.
 `dispatch_profile` is an immutable, opaque label. Central Hermes stores and projects it; only an exact build-1
 configuration match authorizes handoff. An absent or unknown label does not dispatch.
@@ -112,9 +112,9 @@ only the generic API bearer or producer key cannot impersonate owner intake. Pro
 callers retain the explicit identity/profile form, and requests carrying both capabilities are rejected as ambiguous.
 
 The production catalog inventory exposes all 33 repositories currently owned by the GitHub account. Each entry has
-an explicit readiness state and intended test targets. Eight repo-owned no-deploy projects are currently executable:
-Mission Ledger, `vpnctl`, `VPNRouter`, `vpnrouter-gateway`, `suflyor`, `spark-runner`, `subfleet` and
-`slipstream-rust`; 16 active repositories require a reviewed build/test profile, two are
+an explicit readiness state and intended test targets. Seven repo-owned no-deploy projects and one deploy project are
+currently executable: Mission Ledger, `VPNRouter`, `vpnrouter-gateway`, `suflyor`, `spark-runner`, `subfleet`,
+`slipstream-rust`, plus `vpnctl` with the closed `vpnctld-systemd-v1` production driver; 16 active repositories require a reviewed build/test profile, two are
 release-only and seven are archived. Merely discovering a GitHub repository never grants shell access. Workspace's
 **Projects & permissions** settings view lists only owner-safe catalog metadata and stores one ready `project_id`;
 Central independently validates it. Telegram resolves an exact ready project
@@ -138,11 +138,13 @@ browser smoke target. These names describe the intended verification boundary; t
 Control-plane, Proxmox and ops hosts are deliberately absent from project test targets. A project becomes `ready`
 only when an exact schema-v4 delivery profile and its real runner path have been installed and tested.
 
-`delivery_mode: none` is immutable mission acceptance data, not an inference from the completed checks. Central will
-not complete such a mission until the coordinator publishes `delivery: not_applicable` in addition to PR merge,
-default-branch verification and all required gates. A route that declares `deploy` or `release` is rejected before
-mission acceptance until an exact revision/artifact/environment contract is implemented; fresh-main verification is
-therefore never silently treated as a deployment.
+`delivery_mode` is immutable mission acceptance data, not an inference from the completed checks. Central will not
+complete a no-deploy mission until the coordinator publishes `delivery: not_applicable` in addition to PR merge,
+default-branch verification and all required gates. `delivery_mode: deploy` is accepted only for the exact registered
+vpnctl driver and additionally requires deployment gate success, the production environment, the exact merged and
+deployed revision, a complete installed-payload SHA-256 and health verification. `release` and any unregistered deploy
+driver are rejected before mission acceptance or profile activation; fresh-main verification is never silently
+treated as deployment.
 
 For an ordinary owner turn, Central derives `mission_id` from the platform, channel/session identity and stable source
 message ID. The existing immutable `mission.accepted` event is therefore also the durable intake receipt: a retry

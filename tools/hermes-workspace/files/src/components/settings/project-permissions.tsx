@@ -6,7 +6,7 @@ type Project = {
   label: string
   repository: string
   summary: string
-  delivery_mode: 'none'
+  delivery_mode: 'none' | 'deploy'
   status: 'ready' | 'setup_required' | 'read_only' | 'archived'
   category: string
   test_targets: string[]
@@ -31,6 +31,11 @@ const statusLabels: Record<Project['status'], string> = {
   archived: 'Архив',
 }
 
+const deliveryLabels: Record<Project['delivery_mode'], string> = {
+  none: 'Деплой для этого проекта не настроен',
+  deploy: 'После слияния: автоматический деплой и проверка production',
+}
+
 const targetLabels: Record<string, string> = {
   'uap-build-1': 'Linux build-1',
   'github-linux': 'GitHub Linux',
@@ -41,6 +46,7 @@ const targetLabels: Record<string, string> = {
   'pavels-mac-mini': 'Mac mini',
   'android-on-mac': 'Android через Mac mini',
   'desktop-m922ij2': 'Windows workstation',
+  vpnctld: 'vpnctl production',
   browser: 'Browser smoke',
 }
 
@@ -325,6 +331,9 @@ export function ProjectPermissions() {
                     Проверки: {project.test_targets.map((target) => targetLabels[target] || target).join(' · ')}
                   </span>
                 ) : null}
+                <span className="mt-1 block text-xs text-primary-600">
+                  {deliveryLabels[project.delivery_mode]}
+                </span>
                 {project.status === 'setup_required' ? (
                   <Button
                     type="button"

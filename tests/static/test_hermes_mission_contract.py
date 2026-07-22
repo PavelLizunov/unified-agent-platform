@@ -31,7 +31,10 @@ REQUIRED_PAYLOAD = {
 }
 SOURCES = {"central-hermes", "workspace", "telegram", "build1-flow", "test-vm", "github", "flux"}
 TERMINAL_TYPES = {"mission.completed", "mission.failed", "mission.cancelled"}
-STAGES = {"accepted", "planning", "implementing", "testing", "reviewing", "delivering", "verifying", "complete"}
+STAGES = {
+    "accepted", "planning", "implementing", "testing", "reviewing",
+    "delivering", "verifying", "deploying", "complete",
+}
 
 
 class ContractError(ValueError):

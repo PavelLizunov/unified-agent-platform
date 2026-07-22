@@ -18,6 +18,7 @@ CORE_FILES = {
     "mission_adapter.py": pathlib.Path("swarm-bin/mission_adapter.py"),
     "delivery_coordinator.py": pathlib.Path("swarm-bin/delivery_coordinator.py"),
     "project_onboarding.py": pathlib.Path("swarm-bin/project_onboarding.py"),
+    "../../infra/ops/uap-deploy-vpnctld.sh": pathlib.Path("bin/uap-deploy-vpnctld"),
     "systemd/hermes-delivery-coordinator@.service": pathlib.Path(
         ".config/systemd/user/hermes-delivery-coordinator@.service"
     ),
@@ -41,6 +42,7 @@ ONBOARDING_FILES = {
 EXECUTABLES = (
     "flow_contract.py", "mission_adapter.py", "delivery_coordinator.py",
     "project_onboarding.py",
+    "../../infra/ops/uap-deploy-vpnctld.sh",
 )
 _LEGACY_MODEL_FIELDS = {
     "author_model", "reviewer_model", "author_reasoning_effort", "reviewer_reasoning_effort",

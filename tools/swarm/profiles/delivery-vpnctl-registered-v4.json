@@ -15,7 +15,13 @@
   "commit_message": "feat: deliver registered vpnctl mission",
   "completion_evidence": true,
   "default_branch": "main",
-  "delivery_mode": "none",
+  "delivery_mode": "deploy",
+  "deployment": {
+    "driver": "vpnctld-systemd-v1",
+    "environment": "vpnctl-production",
+    "health_url": "http://vpnctld:18402/api/v1/health",
+    "target": "vpnctld"
+  },
   "dispatch_profile": "build1-vpnctl-registered-v4",
   "max_changed_files": 60,
   "max_review_cycles": 7,

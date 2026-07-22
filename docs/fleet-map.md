@@ -59,7 +59,9 @@ live/UI-тесты — ТОЛЬКО на тест-VM, НИКОГДА на owner 
   `vpnr-deb12`/`vpnr-alpine`; сами LXC пока доступны только через LAN/Proxmox control path.
 - **pve-ninitux3** — держит ВОРКЕР (uap-home-2) + СТРОЙКУ (uap-build-1, 16GB). Отсюда и теснота: build-1 съедает
   память хоста, поэтому home-2 не расширить дальше 8GB и тяжёлое лучше слать на уже-выделенный build-1. Здесь же
-  работает `vpnctld` (VMID 119, `192.168.0.236`), production deploy target проекта `vpnctl`.
+  работает `vpnctld` (VMID 119, LAN `192.168.0.236`, tailnet `100.88.198.106`), production deploy target проекта
+  `vpnctl`. Его `tailscaled` использует тот же VLESS proxy `192.168.0.202:30880`, потому что direct initial netmap
+  стабильно обрывался через две минуты; service API `18402/tcp` разрешён на LAN и `tailscale0`.
 
 Полный проверяемый список VM/LXC и политика tailnet находятся в `infra/ops/proxmox-machines.txt`. Существующий
 `uap-healthcheck.timer` на ops-1 каждые 20 минут сверяет его с Proxmox и Tailscale; новая или переехавшая машина

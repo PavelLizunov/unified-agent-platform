@@ -227,7 +227,7 @@ def completion_evidence(*, schema_version=1):
             "result": "Delivery completed, merged, and verified",
         },
     }
-    if schema_version in {2, 3}:
+    if schema_version in {2, 3, 4, 5}:
         source_key_sha256 = "b" * 64
         value["mission"]["mission_id"] = (
             "mission-intake-" + source_key_sha256[:32]
@@ -237,7 +237,7 @@ def completion_evidence(*, schema_version=1):
             "source_key_sha256": source_key_sha256,
             "source_message_sha256": "d" * 64,
         }
-    if schema_version == 3:
+    if schema_version in {3, 5}:
         value["mission"]["owner_answer_sha256s"] = ["1" * 64]
         value["interaction"] = {
             "owner_answers": [{
@@ -254,6 +254,17 @@ def completion_evidence(*, schema_version=1):
                 "projection_id": "e" * 16,
             },
         }
+    if schema_version in {4, 5}:
+        value["source"]["repo"] = "PavelLizunov/vpnctl"
+        value["delivery"]["pr_url"] = "https://github.com/PavelLizunov/vpnctl/pull/42"
+        value["delivery"].update(
+            mode="deploy",
+            applicability="verified",
+            environment="vpnctl-production",
+            artifact_sha256="6" * 64,
+            deployed_revision=value["source"]["default_sha"],
+            health_url="http://vpnctld:18402/api/v1/health",
+        )
     value["sha256"] = flow.canonical_sha256(value)
     return value
 
@@ -493,6 +504,33 @@ class FlowContractTests(unittest.TestCase):
                     key: item for key, item in changed.items() if key != "sha256"
                 })
                 with self.assertRaisesRegex(flow.ContractError, message):
+                    flow.validate_completion_evidence(changed)
+
+    def test_completion_evidence_v4_and_v5_bind_exact_deployment(self):
+        for schema_version in (4, 5):
+            with self.subTest(schema_version=schema_version):
+                value = completion_evidence(schema_version=schema_version)
+                self.assertEqual(value, flow.validate_completion_evidence(value))
+                for field, replacement, message in (
+                    ("artifact_sha256", "bad", "deployment identity"),
+                    ("deployed_revision", "0" * 40, "deployment identity"),
+                    ("mode", "none", "deployment identity"),
+                    ("environment", "other-production", "deployment identity"),
+                    ("health_url", "http://other:18402/api/v1/health", "deployment identity"),
+                ):
+                    changed = completion_evidence(schema_version=schema_version)
+                    changed["delivery"][field] = replacement
+                    changed["sha256"] = flow.canonical_sha256({
+                        key: item for key, item in changed.items() if key != "sha256"
+                    })
+                    with self.assertRaisesRegex(flow.ContractError, message):
+                        flow.validate_completion_evidence(changed)
+                changed = completion_evidence(schema_version=schema_version)
+                changed["source"]["repo"] = "PavelLizunov/other"
+                changed["sha256"] = flow.canonical_sha256({
+                    key: item for key, item in changed.items() if key != "sha256"
+                })
+                with self.assertRaisesRegex(flow.ContractError, "deployment identity"):
                     flow.validate_completion_evidence(changed)
 
     def test_completion_evidence_rejects_recomputed_policy_violations(self):
