@@ -253,6 +253,30 @@ def main() -> None:
     assert next(
         project for project in projects["projects"] if project["project_id"] == "wgturn-core"
     )["status"] == "setup_required"
+    local_llm_lab = next(
+        project for project in projects["projects"]
+        if project["project_id"] == "local-llm-lab"
+    )
+    assert local_llm_lab == {
+        "project_id": "local-llm-lab",
+        "label": "Local LLM Evaluation Lab",
+        "repository": "PavelLizunov/local-llm-evaluation-lab",
+        "summary": (
+            "Каталог тестов LLM, исследовательских сценариев и результатов "
+            "для конкретных моделей."
+        ),
+        "aliases": ["llm lab", "model lab", "лаборатория моделей"],
+        "dispatch_profile": None,
+        "delivery_mode": "none",
+        "platforms": ["workspace", "telegram"],
+        "category": "research",
+        "status": "setup_required",
+        "test_targets": ["desktop-m922ij2", "pavels-mac-mini"],
+    }
+    staged_profile = installed_profiles["build1-local-llm-lab-registered-v4"]
+    assert staged_profile["repo"] == local_llm_lab["repository"]
+    assert staged_profile["delivery_mode"] == local_llm_lab["delivery_mode"]
+    assert local_llm_lab["dispatch_profile"] is None
     runtime_spec = importlib.util.spec_from_file_location(
         "uap_mission_catalog_runtime", ROOT / "tools/hermes-mission/runtime.py"
     )
