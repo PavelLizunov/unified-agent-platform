@@ -430,7 +430,7 @@
 - **Решение:** central k3s Hermes is the user-facing Workspace backend; local build-1 Hermes remains Flow infrastructure. Workspace uses a small, exact-commit, fail-closed external overlay. There is no permanent upstream fork.
 - **Обоснование:** this keeps one user-facing dashboard/Kanban source of truth and avoids duplicating the dispatcher or maintaining a fork.
 - **Отвергнуто:** exposing build-1's local models/game/update surface in the central UI; replacing the local Flow dispatcher; a permanent fork or custom image.
-- **Последствия:** the overlay is reversible and must be removed when upstream provides equivalent switches/auth support. The central gateway API is exposed only on the tailnet NodePort with its bearer key from SOPS; dashboard password session cookies remain in Workspace process memory.
+- **Последствия:** the overlay is reversible and must be removed when upstream provides equivalent switches/auth support. The central gateway API is reachable on the tailnet **AND the home LAN** (a k3s NodePort binds `0.0.0.0` on every node interface; there is no NetworkPolicy yet — proposed in `SECURITY-REMEDIATION-2026-07-24.md`) and is access-controlled only by its bearer key from SOPS at the app layer; dashboard password session cookies remain in Workspace process memory. It is NOT tailnet-only.
 
 ## ADR-028 — Hermes Flow v2: Kanban, quota-aware routing и независимое review
 

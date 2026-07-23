@@ -285,6 +285,14 @@ spec:
             failureThreshold: 5       # ~100s before restarting a single-replica Recreate agent (margin for a transient listener blip)
           volumeMounts:
             - { name: data, mountPath: /opt/data }
+            # F4 / upstream #62336: if any skill ever invokes hermes's LOCAL terminal tool, its snapshot
+            # path (cache/terminal/hermes-snap-*.sh, HERMES_HOME-relative) would capture the gateway's full
+            # secret env in PLAINTEXT onto the durable PVC -> the daily R2 backup. Shadow that DISPOSABLE
+            # cache dir with an emptyDir so any snapshot is ephemeral (gone on roll, never backed up).
+            # Currently inert: the Codex loop, not hermes's terminal tool, drives execution (live find = 0
+            # snapshots). Path is per upstream tools/environments/base.py; confirm via the canary in
+            # SECURITY-REMEDIATION-2026-07-24.md before relying on it if the local terminal tool is enabled.
+            - { name: terminal-cache, mountPath: /opt/data/cache/terminal }
             - { name: research-session, mountPath: /opt/data/mcp/research_session.py, subPath: research_session.py, readOnly: true }
             # managed scope: loaded LAST with override into os.environ, authoritative for
             # every profile + subprocess (codex spawn = os.environ.copy()). This is how the
@@ -323,6 +331,10 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: hermes-agent-data
+        # F4 / #62336: ephemeral terminal-snapshot cache shadowing /opt/data/cache/terminal (see the
+        # gateway volumeMount note). A future local-terminal snapshot lands here, NOT on the PVC/backup.
+        - name: terminal-cache
+          emptyDir: {}
         - name: config
           configMap:
             name: hermes-agent-config
@@ -347,9 +359,12 @@ spec:
           configMap:
             name: hermes-research-session
 ---
-# Web dashboard over the tailnet. The cluster network runs on tailscale0 (ADR-021), so a
-# tailscale-serve proxy can't reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy
-# :30890). Reach it at http://<any-node-tailnet-ip>:30911 with basic auth (user "pavel").
+# Web dashboard. The cluster network runs on tailscale0 (ADR-021), so a tailscale-serve proxy can't
+# reach a ClusterIP — use a NodePort (same pattern as Hermes-legacy :30890). NOTE: a k3s NodePort binds
+# 0.0.0.0 on EVERY node interface, so :30911 is reachable on the tailnet AND the home LAN (192.168.0.0/24);
+# there is NO network-layer restriction yet (no NetworkPolicy — proposed in
+# SECURITY-REMEDIATION-2026-07-24.md). Access is controlled by mandatory basic auth (user "pavel"),
+# e.g. http://<any-node-tailnet-ip>:30911. It is NOT tailnet-only.
 apiVersion: v1
 kind: Service
 metadata:
