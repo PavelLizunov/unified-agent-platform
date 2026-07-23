@@ -88,7 +88,9 @@ spec:
                   raise SystemExit(f"missing restored files: {missing}")
               for name in ("state.db", "missions-v1.sqlite3"):
                   path = root / name
-                  with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as connection:
+                  with sqlite3.connect(
+                      f"{path.as_uri()}?mode=ro&immutable=1", uri=True
+                  ) as connection:
                       check = [row[0] for row in connection.execute("PRAGMA quick_check")]
                       if check != ["ok"]:
                           raise SystemExit(f"{name} quick_check failed: {check[:3]}")
