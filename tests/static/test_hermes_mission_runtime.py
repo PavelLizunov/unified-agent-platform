@@ -55,6 +55,13 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Я обновил только README",
         "Почему задача выполняется",
         "I already updated the README",
+        "Run tests and report the result",
+        "/run Run tests and report the result",
+        "/run read-only status",
+        "/run тесты",
+        "/run статус CI",
+        "/run диагностика CI",
+        "Read https://example.invalid/spec.md and summarize it",
         (
             "Давай вернёмся к задаче по суфлёру. Найди файл handoff с описанием "
             "тестов и скажи, что ты его нашёл. После этого мы продолжим."
@@ -70,6 +77,18 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Сделай эту интеграцию",
         "Я обновил README, теперь исправь тест",
         "I updated the README, now fix the test",
+        "Run tests and fix any failures",
+        "Create a regression test and run it",
+        "Update the test and run it",
+        "Update the README link to https://example.invalid/reference",
+        "Update the source URL to https://example.invalid/reference",
+        "Implement the plan from https://example.invalid/spec.md",
+        "Implement https://example.invalid/spec.md",
+        "Build https://example.invalid/spec.md",
+        "Implement per https://example.invalid/spec.md",
+        "Follow https://example.invalid/spec.md and implement it",
+        "Open https://example.invalid/spec.md and implement it",
+        "Реализуй план на основе https://example.invalid/handoff.md",
         "/run теперь делаем это",
     ):
         assert missions.is_execution_goal(execution), execution
@@ -109,6 +128,7 @@ def test_owner_turn_admission_is_authoritative_before_project_routing() -> None:
             "Какие риски у настройки этого проекта?",
             "Я вижу, что он запустил CI",
             "I already updated the README",
+            "Run tests and report the result",
         )):
             try:
                 store.ingest_owner_turn(
@@ -120,6 +140,21 @@ def test_owner_turn_admission_is_authoritative_before_project_routing() -> None:
                 raise AssertionError("discussion was accepted as an execution mission")
             except missions.MissionError as error:
                 assert str(error) == "owner turn is not an execution goal"
+        assert store.latest() is None
+
+        try:
+            store.ingest_owner_turn(
+                "Implement the plan from https://example.invalid/spec.md",
+                platform="workspace",
+                source_message_id="external-source",
+                session_id="external-source-session",
+                project_id="uap",
+            )
+            raise AssertionError("external source goal was accepted")
+        except missions.MissionError as error:
+            assert str(error) == (
+                "external source is not available through an immutable intake capability"
+            )
         assert store.latest() is None
 
         accepted, created = store.ingest_owner_turn(
