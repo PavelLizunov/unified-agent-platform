@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import re
 import sqlite3
 import tempfile
 import zipfile
@@ -32,6 +33,8 @@ def _archive(
     *,
     include_mission: bool = True,
     corrupt_mission: bool = False,
+    mission_sidecars: bool = False,
+    nested_sidecar: bool = False,
 ) -> pathlib.Path:
     state = root / "state.db"
     mission = root / "missions-v1.sqlite3"
@@ -52,6 +55,15 @@ def _archive(
         output.writestr(".codex/state.sqlite", b"derived")
         if include_mission:
             output.write(mission, "missions-v1.sqlite3")
+            if mission_sidecars:
+                # Unsafe raw live-copy artifacts of a WAL-mode MissionStore: the backup must
+                # replace these with the self-contained sqlite3.backup() snapshot.
+                output.writestr("missions-v1.sqlite3-wal", b"raw-wal")
+                output.writestr("missions-v1.sqlite3-shm", b"raw-shm")
+                output.writestr("missions-v1.sqlite3-journal", b"raw-journal")
+            if nested_sidecar:
+                # A sidecar under a subdirectory must be caught by basename matching too.
+                output.writestr("subdir/missions-v1.sqlite3-wal", b"raw-nested-wal")
     return archive
 
 
@@ -133,6 +145,15 @@ def main() -> None:
     assert "?mode=ro&immutable=1" in restore_canary
     assert 'jsonpath=\'{.status.failed}\'' in restore_canary
     assert "hermes-agent-restore-ok" in restore_canary
+    # The disposable restore canary must run the SAME pinned runtime as the gateway, so a
+    # validated restore proves the deployed image can recover state (no silent version lag).
+    restore_image = re.search(
+        r'^hermes_image="([^"]+)"', restore_canary, re.MULTILINE
+    )
+    assert restore_image, "restore canary must pin hermes_image"
+    assert restore_image.group(1) == gateway["image"], (
+        "restore canary image must match the pinned gateway runtime"
+    )
 
     with tempfile.TemporaryDirectory() as temporary:
         root = pathlib.Path(temporary)
@@ -163,6 +184,54 @@ def main() -> None:
             assert connection.execute(
                 "SELECT count(*) FROM mission_events"
             ).fetchone() == (1,)
+
+    # A WAL-mode MissionStore is raw-copied by `hermes backup` together with its -wal/-shm
+    # sidecars. replace_mission_snapshot must replace the whole footprint with one consistent
+    # snapshot, and validate_archive must fail closed if a raw sidecar leaks through.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = pathlib.Path(temporary)
+        archive = _archive(root, mission_sidecars=True)
+        mission = root / "missions-v1.sqlite3"
+        with closing(sqlite3.connect(mission)) as connection:
+            connection.execute(
+                "INSERT INTO mission_events(mission_id, sequence) VALUES (?, ?)",
+                ("mission-canary", 1),
+            )
+            connection.commit()
+        validator.replace_mission_snapshot(archive, mission)
+        assert validator.validate_archive(archive) == []
+        with zipfile.ZipFile(archive) as source:
+            names = {pathlib.PurePosixPath(entry).name for entry in source.namelist()}
+            assert "missions-v1.sqlite3" in names
+            assert "missions-v1.sqlite3-wal" not in names
+            assert "missions-v1.sqlite3-shm" not in names
+            assert "missions-v1.sqlite3-journal" not in names
+            restored = root / "restored-sidecar.sqlite3"
+            restored.write_bytes(source.read("missions-v1.sqlite3"))
+        with closing(sqlite3.connect(restored)) as connection:
+            assert connection.execute(
+                "SELECT count(*) FROM mission_events"
+            ).fetchone() == (1,)
+
+    with tempfile.TemporaryDirectory() as temporary:
+        root = pathlib.Path(temporary)
+        archive = _archive(root, mission_sidecars=True)
+        _expect_failure(archive, "raw MissionStore sidecar")
+        # the -journal sidecar in particular must be named in the rejection
+        _expect_failure(archive, "missions-v1.sqlite3-journal")
+
+    # A sidecar hidden under a subdirectory is handled by basename too: validate fails closed
+    # if it leaks through, and replace_mission_snapshot strips it.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = pathlib.Path(temporary)
+        archive = _archive(root, nested_sidecar=True)
+        _expect_failure(archive, "raw MissionStore sidecar")
+        validator.replace_mission_snapshot(archive, root / "missions-v1.sqlite3")
+        assert validator.validate_archive(archive) == []
+        with zipfile.ZipFile(archive) as source:
+            names = {pathlib.PurePosixPath(entry).name for entry in source.namelist()}
+            assert "missions-v1.sqlite3" in names
+            assert "missions-v1.sqlite3-wal" not in names
 
     with tempfile.TemporaryDirectory() as temporary:
         root = pathlib.Path(temporary)

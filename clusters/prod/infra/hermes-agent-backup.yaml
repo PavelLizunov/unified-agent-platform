@@ -45,7 +45,8 @@ spec:
                   zip="/work/hermes-backup-$ts.zip"
                   # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). Hermes v0.18
                   # safely snapshots *.db, but not our *.sqlite3 MissionStore; the validator below
-                  # replaces that raw entry with an explicit sqlite3.backup() snapshot.
+                  # replaces that raw entry (and any raw -wal/-shm/-journal sidecars) with one explicit
+                  # sqlite3.backup() snapshot, and fails closed if a raw MissionStore sidecar leaks in.
                   # Redirect (not `| tee`) so the full log is on disk for the checks below. hermes's
                   # exit code is captured into $rc and deliberately TOLERATED under `set -e`: hermes
                   # returns non-zero when it soft-skips a permission-denied file (a few root-owned,
