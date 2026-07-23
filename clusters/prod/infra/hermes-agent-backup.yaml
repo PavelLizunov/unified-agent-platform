@@ -1,7 +1,8 @@
 # hermes-agent PVC DR backup (PR B). The hermes-agent-data PVC is local-path, node-pinned to
 # uap-home-2, reclaimPolicy was Delete, and is NOT covered by the etcd->R2 snapshots (those
 # capture k8s API objects, never the hostPath bytes). A uap-home-2 disk loss would lose ALL
-# earned state: sessions (state.db), the Codex brain (.codex/*.sqlite), kanban, cron, USER.md.
+# earned state: missions (missions-v1.sqlite3), sessions (state.db), the Codex brain
+# (.codex/*.sqlite), kanban, cron, USER.md.
 # This CronJob takes a daily FULL `hermes backup` (consistent sqlite snapshot, safe on the live
 # pod) and ships it to R2. FULL, not --quick: --quick omits .codex/ = the Codex brain memory.
 # Restore: see runbooks/hermes-agent-dr.md. The backup zip contains plaintext auth.json/.env
@@ -33,7 +34,7 @@ spec:
           initContainers:
             # 1) produce the FULL backup zip into a shared emptyDir (reads the PVC; no writes to it).
             - name: dump
-              image: nousresearch/hermes-agent@sha256:39fcfcd3f51f790724d9c61a2918a4f8df963f465a04b3234d70d55a4977da06  # v0.17.0, pinned by digest 2026-06-28
+              image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0, same digest as the gateway
               command: ["/bin/sh", "-c"]
               securityContext:
                 runAsUser: 0       # dump-container file ops as root (NOTE: hermes backup itself still drops to uid 10000)
@@ -42,14 +43,15 @@ spec:
                   set -eu
                   ts=$(date +%Y%m%d-%H%M%S)
                   zip="/work/hermes-backup-$ts.zip"
-                  # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). hermes uses
-                  # sqlite3.backup() for a consistent copy, so this is safe while the gateway runs.
+                  # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). Hermes v0.18
+                  # safely snapshots *.db, but not our *.sqlite3 MissionStore; the validator below
+                  # replaces that raw entry with an explicit sqlite3.backup() snapshot.
                   # Redirect (not `| tee`) so the full log is on disk for the checks below. hermes's
                   # exit code is captured into $rc and deliberately TOLERATED under `set -e`: hermes
                   # returns non-zero when it soft-skips a permission-denied file (a few root-owned,
                   # regeneratable files — see NOTE below), which is BENIGN. Letting `set -e` abort here
                   # killed a real Job mid-run and the R2 ship never fired. The ship-vs-fatal decision
-                  # is the zip-content/manifest check below (empty zip + state.db/auth.json presence),
+                  # is the zip-content/manifest check below,
                   # NOT hermes's exit code: a truly failed backup = missing/empty/partial zip, caught there.
                   rc=0
                   env HOME=/opt/data HERMES_HOME=/opt/data hermes backup -o "$zip" >/work/backup.log 2>&1 || rc=$?
@@ -59,14 +61,16 @@ spec:
                   # container is root, so a few ROOT-owned, REGENERATABLE files (claude global config,
                   # .codex/config.toml seeded from the ConfigMap, stray demo session logs) get skipped.
                   # That is a WARNING, not a failure: the manifest check below guarantees the CRITICAL
-                  # 10000-owned earned state (state.db, auth.json, .codex/*.sqlite) is captured, and
+                  # 10000-owned earned state (state.db, missions-v1.sqlite3, auth.json,
+                  # .codex/*.sqlite) is captured, and
                   # FAILING the whole backup on those skips would leave NO backup -- strictly worse.
                   grep -qi "files skipped\|permission denied" /work/backup.log && echo "WARNING: skipped some regeneratable files (see log) -- non-fatal" || true
                   [ -s "$zip" ] || { echo "FATAL: backup zip missing/empty"; exit 1; }
-                  # Integrity + manifest. HARD-fail on always-present earned state (a corrupt/partial zip can
-                  # never pass as success); WARN-only on regeneratable files that may be legitimately absent
-                  # on a fresh/recovering PVC, so a not-yet-warmed pod still gets its daily backup.
-                  /opt/hermes/.venv/bin/python -c "import zipfile,sys,posixpath; z=zipfile.ZipFile(\"$zip\"); n=z.namelist(); sys.exit(\"FATAL: corrupt zip\") if z.testzip() else None; base={posixpath.basename(x) for x in n}; hard=[f for f in (\"state.db\",\"auth.json\") if f not in base]; sys.exit(\"FATAL: backup missing critical file(s): \"+\", \".join(hard)) if hard else None; soft=[f for f in (\".env\",) if f not in base]+([\".codex/*.sqlite\"] if not any(x.endswith(\".sqlite\") and \"/.codex/\" in \"/\"+x for x in n) else []); print(\"WARNING: backup missing (regeneratable): \"+\", \".join(soft), file=sys.stderr) if soft else None"
+                  # Integrity + manifest. The validator hard-fails unless the authoritative
+                  # MissionStore and Hermes session DB are present, readable and pass SQLite
+                  # quick_check. Regeneratable managed config remains warning-only.
+                  /opt/hermes/.venv/bin/python /opt/uap-backup/backup_validate.py \
+                    --replace-mission /opt/data/missions-v1.sqlite3 "$zip"
                   chmod 600 "$zip"          # root-owned; the ship container (rclone, root) reads it
                   rm -f /work/backup.log
                   ls -la /work
@@ -75,6 +79,7 @@ spec:
               volumeMounts:
                 - { name: data, mountPath: /opt/data }
                 - { name: work, mountPath: /work }
+                - { name: backup-validator, mountPath: /opt/uap-backup/backup_validate.py, subPath: backup_validate.py, readOnly: true }
               resources:
                 requests: { cpu: 50m, memory: 256Mi }
                 limits: { memory: 512Mi }
@@ -117,3 +122,7 @@ spec:
             - name: r2cfg
               secret:
                 secretName: hermes-agent-backup-r2
+            - name: backup-validator
+              configMap:
+                name: hermes-mission-runtime
+                defaultMode: 0555
