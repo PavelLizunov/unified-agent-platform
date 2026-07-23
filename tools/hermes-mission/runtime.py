@@ -129,8 +129,10 @@ _RESEARCH_INTENT = re.compile(
 _MUTATION_INTENT = re.compile(
     r"\b(?:implement|fix|modify|improve|add|remove|refactor|build|deploy|"
     r"deliver|commit|push|"
+    r"create|configure|integrate|rename|update|"
     r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
     r"реализ\w*|исправ\w*|измени\w*|улучш\w*|добав\w*|удали\w*|рефактор\w*|"
+    r"созда\w*|настро\w*|интегр\w*|переимен\w*|обнов\w*|"
     r"собер\w*|достав\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
     re.IGNORECASE,
 )
@@ -176,6 +178,26 @@ _STATUS_OR_NARRATIVE_INTENT = re.compile(
     r"обновил(?:а|и)?|настроил(?:а|и)?|запустил(?:а|и)?|"
     r"выполнил(?:а|и)?|починил(?:а|и)?|собрал(?:а|и)?)\b|"
     r"^(?:why|почему|зачем|когда|где)\b",
+    re.IGNORECASE,
+)
+_READ_ONLY_EXECUTION_INTENT = re.compile(
+    r"\b(?:read[- ]only|run|test|check|inspect|diagnose|start|execute|status|logs?|"
+    r"show\s+(?:the\s+)?status|view\s+(?:the\s+)?logs?)\b|"
+    r"(?:запуст\w*|протест\w*|проверь\w*|диагностир\w*|"
+    r"тест\w*|статус\w*|диагностик\w*|лог\w*|"
+    r"покаж\w*\s+статус|посмотр\w*\s+лог\w*)",
+    re.IGNORECASE,
+)
+_REQUIRED_EXTERNAL_SOURCE = re.compile(
+    r"(?:\bread\b|\buse\b|\bfollow\b|\bopen\b|\bbased\s+on\b|\baccording\s+to\b|"
+    r"\bhandoff\b|прочит\w*|использ\w*|следу\w*|открой\w*|"
+    r"на\s+основе).{0,160}https?://[^\s<>()]+|"
+    r"(?:\bimplement\b|\bbuild\b|реализ\w*|сдела\w*)"
+    r".{0,160}https?://[^\s<>()]+|"
+    r"(?:\bcreate\b|созда\w*).{0,120}"
+    r"(?:\bfrom\b|\bper\b|\bиз\b|\bпо\b).{0,80}https?://[^\s<>()]+|"
+    r"https?://[^\s<>()]+.{0,160}(?:\bas\s+(?:the\s+)?source\b|"
+    r"\bhandoff\b|как\s+источник\w*)",
     re.IGNORECASE,
 )
 _ROUTINE_DOCS_ONLY = re.compile(
@@ -290,6 +312,24 @@ def is_controlled_research_goal(text: object) -> bool:
     )
 
 
+def is_read_only_execution_goal(text: object) -> bool:
+    """Keep non-mutating operational work out of the code-delivery state machine."""
+    if not isinstance(text, str):
+        return False
+    normalized = " ".join(text.split())[:4_000]
+    payload = re.sub(r"^/(?:run|mission)\b\s*", "", normalized, flags=re.IGNORECASE)
+    return bool(_READ_ONLY_EXECUTION_INTENT.search(payload)) and not bool(
+        _MUTATION_INTENT.search(payload)
+    )
+
+
+def requires_external_source(text: object) -> bool:
+    """Fail closed until external source material has an immutable transport."""
+    if not isinstance(text, str):
+        return False
+    return bool(_REQUIRED_EXTERNAL_SOURCE.search(" ".join(text.split())[:4_000]))
+
+
 def is_execution_goal(text: object) -> bool:
     """Conservatively distinguish an explicit action from discussion."""
     if not isinstance(text, str):
@@ -299,6 +339,8 @@ def is_execution_goal(text: object) -> bool:
         return False
     lowered = normalized.casefold()
     if lowered.startswith(("/discuss", "обсудим:", "давай обсудим")):
+        return False
+    if is_read_only_execution_goal(normalized):
         return False
     if lowered.startswith(("/run", "/mission")):
         return True
@@ -3081,6 +3123,10 @@ class MissionStore:
                 session_id=session_id or None,
                 chat_id=chat_id or None,
                 thread_id=thread_id or None,
+            )
+        if requires_external_source(text):
+            raise MissionError(
+                "external source is not available through an immutable intake capability"
             )
         draft = self._intake_draft(platform, scope_key)
         if draft:
