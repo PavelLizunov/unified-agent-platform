@@ -99,6 +99,15 @@ tailnet_online() {
   '
 }
 
+bad_pods() {
+  awk '
+    { name=$1; ready=$2; status=$3
+      if (status=="Completed" || status=="Succeeded" || status=="Terminating") next
+      if (status!="Running") { print name" ("status")"; next }
+      n=split(ready,a,"/"); if (n==2 && a[1]!=a[2]) print name" ("ready" ready)"
+    }'
+}
+
 if [ "${1:-}" = "--self-test" ]; then
   sample='vzdump-qemu-203-old.vma.zst|100|10
 vzdump-qemu-102-new.vma.zst|300|30
@@ -121,6 +130,11 @@ qemu|3|new-vm|pve-a|running|0|" | fleet_drift "$sample_catalog")" = \
   tailnet_online "$sample_tailnet" managed
   ! tailnet_online "$sample_tailnet" old
   ! tailnet_online "$sample_tailnet" absent
+  sample_pods='ready-0 1/1 Running
+rollout-0 0/1 Running
+job-0 0/1 Completed
+old-0 0/1 Terminating'
+  test "$(printf '%s\n' "$sample_pods" | bad_pods)" = 'rollout-0 (ready 0/1)'
   if [ -r "$PVE_INVENTORY_FILE" ]; then
     catalog_live=$(awk -F '|' '$0 !~ /^#/ && NF { print $1 "|" $2 "|" $3 "|" $4 "|running|0|" }' "$PVE_INVENTORY_FILE")
     test -z "$(printf '%s\n' "$catalog_live" | fleet_drift "$PVE_INVENTORY_FILE")"
@@ -154,13 +168,12 @@ code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -x "$EGRESS_PROXY" "
   add_fail "egress proxy down: $EGRESS_PROXY -> $EGRESS_TARGET (curl http_code=${code:-none})"
 
 # (d) no uap-system pods non-Running / not-Ready (Completed/Succeeded job pods are fine).
-bad=$(kubectl -n "$NS" get pods --no-headers 2>/dev/null | awk '
-  { name=$1; ready=$2; status=$3
-    if (status=="Completed" || status=="Succeeded") next
-    if (status=="Terminating") next
-    if (status!="Running") { print name" ("status")"; next }
-    n=split(ready,a,"/"); if (n==2 && a[1]!=a[2]) print name" ("ready" ready)"
-  }')
+bad=$(kubectl -n "$NS" get pods --no-headers 2>/dev/null | bad_pods)
+if [ -n "$bad" ]; then
+  # A normal Recreate rollout is briefly 0/1; only alert if it is still unhealthy after startup.
+  sleep 45
+  bad=$(kubectl -n "$NS" get pods --no-headers 2>/dev/null | bad_pods)
+fi
 [ -n "$bad" ] && add_fail "pods not healthy in $NS: $(printf '%s' "$bad" | tr '\n' ',' | sed 's/,$//; s/,/, /g')"
 
 # (e) Repo-owned Proxmox inventory and required Tailscale peers. A new VM is an alert until its
