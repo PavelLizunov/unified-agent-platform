@@ -46,7 +46,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v84-routine-routing"
+        "v85-mission-observability"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
@@ -72,6 +72,7 @@ def main() -> None:
     )
     assert "HERMES_MISSION_TELEGRAM_CHAT_ID=-1004377555987" in managed_config
     assert "HERMES_MISSION_TELEGRAM_THREAD_ID=2" in managed_config
+    assert "HERMES_MISSION_WORKSPACE_URL=http://100.85.56.31:3000" in managed_config
     assert (
         "cp /opt/hermes/hermes_cli/kanban.py "
         "/mission-runtime/root/hermes_cli/kanban.py"

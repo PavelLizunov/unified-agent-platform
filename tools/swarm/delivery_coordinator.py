@@ -2793,17 +2793,51 @@ class DeliveryCoordinator:
         self.client.publish(state["mission_id"], event)
 
     def _publish_progress_notice(self, state: dict[str, Any], message: str) -> None:
+        payload: dict[str, Any] = {
+            "code": "progress_detail",
+            "message": message,
+            "owner_action_required": False,
+            "phase": state["phase"],
+            "cycle": state["review_cycle"],
+            "cycle_limit": self._review_budget_limit(state),
+        }
+        url = state.get("pr_url")
+        if isinstance(url, str) and url:
+            payload["url"] = url
         event = mission_adapter._producer_event(
             state["mission_id"],
             "mission.notice",
-            {
-                "code": "progress_detail",
-                "message": message,
-                "owner_action_required": False,
-            },
+            payload,
             {"task_id": state["root_task_id"]},
         )
         self.client.publish(state["mission_id"], event)
+
+    def _publish_available_telemetry(self, state: dict[str, Any]) -> None:
+        """Project completed model turns while the mission is still active."""
+        for role, key in (
+            ("author", "author_telemetry"),
+            ("reviewer", "reviewer_telemetry"),
+        ):
+            event = self._telemetry_worker_event(
+                role,
+                state.get(key),
+                attempts_discarded=(
+                    state.get("discarded_author_attempts", 0)
+                    if role == "author"
+                    else 0
+                ),
+            )
+            if event is None:
+                continue
+            self.client.publish(
+                state["mission_id"],
+                mission_adapter._producer_event(
+                    state["mission_id"],
+                    event["type"],
+                    event["payload"],
+                    {"task_id": state["root_task_id"]},
+                ),
+            )
 
     def _reconcile(
         self,
@@ -2976,7 +3010,15 @@ class DeliveryCoordinator:
     ) -> tuple[str, str, list[dict[str, Any]]]:
         def append_telemetry(events: list[dict[str, Any]]) -> None:
             for role, key in (("author", "author_telemetry"), ("reviewer", "reviewer_telemetry")):
-                worker_event = self._telemetry_worker_event(role, state.get(key))
+                worker_event = self._telemetry_worker_event(
+                    role,
+                    state.get(key),
+                    attempts_discarded=(
+                        state.get("discarded_author_attempts", 0)
+                        if role == "author"
+                        else 0
+                    ),
+                )
                 if worker_event is not None:
                     events.insert(-1, worker_event)
 
@@ -5346,7 +5388,10 @@ class DeliveryCoordinator:
 
     @staticmethod
     def _telemetry_worker_event(
-        role: str, telemetry: dict[str, Any] | None
+        role: str,
+        telemetry: dict[str, Any] | None,
+        *,
+        attempts_discarded: int = 0,
     ) -> dict[str, Any] | None:
         if not isinstance(telemetry, dict):
             return None
@@ -5354,6 +5399,7 @@ class DeliveryCoordinator:
             "worker_id": role,
             "status": "completed",
             "profile": role,
+            "attempts_discarded": attempts_discarded,
         }
         model = telemetry.get("model")
         if isinstance(model, str) and model:
@@ -5419,7 +5465,15 @@ class DeliveryCoordinator:
             }},
         ]
         for role, key in (("author", "author_telemetry"), ("reviewer", "reviewer_telemetry")):
-            worker_event = self._telemetry_worker_event(role, state.get(key))
+            worker_event = self._telemetry_worker_event(
+                role,
+                state.get(key),
+                attempts_discarded=(
+                    state.get("discarded_author_attempts", 0)
+                    if role == "author"
+                    else 0
+                ),
+            )
             if worker_event is not None:
                 events.append(worker_event)
         if self.profile.get("delivery_mode") == "none":
@@ -6012,6 +6066,8 @@ class DeliveryCoordinator:
                 if state.get("phase") == "review_rejected":
                     return self._finish_rejection(state, paths)
             self._ensure_route(state, paths)
+            if isinstance(state.get("root_task_id"), str):
+                self._publish_available_telemetry(state)
             ambiguous = self._ambiguous_state(state)
             if ambiguous is not None:
                 self._publish_ambiguous_notice(state, ambiguous)

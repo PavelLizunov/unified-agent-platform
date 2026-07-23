@@ -288,6 +288,7 @@ data:
     # which Telegram mission receives ordinary owner replies.
     HERMES_MISSION_TELEGRAM_CHAT_ID=-1004377555987
     HERMES_MISSION_TELEGRAM_THREAD_ID=2
+    HERMES_MISSION_WORKSPACE_URL=http://100.85.56.31:3000
     # NB: do NOT set HERMES_TELEGRAM_DISABLE_FALLBACK_IPS=1 — tried it, Telegram got flakier (the
     # fallback IPs add redundant connection targets through the proxy). The occasional reconnects are
     # egress-stability noise; they self-heal and Telegram re-delivers queued updates, so no message loss.
