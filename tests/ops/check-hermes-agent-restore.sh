@@ -72,7 +72,7 @@ spec:
         - name: verify
           image: $hermes_image
           securityContext:
-            runAsUser: 10000
+            runAsUser: 0
           command: ["/bin/sh", "-c"]
           args:
             - |
