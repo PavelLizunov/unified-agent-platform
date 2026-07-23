@@ -53,7 +53,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 
 | Type | Required payload | Projection effect |
 |---|---|---|
-| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile`, `execution_class`, `expected_changed_files` | status becomes `active`, stage `accepted` |
+| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile`, `execution_class`, `expected_changed_files`, `owner_gate_flag` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
@@ -134,6 +134,21 @@ uses the existing quality escalation. A routine mission has at most two author/r
 ambiguous classification preserves the profile's previous conservative route and retry budget. Owner-gated flags are
 never removed by this optimization. Spark remains outside coding delivery until a separate exact-model canary and
 policy decision approve it.
+
+Ordinary intake also applies one closed deterministic task-risk classifier before `mission.accepted`. Only
+`architecture_change` may enter a mission, as immutable `owner_gate_flag: architecture_change`; the coordinator
+durably binds it, unions it with profile route flags and asks the existing exact `APPROVE` question before any model
+turn. A docs-only task does not bypass this gate. `destructive`, `credentials_or_external_authority`, `new_provider`
+and `local_or_gpu` are not approvable task flags: they fail before mission state with
+`task requires separate capability setup: <flags>`. Ordinary subscription spend, approved OpenAI routing and routine
+repository checks are not task-risk flags. The classifier requires an action and a nearby protected object, so
+documentation paths, negative tests, redaction tests, dry-run coverage and removal of obsolete Claude/Ollama text do
+not acquire authority merely because they contain a sensitive word. Conversational admission still runs first:
+“Should we integrate Claude as a new provider?” remains ordinary chat, while the direct authoritative execution
+primitive applies the same task-risk check immediately. The shared owner-answer writer rejects any answer that would
+add one of these capabilities; a clarification cannot expand the accepted task. On restart and cutover, MissionStore
+also preflights persisted accepted goals and answers before serving them. A legacy architecture goal is projected with
+the same gate, while a legacy unsupported goal or capability-bearing answer stops fail-closed before dispatch.
 
 Workspace forwards its existing stable optimistic message identity and selected project to the Central session
 stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice
@@ -284,10 +299,11 @@ service:
 - Telegram `/mission [mission-id]` binds a chat to that mission; `/mission answer <text>` answers only the exact open
   question on that binding. Workspace posts the same closed answer shape through its authenticated mission route, and
   owner-relevant stage/question/answer/terminal events render from the same projection and `projection_id`;
-- an approved-profile `architecture_change` deterministically creates one owner question only after the handoff has
+- an approved-profile or immutable task-level `architecture_change` deterministically creates one owner question only after the handoff has
   created one inert sticky-blocked root. The question identity is bound to mission, goal and routing-policy hashes;
   producer response loss replays the same event. Central accepts only exact `APPROVE`, so invalid text leaves the
-  question open. Other owner-gated capabilities remain fail-closed. The coordinator stores the accepted answer in its
+  question open. Other task-risk capabilities require separate capability setup before mission acceptance. The
+  coordinator stores the accepted answer in its
   owner-only durable state before changing Kanban, assigns and unblocks only that exact root with a
   question/answer-hash audit reference, and binds the answer into the next author prompt. The pinned Hermes CLI passes
   that reference into the same SQLite transaction as the `unblocked` event; recovery requires the latest sticky

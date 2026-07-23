@@ -67,7 +67,7 @@ PAYLOAD_FIELDS = {
     "mission.accepted": {
         "goal", "project_id", "project_label", "project_repository",
         "dispatch_profile", "delivery_mode", "parent_mission_id",
-        "capability", "execution_class", "expected_changed_files",
+        "capability", "execution_class", "expected_changed_files", "owner_gate_flag",
         "input_platform", "input_source_key_sha256", "input_source_message_sha256",
     },
     "mission.notice": {
@@ -102,7 +102,7 @@ _EVENT_FIELDS = {"schema_version", "mission_id", "type", "source", "correlation"
 _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _MAX_DELIVERY_SUMMARY_CHARS = 700
 _ID_PAYLOAD_FIELDS = {
-    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "execution_class", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
+    "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "execution_class", "gate_id", "input_platform", "kind", "model", "owner_gate_flag", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
     "environment", "phase", "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -200,6 +200,133 @@ _REQUIRED_EXTERNAL_SOURCE = re.compile(
     r"\bhandoff\b|как\s+источник\w*)",
     re.IGNORECASE,
 )
+_TASK_RISK_PATTERNS = (
+    (
+        "architecture_change",
+        re.compile(
+            r"(?:\b(?:implement|fix|modify|improve|add|remove|refactor|build|"
+            r"deploy|create|configure|integrate|rename|update|enable|change|"
+            r"replace|redesign|supersede|rework|move|transfer)\b|"
+            r"(?:реализ|исправ|измен|улучш|добав|удал|рефактор|созда|настро|"
+            r"интегр|переимен|обнов|разверн|замен|перепроект|перестро|отмен|"
+            r"перенес|переда)\w*)"
+            r".{0,100}(?:\b(?:accepted\s+)?architecture\b|"
+            r"\b(?:architectural|security|authority)\s+boundary\b|"
+            r"\bauthoritative\s+\w*\s*state\b|\bsource\s+of\s+truth\b|"
+            r"\btopology\b|\bADR-\d+\b|архитектур\w*|источник\w*\s+истин\w*|"
+            r"авторитетн\w+\s+состояни\w*|"
+            r"границ\w+\s+(?:безопасност|полномоч)\w*|тополог\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "destructive",
+        re.compile(
+            r"(?:\b(?:drop|wipe|destroy|erase|purge|reset|delete|remove)\b|"
+            r"(?:удал|уничтож|сотр|сброс|очист)\w*)"
+            r".{0,60}(?:\b(?:production|prod|database|db|user\s+data|"
+            r"persistent\s+data|volume|disk|cluster(?!-admin)|repository|repo|vm)\b|"
+            r"прод\w*|баз\w+\s+данн\w*|данн\w+\s+пользовател\w*|"
+            r"том\w*|диск\w*|кластер\w*|репозитор\w*|виртуальн\w+\s+машин\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "credentials_or_external_authority",
+        re.compile(
+            r"(?:\b(?:add|implement|build|enable|create|issue|rotate|replace|"
+            r"grant|provision|configure)\b|"
+            r"(?:добав|реализ|собер|включ|созда|выпуст|ротир|замен|выда|"
+            r"предостав|настро)\w*)"
+            r".{0,60}(?:\b(?:credential|secret|token|api\s+key|ssh\s+key|"
+            r"write\s+access|admin\s+access|cluster-admin|rbac|external\s+account|permission)\w*\b|"
+            r"уч[её]тн\w+\s+данн\w*|секрет\w*|токен\w*|ключ\w+\s+api|"
+            r"ключ\w+\s+ssh|прав\w*.{0,20}(?:запис\w*|cluster-admin|admin|rbac)|"
+            r"доступ\w*|полномоч\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "new_provider",
+        re.compile(
+            r"\b(?:claude|anthropic|openrouter|gemini|qwen)\b.{0,50}"
+            r"\b(?:become|replace)\b.{0,30}\b(?:the\s+)?(?:new\s+)?(?:model\s+)?provider\b|"
+            r"\b(?:add|configure|build|implement|create)\b.{0,60}"
+            r"\b(?:claude|anthropic|openrouter|gemini|qwen)\b"
+            r".{0,30}\b(?:as\s+)?(?:the\s+)?(?:new\s+)?(?:model\s+)?provider\b|"
+            r"\badd\s+(?:support\s+for\s+)?(?:claude|anthropic|openrouter|"
+            r"gemini|qwen)\b.{0,30}\b(?:model\s+)?provider\b|"
+            r"(?:добав\w+).{0,30}(?:claude|anthropic|openrouter|gemini|qwen)"
+            r".{0,30}(?:model\s+provider|модел\w+\s+провайдер\w*|провайдер\w*)|"
+            r"(?:\b(?:add\s+support\s+for|integrate|enable|"
+            r"switch.{0,40}\bto|migrate\s+to|route\s+to|use)\b|"
+            r"(?:добав\w+\s+поддержк\w+|интегр|включ|переключ|мигрир|"
+            r"маршрутизир|использ)\w*)"
+            r".{0,60}(?:\b(?:new\s+(?:model\s+)?provider|claude|anthropic|"
+            r"openrouter|gemini|qwen|non-openai\s+provider)\b|"
+            r"нов\w+\s+(?:модел\w+\s+)?провайдер\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "local_or_gpu",
+        re.compile(
+            r"(?:\b(?:add|integrate|implement|build|create|enable|run|use|"
+            r"deploy|configure|start)\b|"
+            r"(?:добав|интегр|реализ|собер|созда|включ|запуст|запуска|"
+            r"использ|разверн|задепло|настро)\w*)"
+            r".{0,60}(?:\b(?:local\s+(?:inference|model)|ollama|lm\s+studio|"
+            r"gpu|cuda|rocm|rtx)\b|локальн\w+\s+(?:инференс|модел)\w*|"
+            r"видеокарт\w*)",
+            re.IGNORECASE,
+        ),
+    ),
+)
+_TASK_RISK_EXCLUSIONS = {
+    "architecture_change": re.compile(
+        r"\b(?:add|update)\s+(?:a\s+)?(?:link|reference)\s+to\s+ADR-\d+\b|"
+        r"(?:добав|обнов)\w*\s+ссылк\w+\s+на\s+ADR-\d+\b|"
+        r"\b(?:fix|update)\s+(?:(?:a|the)\s+)?"
+        r"(?:typo\s+in\s+)?docs?/architecture\.md\b|"
+        r"(?:исправ|обнов)\w*\s+(?:опечатк\w+\s+в\s+)?"
+        r"docs?/architecture\.md\b",
+        re.IGNORECASE,
+    ),
+    "destructive": re.compile(
+        r"\b(?:delete|remove)\s+(?:the\s+)?(?:production|prod)\s+"
+        r"(?:database|db)\s+(?:instructions?|documentation)\b"
+        r"\s+(?:from|in)\s+(?:the\s+)?(?:readme|docs?)\b|"
+        r"(?:удал|убер)\w*\s+(?:инструкц\w*|документац\w*)"
+        r"(?:\s+по)?\s+(?:production\s+(?:database|db)|"
+        r"prod\s+(?:database|db)|баз\w+\s+данн\w*)"
+        r"\s+(?:из|в)\s+(?:readme|docs?|документ\w*)|"
+        r"(?:удал|убер)\w*\s+(?:production\s+(?:database|db)|"
+        r"prod\s+(?:database|db)|баз\w+\s+данн\w*)"
+        r"\s+(?:инструкц\w*|документац\w*)"
+        r"\s+(?:из|в)\s+(?:readme|docs?|документ\w*)",
+        re.IGNORECASE,
+    ),
+    "credentials_or_external_authority": re.compile(
+        r"\b(?:fake|mock)\s+(?:secret|token|credential)\s+"
+        r"(?:fixture|mock|test)\b|"
+        r"(?:fake|mock|фиктивн\w*)\s+"
+        r"(?:секрет\w*|токен\w*|credential)\s+"
+        r"(?:fixture|mock|test|тест\w*)|"
+        r"\b(?:credential|secret|token)\s+(?:redaction|parser|validator)\b|"
+        r"\brbac\s+(?:validator|test|mock)\b",
+        re.IGNORECASE,
+    ),
+    "new_provider": re.compile(
+        r"\b(?:claude|anthropic|openrouter|gemini|qwen)\s+"
+        r"(?:provider\s+)?(?:mock|fixture|test)\b",
+        re.IGNORECASE,
+    ),
+    "local_or_gpu": re.compile(
+        r"\b(?:mocked?|fake)\s+(?:gpu|cuda|rocm|rtx)\s+"
+        r"(?:path|test|fixture|mock)\b",
+        re.IGNORECASE,
+    ),
+}
 _ROUTINE_DOCS_ONLY = re.compile(
     r"\b(?:only\s+(?:the\s+)?(?:readme(?:\.md)?|docs?|documentation)|"
     r"(?:readme(?:\.md)?|docs?|documentation)\s+only)\b|"
@@ -306,9 +433,11 @@ def is_controlled_research_goal(text: object) -> bool:
     """Route research-only owner turns to the bounded Central search tool."""
     if not isinstance(text, str):
         return False
-    normalized = " ".join(text.split())[:4_000]
-    return bool(_RESEARCH_INTENT.search(normalized)) and not _MUTATION_INTENT.search(
-        normalized
+    normalized = " ".join(text.split())
+    return (
+        bool(_RESEARCH_INTENT.search(normalized))
+        and not _MUTATION_INTENT.search(normalized)
+        and not task_owner_gate_flags(normalized)
     )
 
 
@@ -316,10 +445,12 @@ def is_read_only_execution_goal(text: object) -> bool:
     """Keep non-mutating operational work out of the code-delivery state machine."""
     if not isinstance(text, str):
         return False
-    normalized = " ".join(text.split())[:4_000]
+    normalized = " ".join(text.split())
     payload = re.sub(r"^/(?:run|mission)\b\s*", "", normalized, flags=re.IGNORECASE)
-    return bool(_READ_ONLY_EXECUTION_INTENT.search(payload)) and not bool(
-        _MUTATION_INTENT.search(payload)
+    return (
+        bool(_READ_ONLY_EXECUTION_INTENT.search(payload))
+        and not _MUTATION_INTENT.search(payload)
+        and not task_owner_gate_flags(payload)
     )
 
 
@@ -327,17 +458,18 @@ def requires_external_source(text: object) -> bool:
     """Fail closed until external source material has an immutable transport."""
     if not isinstance(text, str):
         return False
-    return bool(_REQUIRED_EXTERNAL_SOURCE.search(" ".join(text.split())[:4_000]))
+    return bool(_REQUIRED_EXTERNAL_SOURCE.search(" ".join(text.split())))
 
 
 def is_execution_goal(text: object) -> bool:
     """Conservatively distinguish an explicit action from discussion."""
     if not isinstance(text, str):
         return False
-    normalized = " ".join(text.split())[:4_000]
+    normalized = " ".join(text.split())
     if not normalized:
         return False
     lowered = normalized.casefold()
+    task_flags = task_owner_gate_flags(normalized)
     if lowered.startswith(("/discuss", "обсудим:", "давай обсудим")):
         return False
     if is_read_only_execution_goal(normalized):
@@ -347,25 +479,29 @@ def is_execution_goal(text: object) -> bool:
     if (
         _STATUS_OR_NARRATIVE_INTENT.search(normalized)
         and not _DISCUSS_THEN_EXECUTE.search(normalized)
+        and not task_flags
     ):
+        return False
+    discussed_then_execute = _DISCUSS_THEN_EXECUTE.search(normalized)
+    if normalized.endswith("?") and not discussed_then_execute:
         return False
     if (
-        (
-            _RESEARCH_INTENT.search(normalized)
-            or _DISCUSSION_INTENT.search(normalized)
-            or normalized.endswith("?")
-        )
-        and not _DISCUSS_THEN_EXECUTE.search(normalized)
+        (_RESEARCH_INTENT.search(normalized) or _DISCUSSION_INTENT.search(normalized))
+        and not discussed_then_execute
+        and not task_flags
     ):
         return False
-    return bool(_EXECUTION_INTENT.search(normalized))
+    return bool(
+        _EXECUTION_INTENT.search(normalized)
+        or task_flags
+    )
 
 
 def routine_docs_file_limit(text: object) -> int | None:
     """Return the closed small-change cap only for an explicit docs-only goal."""
     if not isinstance(text, str):
         return None
-    normalized = " ".join(text.split())[:4_000]
+    normalized = " ".join(text.split())
     if not is_execution_goal(normalized):
         return None
     if (
@@ -376,6 +512,40 @@ def routine_docs_file_limit(text: object) -> int | None:
     if _ROUTINE_PLAN_ONLY.search(normalized) and not _PLAN_AND_IMPLEMENT.search(normalized):
         return 1
     return None
+
+
+def task_owner_gate_flags(text: object) -> tuple[str, ...]:
+    """Return only explicit protected actions; plain mentions remain ordinary work."""
+    if not isinstance(text, str):
+        return ()
+    normalized = " ".join(text.split())
+    if not normalized:
+        return ()
+    flags = []
+    for flag, pattern in _TASK_RISK_PATTERNS:
+        candidate = normalized
+        if exclusion := _TASK_RISK_EXCLUSIONS.get(flag):
+            if flag in {"architecture_change", "destructive"}:
+                candidate = exclusion.sub(
+                    lambda match: match.group(0).split(maxsplit=1)[0],
+                    candidate,
+                )
+            else:
+                candidate = exclusion.sub("", candidate)
+        if pattern.search(candidate):
+            flags.append(flag)
+    return tuple(sorted(flags))
+
+
+def task_owner_gate_flag(text: object) -> str | None:
+    """Allow the existing architecture gate; other capabilities need separate setup."""
+    flags = task_owner_gate_flags(text)
+    unsupported = tuple(flag for flag in flags if flag != "architecture_change")
+    if unsupported:
+        raise MissionError(
+            "task requires separate capability setup: " + ", ".join(unsupported)
+        )
+    return "architecture_change" if flags else None
 
 
 class MissionError(ValueError):
@@ -931,6 +1101,9 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
     if event_type == "mission.accepted" and "delivery_mode" in payload:
         if payload.get("delivery_mode") not in {"none", "deploy"}:
             raise MissionError("invalid mission delivery mode")
+    if event_type == "mission.accepted" and "owner_gate_flag" in payload:
+        if payload.get("owner_gate_flag") != "architecture_change":
+            raise MissionError("invalid mission owner gate flag")
     if event_type == "mission.accepted":
         execution_class = payload.get("execution_class")
         expected_changed_files = payload.get("expected_changed_files")
@@ -1073,6 +1246,7 @@ def empty_projection() -> dict[str, Any]:
         "delivery_mode": None,
         "execution_class": None,
         "expected_changed_files": None,
+        "owner_gate_flag": None,
         "parent_mission_id": None,
         "input_platform": None,
         "input_source_key_sha256": None,
@@ -1121,6 +1295,21 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             view["updated_at"] = event["occurred_at"]
         kind, payload = event["type"], event["payload"]
         if kind == "mission.accepted":
+            projected_owner_gate_flag = payload.get("owner_gate_flag")
+            if projected_owner_gate_flag is None:
+                legacy_flags = task_owner_gate_flags(payload["goal"])
+                unsupported = tuple(
+                    flag
+                    for flag in legacy_flags
+                    if flag != "architecture_change"
+                )
+                if unsupported:
+                    raise MissionError(
+                        "legacy mission requires separate capability setup: "
+                        + ", ".join(unsupported)
+                    )
+                if legacy_flags:
+                    projected_owner_gate_flag = "architecture_change"
             view.update(
                 status="active",
                 stage="accepted",
@@ -1133,6 +1322,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 delivery_mode=payload.get("delivery_mode"),
                 execution_class=payload.get("execution_class"),
                 expected_changed_files=payload.get("expected_changed_files"),
+                owner_gate_flag=projected_owner_gate_flag,
                 parent_mission_id=payload.get("parent_mission_id"),
                 input_platform=payload.get("input_platform"),
                 input_source_key_sha256=payload.get("input_source_key_sha256"),
@@ -1157,6 +1347,12 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 notice=None,
             )
         elif kind == "mission.answer":
+            legacy_answer_flags = task_owner_gate_flags(payload["text"])
+            if legacy_answer_flags:
+                raise MissionError(
+                    "legacy owner answer adds task capabilities: "
+                    + ", ".join(legacy_answer_flags)
+                )
             question = view.get("question")
             if (
                 view.get("status") != "waiting_owner"
@@ -1753,6 +1949,7 @@ class MissionStore:
             self.path.touch(mode=0o600, exist_ok=True)
             os.chmod(self.path, 0o600)
         self._init_schema()
+        self._preflight_task_risk_history()
 
     def _harden_permissions(self) -> None:
         if os.name != "posix":
@@ -1952,6 +2149,38 @@ class MissionStore:
                 connection.execute(
                     "ALTER TABLE project_onboarding_requests ADD COLUMN invocations_json TEXT"
                 )
+
+    def _preflight_task_risk_history(self) -> None:
+        """Reject pre-gate durable events before any legacy task can resume."""
+        with self._db() as connection:
+            rows = connection.execute(
+                """SELECT mission_id, type, payload_json
+                   FROM mission_events
+                   WHERE type IN ('mission.accepted', 'mission.answer')
+                   ORDER BY rowid"""
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            if row["type"] == "mission.answer":
+                flags = task_owner_gate_flags(payload.get("text"))
+                if flags:
+                    raise MissionError(
+                        "stored owner answer adds task capabilities: "
+                        + ", ".join(flags)
+                    )
+                continue
+            flags = task_owner_gate_flags(payload.get("goal"))
+            unsupported = tuple(
+                flag for flag in flags if flag != "architecture_change"
+            )
+            if unsupported:
+                raise MissionError(
+                    "stored mission requires separate capability setup: "
+                    + ", ".join(unsupported)
+                )
+            expected = "architecture_change" if flags else None
+            if payload.get("owner_gate_flag") not in {None, expected}:
+                raise MissionError("stored mission owner gate flag is invalid")
 
     @staticmethod
     def _row(row: sqlite3.Row) -> dict[str, Any]:
@@ -3165,6 +3394,7 @@ class MissionStore:
             )
         if not is_execution_goal(text):
             raise MissionError("owner turn is not an execution goal")
+        task_owner_gate_flag(text)
         registered_intake_projects(platform)
         try:
             target = registered_intake_target(
@@ -3273,6 +3503,7 @@ class MissionStore:
             raise MissionError("invalid mission goal")
         if not isinstance(platform, str):
             raise MissionError("invalid intake platform")
+        owner_gate_flag = task_owner_gate_flag(goal)
         platform = _require_id(platform, "intake platform")
         target = registered_intake_target(
             platform, project_id=project_id, goal=goal
@@ -3322,6 +3553,8 @@ class MissionStore:
                 execution_class="routine_docs",
                 expected_changed_files=routine_limit,
             )
+        if owner_gate_flag is not None:
+            arguments["owner_gate_flag"] = owner_gate_flag
         try:
             result = self.accept(goal, **arguments)
         except MissionError as error:
@@ -3350,6 +3583,7 @@ class MissionStore:
         capability: str | None = None,
         execution_class: str | None = None,
         expected_changed_files: int | None = None,
+        owner_gate_flag: str | None = None,
         project_id: str | None = None,
         project_label: str | None = None,
         project_repository: str | None = None,
@@ -3361,6 +3595,11 @@ class MissionStore:
         goal = str(goal or "").strip()
         if not goal or len(goal) > _MAX_OWNER_GOAL_CHARS:
             raise MissionError("invalid mission goal")
+        derived_owner_gate_flag = task_owner_gate_flag(goal)
+        if owner_gate_flag is None:
+            owner_gate_flag = derived_owner_gate_flag
+        elif owner_gate_flag != derived_owner_gate_flag:
+            raise MissionError("invalid mission owner gate flag")
         mission_id = _require_id(mission_id or f"mission-{uuid.uuid4()}", "mission_id")
         if dispatch_profile is not None:
             dispatch_profile = _require_id(dispatch_profile, "dispatch_profile")
@@ -3376,6 +3615,8 @@ class MissionStore:
             raise MissionError("invalid mission delivery mode")
         if capability is not None and capability != _MEDIA_CAPABILITY:
             raise MissionError("invalid mission capability")
+        if owner_gate_flag is not None and owner_gate_flag != "architecture_change":
+            raise MissionError("invalid mission owner gate flag")
         if (execution_class, expected_changed_files) != (None, None) and (
             execution_class != "routine_docs"
             or not isinstance(expected_changed_files, int)
@@ -3433,6 +3674,7 @@ class MissionStore:
                 and first["payload"].get("dispatch_profile") == dispatch_profile
                 and first["payload"].get("delivery_mode") == delivery_mode
                 and first["payload"].get("capability") == capability
+                and first["payload"].get("owner_gate_flag") == owner_gate_flag
                 and (
                     first["payload"].get("execution_class") == execution_class
                     or (
@@ -3481,6 +3723,8 @@ class MissionStore:
             payload["delivery_mode"] = delivery_mode
         if capability is not None:
             payload["capability"] = capability
+        if owner_gate_flag is not None:
+            payload["owner_gate_flag"] = owner_gate_flag
         if execution_class is not None:
             payload.update(
                 execution_class=execution_class,
@@ -3704,6 +3948,12 @@ class MissionStore:
         text = str(text or "").strip()
         if not text or len(text) > _MAX_OWNER_ANSWER_CHARS:
             raise MissionError("owner answer must contain 1..4000 characters")
+        task_flags = task_owner_gate_flags(text)
+        if task_flags:
+            raise MissionError(
+                "owner answer cannot add task capabilities: "
+                + ", ".join(task_flags)
+            )
         if (
             question_id.startswith(_OWNER_GATE_QUESTION_PREFIX)
             and text != _OWNER_GATE_APPROVAL

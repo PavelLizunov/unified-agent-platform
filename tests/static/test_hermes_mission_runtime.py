@@ -24,6 +24,123 @@ missions = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(missions)
 
 
+_TASK_OWNER_GATE_POSITIVES = {
+    "architecture_change": (
+        "Replace the accepted architecture and update ADR-031",
+        "Modify the accepted architecture",
+        "Refactor the authority boundary",
+        "Implement a new source of truth",
+        "Configure a new cluster topology",
+        "Move the authoritative mission state from Central to the worker",
+        "Change the accepted security boundary in ADR-031",
+        "Замени принятую архитектуру и обнови ADR-031",
+        "Перенеси authoritative mission state из Central в worker",
+        "Измени принятую security boundary в ADR-031",
+        "Update README only to replace the accepted architecture in ADR-031",
+    ),
+    "destructive": (
+        "Delete the production database and all customer records",
+        "Remove the production database now",
+        "Reset the production k3s cluster",
+        "Purge the persistent production volume",
+        "Удали production базу данных со всеми записями",
+        "Сбрось production кластер k3s",
+        "Очисти persistent production volume",
+    ),
+    "credentials_or_external_authority": (
+        "Create a new GitHub write token for the worker",
+        "Add a GitHub write token",
+        "Implement admin access for the worker",
+        "Add RBAC permissions",
+        "Grant the delivery worker cluster-admin permissions",
+        "Grant cluster-admin, then configure the RBAC validator test",
+        "Rotate the production API key",
+        "Создай новый GitHub write token для worker",
+        "Выдай delivery worker права cluster-admin",
+        "Ротируй production API key",
+    ),
+    "new_provider": (
+        "Add Anthropic as a new model provider",
+        "Anthropic should become the new model provider; integrate it",
+        "Configure Anthropic as a model provider",
+        "Build an OpenRouter model provider",
+        "Implement support for Gemini as a provider",
+        "Create a Qwen model provider integration",
+        "Switch autonomous delivery from OpenAI to OpenRouter",
+        "Integrate Claude into autonomous delivery",
+        "Добавь Anthropic как нового model provider",
+        "Переключи autonomous delivery с OpenAI на OpenRouter",
+        "Интегрируй Claude в autonomous delivery",
+    ),
+    "local_or_gpu": (
+        "Enable Ollama local inference for autonomous delivery",
+        "Add Ollama local inference",
+        "Integrate Ollama local inference",
+        "Implement a CUDA GPU worker",
+        "Build an RTX inference worker",
+        "Create a local model worker",
+        "Run the coding worker on a CUDA GPU",
+        "Deploy a local model on the RTX GPU",
+        "Включи локальный inference через Ollama для autonomous delivery",
+        "Запускай coding worker на CUDA GPU",
+        "Разверни локальную модель на RTX GPU",
+    ),
+}
+
+_TASK_OWNER_GATE_FALSE_POSITIVES = (
+    "Fix a typo in docs/architecture.md",
+    "Add a link to ADR-031 in README",
+    "Remove an unused import from the token parser",
+    "Remove the obsolete test fixture",
+    "Add a regression test for credential redaction",
+    "Update README with the OPENAI_API_KEY environment-variable name",
+    "Add a negative test for rejected Claude routing",
+    "Remove the obsolete Ollama paragraph from README",
+    "Add dry-run coverage to the cleanup command",
+    "Create a fake secret fixture for unit tests",
+    "Configure the RBAC validator test",
+    "Add an Anthropic provider mock for unit tests",
+    "Add unit-test coverage for the mocked GPU path",
+    "Remove Claude provider support",
+    "Remove the obsolete Ollama fallback",
+    "Remove cluster-admin access from the worker",
+    "Update docs: delete the production database instructions from README",
+    "Исправь опечатку в docs/architecture.md",
+    "Добавь ссылку на ADR-031 в README",
+    "Удали неиспользуемый import из token parser",
+    "Удали устаревшую test fixture",
+    "Добавь regression test для credential redaction",
+    "Обнови README, указав имя переменной OPENAI_API_KEY",
+    "Добавь negative test для отклонённого Claude routing",
+    "Удали устаревший абзац про Ollama из README",
+    "Добавь dry-run coverage для cleanup command",
+    "Создай fake secret fixture для unit tests",
+    "Настрой RBAC validator test",
+    "Добавь Anthropic provider mock для unit tests",
+    "Добавь unit-test coverage для mocked GPU path",
+    "Удали поддержку Claude provider",
+    "Удали устаревший Ollama fallback",
+    "Удали cluster-admin доступ у worker",
+    "Обнови docs: удали инструкции по production database из README",
+)
+
+_TASK_OWNER_GATE_MIXED_SAFE_AND_PROTECTED = {
+    "credentials_or_external_authority": (
+        "Create a fake secret fixture for unit tests, then rotate the production API key"
+    ),
+    "destructive": (
+        "Update docs: delete production database instructions from README, "
+        "then reset the production cluster"
+    ),
+    "local_or_gpu": (
+        "Add a mocked GPU path test, then deploy an Ollama local model"
+    ),
+    "new_provider": (
+        "Add an Anthropic provider mock for tests, then switch delivery to OpenRouter"
+    ),
+}
+
+
 def submission(event: dict) -> dict:
     return {
         key: event[key]
@@ -165,6 +282,214 @@ def test_owner_turn_admission_is_authoritative_before_project_routing() -> None:
         )
         assert created
         assert accepted["payload"]["execution_class"] == "routine_docs"
+
+
+def test_task_owner_gate_classifier_has_closed_ru_en_corpus() -> None:
+    assert missions.task_owner_gate_flags(None) == ()
+    assert missions.task_owner_gate_flag(None) is None
+
+    for expected, goals in _TASK_OWNER_GATE_POSITIVES.items():
+        for goal in goals:
+            assert missions.task_owner_gate_flags(goal) == (expected,), goal
+            if expected == "architecture_change":
+                assert missions.task_owner_gate_flag(goal) == expected, goal
+            else:
+                try:
+                    missions.task_owner_gate_flag(goal)
+                    raise AssertionError(f"unsupported task capability was allowed: {goal}")
+                except missions.MissionError as error:
+                    assert str(error) == (
+                        f"task requires separate capability setup: {expected}"
+                    )
+
+    mixed = (
+        "Delete production data, create a GitHub write token, "
+        "add Anthropic as a new provider, "
+        "and enable Ollama GPU inference"
+    )
+    assert missions.task_owner_gate_flags(mixed) == (
+        "credentials_or_external_authority",
+        "destructive",
+        "local_or_gpu",
+        "new_provider",
+    )
+    try:
+        missions.task_owner_gate_flag(mixed)
+        raise AssertionError("mixed unsupported task capabilities were allowed")
+    except missions.MissionError as error:
+        assert str(error) == (
+            "task requires separate capability setup: "
+            "credentials_or_external_authority, destructive, local_or_gpu, new_provider"
+        )
+
+    for goal in _TASK_OWNER_GATE_FALSE_POSITIVES:
+        assert missions.is_execution_goal(goal), goal
+        assert missions.task_owner_gate_flags(goal) == (), goal
+        assert missions.task_owner_gate_flag(goal) is None, goal
+
+    for expected, goal in _TASK_OWNER_GATE_MIXED_SAFE_AND_PROTECTED.items():
+        assert missions.task_owner_gate_flags(goal) == (expected,), goal
+        assert missions.is_execution_goal(goal), goal
+
+    for goal in (
+        "Add a link to ADR-031 and a new source of truth",
+        "Fix the accepted architecture and a typo in docs/architecture.md",
+        "Delete the production database, then remove the obsolete instructions from README",
+        "Remove the production database and its instructions from README",
+        "Remove production database and documentation instructions from README",
+        "Remove production database plus documentation instructions from README",
+        "Remove production database & documentation instructions from README",
+        "Remove production database as well as documentation instructions from README",
+        "Delete prod db instructions, wipe prod db, README",
+        "Delete prod db instructions and wipe prod db in README",
+        "Delete production database documentation; destroy prod db; docs",
+        "Delete production db instructions then wipe prod db README",
+        "Delete production database instructions from README and the production database",
+        "Remove prod db documentation from docs and the prod db",
+        "Delete production database instructions from README plus production data",
+        "Delete production database instructions from README, production database, and old comments",
+        "Grant RBAC permissions; validator test",
+        "Create a fake secret fixture and a production API key",
+        "Integrate Claude, then add an Anthropic provider mock test",
+        "Integrate Claude and add an Anthropic provider mock test",
+        "Integrate Claude plus add an Anthropic provider mock test",
+        "Integrate Claude as well as add an Anthropic provider mock test",
+        "Integrate Claude also add an Anthropic provider mock test",
+        "Add an Anthropic provider mock and OpenRouter as the model provider",
+        "Deploy Ollama; then add a mocked GPU path test",
+        "Deploy a mocked GPU path and an Ollama local model",
+        "I updated README, now delete the production database",
+        "We already fixed docs; now grant cluster-admin permissions",
+    ):
+        assert missions.task_owner_gate_flags(goal), goal
+        assert missions.is_execution_goal(goal), goal
+
+
+def test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance() -> None:
+    routes = json.dumps({
+        "workspace": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    architecture_goals = (
+        "Replace the accepted architecture and update ADR-031",
+        "Замени принятую архитектуру и обнови ADR-031",
+        "Update README only to replace the accepted architecture in ADR-031",
+    )
+    for index, goal in enumerate(architecture_goals):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+            os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+        ):
+            path = Path(temp) / "missions.sqlite3"
+            store = missions.MissionStore(path)
+            accepted, created = store.ingest_owner_turn(
+                goal,
+                platform="workspace",
+                source_message_id=f"architecture-{index}",
+                session_id=f"architecture-session-{index}",
+            )
+            assert created
+            assert accepted["payload"]["owner_gate_flag"] == "architecture_change"
+            if goal.startswith("Update README only"):
+                assert accepted["payload"]["execution_class"] == "routine_docs"
+            projection = store.projection(accepted["mission_id"])
+            assert projection["owner_gate_flag"] == "architecture_change"
+
+            restarted = missions.MissionStore(path)
+            replayed, replay_created = restarted.ingest_owner_turn(
+                goal,
+                platform="workspace",
+                source_message_id=f"architecture-{index}",
+                session_id=f"architecture-session-{index}",
+            )
+            assert not replay_created
+            assert replayed == accepted
+            assert restarted.projection(accepted["mission_id"]) == projection
+
+    rejected = {
+        "destructive": "Delete the production database and all customer records",
+        "credentials_or_external_authority": (
+            "Create a new GitHub write token for the worker"
+        ),
+        "new_provider": "Add Anthropic as a new model provider",
+        "local_or_gpu": "Enable Ollama local inference for autonomous delivery",
+    }
+    for index, (flag, goal) in enumerate(rejected.items()):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+            os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+        ):
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    goal,
+                    platform="workspace",
+                    source_message_id=f"unsupported-{index}",
+                    session_id=f"unsupported-session-{index}",
+                )
+                raise AssertionError(f"unsupported task capability was accepted: {flag}")
+            except missions.MissionError as error:
+                assert str(error) == (
+                    f"task requires separate capability setup: {flag}"
+                )
+            assert store.latest() is None
+
+    for index, goal in enumerate(_TASK_OWNER_GATE_FALSE_POSITIVES):
+        with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+            os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+        ):
+            store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+            accepted, created = store.ingest_owner_turn(
+                goal,
+                platform="workspace",
+                source_message_id=f"safe-sensitive-word-{index}",
+                session_id=f"safe-sensitive-word-session-{index}",
+            )
+            assert created
+            assert "owner_gate_flag" not in accepted["payload"]
+            assert store.projection(accepted["mission_id"])["status"] == "active"
+
+    discussion = "Should we integrate Claude as a new provider?"
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        try:
+            store.ingest_owner_turn(
+                discussion,
+                platform="workspace",
+                source_message_id="provider-discussion",
+                session_id="provider-discussion-session",
+            )
+            raise AssertionError("provider discussion was accepted as a mission")
+        except missions.MissionError as error:
+            assert str(error) == "owner turn is not an execution goal"
+        assert store.latest() is None
+
+        try:
+            store.ingest_owner_goal(
+                "Add Anthropic as a new model provider",
+                platform="workspace",
+                source_message_id="direct-provider-execution",
+                session_id="provider-discussion-session",
+            )
+            raise AssertionError("direct execution path bypassed task risk classification")
+        except missions.MissionError as error:
+            assert str(error) == (
+                "task requires separate capability setup: new_provider"
+            )
+        assert store.latest() is None
+
+        try:
+            store.accept(
+                "Forged task capability",
+                mission_id="mission-forged-task-capability",
+                owner_gate_flag="destructive",
+            )
+            raise AssertionError("non-architecture owner_gate_flag was persisted")
+        except missions.MissionError as error:
+            assert str(error) == "invalid mission owner gate flag"
+        assert store.latest() is None
 
 
 def test_routine_docs_class_is_durable_and_closed() -> None:
@@ -1696,6 +2021,178 @@ def test_owner_gate_accepts_only_exact_approval_without_clearing_question() -> N
         )
         assert answer_created and answer["payload"]["text"] == "APPROVE"
         assert store.projection(accepted["mission_id"])["status"] == "active"
+
+
+def test_owner_answer_cannot_add_task_capabilities_and_survives_restart() -> None:
+    routes = json.dumps({
+        "telegram": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        accepted, created = store.ingest_owner_turn(
+            "Update the registered project",
+            platform="telegram",
+            source_message_id="capability-goal",
+            session_id="capability-session",
+            chat_id="owner-chat",
+            thread_id="owner-thread",
+        )
+        assert created
+        mission_id = accepted["mission_id"]
+        question_id = "capability-question"
+        store.append_producer(
+            mission_id,
+            {
+                "schema_version": 1,
+                "mission_id": mission_id,
+                "type": "mission.question",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:capability-question:1"},
+                "payload": {
+                    "question_id": question_id,
+                    "text": "Which implementation should be used?",
+                },
+            },
+        )
+
+        for candidate in (store, missions.MissionStore(database)):
+            try:
+                candidate.ingest_owner_turn(
+                    "Delete the production database",
+                    platform="telegram",
+                    source_message_id="capability-answer",
+                    session_id="capability-session",
+                    chat_id="owner-chat",
+                    thread_id="owner-thread",
+                )
+                raise AssertionError("owner answer added a destructive capability")
+            except missions.MissionError as error:
+                assert str(error) == (
+                    "owner answer cannot add task capabilities: destructive"
+                )
+            projection = candidate.projection(mission_id)
+            assert projection["status"] == "waiting_owner"
+            assert projection["question"]["question_id"] == question_id
+            assert projection["answer"] is None
+            assert not any(
+                event["type"] == "mission.answer"
+                for event in candidate.events(mission_id)
+            )
+
+
+def test_task_risk_preflight_revalidates_legacy_durable_events() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        architecture_database = Path(temp) / "legacy-architecture.sqlite3"
+        store = missions.MissionStore(architecture_database)
+        accepted, _ = store.accept(
+            "Update the documentation",
+            mission_id="mission-legacy-architecture",
+        )
+        connection = sqlite3.connect(architecture_database)
+        try:
+            payload = json.loads(connection.execute(
+                """SELECT payload_json FROM mission_events
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (accepted["mission_id"],),
+            ).fetchone()[0])
+            payload["goal"] = "Replace the accepted architecture and update ADR-031"
+            connection.execute(
+                """UPDATE mission_events SET payload_json = ?
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (json.dumps(payload), accepted["mission_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        restarted = missions.MissionStore(architecture_database)
+        assert (
+            restarted.projection(accepted["mission_id"])["owner_gate_flag"]
+            == "architecture_change"
+        )
+
+        unsupported_database = Path(temp) / "legacy-unsupported.sqlite3"
+        store = missions.MissionStore(unsupported_database)
+        accepted, _ = store.accept(
+            "Update the documentation",
+            mission_id="mission-legacy-unsupported",
+        )
+        connection = sqlite3.connect(unsupported_database)
+        try:
+            payload = json.loads(connection.execute(
+                """SELECT payload_json FROM mission_events
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (accepted["mission_id"],),
+            ).fetchone()[0])
+            payload["goal"] = "Delete the production database"
+            connection.execute(
+                """UPDATE mission_events SET payload_json = ?
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (json.dumps(payload), accepted["mission_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        try:
+            missions.MissionStore(unsupported_database)
+            raise AssertionError("legacy unsupported mission passed preflight")
+        except missions.MissionError as error:
+            assert str(error) == (
+                "stored mission requires separate capability setup: destructive"
+            )
+
+        answer_database = Path(temp) / "legacy-answer.sqlite3"
+        store = missions.MissionStore(answer_database)
+        accepted, _ = store.accept(
+            "Update the documentation",
+            mission_id="mission-legacy-answer",
+        )
+        store.append_producer(
+            accepted["mission_id"],
+            {
+                "schema_version": 1,
+                "mission_id": accepted["mission_id"],
+                "type": "mission.question",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:legacy-question:1"},
+                "payload": {
+                    "question_id": "legacy-question",
+                    "text": "Which implementation should be used?",
+                },
+            },
+        )
+        store.answer(
+            accepted["mission_id"], "legacy-question", "Preserve current behavior"
+        )
+        connection = sqlite3.connect(answer_database)
+        try:
+            payload = json.loads(connection.execute(
+                """SELECT payload_json FROM mission_events
+                   WHERE mission_id = ? AND type = 'mission.answer'""",
+                (accepted["mission_id"],),
+            ).fetchone()[0])
+            payload["text"] = "Grant cluster-admin access"
+            connection.execute(
+                """UPDATE mission_events SET payload_json = ?
+                   WHERE mission_id = ? AND type = 'mission.answer'""",
+                (json.dumps(payload), accepted["mission_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        try:
+            missions.MissionStore(answer_database)
+            raise AssertionError("legacy capability-bearing answer passed preflight")
+        except missions.MissionError as error:
+            assert str(error) == (
+                "stored owner answer adds task capabilities: "
+                "credentials_or_external_authority"
+            )
 
 
 def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None:
@@ -3531,6 +4028,8 @@ def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_conversational_admission_requires_explicit_execution_intent()
     test_owner_turn_admission_is_authoritative_before_project_routing()
+    test_task_owner_gate_classifier_has_closed_ru_en_corpus()
+    test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance()
     test_routine_docs_class_is_durable_and_closed()
     test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
@@ -3545,6 +4044,8 @@ def main() -> None:
     test_registered_project_selection_is_durable_and_restart_safe()
     test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
     test_owner_gate_accepts_only_exact_approval_without_clearing_question()
+    test_owner_answer_cannot_add_task_capabilities_and_survives_restart()
+    test_task_risk_preflight_revalidates_legacy_durable_events()
     test_session_ordinary_owner_turn_answers_once_and_survives_restart()
     test_session_owner_turn_fails_closed_for_multiple_open_questions()
     test_concurrent_owner_intake_converges_on_one_acceptance()
