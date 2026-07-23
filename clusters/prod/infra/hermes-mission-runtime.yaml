@@ -1808,19 +1808,22 @@ data:
         re.IGNORECASE,
     )
     _MUTATION_INTENT = re.compile(
-        r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
+        r"\b(?:implement|fix|modify|improve|add|remove|refactor|build|deploy|"
+        r"deliver|commit|push|"
         r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
-        r"реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
-        r"собер\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+        r"реализ\w*|исправ\w*|измени\w*|улучш\w*|добав\w*|удали\w*|рефактор\w*|"
+        r"собер\w*|достав\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
         re.IGNORECASE,
     )
     _EXECUTION_INTENT = re.compile(
-        r"\b(?:implement|fix|modify|add|remove|refactor|build|deploy|commit|push|"
+        r"\b(?:implement|fix|modify|improve|add|remove|refactor|build|deploy|"
+        r"deliver|commit|push|"
         r"create|configure|integrate|rename|update|test|run|start|execute|"
         r"open\s+(?:a\s+)?pr|create\s+(?:a\s+)?pr|"
-        r"сдела\w*|реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|рефактор\w*|"
+        r"сдела\w*|реализ\w*|исправ\w*|измени\w*|улучш\w*|добав\w*|удали\w*|рефактор\w*|"
         r"созда\w*|настро\w*|интегр\w*|переимен\w*|обнов\w*|протест\w*|"
-        r"запуст\w*|выполн\w*|почин\w*|собер\w*|внес\w*|задепло\w*|закоммит\w*|запуш\w*)\b",
+        r"запуст\w*|выполн\w*|почин\w*|собер\w*|достав\w*|внес\w*|"
+        r"задепло\w*|закоммит\w*|запуш\w*)\b",
         re.IGNORECASE,
     )
     _DISCUSSION_INTENT = re.compile(
@@ -1831,17 +1834,41 @@ data:
         re.IGNORECASE,
     )
     _DISCUSS_THEN_EXECUTE = re.compile(
-        r"\b(?:and|then)\s+(?:implement|fix|modify|add|remove|create|configure|integrate|"
+        r"\b(?:and|then|now|please)\s+(?:implement|fix|modify|improve|add|"
+        r"remove|create|configure|integrate|deliver|"
         r"rename|update|build|test|run|execute)\b|(?:\bи\b|\bзатем\b)\s+(?:сдела\w*|"
-        r"реализ\w*|исправ\w*|измени\w*|добав\w*|удали\w*|созда\w*|настро\w*|"
+        r"реализ\w*|исправ\w*|измени\w*|улучш\w*|добав\w*|удали\w*|созда\w*|настро\w*|"
         r"интегр\w*|переимен\w*|обнов\w*|протест\w*|запуст\w*|выполн\w*|"
-        r"почин\w*|собер\w*|внес\w*)",
+        r"почин\w*|собер\w*|достав\w*|внес\w*)|"
+        r"\b(?:теперь|пожалуйста)\s+(?:сдела\w*|реализ\w*|исправ\w*|измени\w*|"
+        r"улучш\w*|добав\w*|удали\w*|созда\w*|настро\w*|обнов\w*|почин\w*)",
+        re.IGNORECASE,
+    )
+    _STATUS_OR_NARRATIVE_INTENT = re.compile(
+        r"^(?:i\s+(?:can\s+)?see|we\s+(?:can\s+)?see|"
+        r"я\s+вижу|мы\s+видим)\b|"
+        r"^(?:i|we|he|she|they)\s+(?:(?:have|has)\s+)?(?:already\s+)?"
+        r"(?:implemented|fixed|modified|added|removed|refactored|built|deployed|"
+        r"committed|pushed|created|configured|integrated|renamed|updated|tested|"
+        r"ran|started|executed)\b|"
+        r"^(?:я|мы|он|она|они)\s+(?:уже\s+)?"
+        r"(?:сделал(?:а|и)?|реализовал(?:а|и)?|исправил(?:а|и)?|"
+        r"изменил(?:а|и)?|добавил(?:а|и)?|удалил(?:а|и)?|"
+        r"обновил(?:а|и)?|настроил(?:а|и)?|запустил(?:а|и)?|"
+        r"выполнил(?:а|и)?|починил(?:а|и)?|собрал(?:а|и)?)\b|"
+        r"^(?:why|почему|зачем|когда|где)\b",
         re.IGNORECASE,
     )
     _ROUTINE_DOCS_ONLY = re.compile(
         r"\b(?:only\s+(?:the\s+)?(?:readme(?:\.md)?|docs?|documentation)|"
         r"(?:readme(?:\.md)?|docs?|documentation)\s+only)\b|"
         r"\bтолько\s+(?:файл\s+)?(?:readme(?:\.md)?|docs|документац\w*|документ\w*)\b",
+        re.IGNORECASE,
+    )
+    _ROUTINE_NON_DOCS_SCOPE = re.compile(
+        r"\b(?:code|source|implementation|config(?:uration)?|ya?ml|json|toml|"
+        r"workflow|manifest|tests?|код\w*|исходн\w*|реализац\w*|конфиг\w*|"
+        r"настройк\w*|манифест\w*|тест\w*)\b",
         re.IGNORECASE,
     )
     _ROUTINE_PLAN_ONLY = re.compile(
@@ -1957,6 +1984,11 @@ data:
         if lowered.startswith(("/run", "/mission")):
             return True
         if (
+            _STATUS_OR_NARRATIVE_INTENT.search(normalized)
+            and not _DISCUSS_THEN_EXECUTE.search(normalized)
+        ):
+            return False
+        if (
             (
                 _RESEARCH_INTENT.search(normalized)
                 or _DISCUSSION_INTENT.search(normalized)
@@ -1975,7 +2007,10 @@ data:
         normalized = " ".join(text.split())[:4_000]
         if not is_execution_goal(normalized):
             return None
-        if _ROUTINE_DOCS_ONLY.search(normalized):
+        if (
+            _ROUTINE_DOCS_ONLY.search(normalized)
+            and not _ROUTINE_NON_DOCS_SCOPE.search(normalized)
+        ):
             return 2
         if _ROUTINE_PLAN_ONLY.search(normalized) and not _PLAN_AND_IMPLEMENT.search(normalized):
             return 1
@@ -4763,6 +4798,8 @@ data:
                     chat_id=chat_id or None,
                     thread_id=thread_id or None,
                 )
+            if not is_execution_goal(text):
+                raise MissionError("owner turn is not an execution goal")
             registered_intake_projects(platform)
             try:
                 target = registered_intake_target(

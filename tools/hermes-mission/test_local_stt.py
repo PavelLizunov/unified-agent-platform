@@ -26,7 +26,7 @@ LOCAL_ROUTER = ROOT / "tools" / "local-models" / "route.py"
 
 class FakeMacSTT(BaseHTTPRequestHandler):
     received_lengths: list[int] = []
-    transcripts = ("fragment one", "fragment two", "fragment three", "fragment four")
+    transcripts = ("Add", "a read-only", "status", "command")
 
     def do_POST(self) -> None:
         length = int(self.headers["Content-Length"])
@@ -156,7 +156,7 @@ def main() -> None:
         assert completed.returncode == 0, completed.stderr
         assert completed.stdout == ""
         assert output.read_text(encoding="utf-8") == (
-            "fragment one fragment two fragment three fragment four\n"
+            "Add a read-only status command\n"
         )
         assert FakeMacSTT.received_lengths == [
             20 * 16_000 * 2,

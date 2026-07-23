@@ -194,8 +194,8 @@ def test_topic_routes_ordinary_text_to_media() -> None:
             ) == accepted["mission_id"]
 
 
-def test_same_thread_id_in_different_chat_follows_project_intake() -> None:
-    """Same thread_id in a different chat does NOT route media (thread_id is chat-local)."""
+def test_same_thread_id_in_different_chat_is_not_media_or_code_intake() -> None:
+    """A chat-local topic mismatch cannot turn an image description into code."""
     with tempfile.TemporaryDirectory() as temporary:
         env_patch = {
             "HERMES_HOME": temporary,
@@ -214,12 +214,13 @@ def test_same_thread_id_in_different_chat_follows_project_intake() -> None:
                     thread_id="images-topic",
                 )
                 raise AssertionError("same thread_id in different chat must not route media")
-            except missions.MissionProjectRequired as error:
-                assert len(error.projects) == 2
+            except missions.MissionError as error:
+                assert str(error) == "owner turn is not an execution goal"
+            assert store.latest() is None
 
 
-def test_ordinary_text_in_unknown_topic_follows_project_selection() -> None:
-    """Ordinary text in a non-configured topic still enters project intake."""
+def test_ordinary_text_in_unknown_topic_is_not_code_intake() -> None:
+    """Ordinary text outside a media topic remains ordinary chat."""
     with tempfile.TemporaryDirectory() as temporary:
         env_patch = {
             "HERMES_HOME": temporary,
@@ -237,9 +238,10 @@ def test_ordinary_text_in_unknown_topic_follows_project_selection() -> None:
                     chat_id="supergroup",
                     thread_id="code-topic",
                 )
-                raise AssertionError("ambiguous goal must require project selection")
-            except missions.MissionProjectRequired as error:
-                assert len(error.projects) == 2
+                raise AssertionError("ordinary text was accepted as code intake")
+            except missions.MissionError as error:
+                assert str(error) == "owner turn is not an execution goal"
+            assert store.latest() is None
 
 
 def test_pending_code_draft_intact_while_images_topic_media_accepted() -> None:
@@ -559,8 +561,8 @@ def test_telegram_download_retries_transient_failure_only() -> None:
 if __name__ == "__main__":
     test_media_mission_is_durable_and_does_not_generate_twice()
     test_topic_routes_ordinary_text_to_media()
-    test_same_thread_id_in_different_chat_follows_project_intake()
-    test_ordinary_text_in_unknown_topic_follows_project_selection()
+    test_same_thread_id_in_different_chat_is_not_media_or_code_intake()
+    test_ordinary_text_in_unknown_topic_is_not_code_intake()
     test_pending_code_draft_intact_while_images_topic_media_accepted()
     test_images_topic_replay_returns_same_mission()
     test_explicit_imagegen_works_outside_media_topic()
