@@ -130,6 +130,7 @@ def main() -> None:
     assert "claimName: $pvc" in restore_canary
     assert "missions-v1.sqlite3" in restore_canary
     assert "runAsUser: 0" in restore_canary
+    assert "?mode=ro&immutable=1" in restore_canary
     assert 'jsonpath=\'{.status.failed}\'' in restore_canary
     assert "hermes-agent-restore-ok" in restore_canary
 
