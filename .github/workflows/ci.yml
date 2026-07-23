@@ -75,7 +75,7 @@ jobs:
           for t in $(find tools -name 'test_*.py' | sort); do echo "== $t =="; python "$t" || exit 1; done
       - name: Install kustomize
         if: ${{ steps.classify.outputs.skip_iac != 'true' }}
-        uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f  # v2
+        uses: imranismail/setup-kustomize@53f941b41dca13ed61874bbc6b4b6e1562877530  # v3.0.0
       - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
         if: ${{ steps.classify.outputs.skip_iac != 'true' }}
         run: kustomize build clusters/prod >/dev/null
