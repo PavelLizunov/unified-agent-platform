@@ -71,6 +71,8 @@ spec:
       containers:
         - name: verify
           image: $hermes_image
+          securityContext:
+            runAsUser: 10000
           command: ["/bin/sh", "-c"]
           args:
             - |
@@ -109,7 +111,20 @@ spec:
             secretName: hermes-agent-backup-r2
 EOF
 
-kubectl -n "$namespace" wait --for=condition=complete "job/$job" --timeout=900s
+attempt=0
+while [ "$attempt" -lt 180 ]; do
+  succeeded="$(kubectl -n "$namespace" get job "$job" -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+  failed="$(kubectl -n "$namespace" get job "$job" -o jsonpath='{.status.failed}' 2>/dev/null || true)"
+  [ "$succeeded" = "1" ] && break
+  if [ -n "$failed" ] && [ "$failed" -ge 1 ]; then
+    kubectl -n "$namespace" logs "job/$job" --all-containers --prefix || true
+    echo "FATAL: disposable restore Job failed" >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  sleep 5
+done
+[ "$succeeded" = "1" ] || { echo "FATAL: disposable restore Job timed out" >&2; exit 1; }
 kubectl -n "$namespace" logs "job/$job" -c verify
 kubectl -n "$namespace" logs "job/$job" -c verify | grep -q "hermes-restore-canary-ok"
 echo "hermes-agent-restore-ok"
