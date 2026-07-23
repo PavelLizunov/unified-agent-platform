@@ -602,12 +602,16 @@ over bare Docker.
   fail-closed guard aborts boot if the managed brain overlay is missing/malformed. So the **dashboard is now a
   durable self-serve surface** for soft config while the brain stays reproducible. Independently reviewed; pod rolled
   once to `v5-config-hybrid`, healthy. See the "Config ownership" section in `runbooks/hermes-agent-codex-brain.md`.
-- **PVC DR backup DONE 2026-06-25 (PR #17, merged):** the node-local `hermes-agent-data` PVC (NOT in the etcd→R2
-  snapshots) now has a daily **`CronJob hermes-agent-backup`** — FULL `hermes backup` (consistent sqlite snapshot,
-  incl. the `.codex` brain DBs) → `r2:uap-k3s-snapshots/hermes-agent-backup/`, keep-7, direct to R2 (so it works
-  while the egress is down). Fail-loud integrity guards (non-empty + valid zip + `.codex` present). PV flipped to
-  `reclaimPolicy: Retain`. **Verified:** a manual job shipped a 40MB zip to R2. Restore + hardening follow-ups
-  (client-side encryption; current shared R2 credential scope is an owner-accepted risk) in
+- **PVC DR backup + disposable restore PASS 2026-07-23 (PRs #421–#425):** the node-local
+  `hermes-agent-data` PVC (NOT in the etcd→R2 snapshots) has a daily **`CronJob hermes-agent-backup`**. The
+  dump runtime now matches deployed Hermes `v0.18.0`; `missions-v1.sqlite3` is replaced with a SQLite online
+  snapshot and validated together with root `state.db` and `auth.json` before upload to
+  `r2:uap-k3s-snapshots/hermes-agent-backup/` (keep-7). The latest real archive was imported into a unique
+  disposable PVC and both databases passed read-only `quick_check`; the restored MissionStore contained
+  **1072 committed events**. The Job, pod and PVC were removed afterwards. PV remains
+  `reclaimPolicy: Retain`. This proves archive creation and disposable data restore, not a destructive production
+  replacement or restored credential usability. Evidence:
+  `docs/evidence/hermes-missionstore-backup-restore-2026-07-23.md`; operational procedure:
   `runbooks/hermes-agent-dr.md`.
 - **Egress outage RESOLVED 2026-06-25 (PR #19, merged) — HA failover egress.** The single German VLESS+REALITY exit
   had died server-side (`singbox-egress` logged `EOF` to chatgpt.com/api.telegram.org/ipify/dns alike), taking the

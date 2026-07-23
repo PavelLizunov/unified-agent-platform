@@ -445,6 +445,11 @@ Remaining:
 - **Canary cross-node Secret restore: DONE 2026-07-12.** A clean disposable host restored the R2-fetched snapshot
   with only the original server token and read back the exact canary Secret value; no separate encryption config
   was required. Test state was fully removed.
+- **Hermes PVC MissionStore restore: DONE 2026-07-23.** The version-matched daily backup now replaces
+  `missions-v1.sqlite3` with an online SQLite snapshot and validates all authoritative root databases before R2
+  upload. A disposable PVC/Job imported the latest real archive, passed SQLite integrity checks and read
+  1072 committed mission events; all canary resources were then removed. This is a non-destructive data-restore
+  proof, not a production cutover.
 - **Proxmox VM backups: DONE 2026-07-13.** Critical VMIDs `102/201/202/203` run daily to a separate
   `pve-ninitux2` disk; VM203 passed archive integrity plus an isolated, never-started restore check.
 - **Done when:** an off-homelab escrow decrypt succeeds. Proxmox VM backup/restore is already proven.
