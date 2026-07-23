@@ -367,15 +367,14 @@ _GATE_LABELS = {
 _ALLOWED_WORKER_MODELS = {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
 _ALLOWED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 _ROLE_LABELS = {"author": "Автор", "reviewer": "Ревьюер"}
-_API_PRICE_DATE = "22.07.2026"
-_API_PRICES = {
-    # input, cached input, cache write, output; USD per million tokens
-    "gpt-5.6-sol": tuple(map(Decimal, ("5", "0.5", "6.25", "30"))),
-    "gpt-5.6-terra": tuple(map(Decimal, ("2.5", "0.25", "3.125", "15"))),
-    "gpt-5.6-luna": tuple(map(Decimal, ("1", "0.1", "1.25", "6"))),
-}
-_WEB_SEARCH_USD = Decimal("0.01")
-_LONG_CONTEXT_TOKENS = 272_000
+# Internal OpenAI route aliases (luna/sol/terra) have no repository- or
+# runtime-attested official API price contract. The owner views therefore never
+# estimate API cost or cache billing — they report cost as not attested by the
+# subscription runtime. No price table lives in this repo on purpose.
+_COST_UNATTESTED = (
+    "API-стоимость: не подтверждена — официального прайса для внутренних "
+    "маршрутов нет, runtime подписки стоимость не аттестует"
+)
 _STAGE_LABELS = {
     "accepted": "Цель принята",
     "planning": "Планирование",
@@ -408,6 +407,36 @@ _NOTICE_LABELS = {
     "disk_space_recovered": (
         "Место на выделенном томе освобождено. Доставка продолжилась автоматически."
     ),
+}
+_WAIT_LABELS = {
+    "capacity_wait": "освобождения модели OpenAI",
+    "disk_space_wait": "освобождения места на томе",
+    "execution_reconciling": "восстановления прерванного запуска",
+}
+# Human-readable labels for the bounded delivery phases a mission.notice may
+# carry. Only a mapped phase is ever shown to the owner — a raw internal phase
+# id is never exposed as the only explanation of a checkpoint.
+_CHECKPOINT_LABELS = {
+    "new": "задача создана",
+    "author_committed": "изменения внесены автором",
+    "candidate_pushed": "кандидат отправлен в репозиторий",
+    "candidate_pr_open": "открыт черновик PR",
+    "pr_open": "PR открыт",
+    "pre_review_ci_green": "CI зелёный до ревью",
+    "needs_fix": "требуются правки после ревью",
+    "ci_failed": "CI не пройден",
+    "author_checks_failed": "проверки автора не пройдены",
+    "review_escalation_pending": "ожидает эскалации ревью",
+    "waiting_owner": "ожидает владельца",
+    "owner_answer_pending": "ожидает ответа владельца",
+    "post_verify_running": "проверка после слияния выполняется",
+    "post_verify_retry_pending": "запланирован повтор проверки после слияния",
+    "post_verify_failed": "проверка после слияния не пройдена",
+    "post_verify_repair_completed": "восстановление после слияния завершено",
+    "deploy_running": "развёртывание выполняется",
+    "deploy_retry_wait": "ожидание повтора развёртывания",
+    "deployment_failed": "развёртывание не выполнено",
+    "complete": "готово",
 }
 _INTAKE_CANCEL_ALIASES = {"cancel", "отмена", "отменить"}
 _PROJECT_ONBOARDING_OWNER = "PavelLizunov"
@@ -1461,6 +1490,75 @@ def _workspace_mission_url(view: dict[str, Any]) -> str | None:
     return f"{base}/dashboard?mission={urllib.parse.quote(mission_id, safe='')}"
 
 
+def _running_task_title(view: dict[str, Any]) -> str | None:
+    """Return the bounded title of the currently running task, if attested."""
+    tasks = view.get("tasks")
+    if not isinstance(tasks, list):
+        return None
+    for task in tasks:
+        if isinstance(task, dict) and task.get("status") in {"running", "in_progress"}:
+            title = task.get("title")
+            if isinstance(title, str) and title.strip():
+                return " ".join(title.split())[:120]
+    return None
+
+
+def _active_update_lines(view: dict[str, Any]) -> list[str]:
+    """Generic bounded active-update fields shared by Telegram and Workspace.
+
+    Shows the concrete current operation, the last durable checkpoint, what the
+    mission is waiting for, and whether owner action is required. Every value is
+    derived from attested stage/sequence/task/notice/question data and the
+    deterministic stage/checkpoint/wait maps; nothing here invents activity.
+    """
+    lines: list[str] = []
+    stage = view.get("stage")
+    stage_label = (
+        _STAGE_LABELS.get(stage, "Выполнение")
+        if isinstance(stage, str)
+        else "Выполнение"
+    )
+
+    # Concrete current operation: deterministic stage phase + active task title.
+    task_title = _running_task_title(view)
+    operation = f"{stage_label} — {task_title}" if task_title else stage_label
+    lines.append(f"Сейчас: {operation}")
+
+    # Last durable checkpoint: shown for EVERY active mission. Built from the
+    # durable event sequence + localized stage, enriched with a mapped notice
+    # phase. A raw internal phase id is never exposed on its own.
+    checkpoint = stage_label
+    sequence = view.get("sequence")
+    if isinstance(sequence, int) and not isinstance(sequence, bool) and sequence > 0:
+        checkpoint = f"{checkpoint} · durable-событие {sequence}"
+    notice = view.get("notice")
+    notice = notice if isinstance(notice, dict) else {}
+    phase = notice.get("phase")
+    phase_label = _CHECKPOINT_LABELS.get(phase) if isinstance(phase, str) else None
+    if phase_label:
+        checkpoint = f"{checkpoint} · {phase_label}"
+    lines.append(f"Контрольная точка: {checkpoint}")
+
+    # What the mission is waiting for: always explicit, never an invented action.
+    question = view.get("question")
+    has_question = isinstance(question, dict) and bool(question.get("text"))
+    if has_question:
+        lines.append("Ждёт: вашего ответа на вопрос")
+    else:
+        wait = _WAIT_LABELS.get(notice.get("code", ""))
+        if wait:
+            lines.append(f"Ждёт: {wait}")
+        else:
+            lines.append(
+                "Ждёт: причина ожидания ещё не записана, жду следующей "
+                "автоматической контрольной точки"
+            )
+
+    owner_required = has_question or bool(notice.get("owner_action_required"))
+    lines.append(f"Нужно ваше действие: {'да' if owner_required else 'нет'}")
+    return lines
+
+
 def telegram_text(view: dict[str, Any]) -> str:
     """Render the compact Telegram view from the exact Workspace projection."""
     status = view.get("status") or "unknown"
@@ -1476,6 +1574,11 @@ def telegram_text(view: dict[str, Any]) -> str:
     workspace_url = _workspace_mission_url(view)
     if workspace_url:
         lines.append(f"Подробнее: {workspace_url}")
+    if status in ("active", "waiting_owner"):
+        elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
+        if elapsed:
+            lines.append(f"В работе: {elapsed}")
+        lines.extend(_active_update_lines(view))
     goal = view.get("goal")
     if isinstance(goal, str) and goal.strip():
         short_goal = " ".join(goal.split())
@@ -1521,8 +1624,16 @@ def telegram_text(view: dict[str, Any]) -> str:
     if status in ("active", "waiting_owner", "failed", "cancelled"):
         workers = view.get("workers", [])
         final = status in ("failed", "cancelled")
-        lines.extend(_role_telemetry_lines(workers, final=final))
-        lines.extend(_usage_statistics_lines(workers, final=final))
+        role_lines = _role_telemetry_lines(workers, final=final)
+        usage_lines = _usage_statistics_lines(workers, final=final)
+        lines.extend(role_lines)
+        lines.extend(usage_lines)
+        if status in ("active", "waiting_owner") and not role_lines and not usage_lines:
+            lines.append(
+                "Текущий расход модели: подтверждённый usage появится после "
+                "завершённого подтверждённого запуска (во время прогона модель "
+                "не отдаёт итоговый usage)."
+            )
     lines.append(
         "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
             tasks=len(view.get("tasks", [])),
@@ -1607,6 +1718,18 @@ def _role_telemetry_lines(
             and isinstance(out_tok, int) and not isinstance(out_tok, bool) and out_tok >= 0
         ):
             parts.append(f"{in_tok} in / {out_tok} out")
+        cached = _metric(worker, "cached_input_tokens")
+        if cached is not None:
+            parts.append(f"кэш {cached}")
+        reasoning = _metric(worker, "reasoning_output_tokens")
+        if reasoning is not None:
+            parts.append(f"reasoning {reasoning}")
+        requests = _metric(worker, "model_requests")
+        if requests is not None:
+            parts.append(f"запросов {requests}")
+        discarded = _metric(worker, "attempts_discarded")
+        if discarded:
+            parts.append(f"отброшено {discarded}")
         lines.append(" · ".join(parts))
     return lines
 
@@ -1626,36 +1749,6 @@ def _format_token_count(value: int) -> str:
     return str(value)
 
 
-def _api_cost_range(workers: list[dict[str, Any]]) -> tuple[Decimal, Decimal] | None:
-    low = Decimal(0)
-    high = Decimal(0)
-    million = Decimal(1_000_000)
-    for worker in workers:
-        prices = _API_PRICES.get(worker.get("model"))
-        input_tokens = _metric(worker, "input_tokens")
-        cached_tokens = _metric(worker, "cached_input_tokens")
-        output_tokens = _metric(worker, "output_tokens")
-        max_input = _metric(worker, "max_request_input_tokens")
-        if (
-            prices is None or input_tokens is None or cached_tokens is None
-            or output_tokens is None or max_input is None or max_input <= 0
-            or max_input > _LONG_CONTEXT_TOKENS or cached_tokens > input_tokens
-        ):
-            return None
-        input_price, cached_price, cache_write_price, output_price = prices
-        fresh_tokens = Decimal(input_tokens - cached_tokens)
-        cached_tokens_decimal = Decimal(cached_tokens)
-        output_tokens_decimal = Decimal(output_tokens)
-        searches = Decimal(_metric(worker, "web_search_calls") or 0)
-        fixed = (
-            cached_tokens_decimal * cached_price
-            + output_tokens_decimal * output_price
-        ) / million + searches * _WEB_SEARCH_USD
-        low += fixed + fresh_tokens * input_price / million
-        high += fixed + fresh_tokens * cache_write_price / million
-    return low, high
-
-
 def _usage_statistics_lines(
     workers: list[dict[str, Any]], *, final: bool = True
 ) -> list[str]:
@@ -1668,13 +1761,39 @@ def _usage_statistics_lines(
         if isinstance(worker, dict) and worker.get("profile") in _ROLE_LABELS
     ]
     telemetry = cumulative or role_telemetry
+    if not telemetry:
+        return []
+    if cumulative:
+        label = "Накопительный подтверждённый расход"
+    else:
+        label = (
+            "Статистика финальных прогонов"
+            if final
+            else "Последние подтверждённые прогоны"
+        )
     measured = [
         worker for worker in telemetry
         if _metric(worker, "input_tokens") is not None
         and _metric(worker, "output_tokens") is not None
     ]
     if not measured or len(measured) != len(telemetry):
-        return []
+        # Partial or missing telemetry: the per-role lines (emitted by
+        # _role_telemetry_lines) keep each role's attested numbers, but the
+        # aggregate total/cache/cost cannot be attested honestly — say so
+        # instead of dropping the whole block or inventing a partial total.
+        lines = [
+            f"{label}: совокупный расход, кэш и API-стоимость недоступны — "
+            "телеметрия подтверждена не для всех ролей."
+        ]
+        discarded = sum(
+            _metric(worker, "attempts_discarded") or 0 for worker in measured
+        )
+        if discarded:
+            lines.append(
+                f"Важно: как минимум {discarded} предыдущих или отброшенных "
+                "прогонов не входят в эту сумму."
+            )
+        return lines
 
     total_input = sum(_metric(worker, "input_tokens") or 0 for worker in measured)
     total_output = sum(_metric(worker, "output_tokens") or 0 for worker in measured)
@@ -1688,21 +1807,18 @@ def _usage_statistics_lines(
                 else Decimal(0)
             ).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
             parts.extend((
-                f"runtime-кэш {_format_token_count(cached)} ({str(percent).replace('.', ',')}%)",
+                f"runtime-кэш (подтверждено runtime, не биллинг) "
+                f"{_format_token_count(cached)} ({str(percent).replace('.', ',')}%)",
                 f"новый вход {_format_token_count(total_input - cached)}",
             ))
+        else:
+            parts.append("runtime-кэш: недоступно")
+    else:
+        parts.append("runtime-кэш: недоступно")
     parts.append(f"выход {_format_token_count(total_output)}")
     requests = [_metric(worker, "model_requests") for worker in measured]
     if all(value is not None for value in requests):
         parts.append(f"запросы к моделям {sum(value or 0 for value in requests)}")
-    if cumulative:
-        label = "Накопительный подтверждённый расход"
-    else:
-        label = (
-            "Статистика финальных прогонов"
-            if final
-            else "Последние подтверждённые прогоны"
-        )
     lines = [f"{label}: " + " · ".join(parts)]
     discarded = sum(
         _metric(worker, "attempts_discarded") or 0 for worker in measured
@@ -1721,16 +1837,7 @@ def _usage_statistics_lines(
             f"Инструменты: shell {command_calls} · ненулевой код {failed_commands} · web search {searches}"
         )
 
-    estimate = _api_cost_range(measured)
-    if estimate is not None:
-        low, high = (
-            value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            for value in estimate
-        )
-        low_text = str(low).replace(".", ",")
-        high_text = str(high).replace(".", ",")
-        amount = f"${low_text}" if low == high else f"${low_text}–${high_text}"
-        lines.append(f"API-эквивалент: {amount} · прайс OpenAI {_API_PRICE_DATE}")
+    lines.append(_COST_UNATTESTED)
     return lines
 
 

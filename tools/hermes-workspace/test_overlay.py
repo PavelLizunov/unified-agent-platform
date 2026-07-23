@@ -588,6 +588,26 @@ def main() -> None:
         assert "Подробнее о задаче" in mission_card
         assert "missionIdFromLocation" in mission_card
         assert "selectMissionInLocation" in mission_card
+        assert "missionDeepLink" in mission_card
+        assert "Ссылка на эту задачу" in mission_card
+        assert "new URL('/dashboard', window.location.origin)" in mission_card
+        assert "runningTaskTitle" in mission_card
+        assert "waitLabels" in mission_card
+        assert "checkpointLabels" in mission_card
+        assert "costUnattested" in mission_card
+        # Unknown stage falls back to the localized generic label, never raw.
+        assert "const stageLabel = stageLabels[mission.stage] || 'Выполнение'" in mission_card
+        assert "stageLabels[mission.stage] || mission.stage || 'Выполнение'" not in mission_card
+        # Running task title is whitespace-normalized AND trimmed.
+        assert ".replace(/\\s+/g, ' ').trim().slice(0, 120)" in mission_card
+        assert "Сейчас: {currentOperation}" in mission_card
+        assert "Контрольная точка: {checkpoint}" in mission_card
+        assert "durable-событие ${mission.sequence}" in mission_card
+        assert "Ждёт: {waitingFor}" in mission_card
+        assert "причина ожидания ещё не записана" in mission_card
+        assert "Нужно ваше действие: {ownerActionRequired ? 'да' : 'нет'}" in mission_card
+        assert "runtime-кэш (подтверждено runtime, не биллинг)" in mission_card
+        assert "checkpoint ${mission.notice.phase}" not in mission_card
         assert "Накопительный расход выбранной задачи" in mission_card
         assert "Последние сохранённые прогоны" in mission_card
         assert "eventPresentation" in mission_card
