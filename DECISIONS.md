@@ -771,11 +771,12 @@
   exact-`APPROVE` protocol. `destructive`, `credentials_or_external_authority`, `new_provider` и `local_or_gpu`
   отвергаются до mission с точной ошибкой `task requires separate capability setup: <flags>`: ответ внутри обычной
   mission не может создать отсутствующую capability.
-- **Cutover/restart:** при каждом открытии durable MissionStore Central повторно проверяет уже сохранённые
-  `mission.accepted` и `mission.answer`. Legacy architecture goal без поля проецируется с
+- **Cutover/restart:** при каждом открытии durable MissionStore Central повторно проверяет уже сохранённые события
+  всех nonterminal missions. Legacy architecture goal без поля проецируется с
   `architecture_change` и поэтому получает тот же gate; legacy unsupported goal или capability-bearing answer
-  останавливает runtime fail-closed до dispatch. Новые owner answers также проходят этот gate в общем
-  `MissionStore.answer()`, независимо от Workspace/Telegram ingress.
+  останавливает runtime fail-closed до dispatch. Terminal history остаётся читаемой, но никогда не возобновляется.
+  Новые owner answers также проходят этот gate в общем `MissionStore.answer()`, независимо от Workspace/Telegram
+  ingress.
 - **False-positive boundary:** чувствительное слово без защищённого действия не выдаёт полномочий и не ставит gate.
   Правка `docs/architecture.md`, ссылка на ADR, удаление test fixture, credential-redaction test, отрицательный
   Claude-routing test, удаление устаревшего Ollama-текста и dry-run coverage остаются обычными задачами. При этом
