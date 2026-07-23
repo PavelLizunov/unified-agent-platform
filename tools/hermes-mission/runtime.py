@@ -1778,7 +1778,10 @@ def _completion_result(view: dict[str, Any]) -> str:
     else:
         lines.append("Проверки: нет данных о проверках")
     if view.get("delivery_mode") == "none":
-        lines.append("Деплой: не настроен для этого проекта")
+        if view.get("execution_class") == "routine_docs":
+            lines.append("Деплой: не требуется — задача только для документации")
+        else:
+            lines.append("Деплой: не настроен для этого проекта")
     elif view.get("delivery_mode") == "deploy":
         deployment = deliveries.get("deployment", {})
         environment = deployment.get("environment")
@@ -3562,6 +3565,7 @@ class MissionStore:
             arguments.update(
                 execution_class="routine_docs",
                 expected_changed_files=routine_limit,
+                delivery_mode="none",
             )
         if owner_gate_flag is not None:
             arguments["owner_gate_flag"] = owner_gate_flag
@@ -3634,6 +3638,8 @@ class MissionStore:
             or not 1 <= expected_changed_files <= 2
         ):
             raise MissionError("invalid mission execution class")
+        if execution_class == "routine_docs" and delivery_mode != "none":
+            raise MissionError("routine_docs missions require delivery mode none")
         if parent_mission_id is not None:
             parent_mission_id = _require_id(parent_mission_id, "parent_mission_id")
             if parent_mission_id == mission_id:

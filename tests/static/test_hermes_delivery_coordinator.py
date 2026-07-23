@@ -71,6 +71,22 @@ def reusable_profile(root: pathlib.Path) -> dict:
     return value
 
 
+def deploy_profile(root: pathlib.Path) -> dict:
+    value = reusable_profile(root)
+    value.update(
+        allowed_path_prefixes=["."],
+        max_changed_files=60,
+        delivery_mode="deploy",
+        deployment={
+            "driver": "vpnctld-systemd-v1",
+            "environment": "vpnctl-production",
+            "target": "vpnctld",
+            "health_url": "http://vpnctld:18402/api/v1/health",
+        },
+    )
+    return value
+
+
 def merged_post_verify_state(approved: dict) -> dict:
     return {
         "schema_version": 1,
@@ -3642,6 +3658,169 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 )["status"],
             )
 
+    def test_routine_docs_on_deploy_profile_gets_effective_none_mode(self):
+        """routine_docs on a deploy-capable profile must derive effective mode none."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = deploy_profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-deploy")
+            state = instance._load_state("mission-routine-deploy", paths)
+
+            # routine_docs mission with delivery_mode=none binds correctly
+            mission = {
+                "mission_id": "mission-routine-deploy",
+                "goal": "Обнови только README",
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertEqual("none", state["delivery_mode"])
+            self.assertEqual("routine_docs", state["execution_class"])
+
+            # Effective mode is durable across restart
+            recovered = instance._load_state("mission-routine-deploy", paths)
+            self.assertEqual("none", recovered["delivery_mode"])
+            instance._bind_mission_goal(recovered, mission, paths)
+            self.assertEqual("none", recovered["delivery_mode"])
+
+            # Legacy routine_docs+deploy mission is rejected before any mutation
+            legacy_mission = {
+                "mission_id": "mission-legacy-routine-deploy",
+                "goal": "Обнови только README",
+                "delivery_mode": "deploy",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+            }
+            legacy_paths = instance._paths("mission-legacy-routine-deploy")
+            legacy_state = instance._load_state("mission-legacy-routine-deploy", legacy_paths)
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "delivery mode does not match"
+            ):
+                instance._bind_mission_goal(legacy_state, legacy_mission, legacy_paths)
+
+            # Normal code mission on the same deploy profile keeps deploy
+            code_mission = {
+                "mission_id": "mission-code-deploy",
+                "goal": "Исправь баг в маршрутизаторе",
+                "delivery_mode": "deploy",
+            }
+            code_paths = instance._paths("mission-code-deploy")
+            code_state = instance._load_state("mission-code-deploy", code_paths)
+            instance._bind_mission_goal(code_state, code_mission, code_paths)
+            self.assertEqual("deploy", code_state["delivery_mode"])
+
+            # Execute the real verified-phase branch and stop at cleanup.
+            state.update(
+                phase="verified",
+                root_task_id="task-1",
+                run_id="7",
+            )
+            instance._save(paths, state)
+            with (
+                mock.patch.object(instance, "_mission", return_value=mission),
+                mock.patch.object(instance, "_record_systemd_invocation"),
+                mock.patch.object(instance, "_ensure_route"),
+                mock.patch.object(instance, "_ensure_restart_claim"),
+                mock.patch.object(instance, "_ensure_worktree"),
+                mock.patch.object(instance, "_publish_available_telemetry"),
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(
+                    instance, "_cleanup", side_effect=RuntimeError("stop-after-verified")
+                ),
+                mock.patch.object(instance, "_deployment_plan") as deploy_plan,
+                self.assertRaisesRegex(RuntimeError, "stop-after-verified"),
+            ):
+                instance.tick()
+            deploy_plan.assert_not_called()
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("cleanup_pending", persisted["phase"])
+
+    def test_schema_v3_delivery_mode_behavior_remains_profile_derived(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-v3-mode")
+            state = instance._load_state("mission-v3-mode", paths)
+            mission = {
+                "mission_id": "mission-v3-mode",
+                "goal": instance.profile["goal"],
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertNotIn("delivery_mode", state)
+            self.assertIsNone(instance._effective_delivery_mode(state))
+            with mock.patch.object(
+                instance, "_candidate_files", return_value=["Cli.cs"]
+            ):
+                events = instance._events({
+                    "pr_url": "https://example.invalid/pr/1",
+                    "default_sha": "a" * 40,
+                }, cleanup=True)
+            self.assertFalse(any(
+                event["type"] == "delivery.upsert"
+                and event["payload"].get("kind") in {"delivery", "deployment"}
+                for event in events
+            ))
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "approved exact merged revision"
+            ):
+                instance._deployment_plan({"default_sha": "a" * 40}, paths)
+
+    def test_routine_docs_events_omit_deployment_gate(self):
+        """routine_docs events must omit deployment gate and mark not_applicable."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = deploy_profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-events")
+            state = instance._load_state("mission-routine-events", paths)
+            mission = {
+                "mission_id": "mission-routine-events",
+                "goal": "Обнови только README",
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            state.update(
+                pr_url="https://example.invalid/pr/1",
+                default_sha="default-sha",
+                author_telemetry=None,
+                reviewer_telemetry=None,
+            )
+            with mock.patch.object(
+                instance, "_candidate_files", return_value=["README.md"]
+            ):
+                events = instance._events(state, cleanup=True)
+
+            # No deployment gate
+            gate_ids = [
+                event["payload"]["gate_id"]
+                for event in events
+                if event["type"] == "gate.upsert"
+            ]
+            self.assertNotIn("deployment", gate_ids)
+
+            # Delivery marked not_applicable with documentation-only summary
+            delivery_events = [
+                event for event in events
+                if event["type"] == "delivery.upsert"
+                and event["payload"].get("kind") == "delivery"
+            ]
+            self.assertEqual(1, len(delivery_events))
+            self.assertEqual("not_applicable", delivery_events[0]["payload"]["status"])
+            self.assertIn(
+                "Documentation-only",
+                delivery_events[0]["payload"].get("summary", ""),
+            )
+
     def test_task_architecture_gate_is_durably_unioned_with_profile_flags(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -3738,6 +3917,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     instance._events({
                         "pr_url": "https://example.invalid/pr/1",
                         "default_sha": "default-sha",
+                        "delivery_mode": "none",
                     }, cleanup=True),
                 )
             changed = dict(mission, delivery_mode=None)
@@ -4034,7 +4214,16 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             value = reusable_profile(root)
-            value.update(completion_evidence=True, delivery_mode="none")
+            value.update(
+                completion_evidence=True,
+                delivery_mode="deploy",
+                deployment={
+                    "driver": "vpnctld-systemd-v1",
+                    "environment": "vpnctl-production",
+                    "target": "vpnctld",
+                    "health_url": "http://vpnctld:18402/api/v1/health",
+                },
+            )
             path = root / "profile.json"
             path.write_text(json.dumps(value), encoding="utf-8")
             approved = coordinator.load_profile(path)
@@ -4065,6 +4254,9 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "mission_goal_sha256": hashlib.sha256(
                     b"Deliver a verified change"
                 ).hexdigest(),
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
                 "parent_mission_id": None,
                 "owner_answers": [{
                     "question_id": "owner-gate:question",
@@ -4185,6 +4377,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             self.assertEqual(bundle["sha256"], state["completion_evidence_sha256"])
             self.assertEqual([101, 102], bundle["delivery"]["ci_run_ids"])
+            self.assertEqual("none", bundle["delivery"]["mode"])
+            self.assertEqual(
+                "not_applicable", bundle["delivery"]["applicability"]
+            )
             self.assertEqual(candidate, bundle["reviewer"]["reviewed_sha"])
             self.assertEqual(3, bundle["schema_version"])
             self.assertEqual("telegram", bundle["input"]["platform"])
@@ -10657,7 +10853,7 @@ class TestCancelledCleanup(unittest.TestCase):
             paths = instance._paths("mission-deploy")
             state = {
                 "mission_id": "mission-deploy", "phase": "verified",
-                "default_sha": revision,
+                "default_sha": revision, "delivery_mode": "deploy",
             }
             instance._deployment_plan(state, paths)
             self.assertFalse(instance._run_deployment_attempt(state, paths))
@@ -10684,6 +10880,7 @@ class TestCancelledCleanup(unittest.TestCase):
             resume_state = {
                 "mission_id": "mission-resume", "phase": "deploy_running",
                 "default_sha": revision, "deployment_attempts": 1,
+                "delivery_mode": "deploy",
                 "deployment_plan": {
                     "schema_version": 1, **value["deployment"], "revision": revision,
                 },

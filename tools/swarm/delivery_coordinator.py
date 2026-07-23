@@ -891,6 +891,16 @@ class DeliveryCoordinator:
             raise DeliveryError("durable mission goal is missing or invalid")
         return goal
 
+    def _effective_delivery_mode(self, state: dict[str, Any]) -> str | None:
+        if self.profile["schema_version"] == 3:
+            return self.profile.get("delivery_mode")
+        mode = state.get("delivery_mode")
+        if mode is None and self.profile.get("delivery_mode") is None:
+            return None
+        if mode not in {"none", "deploy"}:
+            raise DeliveryError("durable mission delivery mode is missing or invalid")
+        return mode
+
     def _bind_mission_goal(
         self,
         state: dict[str, Any],
@@ -905,9 +915,15 @@ class DeliveryCoordinator:
             if goal != self.profile["goal"]:
                 raise DeliveryError("mission goal does not match the owner-approved profile")
             return
-        expected_mode = self.profile.get("delivery_mode")
+        execution_class = mission.get("execution_class")
+        if execution_class == "routine_docs":
+            expected_mode = "none"
+        else:
+            expected_mode = self.profile.get("delivery_mode")
         if mission.get("delivery_mode") != expected_mode:
-            raise DeliveryError("mission delivery mode does not match the approved profile")
+            raise DeliveryError(
+                "mission delivery mode does not match the effective profile mode"
+            )
         stored_mode = state.get("delivery_mode")
         if stored_mode is None and expected_mode is not None:
             state["delivery_mode"] = expected_mode
@@ -922,7 +938,6 @@ class DeliveryCoordinator:
             changed = True
         elif stored_goal != goal or stored_digest != digest:
             raise DeliveryError("mission goal changed after the durable execution checkpoint")
-        execution_class = mission.get("execution_class")
         expected_changed_files = mission.get("expected_changed_files")
         owner_gate_flag = mission.get("owner_gate_flag")
         if (execution_class, expected_changed_files) != (None, None) and (
@@ -5543,7 +5558,7 @@ class DeliveryCoordinator:
         deployment = self.profile.get("deployment")
         revision = state.get("default_sha")
         if (
-            self.profile.get("delivery_mode") != "deploy"
+            self._effective_delivery_mode(state) != "deploy"
             or not isinstance(deployment, dict)
             or not isinstance(revision, str)
             or not re.fullmatch(r"[0-9a-f]{40,64}", revision)
@@ -5763,12 +5778,15 @@ class DeliveryCoordinator:
         usage_event = self._usage_worker_event(state)
         if usage_event is not None:
             events.append(usage_event)
-        if self.profile.get("delivery_mode") == "none":
-            events.append({
-                "type": "delivery.upsert",
-                "payload": {"kind": "delivery", "status": "not_applicable"},
-            })
-        elif self.profile.get("delivery_mode") == "deploy":
+        delivery_mode = self._effective_delivery_mode(state)
+        if delivery_mode == "none":
+            payload: dict[str, str] = {"kind": "delivery", "status": "not_applicable"}
+            if state.get("execution_class") == "routine_docs":
+                payload["summary"] = (
+                    "Documentation-only task; production deploy is not applicable"
+                )
+            events.append({"type": "delivery.upsert", "payload": payload})
+        elif delivery_mode == "deploy":
             plan = state.get("deployment_plan")
             if not isinstance(plan, dict):
                 raise DeliveryError("completed deployment has no durable plan")
@@ -5884,7 +5902,7 @@ class DeliveryCoordinator:
             and channel_converged
         ):
             evidence_version = 3
-        delivery_mode = self.profile.get("delivery_mode")
+        delivery_mode = self._effective_delivery_mode(state)
         if delivery_mode == "deploy":
             if evidence_version == 1:
                 raise DeliveryError("deployment evidence requires durable input lineage")
@@ -6629,7 +6647,7 @@ class DeliveryCoordinator:
 
             if state["phase"] == "verified":
                 self._assert_claim(state)
-                if self.profile.get("delivery_mode") != "deploy":
+                if self._effective_delivery_mode(state) != "deploy":
                     state["phase"] = "cleanup_pending"
                     self._save(paths, state)
                 else:
