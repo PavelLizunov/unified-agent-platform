@@ -135,6 +135,12 @@ ambiguous classification preserves the profile's previous conservative route and
 never removed by this optimization. Spark remains outside coding delivery until a separate exact-model canary and
 policy decision approve it.
 
+`routine_docs` also derives the mission's effective `delivery_mode: none` at Central acceptance, even when the
+registered target profile supports production deployment. The coordinator independently re-derives and durably binds
+that effective mode before execution. It still requires exact-SHA review, the approved CI/security gates,
+post-verification and cleanup, but publishes deployment as not applicable and never invokes the production deploy
+driver. A non-documentation mission keeps the registered profile's deployment mode.
+
 Ordinary intake also applies one closed deterministic task-risk classifier before `mission.accepted`. Only
 `architecture_change` may enter a mission, as immutable `owner_gate_flag: architecture_change`; the coordinator
 durably binds it, unions it with profile route flags and asks the existing exact `APPROVE` question before any model

@@ -551,6 +551,122 @@ def test_routine_docs_class_is_durable_and_closed() -> None:
                 assert "execution class" in str(error)
 
 
+def test_routine_docs_on_deploy_target_gets_effective_none_mode() -> None:
+    """routine_docs intake on a deploy-capable target must accept delivery_mode=none."""
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl",
+                "summary": "VPN control daemon", "aliases": ["vpnctl"],
+                "dispatch_profile": "build1-vpnctl-registered-v4",
+                "delivery_mode": "deploy", "platforms": ["workspace", "telegram"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+
+        # routine_docs goal on deploy-capable target → delivery_mode=none
+        accepted, created = store.ingest_owner_goal(
+            "Обнови только README",
+            platform="workspace",
+            source_message_id="routine-deploy-1",
+            session_id="routine-deploy-session",
+            project_id="vpnctl",
+        )
+        assert created
+        assert accepted["payload"]["execution_class"] == "routine_docs"
+        assert accepted["payload"]["delivery_mode"] == "none"
+        projection = store.projection(accepted["mission_id"])
+        assert projection["delivery_mode"] == "none"
+        assert projection["execution_class"] == "routine_docs"
+
+        # Idempotent replay returns the same acceptance
+        replay, replay_created = store.ingest_owner_goal(
+            "Обнови только README",
+            platform="workspace",
+            source_message_id="routine-deploy-1",
+            session_id="routine-deploy-session",
+            project_id="vpnctl",
+        )
+        assert not replay_created
+        assert replay == accepted
+
+        # Normal code mission on the same deploy-capable target keeps deploy
+        code_accepted, code_created = store.ingest_owner_goal(
+            "Исправь баг в маршрутизаторе",
+            platform="workspace",
+            source_message_id="code-deploy-1",
+            session_id="routine-deploy-session",
+            project_id="vpnctl",
+        )
+        assert code_created
+        assert "execution_class" not in code_accepted["payload"]
+        assert code_accepted["payload"]["delivery_mode"] == "deploy"
+
+        # New routine_docs acceptance requires the exact effective none mode.
+        for index, invalid_mode in enumerate((None, "deploy")):
+            try:
+                store.accept(
+                    "Обнови только README",
+                    mission_id=f"mission-invalid-routine-mode-{index}",
+                    execution_class="routine_docs",
+                    expected_changed_files=2,
+                    delivery_mode=invalid_mode,
+                )
+                raise AssertionError("invalid routine_docs delivery mode was accepted")
+            except missions.MissionError as error:
+                assert "routine_docs" in str(error)
+
+    # Historical terminal events remain readable after the stricter new admission.
+    historical_id = "mission-historical-routine-deploy"
+    historical = missions._validate_submission(historical_id, {
+        "schema_version": missions.SCHEMA_VERSION,
+        "mission_id": historical_id,
+        "type": "mission.accepted",
+        "source": "central-hermes",
+        "correlation": {},
+        "payload": {
+            "goal": "Legacy documentation mission",
+            "delivery_mode": "deploy",
+            "execution_class": "routine_docs",
+            "expected_changed_files": 2,
+        },
+    })
+    historical.update(sequence=1, occurred_at="2026-07-01T00:00:00Z")
+    terminal = {
+        "schema_version": missions.SCHEMA_VERSION,
+        "mission_id": historical_id,
+        "sequence": 2,
+        "type": "mission.completed",
+        "source": "central-hermes",
+        "correlation": {},
+        "payload": {"result": "Legacy completion"},
+        "occurred_at": "2026-07-01T00:01:00Z",
+    }
+    historical_view = missions.project([historical, terminal])
+    assert historical_view["status"] == "completed"
+    assert historical_view["delivery_mode"] == "deploy"
+
+    # Terminal wording for routine_docs shows documentation-only
+    result_text = missions._completion_result({
+        "delivery_mode": "none",
+        "execution_class": "routine_docs",
+    })
+    assert "не требуется" in result_text
+    assert "документации" in result_text
+
+    # Normal none mission keeps the original wording
+    normal_text = missions._completion_result({"delivery_mode": "none"})
+    assert "не настроен" in normal_text
+
+
 def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> None:
     catalog = json.dumps({
         "schema_version": 2,
@@ -4095,6 +4211,7 @@ def main() -> None:
     test_task_owner_gate_classifier_has_closed_ru_en_corpus()
     test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance()
     test_routine_docs_class_is_durable_and_closed()
+    test_routine_docs_on_deploy_target_gets_effective_none_mode()
     test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()

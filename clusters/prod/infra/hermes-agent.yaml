@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v91-task-risk-terminal-history"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v92-routine-docs-no-deploy"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
