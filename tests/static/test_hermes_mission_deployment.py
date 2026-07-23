@@ -46,7 +46,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v87-source-gated-routine-plans"
+        "v88-authoritative-admission"
     )
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
