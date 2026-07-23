@@ -15,6 +15,22 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 USES = re.compile(r"^\s*uses:\s*['\"]?([^'\"\s#]+)", re.MULTILINE)
 COMMIT = re.compile(r"[0-9a-f]{40}", re.ASCII)
 
+# The hermes v0.19 readiness fixture allowlist, exactly as it must appear in
+# .gitleaks.toml: scoped to the one fixture path, permitting only its known
+# SHA-256-bearing lines (the "sha256" field + overlay_files' 7 fingerprinted
+# upstream paths). Mirrored here so the structural test below can assert the
+# generic-api-key rule carries precisely the two narrow allowlists, no more.
+HERMES_V019_ALLOWLIST = {
+    "description": "Hermes v0.19 readiness fixture stores one-way upstream source SHA-256 fingerprints, not credentials",
+    "condition": "AND",
+    "regexTarget": "line",
+    "paths": [r"^tests/fixtures/hermes-v019-readiness\.json$"],
+    "regexes": [
+        r'^\s*"sha256"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$',
+        r'^\s*"(gateway/(platforms/api_server|run)\.py|hermes_cli/(commands|kanban_db|kanban|main)\.py|plugins/platforms/telegram/adapter\.py)"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$',
+    ],
+}
+
 
 class GitHubActionsPinsTests(unittest.TestCase):
     def test_remote_actions_use_exact_commit_shas(self) -> None:
@@ -64,7 +80,13 @@ class GitHubActionsPinsTests(unittest.TestCase):
             "paths": [r"^docs/evidence/completion/[^/]+\.json$"],
             "regexes": [r'^\s*"source_key_sha256"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$'],
         }
-        self.assertEqual([{"id": "generic-api-key", "allowlists": [allowlist]}], config["rules"])
+        # The generic-api-key rule must carry EXACTLY these two narrow allowlists
+        # (completion evidence + hermes v0.19 readiness fixture) and nothing else --
+        # this is the guard against a broad/unaccounted allowlist sneaking in.
+        self.assertEqual(
+            [{"id": "generic-api-key", "allowlists": [allowlist, HERMES_V019_ALLOWLIST]}],
+            config["rules"],
+        )
 
         digest = "0123456789abcdef" * 4
         line = re.compile(allowlist["regexes"][0])
@@ -75,6 +97,33 @@ class GitHubActionsPinsTests(unittest.TestCase):
         )
         self.assertIsNotNone(path.search("docs/evidence/completion/evidence.json"))
         self.assertIsNone(path.search("docs/evidence/completion/nested/evidence.json"))
+
+    def test_hermes_v019_fixture_gitleaks_allowlist_is_narrow(self) -> None:
+        allowlist = HERMES_V019_ALLOWLIST
+        digest = "0123456789abcdef" * 4
+        sha_field = re.compile(allowlist["regexes"][0])
+        path_key = re.compile(allowlist["regexes"][1])
+        path = re.compile(allowlist["paths"][0])
+        # POSITIVE: the fixture's known SHA-256-bearing lines ARE allowlisted.
+        self.assertIsNotNone(sha_field.search(f'          "sha256": "{digest}",'))
+        self.assertIsNotNone(path_key.search(f'    "gateway/run.py": "{digest}",'))
+        self.assertIsNotNone(path_key.search(f'    "gateway/platforms/api_server.py": "{digest}",'))
+        self.assertIsNotNone(path_key.search(f'    "hermes_cli/kanban_db.py": "{digest}",'))
+        self.assertIsNotNone(
+            path_key.search(f'    "plugins/platforms/telegram/adapter.py": "{digest}",')
+        )
+        # NEGATIVE: an unrelated secret-like 64-hex is NOT allowlisted (still flagged).
+        for bad in (
+            f'  "openai_api_key": "{digest}",',
+            f'  "telegram_bot_token": "{digest}",',
+            f'  "api_secret": "{digest}",',
+            f'  "source_key_sha256": "{digest}",',
+        ):
+            self.assertIsNone(sha_field.search(bad), bad)
+            self.assertIsNone(path_key.search(bad), bad)
+        # Path scope is exactly the readiness fixture, not sibling fixtures.
+        self.assertIsNotNone(path.search("tests/fixtures/hermes-v019-readiness.json"))
+        self.assertIsNone(path.search("tests/fixtures/some-other-fixture.json"))
 
 
 if __name__ == "__main__":

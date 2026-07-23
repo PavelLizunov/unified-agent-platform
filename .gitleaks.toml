@@ -30,3 +30,18 @@ id = "generic-api-key"
   regexTarget = "line"
   paths = ['''^docs/evidence/completion/[^/]+\.json$''']
   regexes = ['''^\s*"source_key_sha256"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$''']
+
+  [[rules.allowlists]]
+  description = "Hermes v0.19 readiness fixture stores one-way upstream source SHA-256 fingerprints, not credentials"
+  condition = "AND"
+  regexTarget = "line"
+  paths = ['''^tests/fixtures/hermes-v019-readiness\.json$''']
+  # Narrow on purpose: only the fixture's known SHA-256-bearing lines are
+  # allowlisted -- the explicit "sha256" field and overlay_files' 7 fingerprinted
+  # upstream paths. Any OTHER key holding a 64-hex value (e.g. an api key pasted
+  # by mistake) is NOT matched and is still flagged. tests/static/
+  # test_hermes_v019_pin_guard.py asserts this narrowing (positive + negative).
+  regexes = [
+    '''^\s*"sha256"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$''',
+    '''^\s*"(gateway/(platforms/api_server|run)\.py|hermes_cli/(commands|kanban_db|kanban|main)\.py|plugins/platforms/telegram/adapter\.py)"\s*:\s*"[0-9a-f]{64}"\s*,?\s*$''',
+  ]
