@@ -6398,12 +6398,10 @@ data:
         """The archive is not a usable Hermes recovery point."""
 
 
-    def _entry_by_basename(names: list[str], basename: str) -> str:
-        matches = [name for name in names if posixpath.basename(name) == basename]
+    def _required_root_entry(names: list[str], filename: str) -> str:
+        matches = [name for name in names if name.removeprefix("./") == filename]
         if len(matches) != 1:
-            raise BackupValidationError(
-                f"backup must contain exactly one {basename}; found {len(matches)}"
-            )
+            raise BackupValidationError(f"backup is missing root file {filename}")
         return matches[0]
 
 
@@ -6473,16 +6471,6 @@ data:
                 with zipfile.ZipFile(archive_path) as source_archive, zipfile.ZipFile(
                     rewritten, "w", zipfile.ZIP_DEFLATED, compresslevel=6
                 ) as target_archive:
-                    mission_entries = [
-                        entry
-                        for entry in source_archive.infolist()
-                        if posixpath.basename(entry.filename) == "missions-v1.sqlite3"
-                    ]
-                    arcname = (
-                        mission_entries[0].filename
-                        if mission_entries
-                        else "missions-v1.sqlite3"
-                    )
                     for entry in source_archive.infolist():
                         if posixpath.basename(entry.filename) == "missions-v1.sqlite3":
                             continue
@@ -6490,7 +6478,7 @@ data:
                             entry, "w"
                         ) as target:
                             shutil.copyfileobj(source, target)
-                    target_archive.write(snapshot, arcname)
+                    target_archive.write(snapshot, "missions-v1.sqlite3")
                 os.replace(rewritten, archive_path)
             except (OSError, zipfile.BadZipFile) as error:
                 raise BackupValidationError(
@@ -6509,8 +6497,8 @@ data:
                     )
                 names = archive.namelist()
                 entries = {
-                    basename: _entry_by_basename(names, basename)
-                    for basename in REQUIRED_FILES
+                    filename: _required_root_entry(names, filename)
+                    for filename in REQUIRED_FILES
                 }
                 _check_sqlite(archive, entries["state.db"])
                 _check_sqlite(

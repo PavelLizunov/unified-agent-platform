@@ -47,6 +47,7 @@ def _archive(
     with zipfile.ZipFile(archive, "w") as output:
         output.write(state, "state.db")
         output.writestr("auth.json", "{}")
+        output.writestr(".codex/auth.json", "{}")
         output.writestr(".env", "managed=true")
         output.writestr(".codex/state.sqlite", b"derived")
         if include_mission:
@@ -164,7 +165,7 @@ def main() -> None:
         root = pathlib.Path(temporary)
         _expect_failure(
             _archive(root, include_mission=False),
-            "exactly one missions-v1.sqlite3; found 0",
+            "backup is missing root file missions-v1.sqlite3",
         )
 
     with tempfile.TemporaryDirectory() as temporary:
