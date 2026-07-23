@@ -94,6 +94,35 @@ const noticeLabels: Record<string, string> = {
   disk_space_recovered:
     'Место на выделенном томе освобождено. Доставка продолжилась автоматически.',
 }
+const waitLabels: Record<string, string> = {
+  capacity_wait: 'освобождения модели OpenAI',
+  disk_space_wait: 'освобождения места на томе',
+  execution_reconciling: 'восстановления прерванного запуска',
+}
+const checkpointLabels: Record<string, string> = {
+  new: 'задача создана',
+  author_committed: 'изменения внесены автором',
+  candidate_pushed: 'кандидат отправлен в репозиторий',
+  candidate_pr_open: 'открыт черновик PR',
+  pr_open: 'PR открыт',
+  pre_review_ci_green: 'CI зелёный до ревью',
+  needs_fix: 'требуются правки после ревью',
+  ci_failed: 'CI не пройден',
+  author_checks_failed: 'проверки автора не пройдены',
+  review_escalation_pending: 'ожидает эскалации ревью',
+  waiting_owner: 'ожидает владельца',
+  owner_answer_pending: 'ожидает ответа владельца',
+  post_verify_running: 'проверка после слияния выполняется',
+  post_verify_retry_pending: 'запланирован повтор проверки после слияния',
+  post_verify_failed: 'проверка после слияния не пройдена',
+  post_verify_repair_completed: 'восстановление после слияния завершено',
+  deploy_running: 'развёртывание выполняется',
+  deploy_retry_wait: 'ожидание повтора развёртывания',
+  deployment_failed: 'развёртывание не выполнено',
+  complete: 'готово',
+}
+const costUnattested =
+  'API-стоимость: не подтверждена — официального прайса для внутренних маршрутов нет, runtime подписки стоимость не аттестует'
 
 function ownerQuestionText(question: { question_id: string; text: string }) {
   if (question.question_id.startsWith('owner-gate:')) {
@@ -178,6 +207,13 @@ function selectMissionInLocation(missionId: string) {
   window.history.replaceState(null, '', url)
 }
 
+function missionDeepLink(missionId: string) {
+  if (typeof window === 'undefined' || !missionId) return ''
+  const url = new URL('/dashboard', window.location.origin)
+  url.searchParams.set('mission', missionId)
+  return url.toString()
+}
+
 function compactTokenCount(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}K`
@@ -189,6 +225,18 @@ function numberValue(item: Item, key: string) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
     ? value
     : null
+}
+
+function runningTaskTitle(tasks: Array<Item>): string | null {
+  for (const task of tasks) {
+    if (task.status === 'running' || task.status === 'in_progress') {
+      const title = task.title
+      if (typeof title === 'string' && title.trim()) {
+        return title.replace(/\s+/g, ' ').trim().slice(0, 120)
+      }
+    }
+  }
+  return null
 }
 
 function eventPresentation(event: MissionEvent) {
@@ -414,6 +462,30 @@ export function MissionOverviewCard() {
     )
   }
 
+  const isActive = activeStatuses.has(mission.status)
+  // Unknown stage falls back to the same localized generic label as Telegram —
+  // never expose a raw internal stage id in the active-update block.
+  const stageLabel = stageLabels[mission.stage] || 'Выполнение'
+  const runningTitle = runningTaskTitle(mission.tasks)
+  const currentOperation = `${stageLabel}${runningTitle ? ` — ${runningTitle}` : ''}`
+  const phaseLabel = mission.notice?.phase
+    ? checkpointLabels[mission.notice.phase] ?? null
+    : null
+  const checkpoint = [
+    stageLabel,
+    mission.sequence > 0 ? `durable-событие ${mission.sequence}` : null,
+    phaseLabel,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const waitingFor = mission.question?.text
+    ? 'вашего ответа на вопрос'
+    : mission.notice && waitLabels[mission.notice.code]
+      ? waitLabels[mission.notice.code]
+      : 'причина ожидания ещё не записана, жду следующей автоматической контрольной точки'
+  const ownerActionRequired =
+    Boolean(mission.question?.text) || Boolean(mission.notice?.owner_action_required)
+
   return (
     <section className="rounded-xl border border-[var(--theme-border)] bg-[var(--theme-card)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -431,11 +503,21 @@ export function MissionOverviewCard() {
           {mission.notice?.cycle && mission.notice?.cycle_limit ? (
             <div className="text-xs opacity-65">
               Цикл {mission.notice.cycle} из {mission.notice.cycle_limit}
-              {mission.notice.phase ? ` · checkpoint ${mission.notice.phase}` : ''}
+              {mission.notice.phase && checkpointLabels[mission.notice.phase]
+                ? ` · ${checkpointLabels[mission.notice.phase]}`
+                : ''}
             </div>
           ) : null}
           {updatedAt ? (
             <div className="text-xs opacity-55">Последнее обновление: {updatedAt}</div>
+          ) : null}
+          {mission.mission_id ? (
+            <a
+              href={missionDeepLink(mission.mission_id)}
+              className="text-xs underline underline-offset-2 opacity-70"
+            >
+              Ссылка на эту задачу
+            </a>
           ) : null}
         </div>
         {missionOptions.length > 1 ? (
@@ -463,6 +545,14 @@ export function MissionOverviewCard() {
           style={{ width: `${Math.max(0, Math.min(100, mission.progress_percent))}%` }}
         />
       </div>
+      {isActive ? (
+        <div className="mt-3 rounded-md bg-black/10 px-3 py-2 text-xs leading-relaxed">
+          <p>Сейчас: {currentOperation}</p>
+          <p>Контрольная точка: {checkpoint}</p>
+          <p>Ждёт: {waitingFor}</p>
+          <p>Нужно ваше действие: {ownerActionRequired ? 'да' : 'нет'}</p>
+        </div>
+      ) : null}
       {mission.question ? (
         <div className="mt-3 rounded-md bg-amber-500/10 px-3 py-2 text-sm">
           <p>Нужен ваш ответ: {ownerQuestionText(mission.question)}</p>
@@ -542,7 +632,7 @@ export function MissionOverviewCard() {
           <p className="mt-1 text-xs leading-relaxed">
             Вход {compactTokenCount(totalInput)}
             {hasCompleteCacheData
-              ? ` · кэш ${compactTokenCount(totalCached)} (${totalInput ? ((totalCached * 100) / totalInput).toFixed(1) : '0.0'}%) · новый вход ${compactTokenCount(Math.max(0, totalInput - totalCached))}`
+              ? ` · runtime-кэш (подтверждено runtime, не биллинг) ${compactTokenCount(totalCached)} (${totalInput ? ((totalCached * 100) / totalInput).toFixed(1) : '0.0'}%) · новый вход ${compactTokenCount(Math.max(0, totalInput - totalCached))}`
               : ' · данные о кэше не сохранены'}
             {hasCompleteOutputData
               ? ` · выход ${compactTokenCount(totalOutput)}`
@@ -553,6 +643,7 @@ export function MissionOverviewCard() {
               `${worker.profile === 'author' ? 'Автор' : 'Ревьюер'}: ${String(worker.model || 'модель не указана')}`
             )).join(' · ')}
           </p>
+          <p className="mt-1 text-xs opacity-70">{costUnattested}</p>
           {!usageIsCumulative ? (
             <p className="mt-1 text-xs text-amber-300">
               Для этой старой миссии накопительный ledger ещё не вёлся; предыдущие correction cycles могут не входить в сумму.
