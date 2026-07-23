@@ -29,6 +29,35 @@ DEFAULT_CODEX_HOME = "/opt/data/.codex"
 DEFAULT_PROXY = "http://singbox-egress-ha.uap-system.svc:12080"
 DEFAULT_NO_PROXY = ".svc,.cluster.local,localhost,127.0.0.1,10.0.0.0/8,100.64.0.0/10"
 
+# Allowlist for the research child's environment. The codex subprocess is spawned with a FRESH
+# env built from ONLY these keys (plus HOME/CODEX_HOME pinned per request) — none of the gateway's
+# co-located app secrets (API_SERVER_KEY, HERMES_MISSION_*_KEY, dashboard password,
+# CLAUDE_CODE_OAUTH_TOKEN, TELEGRAM_BOT_TOKEN) ride along. The egress proxy vars are required and
+# are proven present via setdefault in _scrubbed_child_env. Locked by
+# tests/static/test_hermes_security_boundary.py.
+_CHILD_ENV_ALLOWLIST = frozenset({"PATH", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"})
+
+
+def _scrubbed_child_env(
+    base_environ: dict[str, str], home: str, codex_home: str
+) -> dict[str, str]:
+    """Build the allowlisted environment for the research codex child.
+
+    Copies ONLY ``_CHILD_ENV_ALLOWLIST`` keys from ``base_environ`` (so no gateway secret is
+    inherited), proves the egress proxy vars are present (setdefault), and pins HOME/CODEX_HOME
+    to the ephemeral per-request directories.
+    """
+    env = {
+        key: value
+        for key, value in base_environ.items()
+        if key in _CHILD_ENV_ALLOWLIST
+    }
+    env.setdefault("HTTPS_PROXY", DEFAULT_PROXY)
+    env.setdefault("HTTP_PROXY", DEFAULT_PROXY)
+    env.setdefault("NO_PROXY", DEFAULT_NO_PROXY)
+    env.update(HOME=home, CODEX_HOME=codex_home)
+    return env
+
 
 def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
@@ -320,15 +349,9 @@ def run_research_session(
                 schema_path.write_text(
                     json.dumps(_schema(bounded_sources), ensure_ascii=False), encoding="utf-8"
                 )
-                env = {
-                    key: value
-                    for key, value in os.environ.items()
-                    if key in {"PATH", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY"}
-                }
-                env.setdefault("HTTPS_PROXY", DEFAULT_PROXY)
-                env.setdefault("HTTP_PROXY", DEFAULT_PROXY)
-                env.setdefault("NO_PROXY", DEFAULT_NO_PROXY)
-                env.update(HOME=str(tmp_path), CODEX_HOME=str(child_codex_home))
+                env = _scrubbed_child_env(
+                    dict(os.environ), str(tmp_path), str(child_codex_home)
+                )
                 completed = runner(
                     [
                         codex_bin,

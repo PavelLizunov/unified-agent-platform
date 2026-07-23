@@ -194,6 +194,21 @@ data:
     # codex's own bubblewrap sandbox cannot initialise in the restricted container
     # (no user namespaces) -> writes fail with "sandbox permission error". The pod
     # itself is the security boundary, so disable codex's sandbox.
+    #
+    # HONEST SECURITY BOUNDARY (F3/F4 — do not claim otherwise):
+    #  - The codex subprocess OWNS the inner tool loop with approval_policy=never + danger-full-access.
+    #    Hermes' approvals, dangerous-command checks, Tirith scanner and HERMES_WRITE_SAFE_ROOT gate
+    #    HERMES' own terminal tool — which is NOT what executes the brain's shell. They are OFF this path.
+    #  - Tirith is INERT here: HERMES_DISABLE_LAZY_INSTALLS=1 disables lazy install, so the Tirith binary
+    #    is not installed, and it does NOT scan the Codex brain path regardless — the brain's shell is the
+    #    Codex subprocess, not hermes's terminal tool. Do not claim command-scanning protects the brain.
+    #  - The brain is spawned with os.environ.copy() and can read /proc/self/environ, /opt/data/.env and
+    #    /opt/data/auth.json: it inherits the gateway's FULL co-located secret set (API_SERVER_KEY,
+    #    HERMES_MISSION_*_KEY, dashboard password, CLAUDE_CODE_OAUTH_TOKEN, Telegram token). The POD is the
+    #    SOLE boundary; there is NO gateway<->brain credential separation. MCP server processes (e.g. the
+    #    [mcp_servers.build1] stdio server) and the brain share this pod trust domain and are NOT proven
+    #    separately env-scrubbed. The ONLY separately-scrubbed child is the research Codex child (the
+    #    untrusted-content boundary) — see files/hermes_research_session.py:_scrubbed_child_env.
     sandbox_mode = "danger-full-access"
     approval_policy = "never"
     tool_output_token_limit = 10000

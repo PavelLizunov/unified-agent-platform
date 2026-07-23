@@ -12,13 +12,14 @@ subfleet → Claude) into a tool-using agent. It is the "agent" in unified-**age
 > NOT be fixed unless this agent is un-parked. Do not build on it; do not expose it beyond the tailnet.
 >
 > - `hermes_trace` echoes raw `kube_logs` tool output back to the caller, so a read-scoped key can see
->   more than the tool's summary intends — **accepted**: the NodePort is tailnet-only and `HERMES_KEY`-gated.
+>   more than the tool's summary intends — **accepted**: the NodePort is reachable on the tailnet AND the
+>   home LAN (NOT tailnet-only) and is gated only by `HERMES_KEY` at the app layer.
 > - The `hermes-code` ConfigMap can drift from `hermes/hermes.py` (the embedded source need not match the
 >   file) — **accepted**: re-render from the file if ever un-parked.
 > - `max_steps` is not enforced on the ReWOO path (only the ReAct loop honors it) — **accepted**: runs are
 >   still bounded by the model and the request timeout.
-> - `GET /tools` is unauthenticated (lists tool names/scopes; no execution) — **accepted**: low-sensitivity
->   and tailnet-only.
+> - `GET /tools` is unauthenticated (lists tool names/scopes; no execution) — **accepted**: low-sensitivity;
+>   the NodePort is reachable on the tailnet AND home LAN but the endpoint only lists names.
 > - `_summarize`'s prompt doesn't restate that tool/log evidence is untrusted, so a malicious fetched page
 >   or log line could try to inject instructions into the final answer — **accepted**: the summarizer cannot
 >   call tools itself, so the blast radius is a bad answer, not further action; tracked in
@@ -33,6 +34,8 @@ subfleet → Claude) into a tool-using agent. It is the "agent" in unified-**age
   with the code mounted from the `hermes-code` ConfigMap (no image build, no pip — RU-egress safe).
 - In-cluster: `hermes.uap-system.svc:8900`. Over the tailnet: **`http://<node-tailnet-ip>:30890`**
   (NodePort; WireGuard-encrypted, `HERMES_KEY` auth). E.g. `http://uap-home-1.tail9fd337.ts.net:30890`.
+  The same NodePort also binds `0.0.0.0` on the home-LAN node interfaces, so :30890 is **NOT tailnet-only**;
+  `HERMES_KEY` is the only gate (no NetworkPolicy).
   (tailscale-serve can't proxy to the ClusterIP — the cluster net itself runs on tailscale, ADR-021 —
   so NodePort is used; see the Service note in `clusters/prod/infra/hermes.yaml`.)
 - Auth key: `kubectl -n uap-system get secret hermes-keys -o jsonpath='{.data.HERMES_KEY}' | base64 -d`

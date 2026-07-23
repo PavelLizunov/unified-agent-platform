@@ -40,9 +40,11 @@ metadata:
   name: hermes
   namespace: uap-system
 spec:
-  # NodePort: reachable over the tailnet at http://<node-tailnet-ip>:30890 (WireGuard-encrypted,
-  # HERMES_KEY auth). tailscale-serve can't proxy to this ClusterIP (the cluster net itself runs on
-  # tailscale, ADR-021 — the serve proxy never reaches the backend); NodePort routes via kube-proxy.
+  # NodePort: reachable at http://<node-tailnet-ip>:30890 over the tailnet (WireGuard-encrypted) AND on
+  # the home LAN — a k3s NodePort binds 0.0.0.0 on every node interface, so this is NOT tailnet-only;
+  # access is controlled only by HERMES_KEY at the app layer (no NetworkPolicy). tailscale-serve can't
+  # proxy to this ClusterIP (the cluster net itself runs on tailscale, ADR-021 — the serve proxy never
+  # reaches the backend); NodePort routes via kube-proxy.
   type: NodePort
   selector:
     app: hermes
