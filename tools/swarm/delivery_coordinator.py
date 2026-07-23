@@ -2423,10 +2423,18 @@ class DeliveryCoordinator:
                 or state.get("dispatch_profile") != self.profile["dispatch_profile"]
             ):
                 raise DeliveryError("delivery state identity mismatch")
+            migrated = False
             state.setdefault("prior_review_rejections", 0)
             state.setdefault("prior_ci_failures", 0)
             state.setdefault("prior_author_failures", 0)
             state.setdefault("discarded_author_attempts", 0)
+            if "model_usage_history" not in state:
+                state["model_usage_history"] = []
+                state["model_usage_missing_attempts"] = state[
+                    "prior_review_rejections"
+                ]
+                migrated = True
+            state.setdefault("model_usage_missing_attempts", 0)
             if self.profile["schema_version"] == 4:
                 state.setdefault("author_commit_count", 0)
             state.setdefault("route_decisions", {})
@@ -2435,7 +2443,6 @@ class DeliveryCoordinator:
             self._owner_answers(state)
             self._review_escalation(state)
             self._ci_retry_state(state)
-            migrated = False
             if "review_findings" in state:
                 findings = _sanitize_findings(state["review_findings"])
                 if findings != state["review_findings"]:
@@ -2508,6 +2515,8 @@ class DeliveryCoordinator:
             "prior_ci_failures": 0,
             "prior_author_failures": 0,
             "discarded_author_attempts": 0,
+            "model_usage_history": [],
+            "model_usage_missing_attempts": 0,
             "author_commit_count": 0,
             "route_decisions": {},
             "effective_route_decisions": {},
@@ -2812,12 +2821,111 @@ class DeliveryCoordinator:
         )
         self.client.publish(state["mission_id"], event)
 
-    def _publish_available_telemetry(self, state: dict[str, Any]) -> None:
-        """Project completed model turns while the mission is still active."""
+    def _record_model_usage(
+        self,
+        state: dict[str, Any],
+        role: str,
+        telemetry: dict[str, Any] | None,
+    ) -> bool:
+        """Append one attested turn once; keep only bounded numeric usage."""
+        event = self._telemetry_worker_event(role, telemetry)
+        if event is None or not isinstance(telemetry, dict):
+            return False
+        session_id = telemetry.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
+            return False
+        attempt_id = hashlib.sha256(
+            f"{role}\0{session_id}".encode("utf-8")
+        ).hexdigest()
+        payload = event["payload"]
+        record: dict[str, Any] = {"attempt_id": attempt_id, "role": role}
+        for field in (
+            "input_tokens", "cached_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "model_requests",
+            "max_request_input_tokens", "command_calls", "failed_commands",
+            "web_search_calls",
+        ):
+            value = payload.get(field)
+            if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                record[field] = value
+        history = state.setdefault("model_usage_history", [])
+        if not isinstance(history, list) or len(history) > 64:
+            raise DeliveryError("durable model usage history is invalid")
+        for existing in history:
+            if not isinstance(existing, dict):
+                raise DeliveryError("durable model usage record is invalid")
+            if existing.get("attempt_id") == attempt_id:
+                if existing != record:
+                    raise DeliveryError("durable model usage record changed")
+                return False
+        if len(history) == 64:
+            raise DeliveryError("durable model usage history exhausted")
+        history.append(record)
+        return True
+
+    @staticmethod
+    def _usage_worker_event(state: dict[str, Any]) -> dict[str, Any] | None:
+        history = state.get("model_usage_history")
+        if not isinstance(history, list) or not history:
+            return None
+        payload: dict[str, Any] = {
+            "worker_id": "usage-total",
+            "status": "completed",
+            "profile": "usage",
+        }
+        sum_fields = (
+            "input_tokens", "cached_input_tokens", "output_tokens",
+            "reasoning_output_tokens", "model_requests", "command_calls",
+            "failed_commands", "web_search_calls",
+        )
+        for field in sum_fields:
+            values = [
+                record.get(field)
+                for record in history
+                if isinstance(record, dict)
+            ]
+            if values and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+                for value in values
+            ):
+                payload[field] = sum(values)
+        max_inputs = [
+            record.get("max_request_input_tokens")
+            for record in history
+            if isinstance(record, dict)
+        ]
+        if max_inputs and all(
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+            for value in max_inputs
+        ):
+            payload["max_request_input_tokens"] = max(max_inputs)
+        missing = state.get("model_usage_missing_attempts", 0)
+        discarded = state.get("discarded_author_attempts", 0)
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in (missing, discarded)
+        ):
+            raise DeliveryError("durable model usage omission count is invalid")
+        payload["attempts_discarded"] = missing + discarded
+        return {"type": "worker.upsert", "payload": payload}
+
+    def _publish_available_telemetry(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        """Project completed model turns and their restart-safe cumulative usage."""
+        usage_changed = False
         for role, key in (
             ("author", "author_telemetry"),
             ("reviewer", "reviewer_telemetry"),
         ):
+            usage_changed = (
+                self._record_model_usage(state, role, state.get(key))
+                or usage_changed
+            )
             event = self._telemetry_worker_event(
                 role,
                 state.get(key),
@@ -2835,6 +2943,19 @@ class DeliveryCoordinator:
                     state["mission_id"],
                     event["type"],
                     event["payload"],
+                    {"task_id": state["root_task_id"]},
+                ),
+            )
+        if usage_changed:
+            self._save(paths, state)
+        usage = self._usage_worker_event(state)
+        if usage is not None:
+            self.client.publish(
+                state["mission_id"],
+                mission_adapter._producer_event(
+                    state["mission_id"],
+                    usage["type"],
+                    usage["payload"],
                     {"task_id": state["root_task_id"]},
                 ),
             )
@@ -3021,6 +3142,9 @@ class DeliveryCoordinator:
                 )
                 if worker_event is not None:
                     events.insert(-1, worker_event)
+            usage_event = self._usage_worker_event(state)
+            if usage_event is not None:
+                events.insert(-1, usage_event)
 
         def finish(
             result: str, summary: str, events: list[dict[str, Any]]
@@ -3544,6 +3668,7 @@ class DeliveryCoordinator:
         mission_adapter._write_json(
             paths["directory"] / "author-telemetry.json", telemetry, private_parent=True
         )
+        self._record_model_usage(state, "author", telemetry)
         state.update(
             phase="author_committed",
             candidate_sha=candidate,
@@ -4265,6 +4390,7 @@ class DeliveryCoordinator:
         }
         mission_adapter._write_json(paths["directory"] / "review-verification.json", verification, private_parent=True)
         mission_adapter._write_json(paths["directory"] / "review-telemetry.json", telemetry, private_parent=True)
+        self._record_model_usage(state, "reviewer", telemetry)
         state.update(review_verification=verification, reviewer_telemetry=telemetry)
         state.pop("model_invocation", None)
         if verification["verdict"] == "accept":
@@ -5476,6 +5602,9 @@ class DeliveryCoordinator:
             )
             if worker_event is not None:
                 events.append(worker_event)
+        usage_event = self._usage_worker_event(state)
+        if usage_event is not None:
+            events.append(usage_event)
         if self.profile.get("delivery_mode") == "none":
             events.append({
                 "type": "delivery.upsert",
@@ -6067,7 +6196,7 @@ class DeliveryCoordinator:
                     return self._finish_rejection(state, paths)
             self._ensure_route(state, paths)
             if isinstance(state.get("root_task_id"), str):
-                self._publish_available_telemetry(state)
+                self._publish_available_telemetry(state, paths)
             ambiguous = self._ambiguous_state(state)
             if ambiguous is not None:
                 self._publish_ambiguous_notice(state, ambiguous)

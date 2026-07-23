@@ -135,6 +135,7 @@ PREVIOUS_ADDED_FILES = {
         "3b0fe465c716052bc8b3c094d5c3d8a28613a9bf7a2ab2e8e103aa186a46398b",
         "f241d05b4f206a62dee6607e84f9cec4b671633a61e078ccd0e68607be1d054d",
         "27d9d9e5d1dbe6849294c224767fdd02e0f1c1558f97011b68f7073e424c21ef",
+        "562e8d6f5a3d742951c0580fb6ad0d278489b2c290dc1a33516ce4fa552a8ea2",
     ),
 }
 ASSET_ROOT = pathlib.Path(__file__).with_name("files")

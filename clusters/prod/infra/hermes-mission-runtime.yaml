@@ -3051,10 +3051,15 @@ data:
     def _usage_statistics_lines(
         workers: list[dict[str, Any]], *, final: bool = True
     ) -> list[str]:
-        telemetry = [
+        cumulative = [
+            worker for worker in workers
+            if isinstance(worker, dict) and worker.get("profile") == "usage"
+        ]
+        role_telemetry = [
             worker for worker in workers
             if isinstance(worker, dict) and worker.get("profile") in _ROLE_LABELS
         ]
+        telemetry = cumulative or role_telemetry
         measured = [
             worker for worker in telemetry
             if _metric(worker, "input_tokens") is not None
@@ -3082,14 +3087,22 @@ data:
         requests = [_metric(worker, "model_requests") for worker in measured]
         if all(value is not None for value in requests):
             parts.append(f"запросы к моделям {sum(value or 0 for value in requests)}")
-        label = "Статистика финальных прогонов" if final else "Текущий подтверждённый расход"
+        if cumulative:
+            label = "Накопительный подтверждённый расход"
+        else:
+            label = (
+                "Статистика финальных прогонов"
+                if final
+                else "Последние подтверждённые прогоны"
+            )
         lines = [f"{label}: " + " · ".join(parts)]
         discarded = sum(
             _metric(worker, "attempts_discarded") or 0 for worker in measured
         )
         if discarded:
             lines.append(
-                f"Важно: {discarded} отброшенных прогонов не входят в эту сумму."
+                f"Важно: как минимум {discarded} предыдущих или отброшенных "
+                "прогонов не входят в эту сумму."
             )
 
         command_calls = sum(_metric(worker, "command_calls") or 0 for worker in measured)

@@ -9194,9 +9194,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "mission_id": "mission-active-usage",
                 "root_task_id": "task-usage",
                 "discarded_author_attempts": 1,
+                "model_usage_history": [],
+                "model_usage_missing_attempts": 2,
                 "author_telemetry": {
                     "model": "gpt-5.6-sol",
                     "reasoning_effort": "xhigh",
+                    "session_id": "author-session-usage",
                     "usage": {
                         "input_tokens": 2_000,
                         "cached_input_tokens": 1_500,
@@ -9206,18 +9209,76 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "max_request_input_tokens": 900,
                 },
             }
-            coord._publish_available_telemetry(state)
-            coord._publish_available_telemetry(state)
-            self.assertEqual(2, len(client.stages))
-            first, second = client.stages
+            paths = coord._paths(state["mission_id"])
+            coord._publish_available_telemetry(state, paths)
+            coord._publish_available_telemetry(state, paths)
+            self.assertEqual(4, len(client.stages))
+            first, usage, second, repeated_usage = client.stages
             self.assertEqual("worker.upsert", first["type"])
             self.assertEqual("author", first["payload"]["worker_id"])
             self.assertEqual(2_000, first["payload"]["input_tokens"])
             self.assertEqual(1, first["payload"]["attempts_discarded"])
+            self.assertEqual("usage-total", usage["payload"]["worker_id"])
+            self.assertEqual("usage", usage["payload"]["profile"])
+            self.assertEqual(2_000, usage["payload"]["input_tokens"])
+            self.assertEqual(1_500, usage["payload"]["cached_input_tokens"])
+            self.assertEqual(3, usage["payload"]["attempts_discarded"])
+            self.assertEqual(1, len(state["model_usage_history"]))
             self.assertEqual(
                 first["correlation"]["producer_event_id"],
                 second["correlation"]["producer_event_id"],
             )
+            self.assertEqual(
+                usage["correlation"]["producer_event_id"],
+                repeated_usage["correlation"]["producer_event_id"],
+            )
+
+    def test_cumulative_usage_sums_distinct_attested_turns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            coord = coordinator.DeliveryCoordinator(
+                profile(root), FakeClient(), FakeBackend(), root / "state"
+            )
+            state = {
+                "model_usage_history": [],
+                "model_usage_missing_attempts": 1,
+                "discarded_author_attempts": 1,
+            }
+            author = {
+                "session_id": "author-session",
+                "usage": {
+                    "input_tokens": 1_000,
+                    "cached_input_tokens": 800,
+                    "output_tokens": 100,
+                    "reasoning_output_tokens": 40,
+                },
+                "model_requests": 3,
+                "max_request_input_tokens": 700,
+            }
+            reviewer = {
+                "session_id": "reviewer-session",
+                "usage": {
+                    "input_tokens": 500,
+                    "cached_input_tokens": 300,
+                    "output_tokens": 60,
+                    "reasoning_output_tokens": 20,
+                },
+                "model_requests": 2,
+                "max_request_input_tokens": 450,
+            }
+            self.assertTrue(coord._record_model_usage(state, "author", author))
+            self.assertTrue(coord._record_model_usage(state, "reviewer", reviewer))
+            self.assertFalse(coord._record_model_usage(state, "author", author))
+            event = coord._usage_worker_event(state)
+            self.assertIsNotNone(event)
+            payload = event["payload"]
+            self.assertEqual(1_500, payload["input_tokens"])
+            self.assertEqual(1_100, payload["cached_input_tokens"])
+            self.assertEqual(160, payload["output_tokens"])
+            self.assertEqual(60, payload["reasoning_output_tokens"])
+            self.assertEqual(5, payload["model_requests"])
+            self.assertEqual(700, payload["max_request_input_tokens"])
+            self.assertEqual(2, payload["attempts_discarded"])
 
     def test_events_omit_absent_or_invalid_telemetry(self):
         with tempfile.TemporaryDirectory() as directory:
