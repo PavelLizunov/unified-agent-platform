@@ -13,6 +13,25 @@ permissions:
 # - The job name `static-checks` is load-bearing: the master ruleset requires exactly that context.
 # - Smoke tests are intentionally NOT here (they SSH to tailnet IPs + need the age key) — they stay
 #   a workstation/ops-1 job. This job is cluster-free on purpose.
+#
+# Diff-aware fast path (fail-open):
+# - The `classify` step (repo-owned stdlib script tests/static/ci_diff_classifier.py, native git) inspects
+#   the exact pull_request base/head diff and emits `skip_<group>` outputs. Expensive step groups are gated
+#   on `if: ${{ steps.classify.outputs.skip_<group> != 'true' }}`, so an unset/false output RUNS the step.
+# - Only a `pull_request` with an exact, present, cleanly-parsed diff of pure add/modify safe paths may skip
+#   a group whose closed scope was not touched. Anything ambiguous fails open to RUN ALL CHECKS:
+#   non-pull_request events, unknown/missing SHA, unparsable diff, deletion/rename/typechange, path
+#   traversal/weird names, and any workflow/CI-tool/dependency/config/classifier change.
+# - Security gates (Secret scan + gitleaks) are unconditional and are NEVER modelled or skipped by the
+#   classifier. Skipped steps are reported truthfully via the classifier log + $GITHUB_STEP_SUMMARY.
+# - Failure path (fail-open + always-on security):
+#   * ONLY the `classify` step has `continue-on-error: true`. A classifier crash (SyntaxError/ImportError/
+#     runtime failure before any output) writes nothing to $GITHUB_OUTPUT, so every `skip_<group>` stays
+#     unset and `!= 'true'` RUNS the group — the job degrades to RUN ALL instead of stopping. No other step
+#     hides failure: a real test/IaC failure still fails the step and the job.
+#   * `secret_scan` and `gitleaks` carry `if: ${{ always() }}` so they are ATTEMPTED even after an earlier
+#     step fails (GitHub's implicit success() would otherwise skip them). If either scan itself fails, its
+#     step is red and the required `static-checks` job is red.
 
 jobs:
   static-checks:
@@ -21,30 +40,47 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           fetch-depth: 0                     # full history so gitleaks can scan the PR commit range (base^..head)
+                                             # and the diff-aware classifier can resolve the exact base/head diff
+      - name: Classify diff (diff-aware fast path; fail-open to RUN ALL)
+        id: classify
+        continue-on-error: true              # ONLY this step: a classifier crash must degrade to RUN ALL, not stop the job
+        env:
+          UAP_DIFF_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          UAP_DIFF_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tests/static/ci_diff_classifier.py
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: '3.11'
       - name: Install Python deps
         run: pip install -r requirements-dev.txt   # PyYAML (validate_iac); secret_scan needs only git
       - name: Secret scan (repo-root as argv[1], same call as secret-scan.ps1)
+        if: ${{ always() }}                  # security gate: attempted even after an earlier step fails; a scan failure still fails the job
         run: python tests/static/secret_scan.py .
       - name: IaC static validation
+        if: ${{ steps.classify.outputs.skip_iac != 'true' }}
         run: python tests/static/validate_iac.py .
       - name: Ops healthcheck parser self-test
+        if: ${{ steps.classify.outputs.skip_healthcheck != 'true' }}
         run: PVE_INVENTORY_FILE=infra/ops/proxmox-machines.txt sh infra/ops/uap-healthcheck.sh --self-test
       - name: Hermes unit tests (hermetic, offline; test_*.py only — NOT *.py, which imports the live-endpoint scripts)
+        if: ${{ steps.classify.outputs.skip_hermes != 'true' }}
         run: python -m unittest discover -s hermes/tests -p 'test_*.py'
       - name: Static fixture tests (regression tests for validate_iac/secret_scan logic)
+        if: ${{ steps.classify.outputs.skip_static != 'true' }}
         run: |
           for t in tests/static/test_*.py; do echo "== $t =="; python "$t" || exit 1; done
       - name: Tools unit tests (discover + run every tools/**/test_*.py; stdlib-only, assert-based, run directly)
+        if: ${{ steps.classify.outputs.skip_tools != 'true' }}
         run: |
           for t in $(find tools -name 'test_*.py' | sort); do echo "== $t =="; python "$t" || exit 1; done
       - name: Install kustomize
+        if: ${{ steps.classify.outputs.skip_iac != 'true' }}
         uses: imranismail/setup-kustomize@2ba527d4d055ab63514ba50a99456fc35684947f  # v2
       - name: Kustomize build clusters/prod (SOPS values are plain strings; no age key needed)
+        if: ${{ steps.classify.outputs.skip_iac != 'true' }}
         run: kustomize build clusters/prod >/dev/null
       - name: gitleaks (defense-in-depth over the hand-rolled 10-pattern scanner; free for personal repos)
+        if: ${{ always() }}                  # security gate: attempted even after an earlier step fails; a scan failure still fails the job
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # required by gitleaks-action v2 on pull_request events
