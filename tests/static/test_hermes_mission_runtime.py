@@ -51,6 +51,10 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Какие риски у настройки этого проекта?",
         "Analyze the repository and tell me how we should integrate this",
         "Find the latest test API documentation",
+        "Я вижу, что он запустил CI",
+        "Я обновил только README",
+        "Почему задача выполняется",
+        "I already updated the README",
         (
             "Давай вернёмся к задаче по суфлёру. Найди файл handoff с описанием "
             "тестов и скажи, что ты его нашёл. После этого мы продолжим."
@@ -64,6 +68,8 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Посмотри сценарий и исправь найденные проблемы",
         "Configure this existing project",
         "Сделай эту интеграцию",
+        "Я обновил README, теперь исправь тест",
+        "I updated the README, now fix the test",
         "/run теперь делаем это",
     ):
         assert missions.is_execution_goal(execution), execution
@@ -83,7 +89,47 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         "Create an implementation plan and then implement it"
     ) is None
     assert missions.routine_docs_file_limit("Обнови README и код") is None
+    assert missions.routine_docs_file_limit("Обнови только README и код") is None
+    assert missions.routine_docs_file_limit("Я обновил только README") is None
     assert missions.routine_docs_file_limit("Исправь простой баг") is None
+
+
+def test_owner_turn_admission_is_authoritative_before_project_routing() -> None:
+    routes = json.dumps({
+        "workspace": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        for index, discussion in enumerate((
+            "Какие риски у настройки этого проекта?",
+            "Я вижу, что он запустил CI",
+            "I already updated the README",
+        )):
+            try:
+                store.ingest_owner_turn(
+                    discussion,
+                    platform="workspace",
+                    source_message_id=f"discussion-{index}",
+                    session_id="discussion-session",
+                )
+                raise AssertionError("discussion was accepted as an execution mission")
+            except missions.MissionError as error:
+                assert str(error) == "owner turn is not an execution goal"
+        assert store.latest() is None
+
+        accepted, created = store.ingest_owner_turn(
+            "/run Обнови только README",
+            platform="workspace",
+            source_message_id="explicit-run",
+            session_id="discussion-session",
+        )
+        assert created
+        assert accepted["payload"]["execution_class"] == "routine_docs"
 
 
 def test_routine_docs_class_is_durable_and_closed() -> None:
@@ -1712,15 +1758,17 @@ def test_session_ordinary_owner_turn_answers_once_and_survives_restart() -> None
             session_id="session-workspace",
         )
         assert not delayed_created and delayed_replay == answer
-        unrelated, unrelated_created = restarted.ingest_owner_turn(
-            "The same source ID belongs to another Central session",
-            platform="workspace",
-            source_message_id="workspace-answer-1",
-            session_id="session-other",
-        )
-        assert unrelated_created and unrelated["mission_id"] not in {
-            mission_id, next_goal["mission_id"]
-        }
+        try:
+            restarted.ingest_owner_turn(
+                "The same source ID belongs to another Central session",
+                platform="workspace",
+                source_message_id="workspace-answer-1",
+                session_id="session-other",
+            )
+            raise AssertionError("non-execution turn created an unrelated mission")
+        except missions.MissionError as error:
+            assert str(error) == "owner turn is not an execution goal"
+        assert restarted.latest() == next_goal["mission_id"]
 
 
 def test_session_owner_turn_fails_closed_for_multiple_open_questions() -> None:
@@ -3447,6 +3495,7 @@ def test_disk_space_notice_contract_through_runtime_validation_and_store() -> No
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_conversational_admission_requires_explicit_execution_intent()
+    test_owner_turn_admission_is_authoritative_before_project_routing()
     test_routine_docs_class_is_durable_and_closed()
     test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
