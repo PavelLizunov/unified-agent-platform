@@ -129,6 +129,8 @@ def main() -> None:
     assert 'job="hermes-restore-canary-$suffix"' in restore_canary
     assert "claimName: $pvc" in restore_canary
     assert "missions-v1.sqlite3" in restore_canary
+    assert "runAsUser: 10000" in restore_canary
+    assert 'jsonpath=\'{.status.failed}\'' in restore_canary
     assert "hermes-agent-restore-ok" in restore_canary
 
     with tempfile.TemporaryDirectory() as temporary:
