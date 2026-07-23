@@ -12,22 +12,30 @@ required `static-checks` status check remains green.
 | Item | Value |
 |---|---|
 | Base commit | `3cb45d50c1e85da5fee902e1ea62ed5f1946c1f6` |
-| Branch | `codex/ci-docs-canary-20260724` |
+| Branch | `codex/ci-docs-live-canary-20260724` |
 | Canary change | single added file `docs/evidence/ci-diff-aware-live-canary-2026-07-24.md` |
 | Expected skipped groups | IaC, healthcheck, Hermes, static fixtures, tools, kustomize |
 | Expected executed jobs | Secret scan, gitleaks |
 | Expected required check | `static-checks` green |
 
-This commit **is** the predeclared canary payload. No result is claimed yet.
+The first commit in PR #439 was the predeclared canary payload. It made no runtime or
+production changes.
 
-## Observation (pending)
+## Observed result
 
-Run URL: _to be filled after CI observation_
+PR: <https://github.com/PavelLizunov/unified-agent-platform/pull/439>
 
-Result: _to be filled after CI observation_
+Run: <https://github.com/PavelLizunov/unified-agent-platform/actions/runs/30054160600/job/89362279743>
+
+`static-checks` passed in 12 seconds. The classifier, Secret scan, and gitleaks succeeded.
+IaC validation, the healthcheck self-test, Hermes tests, static fixture tests, tools tests,
+kustomize installation, and the kustomize build were all reported as `skipped`.
+
+Acceptance verdict: **PASS**. The observed steps match the predeclared expectation.
 
 ## Honest boundary
 
 This canary proves only that one added `.md` file triggers the expected skip/execute
 pattern on this branch. It does not prove correctness for mixed diffs, code changes,
-deleted files, or renames. Those remain covered by existing full-matrix runs.
+deleted files, or renames. It also does not live-inject a classifier crash. Those cases
+remain covered by deterministic regression tests and full-matrix runs.
