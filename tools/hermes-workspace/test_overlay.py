@@ -590,6 +590,8 @@ def main() -> None:
         assert "selectMissionInLocation" in mission_card
         assert "Расход выбранной задачи на данный момент" in mission_card
         assert "eventPresentation" in mission_card
+        assert "число запросов не сохранено" in mission_card
+        assert "данные о кэше не сохранены" in mission_card
         assert "Открыть текущий PR или результат" in mission_card
         assert "отброшенных прогонов пока не входят в сумму" in mission_card
         assert "whitespace-pre-wrap leading-relaxed" in mission_card

@@ -330,13 +330,22 @@ export function MissionOverviewCard() {
     (total, worker) => total + (numberValue(worker, 'input_tokens') ?? 0),
     0,
   )
+  const hasCompleteCacheData = measuredWorkers.every(
+    (worker) => numberValue(worker, 'cached_input_tokens') !== null,
+  )
   const totalCached = measuredWorkers.reduce(
     (total, worker) => total + (numberValue(worker, 'cached_input_tokens') ?? 0),
     0,
   )
+  const hasCompleteOutputData = measuredWorkers.every(
+    (worker) => numberValue(worker, 'output_tokens') !== null,
+  )
   const totalOutput = measuredWorkers.reduce(
     (total, worker) => total + (numberValue(worker, 'output_tokens') ?? 0),
     0,
+  )
+  const hasCompleteRequestData = measuredWorkers.every(
+    (worker) => numberValue(worker, 'model_requests') !== null,
   )
   const totalRequests = measuredWorkers.reduce(
     (total, worker) => total + (numberValue(worker, 'model_requests') ?? 0),
@@ -519,16 +528,19 @@ export function MissionOverviewCard() {
               Расход выбранной задачи на данный момент
             </h3>
             <span className="text-xs opacity-65">
-              {totalRequests} запросов к моделям
+              {hasCompleteRequestData
+                ? `${totalRequests} запросов к моделям`
+                : 'число запросов не сохранено'}
             </span>
           </div>
           <p className="mt-1 text-xs leading-relaxed">
             Вход {compactTokenCount(totalInput)}
-            {totalCached
-              ? ` · кэш ${compactTokenCount(totalCached)} (${totalInput ? ((totalCached * 100) / totalInput).toFixed(1) : '0.0'}%)`
-              : ''}
-            {' · '}новый вход {compactTokenCount(Math.max(0, totalInput - totalCached))}
-            {' · '}выход {compactTokenCount(totalOutput)}
+            {hasCompleteCacheData
+              ? ` · кэш ${compactTokenCount(totalCached)} (${totalInput ? ((totalCached * 100) / totalInput).toFixed(1) : '0.0'}%) · новый вход ${compactTokenCount(Math.max(0, totalInput - totalCached))}`
+              : ' · данные о кэше не сохранены'}
+            {hasCompleteOutputData
+              ? ` · выход ${compactTokenCount(totalOutput)}`
+              : ' · выход не сохранён'}
           </p>
           <p className="mt-1 text-xs opacity-70">
             {measuredWorkers.map((worker) => (
