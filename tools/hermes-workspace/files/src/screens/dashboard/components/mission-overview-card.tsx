@@ -323,9 +323,13 @@ export function MissionOverviewCard() {
   const telemetryWorkers = mission?.workers.filter(
     (worker) => worker.profile === 'author' || worker.profile === 'reviewer',
   ) ?? []
-  const measuredWorkers = telemetryWorkers.filter(
+  const usageWorker = mission?.workers.find(
+    (worker) => worker.profile === 'usage',
+  )
+  const measuredWorkers = (usageWorker ? [usageWorker] : telemetryWorkers).filter(
     (worker) => numberValue(worker, 'input_tokens') !== null,
   )
+  const usageIsCumulative = Boolean(usageWorker)
   const totalInput = measuredWorkers.reduce(
     (total, worker) => total + (numberValue(worker, 'input_tokens') ?? 0),
     0,
@@ -525,7 +529,9 @@ export function MissionOverviewCard() {
         <div className="mt-3 rounded-md bg-violet-500/10 px-3 py-2 text-sm">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <h3 className="text-xs font-semibold uppercase tracking-wide opacity-70">
-              Расход выбранной задачи на данный момент
+              {usageIsCumulative
+                ? 'Накопительный расход выбранной задачи'
+                : 'Последние сохранённые прогоны'}
             </h3>
             <span className="text-xs opacity-65">
               {hasCompleteRequestData
@@ -543,13 +549,18 @@ export function MissionOverviewCard() {
               : ' · выход не сохранён'}
           </p>
           <p className="mt-1 text-xs opacity-70">
-            {measuredWorkers.map((worker) => (
+            {telemetryWorkers.map((worker) => (
               `${worker.profile === 'author' ? 'Автор' : 'Ревьюер'}: ${String(worker.model || 'модель не указана')}`
             )).join(' · ')}
           </p>
+          {!usageIsCumulative ? (
+            <p className="mt-1 text-xs text-amber-300">
+              Для этой старой миссии накопительный ledger ещё не вёлся; предыдущие correction cycles могут не входить в сумму.
+            </p>
+          ) : null}
           {discardedAttempts ? (
             <p className="mt-1 text-xs text-amber-300">
-              Это нижняя граница: {discardedAttempts} отброшенных прогонов пока не входят в сумму.
+              Это нижняя граница: как минимум {discardedAttempts} предыдущих или отброшенных прогонов не входят в сумму.
             </p>
           ) : null}
         </div>

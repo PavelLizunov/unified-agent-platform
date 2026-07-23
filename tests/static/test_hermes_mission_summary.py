@@ -76,17 +76,29 @@ def test_active_telegram_has_workspace_link_progress_and_honest_usage_scope() ->
             "cycle_limit": 8,
             "url": "https://github.com/Owner/repo/pull/23",
         },
-        workers=[{
-            "worker_id": "author",
-            "status": "completed",
-            "profile": "author",
-            "model": "gpt-5.6-sol",
-            "input_tokens": 2_292_409,
-            "cached_input_tokens": 2_156_544,
-            "output_tokens": 15_025,
-            "model_requests": 37,
-            "attempts_discarded": 1,
-        }],
+        workers=[
+            {
+                "worker_id": "author",
+                "status": "completed",
+                "profile": "author",
+                "model": "gpt-5.6-sol",
+                "input_tokens": 2_292_409,
+                "cached_input_tokens": 2_156_544,
+                "output_tokens": 15_025,
+                "model_requests": 37,
+                "attempts_discarded": 1,
+            },
+            {
+                "worker_id": "usage-total",
+                "status": "completed",
+                "profile": "usage",
+                "input_tokens": 2_292_409,
+                "cached_input_tokens": 2_156_544,
+                "output_tokens": 15_025,
+                "model_requests": 37,
+                "attempts_discarded": 3,
+            },
+        ],
     )
     with mock.patch.dict(
         "os.environ",
@@ -97,9 +109,9 @@ def test_active_telegram_has_workspace_link_progress_and_honest_usage_scope() ->
     assert f"http://100.85.56.31:3000/dashboard?mission={MID}" in text
     assert "Цикл: 2 из 8" in text
     assert "https://github.com/Owner/repo/pull/23" in text
-    assert "Текущий подтверждённый расход: вход 2,29 млн" in text
+    assert "Накопительный подтверждённый расход: вход 2,29 млн" in text
     assert "Автор (последний завершённый прогон): gpt-5.6-sol" in text
-    assert "1 отброшенных прогонов не входят в эту сумму" in text
+    assert "как минимум 3 предыдущих или отброшенных прогонов не входят" in text
 
 
 def test_completion_gates_deploy_and_fail_closed() -> None:
