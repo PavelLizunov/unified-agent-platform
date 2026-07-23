@@ -72,3 +72,20 @@ powershell -ExecutionPolicy Bypass -File .\tests\verify-local.ps1 -IncludeReadin
   (`.github/workflows/ci.yml`, job `static-checks`) on every push/PR; the `protect-master` ruleset **requires** that
   check green before a PR can merge to `master` (deploys are PR-based — ADR-026). The PowerShell smoke tests need the
   tailnet + age key, so they stay a workstation/ops-1 job, not CI.
+- **CI diff-aware fast path (fail-open):** a `classify` step (`tests/static/ci_diff_classifier.py`, repo-owned
+  stdlib + native git, no new action) inspects the exact `pull_request` base/head diff and may skip irrelevant
+  expensive step groups by closed scope — IaC/kustomize for `clusters/`+`infra/`, ops healthcheck for `infra/`,
+  hermes unit for `hermes/`, static fixture tests for `tests/`+`tools/`, tools tests for `tools/`. The job name
+  `static-checks` and the security gates (`secret_scan`, gitleaks) are unconditional and **never** skipped. Any
+  ambiguity fails open to RUN ALL CHECKS: non-`pull_request` events, unknown/missing SHA, unparsable diff,
+  deletion/rename/typechange, path traversal/weird names, and any workflow/CI-tool/dependency/config/classifier
+  change. Skipped steps are reported truthfully in the job log and `$GITHUB_STEP_SUMMARY`. Residual canary (live,
+  not run here): a docs-only PR must show the expensive steps SKIPPED while `static-checks` stays green and both
+  security scans succeed.
+- **CI diff-aware failure path (fail-open + always-on security):** ONLY the `classify` step carries
+  `continue-on-error: true` — a classifier crash writes no outputs, so every `skip_<group>` stays unset and the
+  `!= 'true'` gate RUNS the group (degrade to RUN ALL, never stop the job). No other step hides failure. The
+  `secret_scan` and `gitleaks` gates carry `if: ${{ always() }}` so they are attempted even after an earlier step
+  fails (implicit `success()` would otherwise skip them); if either scan itself fails, `static-checks` is still red.
+  Structural regression: `tests/static/test_ci_diff_classifier.py` asserts classify is the only continue-on-error
+  step, both security gates use `always()`, and ordinary test/IaC groups keep fail-fast red behavior.
