@@ -14,7 +14,18 @@ from contextlib import closing
 from pathlib import Path
 
 
-REQUIRED_FILES = ("state.db", "auth.json", "missions-v1.sqlite3")
+MISSION_DB = "missions-v1.sqlite3"
+REQUIRED_FILES = ("state.db", "auth.json", MISSION_DB)
+
+# WAL-mode MissionStore sidecars that `hermes backup` raw-copies off the live PVC. A consistent
+# sqlite3.backup() snapshot is self-contained, so these raw copies must never reach the archive:
+# a stale -wal/-shm next to the fresh snapshot can corrupt restore.
+MISSION_SIDECARS = (
+    f"{MISSION_DB}-wal",
+    f"{MISSION_DB}-shm",
+    f"{MISSION_DB}-journal",
+)
+_MISSION_FOOTPRINT = frozenset((MISSION_DB, *MISSION_SIDECARS))
 
 
 class BackupValidationError(ValueError):
@@ -75,7 +86,7 @@ def replace_mission_snapshot(archive_path: Path, mission_path: Path) -> None:
         prefix="hermes-mission-snapshot-", dir=archive_path.parent
     ) as temporary:
         temporary_root = Path(temporary)
-        snapshot = temporary_root / "missions-v1.sqlite3"
+        snapshot = temporary_root / MISSION_DB
         rewritten = temporary_root / archive_path.name
         try:
             with closing(
@@ -95,13 +106,13 @@ def replace_mission_snapshot(archive_path: Path, mission_path: Path) -> None:
                 rewritten, "w", zipfile.ZIP_DEFLATED, compresslevel=6
             ) as target_archive:
                 for entry in source_archive.infolist():
-                    if posixpath.basename(entry.filename) == "missions-v1.sqlite3":
+                    if posixpath.basename(entry.filename) in _MISSION_FOOTPRINT:
                         continue
                     with source_archive.open(entry) as source, target_archive.open(
                         entry, "w"
                     ) as target:
                         shutil.copyfileobj(source, target)
-                target_archive.write(snapshot, "missions-v1.sqlite3")
+                target_archive.write(snapshot, MISSION_DB)
             os.replace(rewritten, archive_path)
         except (OSError, zipfile.BadZipFile) as error:
             raise BackupValidationError(
@@ -126,10 +137,16 @@ def validate_archive(path: Path) -> list[str]:
             _check_sqlite(archive, entries["state.db"])
             _check_sqlite(
                 archive,
-                entries["missions-v1.sqlite3"],
+                entries[MISSION_DB],
                 required_table="mission_events",
             )
             basenames = {posixpath.basename(name) for name in names}
+            stray = sorted(name for name in basenames if name in MISSION_SIDECARS)
+            if stray:
+                raise BackupValidationError(
+                    f"backup contains raw MissionStore sidecar(s) {stray}; "
+                    "the consistent snapshot must be self-contained"
+                )
             warnings = []
             if ".env" not in basenames:
                 warnings.append(".env")

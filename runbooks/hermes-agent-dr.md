@@ -24,8 +24,10 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
   access; same bucket as the etcd snapshots, distinct folder).
 - The backup is a **consistent** snapshot. `hermes backup` v0.18 uses `sqlite3.backup()` for `.db` files,
   but treats the UAP `missions-v1.sqlite3` as a normal file. Before upload, the repo-owned validator
-  creates a separate `sqlite3.backup()` snapshot and atomically replaces that raw ZIP entry. The live PVC
-  is never modified. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
+  creates a separate `sqlite3.backup()` snapshot and atomically replaces that raw ZIP entry **plus any raw
+  `missions-v1.sqlite3-wal/-shm/-journal` sidecars** — the WAL-mode live copy is not safe to archive next to
+  the fresh snapshot, and the manifest check **fails closed** if a raw MissionStore sidecar leaks through.
+  The live PVC is never modified. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
 - **Completeness is enforced** (this was a silent gap — the old check only verified one `.codex/*.sqlite`):
   a manifest check **fails** the job on an empty/corrupt zip or a missing **hard-required** file
   (`state.db`, `missions-v1.sqlite3`, `auth.json` — always-present, owned by uid 10000). Both required
