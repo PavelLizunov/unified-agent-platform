@@ -44,6 +44,7 @@ PAYLOAD_FIELDS = {
         "input_tokens", "cached_input_tokens", "output_tokens",
         "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
         "command_calls", "failed_commands", "web_search_calls",
+        "attempts_discarded",
     },
 }
 MAX_LOG_BYTES = 1024 * 1024
@@ -720,6 +721,7 @@ def _worker_metadata_events(
                 "input_tokens", "cached_input_tokens", "output_tokens",
                 "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
                 "command_calls", "failed_commands", "web_search_calls",
+                "attempts_discarded",
             ):
                 value = payload.get(field)
                 if value is not None and (

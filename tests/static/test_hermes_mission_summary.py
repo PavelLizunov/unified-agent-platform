@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNTIME = ROOT / "tools" / "hermes-mission" / "runtime.py"
@@ -57,6 +58,48 @@ def test_headline_telegram_text_and_backward_compat() -> None:
     ttext = m.telegram_text(tv)
     assert "\u0418\u0441\u043f\u043e\u043b\u043d\u0438\u0442\u0435\u043b\u0438 1" in ttext
     assert "\u0410\u0432\u0442\u043e\u0440 (\u0444\u0438\u043d\u0430\u043b\u044c\u043d\u044b\u0439 \u043f\u0440\u043e\u0433\u043e\u043d)" in ttext
+
+
+def test_active_telegram_has_workspace_link_progress_and_honest_usage_scope() -> None:
+    view = _view(
+        mission_id=MID,
+        project_label="Suflyor",
+        status="active",
+        stage="testing",
+        progress_percent=50,
+        notice={
+            "code": "progress_detail",
+            "message": "Черновик PR проходит обязательный CI.",
+            "owner_action_required": False,
+            "phase": "candidate_pr_open",
+            "cycle": 2,
+            "cycle_limit": 8,
+            "url": "https://github.com/Owner/repo/pull/23",
+        },
+        workers=[{
+            "worker_id": "author",
+            "status": "completed",
+            "profile": "author",
+            "model": "gpt-5.6-sol",
+            "input_tokens": 2_292_409,
+            "cached_input_tokens": 2_156_544,
+            "output_tokens": 15_025,
+            "model_requests": 37,
+            "attempts_discarded": 1,
+        }],
+    )
+    with mock.patch.dict(
+        "os.environ",
+        {"HERMES_MISSION_WORKSPACE_URL": "http://100.85.56.31:3000"},
+        clear=False,
+    ):
+        text = m.telegram_text(view)
+    assert f"http://100.85.56.31:3000/dashboard?mission={MID}" in text
+    assert "Цикл: 2 из 8" in text
+    assert "https://github.com/Owner/repo/pull/23" in text
+    assert "Текущий подтверждённый расход: вход 2,29 млн" in text
+    assert "Автор (последний завершённый прогон): gpt-5.6-sol" in text
+    assert "1 отброшенных прогонов не входят в эту сумму" in text
 
 
 def test_completion_gates_deploy_and_fail_closed() -> None:

@@ -468,13 +468,33 @@ def test_capacity_notice_projects_to_workspace_and_telegram_without_owner_gate()
                         "Следом — автоматические проверки и CI."
                     ),
                     "owner_action_required": False,
+                    "phase": "needs_fix",
+                    "cycle": 3,
+                    "cycle_limit": 7,
+                    "url": "https://github.com/owner/repo/pull/7",
                 },
             }
             store.append_producer("mission-capacity", progress)
             view = store.projection("mission-capacity")
             rendered = missions.telegram_text(view)
             assert progress["payload"]["message"] in rendered
+            assert "Цикл: 3 из 7" in rendered
+            assert "https://github.com/owner/repo/pull/7" in rendered
             assert "От вас ничего не требуется." in rendered
+
+            invalid_url = {
+                **progress,
+                "correlation": {
+                    **progress["correlation"],
+                    "producer_event_id": "flow:mission-capacity:invalid-url",
+                },
+                "payload": {**progress["payload"], "url": "javascript:alert(1)"},
+            }
+            try:
+                store.append_producer("mission-capacity", invalid_url)
+                raise AssertionError("unsafe notice URL was accepted")
+            except missions.MissionError as error:
+                assert "notice URL" in str(error)
 
             invalid = {
                 **notice,

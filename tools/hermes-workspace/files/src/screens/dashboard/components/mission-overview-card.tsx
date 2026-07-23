@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useRef, useState, type FormEvent } from 'react'
 
-type Item = Record<string, string>
+type Item = Record<string, string | number | boolean | null | undefined>
 
 export type MissionView = {
   mission_id: string
@@ -18,6 +18,10 @@ export type MissionView = {
     message: string
     owner_action_required: boolean
     next_attempt_at?: string
+    phase?: string
+    cycle?: number
+    cycle_limit?: number
+    url?: string
   } | null
   goal?: string | null
   question?: { question_id: string; text: string } | null
@@ -46,6 +50,8 @@ type MissionEvent = {
   sequence: number
   type: string
   occurred_at?: string
+  source?: string
+  payload?: Record<string, unknown>
 }
 type MissionReplayResponse = {
   mission?: MissionView
@@ -160,14 +166,95 @@ function formattedUpdatedAt(value?: string | null) {
   return Number.isNaN(date.getTime()) ? null : date.toLocaleString('ru-RU')
 }
 
+function missionIdFromLocation() {
+  if (typeof window === 'undefined') return ''
+  return new URLSearchParams(window.location.search).get('mission') || ''
+}
+
+function selectMissionInLocation(missionId: string) {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  url.searchParams.set('mission', missionId)
+  window.history.replaceState(null, '', url)
+}
+
+function compactTokenCount(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(2).replace(/\.?0+$/, '')}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  return String(value)
+}
+
+function numberValue(item: Item, key: string) {
+  const value = item[key]
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null
+}
+
+function eventPresentation(event: MissionEvent) {
+  const payload = event.payload ?? {}
+  const text = (key: string) =>
+    typeof payload[key] === 'string' ? String(payload[key]) : ''
+  const number = (key: string) =>
+    typeof payload[key] === 'number' ? Number(payload[key]) : null
+  switch (event.type) {
+    case 'mission.accepted':
+      return { title: 'Цель принята', detail: 'Создана одна durable-задача в Central Hermes.' }
+    case 'mission.stage': {
+      const stage = text('stage')
+      const progress = number('progress_percent')
+      return {
+        title: stageLabels[stage] || stage || 'Этап обновлён',
+        detail: progress === null ? '' : `Прогресс ${progress}%.`,
+      }
+    }
+    case 'mission.notice':
+      return {
+        title: 'Подробное обновление',
+        detail: text('message'),
+      }
+    case 'task.upsert': {
+      const status = text('status')
+      return {
+        title: status === 'running' ? 'Задача запущена' : 'Задача подготовлена',
+        detail: text('title'),
+      }
+    }
+    case 'worker.upsert': {
+      const profile = text('profile')
+      const role = profile === 'author' ? 'Автор' : profile === 'reviewer' ? 'Ревьюер' : 'Координатор'
+      const model = text('model')
+      const input = number('input_tokens')
+      return {
+        title: `${role}: ${text('status') || 'обновление'}`,
+        detail: [model, input === null ? '' : `вход ${compactTokenCount(input)}`].filter(Boolean).join(' · '),
+      }
+    }
+    case 'gate.upsert':
+      return { title: `Проверка: ${text('gate_id')}`, detail: text('status') }
+    case 'change.upsert':
+      return { title: `Изменение: ${text('path')}`, detail: text('status') }
+    case 'delivery.upsert':
+      return { title: `Результат: ${text('kind')}`, detail: text('status') }
+    case 'mission.completed':
+      return { title: 'Задача завершена', detail: text('result') }
+    case 'mission.failed':
+      return { title: 'Задача завершилась с ошибкой', detail: text('error') }
+    case 'mission.cancelled':
+      return { title: 'Задача отменена', detail: text('reason') }
+    default:
+      return { title: event.type, detail: '' }
+  }
+}
+
 function rows(items: Array<Item>, primary: string, secondary: string) {
   if (!items.length) return <span className="text-xs opacity-60">Нет</span>
   return (
     <ul className="space-y-1 text-xs">
       {items.map((item, index) => (
         <li key={`${item[primary] || index}`} className="flex justify-between gap-3">
-          <span className="truncate">{item[primary]}</span>
-          <span className="shrink-0 opacity-65">{item[secondary]}</span>
+          <span className="truncate">{String(item[primary] ?? '')}</span>
+          <span className="shrink-0 opacity-65">{String(item[secondary] ?? '')}</span>
         </li>
       ))}
     </ul>
@@ -184,7 +271,7 @@ function safeDeliveryUrl(value: string): string | null {
 }
 
 export function MissionOverviewCard() {
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedId, setSelectedId] = useState(missionIdFromLocation)
   const [answerDraft, setAnswerDraft] = useState({ questionId: '', text: '' })
   const [answerError, setAnswerError] = useState('')
   const [answering, setAnswering] = useState(false)
@@ -203,11 +290,12 @@ export function MissionOverviewCard() {
   })
   const missions = query.data?.missions ?? []
   const snapshotMission = selectMission(missions, selectedId)
+  const selectedMissionId = selectedId || snapshotMission?.mission_id || ''
   const replayQuery = useQuery<MissionReplay>({
-    queryKey: ['central-mission-events', snapshotMission?.mission_id],
-    enabled: Boolean(snapshotMission),
+    queryKey: ['central-mission-events', selectedMissionId],
+    enabled: Boolean(selectedMissionId),
     queryFn: async () => {
-      const missionId = snapshotMission!.mission_id
+      const missionId = selectedMissionId
       const previous =
         replayRef.current?.mission.mission_id === missionId
           ? replayRef.current
@@ -228,6 +316,36 @@ export function MissionOverviewCard() {
   })
   const mission = replayQuery.data?.mission ?? snapshotMission
   const missionEvents = replayQuery.data?.events ?? []
+  const missionOptions =
+    mission && !missions.some((item) => item.mission_id === mission.mission_id)
+      ? [mission, ...missions]
+      : missions
+  const telemetryWorkers = mission?.workers.filter(
+    (worker) => worker.profile === 'author' || worker.profile === 'reviewer',
+  ) ?? []
+  const measuredWorkers = telemetryWorkers.filter(
+    (worker) => numberValue(worker, 'input_tokens') !== null,
+  )
+  const totalInput = measuredWorkers.reduce(
+    (total, worker) => total + (numberValue(worker, 'input_tokens') ?? 0),
+    0,
+  )
+  const totalCached = measuredWorkers.reduce(
+    (total, worker) => total + (numberValue(worker, 'cached_input_tokens') ?? 0),
+    0,
+  )
+  const totalOutput = measuredWorkers.reduce(
+    (total, worker) => total + (numberValue(worker, 'output_tokens') ?? 0),
+    0,
+  )
+  const totalRequests = measuredWorkers.reduce(
+    (total, worker) => total + (numberValue(worker, 'model_requests') ?? 0),
+    0,
+  )
+  const discardedAttempts = measuredWorkers.reduce(
+    (total, worker) => total + (numberValue(worker, 'attempts_discarded') ?? 0),
+    0,
+  )
   const projectTitle = mission?.project_label
     ? `${mission.project_label}${mission.project_repository ? ` (${mission.project_repository})` : ''}`
     : mission?.project_repository || mission?.goal || mission?.mission_id
@@ -297,18 +415,28 @@ export function MissionOverviewCard() {
           <div className="text-xs opacity-65">
             Этап: {stageLabels[mission.stage] || mission.stage} · {mission.progress_percent}% · Статус: {statusLabels[mission.status] || mission.status}
           </div>
+          {mission.notice?.cycle && mission.notice?.cycle_limit ? (
+            <div className="text-xs opacity-65">
+              Цикл {mission.notice.cycle} из {mission.notice.cycle_limit}
+              {mission.notice.phase ? ` · checkpoint ${mission.notice.phase}` : ''}
+            </div>
+          ) : null}
           {updatedAt ? (
             <div className="text-xs opacity-55">Последнее обновление: {updatedAt}</div>
           ) : null}
         </div>
-        {missions.length > 1 ? (
+        {missionOptions.length > 1 ? (
           <select
             aria-label="Задача"
             value={mission.mission_id}
-            onChange={(event) => setSelectedId(event.target.value)}
+            onChange={(event) => {
+              replayRef.current = null
+              setSelectedId(event.target.value)
+              selectMissionInLocation(event.target.value)
+            }}
             className="max-w-52 rounded-md border border-[var(--theme-border)] bg-transparent px-2 py-1 text-xs"
           >
-            {missions.map((item) => (
+            {missionOptions.map((item) => (
               <option key={item.mission_id} value={item.mission_id}>
                 {item.project_label || item.project_repository?.split('/').pop() || 'Задача'} · {(item.goal || '').replace(/\s+/g, ' ').slice(0, 48)} · {stageLabels[item.stage] || item.stage} {item.progress_percent}% · {item.mission_id.slice(-8)}
               </option>
@@ -362,6 +490,16 @@ export function MissionOverviewCard() {
       {mission.notice ? (
         <div className="mt-3 rounded-md bg-sky-500/10 px-3 py-2 text-sm">
           <p>{noticeLabels[mission.notice.code] || mission.notice.message}</p>
+          {mission.notice.url && safeDeliveryUrl(mission.notice.url) ? (
+            <a
+              href={safeDeliveryUrl(mission.notice.url)!}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block text-xs underline underline-offset-2"
+            >
+              Открыть текущий PR или результат
+            </a>
+          ) : null}
           {mission.notice.next_attempt_at ? (
             <p className="mt-1 text-xs opacity-70">
               Следующая автоматическая попытка (UTC): {mission.notice.next_attempt_at}
@@ -374,6 +512,40 @@ export function MissionOverviewCard() {
           </p>
         </div>
       ) : null}
+      {measuredWorkers.length ? (
+        <div className="mt-3 rounded-md bg-violet-500/10 px-3 py-2 text-sm">
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <h3 className="text-xs font-semibold uppercase tracking-wide opacity-70">
+              Расход выбранной задачи на данный момент
+            </h3>
+            <span className="text-xs opacity-65">
+              {totalRequests} запросов к моделям
+            </span>
+          </div>
+          <p className="mt-1 text-xs leading-relaxed">
+            Вход {compactTokenCount(totalInput)}
+            {totalCached
+              ? ` · кэш ${compactTokenCount(totalCached)} (${totalInput ? ((totalCached * 100) / totalInput).toFixed(1) : '0.0'}%)`
+              : ''}
+            {' · '}новый вход {compactTokenCount(Math.max(0, totalInput - totalCached))}
+            {' · '}выход {compactTokenCount(totalOutput)}
+          </p>
+          <p className="mt-1 text-xs opacity-70">
+            {measuredWorkers.map((worker) => (
+              `${worker.profile === 'author' ? 'Автор' : 'Ревьюер'}: ${String(worker.model || 'модель не указана')}`
+            )).join(' · ')}
+          </p>
+          {discardedAttempts ? (
+            <p className="mt-1 text-xs text-amber-300">
+              Это нижняя граница: {discardedAttempts} отброшенных прогонов пока не входят в сумму.
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="mt-3 rounded-md bg-black/10 px-3 py-2 text-xs opacity-70">
+          Токены появятся здесь сразу после завершения текущего прогона модели. Во время самого прогона Codex не отдаёт подтверждённый итоговый usage.
+        </div>
+      )}
       {mission.result ? (
         <div className="mt-3 rounded-md bg-emerald-500/10 px-3 py-2 text-sm">
           <h3 className="text-xs font-semibold uppercase tracking-wide opacity-70">Результат</h3>
@@ -418,16 +590,31 @@ export function MissionOverviewCard() {
         {missionEvents.length ? (
           <div className="mt-4">
             <h3 className="mb-1 text-xs font-semibold">Хронология</h3>
-            <ol className="max-h-44 space-y-1 overflow-auto text-xs">
-              {missionEvents.map((event) => (
-                <li key={event.event_id} className="flex gap-2">
-                  <span className="w-8 shrink-0 text-right opacity-45">{event.sequence}</span>
-                  <span>{event.type}</span>
-                  {event.occurred_at ? (
-                    <time className="ml-auto shrink-0 opacity-45">{event.occurred_at}</time>
-                  ) : null}
-                </li>
-              ))}
+            <ol className="max-h-72 space-y-2 overflow-auto text-xs">
+              {missionEvents.map((event) => {
+                const presentation = eventPresentation(event)
+                return (
+                  <li key={event.event_id} className="flex gap-2 rounded bg-black/5 px-2 py-1.5">
+                    <span className="w-6 shrink-0 text-right opacity-45">{event.sequence}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="font-medium">{presentation.title}</span>
+                      {presentation.detail ? (
+                        <span className="mt-0.5 block whitespace-pre-wrap opacity-70">
+                          {presentation.detail}
+                        </span>
+                      ) : null}
+                      <span className="mt-0.5 block font-mono text-[10px] opacity-35">
+                        {event.type}
+                      </span>
+                    </span>
+                    {event.occurred_at ? (
+                      <time className="shrink-0 opacity-45">
+                        {formattedUpdatedAt(event.occurred_at)}
+                      </time>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ol>
           </div>
         ) : null}
@@ -438,21 +625,25 @@ export function MissionOverviewCard() {
         ) : null}
         {mission.deliveries.length ? (
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            {mission.deliveries.map((delivery) => (
-              safeDeliveryUrl(delivery.url) ? (
+            {mission.deliveries.map((delivery, index) => {
+              const kind = String(delivery.kind ?? 'result')
+              const status = String(delivery.status ?? '')
+              const url = safeDeliveryUrl(String(delivery.url ?? ''))
+              const key = `${kind}-${index}`
+              return url ? (
                 <a
-                  key={delivery.kind}
-                  href={safeDeliveryUrl(delivery.url)!}
+                  key={key}
+                  href={url}
                   target="_blank"
                   rel="noreferrer"
                   className="underline underline-offset-2"
                 >
-                  {delivery.kind}: {delivery.status}
+                  {kind}: {status}
                 </a>
               ) : (
-                <span key={delivery.kind}>{delivery.kind}: {delivery.status}</span>
+                <span key={key}>{kind}: {status}</span>
               )
-            ))}
+            })}
           </div>
         ) : null}
         <div className="mt-3 text-[10px] opacity-45">

@@ -3085,9 +3085,12 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             state = {
                 "mission_id": "progress-notice",
                 "root_task_id": "task-1",
+                "phase": "candidate_pr_open",
+                "review_cycle": 3,
+                "pr_url": "https://github.com/owner/repo/pull/7",
             }
             message = (
-                "Цикл 3 из 7. Автор gpt-5.6-terra исправляет замечания. "
+                "Цикл 3 из 4. Автор gpt-5.6-terra исправляет замечания. "
                 "Следом — автоматические проверки и CI."
             )
 
@@ -3099,6 +3102,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual("progress_detail", first["payload"]["code"])
             self.assertEqual(message, first["payload"]["message"])
             self.assertFalse(first["payload"]["owner_action_required"])
+            self.assertEqual("candidate_pr_open", first["payload"]["phase"])
+            self.assertEqual(3, first["payload"]["cycle"])
+            self.assertEqual(4, first["payload"]["cycle_limit"])
+            self.assertEqual(
+                "https://github.com/owner/repo/pull/7",
+                first["payload"]["url"],
+            )
             self.assertEqual(
                 first["correlation"]["producer_event_id"],
                 second["correlation"]["producer_event_id"],
@@ -9121,6 +9131,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             state = {
                 "branch": "b", "candidate_sha": "sha", "pr_url": "https://x/pr/1",
                 "default_sha": "dsha", "candidate_files": ["src/a.py"],
+                "discarded_author_attempts": 1,
                 "author_telemetry": {
                     "model": "gpt-5.6-sol", "reasoning_effort": "xhigh",
                     "usage": {
@@ -9164,11 +9175,49 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(11, author["payload"]["command_calls"])
             self.assertEqual(2, author["payload"]["failed_commands"])
             self.assertEqual(3, author["payload"]["web_search_calls"])
+            self.assertEqual(1, author["payload"]["attempts_discarded"])
             self.assertEqual("gpt-5.6-terra", reviewer["payload"]["model"])
+            self.assertEqual(0, reviewer["payload"]["attempts_discarded"])
             self.assertEqual(500, reviewer["payload"]["input_tokens"])
             self.assertNotIn("output_tokens", reviewer["payload"])
             # Deterministic replay
             self.assertEqual(events, coord._events(state, cleanup=True))
+
+    def test_active_mission_publishes_available_author_telemetry_idempotently(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            coord = coordinator.DeliveryCoordinator(
+                profile(root), client, FakeBackend(), root / "state"
+            )
+            state = {
+                "mission_id": "mission-active-usage",
+                "root_task_id": "task-usage",
+                "discarded_author_attempts": 1,
+                "author_telemetry": {
+                    "model": "gpt-5.6-sol",
+                    "reasoning_effort": "xhigh",
+                    "usage": {
+                        "input_tokens": 2_000,
+                        "cached_input_tokens": 1_500,
+                        "output_tokens": 200,
+                    },
+                    "model_requests": 4,
+                    "max_request_input_tokens": 900,
+                },
+            }
+            coord._publish_available_telemetry(state)
+            coord._publish_available_telemetry(state)
+            self.assertEqual(2, len(client.stages))
+            first, second = client.stages
+            self.assertEqual("worker.upsert", first["type"])
+            self.assertEqual("author", first["payload"]["worker_id"])
+            self.assertEqual(2_000, first["payload"]["input_tokens"])
+            self.assertEqual(1, first["payload"]["attempts_discarded"])
+            self.assertEqual(
+                first["correlation"]["producer_event_id"],
+                second["correlation"]["producer_event_id"],
+            )
 
     def test_events_omit_absent_or_invalid_telemetry(self):
         with tempfile.TemporaryDirectory() as directory:

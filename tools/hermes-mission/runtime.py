@@ -16,6 +16,7 @@ import os
 import re
 import sqlite3
 import time
+import urllib.parse
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
@@ -71,6 +72,7 @@ PAYLOAD_FIELDS = {
     },
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
+        "phase", "cycle", "cycle_limit", "url",
     },
     "mission.answer": {
         "question_id", "text", "source_message_id", "source_platform",
@@ -81,6 +83,7 @@ PAYLOAD_FIELDS = {
         "input_tokens", "cached_input_tokens", "output_tokens",
         "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
         "command_calls", "failed_commands", "web_search_calls",
+        "attempts_discarded",
     },
     "terminal.append": {"stream", "text", "offset"},
     "delivery.upsert": {
@@ -100,7 +103,7 @@ _NULLABLE_PAYLOAD = {("task.upsert", "assignee"), ("worker.upsert", "profile")}
 _MAX_DELIVERY_SUMMARY_CHARS = 700
 _ID_PAYLOAD_FIELDS = {
     "artifact_id", "assignee", "capability", "code", "delivery_mode", "dispatch_profile", "effort", "execution_class", "gate_id", "input_platform", "kind", "model", "parent_mission_id", "profile", "project_id", "question_id", "source_platform",
-    "environment", "run_id", "status", "stream", "task_id", "worker_id",
+    "environment", "phase", "run_id", "status", "stream", "task_id", "worker_id",
 }
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _MAX_EVENT_JSON = 65_536
@@ -771,6 +774,7 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             "input_tokens", "cached_input_tokens", "output_tokens",
             "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
             "command_calls", "failed_commands", "web_search_calls",
+            "attempts_discarded", "cycle", "cycle_limit",
         }:
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise MissionError(f"invalid payload.{name}")
@@ -812,6 +816,17 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
                 raise MissionError("invalid mission notice timestamp") from error
             if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
                 raise MissionError("invalid mission notice timestamp")
+        url = payload.get("url")
+        if url is not None:
+            parsed_url = urllib.parse.urlsplit(url)
+            if (
+                len(url) > 2_048
+                or parsed_url.scheme not in {"http", "https"}
+                or not parsed_url.netloc
+                or parsed_url.username is not None
+                or parsed_url.password is not None
+            ):
+                raise MissionError("invalid mission notice URL")
     if event_type == "mission.answer" and "source_message_id" in payload:
         _require_source_value(payload.get("source_message_id"), "source_message_id")
     if event_type == "mission.answer" and "source_platform" in payload:
@@ -1138,6 +1153,25 @@ def _project_tag(view: dict[str, Any]) -> str | None:
     return f"#{tag}" if tag else None
 
 
+def _workspace_mission_url(view: dict[str, Any]) -> str | None:
+    """Build one optional owner-facing deep link without trusting mission text."""
+    base = os.environ.get("HERMES_MISSION_WORKSPACE_URL", "").strip().rstrip("/")
+    mission_id = view.get("mission_id")
+    if not base or not isinstance(mission_id, str) or not mission_id:
+        return None
+    parsed = urllib.parse.urlsplit(base)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return f"{base}/dashboard?mission={urllib.parse.quote(mission_id, safe='')}"
+
+
 def telegram_text(view: dict[str, Any]) -> str:
     """Render the compact Telegram view from the exact Workspace projection."""
     status = view.get("status") or "unknown"
@@ -1150,6 +1184,9 @@ def telegram_text(view: dict[str, Any]) -> str:
         f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
         f"Статус: {_STATUS_LABELS.get(status, status)}",
     ]
+    workspace_url = _workspace_mission_url(view)
+    if workspace_url:
+        lines.append(f"Подробнее: {workspace_url}")
     goal = view.get("goal")
     if isinstance(goal, str) and goal.strip():
         short_goal = " ".join(goal.split())
@@ -1171,6 +1208,16 @@ def telegram_text(view: dict[str, Any]) -> str:
     if view.get("notice"):
         notice = view["notice"]
         lines.append(f"Обновление: {_NOTICE_LABELS.get(notice['code'], notice['message'])}")
+        cycle = notice.get("cycle")
+        cycle_limit = notice.get("cycle_limit")
+        if (
+            isinstance(cycle, int) and not isinstance(cycle, bool)
+            and isinstance(cycle_limit, int) and not isinstance(cycle_limit, bool)
+        ):
+            lines.append(f"Цикл: {cycle} из {cycle_limit}")
+        notice_url = notice.get("url")
+        if isinstance(notice_url, str) and notice_url != workspace_url:
+            lines.append(f"Текущий результат: {notice_url}")
         if notice.get("next_attempt_at"):
             lines.append(f"Следующая автоматическая попытка (UTC): {notice['next_attempt_at']}")
         lines.append(
@@ -1182,10 +1229,11 @@ def telegram_text(view: dict[str, Any]) -> str:
         lines.append(f"Итог: {view['result']}")
     if view.get("error"):
         lines.append(f"Ошибка: {view['error']}")
-    if status in ("failed", "cancelled"):
+    if status in ("active", "waiting_owner", "failed", "cancelled"):
         workers = view.get("workers", [])
-        lines.extend(_role_telemetry_lines(workers))
-        lines.extend(_usage_statistics_lines(workers))
+        final = status in ("failed", "cancelled")
+        lines.extend(_role_telemetry_lines(workers, final=final))
+        lines.extend(_usage_statistics_lines(workers, final=final))
     lines.append(
         "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
             tasks=len(view.get("tasks", [])),
@@ -1243,7 +1291,9 @@ def _format_elapsed(started_at: str | None, finished_at: str | None) -> str | No
     return f"{seconds}с"
 
 
-def _role_telemetry_lines(workers: list[dict[str, Any]]) -> list[str]:
+def _role_telemetry_lines(
+    workers: list[dict[str, Any]], *, final: bool = True
+) -> list[str]:
     """Render role-bound telemetry from final accepted author/reviewer runs."""
     lines: list[str] = []
     for worker in workers:
@@ -1256,7 +1306,8 @@ def _role_telemetry_lines(workers: list[dict[str, Any]]) -> list[str]:
         if not isinstance(model, str) or not model.strip():
             continue
         role = _ROLE_LABELS[profile]
-        parts = [f"{role} (финальный прогон): {model.strip()}"]
+        run_label = "финальный прогон" if final else "последний завершённый прогон"
+        parts = [f"{role} ({run_label}): {model.strip()}"]
         effort = worker.get("effort")
         if isinstance(effort, str) and effort.strip():
             parts.append(f"effort {effort.strip()}")
@@ -1316,7 +1367,9 @@ def _api_cost_range(workers: list[dict[str, Any]]) -> tuple[Decimal, Decimal] | 
     return low, high
 
 
-def _usage_statistics_lines(workers: list[dict[str, Any]]) -> list[str]:
+def _usage_statistics_lines(
+    workers: list[dict[str, Any]], *, final: bool = True
+) -> list[str]:
     telemetry = [
         worker for worker in workers
         if isinstance(worker, dict) and worker.get("profile") in _ROLE_LABELS
@@ -1348,7 +1401,15 @@ def _usage_statistics_lines(workers: list[dict[str, Any]]) -> list[str]:
     requests = [_metric(worker, "model_requests") for worker in measured]
     if all(value is not None for value in requests):
         parts.append(f"запросы к моделям {sum(value or 0 for value in requests)}")
-    lines = ["Статистика финальных прогонов: " + " · ".join(parts)]
+    label = "Статистика финальных прогонов" if final else "Текущий подтверждённый расход"
+    lines = [f"{label}: " + " · ".join(parts)]
+    discarded = sum(
+        _metric(worker, "attempts_discarded") or 0 for worker in measured
+    )
+    if discarded:
+        lines.append(
+            f"Важно: {discarded} отброшенных прогонов не входят в эту сумму."
+        )
 
     command_calls = sum(_metric(worker, "command_calls") or 0 for worker in measured)
     failed_commands = sum(_metric(worker, "failed_commands") or 0 for worker in measured)

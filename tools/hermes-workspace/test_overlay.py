@@ -586,6 +586,12 @@ def main() -> None:
         assert "mission.projection_id" in mission_card
         assert "mission.terminal" in mission_card
         assert "Подробнее о задаче" in mission_card
+        assert "missionIdFromLocation" in mission_card
+        assert "selectMissionInLocation" in mission_card
+        assert "Расход выбранной задачи на данный момент" in mission_card
+        assert "eventPresentation" in mission_card
+        assert "Открыть текущий PR или результат" in mission_card
+        assert "отброшенных прогонов пока не входят в сумму" in mission_card
         assert "whitespace-pre-wrap leading-relaxed" in mission_card
         assert "project_repository" in mission_card
         assert 'aria-label="Ответ"' in mission_card
