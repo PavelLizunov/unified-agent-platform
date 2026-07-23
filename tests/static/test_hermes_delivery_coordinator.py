@@ -6991,6 +6991,318 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 )
             self.assertEqual([], client.stages)
 
+    def test_restart_reclaims_ready_task_after_durable_run_became_stale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("restart-stale-claim")
+            state = {
+                "schema_version": 1,
+                "mission_id": "restart-stale-claim",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "candidate_pr_open",
+                "root_task_id": "task-1",
+                "run_id": "7",
+            }
+
+            instance._ensure_restart_claim(state, paths)
+
+            self.assertEqual("8", state["run_id"])
+            self.assertEqual(2, backend.claims)
+            self.assertNotIn("restart_claim_recovery", state)
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("8", persisted["run_id"])
+            self.assertNotIn("restart_claim_recovery", persisted)
+            self.assertEqual(
+                1, sum(run["status"] == "running" for run in backend.runs)
+            )
+
+    def test_tick_reclaims_candidate_pr_before_ci_without_repeating_author(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            counters = {
+                "authors": 0, "reviews": 0, "cleanups": 0, "worktrees": 0,
+            }
+            instance = HermeticCoordinator(
+                approved,
+                FakeClient(),
+                backend,
+                root / "state",
+                counters=counters,
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "candidate_pr_open",
+                "branch": "codex/restart-stale-claim",
+                "review_cycle": 1,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "candidate_sha": "candidate-sha",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+                "crash_injected": True,
+            })
+
+            def stop_at_ci(state, _paths):
+                self.assertEqual("8", state["run_id"])
+                self.assertNotIn("restart_claim_recovery", state)
+                raise RuntimeError("pre-review CI reached")
+
+            with (
+                mock.patch.object(
+                    instance, "_author", side_effect=AssertionError("author repeated")
+                ) as author,
+                mock.patch.object(
+                    instance, "_push_candidate",
+                    side_effect=AssertionError("candidate pushed twice"),
+                ) as push,
+                mock.patch.object(
+                    instance, "_ensure_candidate_pr",
+                    side_effect=AssertionError("candidate PR opened twice"),
+                ) as candidate_pr,
+                mock.patch.object(instance, "_pre_review_ci", side_effect=stop_at_ci),
+                self.assertRaisesRegex(RuntimeError, "pre-review CI reached"),
+            ):
+                instance.tick()
+
+            author.assert_not_called()
+            push.assert_not_called()
+            candidate_pr.assert_not_called()
+            self.assertEqual(2, backend.claims)
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("8", persisted["run_id"])
+            self.assertNotIn("restart_claim_recovery", persisted)
+
+    def test_restart_reclaim_adopts_proven_claim_after_response_loss(self):
+        class CrashAfterClaimBackend(FakeBackend):
+            crash_after_claim = False
+
+            def claim(self, task_id, *, ttl_seconds, provenance=None):
+                snapshot = super().claim(
+                    task_id, ttl_seconds=ttl_seconds, provenance=provenance
+                )
+                if self.crash_after_claim:
+                    self.crash_after_claim = False
+                    raise coordinator.InjectedCrash("after restart reclaim side effect")
+                return snapshot
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = CrashAfterClaimBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("restart-lost-claim-response")
+            state = {
+                "schema_version": 1,
+                "mission_id": "restart-lost-claim-response",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "candidate_pr_open",
+                "root_task_id": "task-1",
+                "run_id": "7",
+            }
+            backend.crash_after_claim = True
+
+            with self.assertRaisesRegex(
+                coordinator.InjectedCrash, "restart reclaim side effect"
+            ):
+                instance._ensure_restart_claim(state, paths)
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            recovery = persisted["restart_claim_recovery"]
+            self.assertEqual("7", persisted["run_id"])
+            self.assertEqual("8", str(backend.runs[-1]["id"]))
+            self.assertEqual(
+                recovery["reclaim_token"], backend.runs[-1]["claim_lock"]
+            )
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state(
+                "restart-lost-claim-response", paths
+            )
+            restarted._ensure_restart_claim(recovered, paths)
+
+            self.assertEqual(2, backend.claims)
+            self.assertEqual("8", recovered["run_id"])
+            self.assertNotIn("restart_claim_recovery", recovered)
+            self.assertEqual(
+                1, sum(run["status"] == "running" for run in backend.runs)
+            )
+
+    def test_restart_reclaim_finishes_checkpoint_after_run_id_save_crash(self):
+        class CrashAfterRunCheckpoint(coordinator.DeliveryCoordinator):
+            crash_after_run_checkpoint = True
+
+            def _save(self, paths, state):
+                super()._save(paths, state)
+                if (
+                    self.crash_after_run_checkpoint
+                    and state.get("run_id") == "8"
+                    and state.get("restart_claim_recovery") is not None
+                ):
+                    self.crash_after_run_checkpoint = False
+                    raise coordinator.InjectedCrash(
+                        "after durable replacement run checkpoint"
+                    )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = CrashAfterRunCheckpoint(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("restart-run-checkpoint-crash")
+            state = {
+                "schema_version": 1,
+                "mission_id": "restart-run-checkpoint-crash",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "candidate_pr_open",
+                "root_task_id": "task-1",
+                "run_id": "7",
+            }
+
+            with self.assertRaisesRegex(
+                coordinator.InjectedCrash, "replacement run checkpoint"
+            ):
+                instance._ensure_restart_claim(state, paths)
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("8", persisted["run_id"])
+            self.assertIn("restart_claim_recovery", persisted)
+
+            restarted = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            recovered = restarted._load_state(
+                "restart-run-checkpoint-crash", paths
+            )
+            restarted._ensure_restart_claim(recovered, paths)
+
+            self.assertEqual(2, backend.claims)
+            self.assertEqual("8", recovered["run_id"])
+            self.assertNotIn("restart_claim_recovery", recovered)
+
+    def test_restart_reclaim_rejects_foreign_active_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state"
+            )
+            paths = instance._paths("restart-foreign-claim")
+            state = {
+                "schema_version": 1,
+                "mission_id": "restart-foreign-claim",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "candidate_pr_open",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "restart_claim_recovery": {
+                    "schema_version": 1,
+                    "previous_run_id": "7",
+                    "reclaim_token": "a" * 64,
+                },
+            }
+            instance._save(paths, state)
+            backend.claim(
+                "task-1",
+                ttl_seconds=approved["claim_ttl_seconds"],
+                provenance="f" * 64,
+            )
+
+            with self.assertRaisesRegex(
+                coordinator.mission_adapter.AdapterError, "stale claim"
+            ):
+                instance._ensure_restart_claim(state, paths)
+
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertEqual("7", persisted["run_id"])
+            self.assertEqual(
+                "a" * 64,
+                persisted["restart_claim_recovery"]["reclaim_token"],
+            )
+
+    def test_restart_reclaim_requires_exact_stale_prior_run(self):
+        cases = {
+            "missing": {"run_id": "999"},
+            "not_stale": {"status": "cancelled", "outcome": "cancelled"},
+            "foreign_profile": {"profile": "other-worker"},
+        }
+        for name, mutation in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                backend = FakeBackend()
+                backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+                backend.task.update(status="ready", claim_expires=None)
+                backend.runs[0].update(
+                    status="stale", outcome="stale", claim_expires=None
+                )
+                changes = dict(mutation)
+                run_id = changes.pop("run_id", "7")
+                backend.runs[0].update(changes)
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), backend, root / "state"
+                )
+                state = {
+                    "mission_id": f"restart-invalid-prior-{name}",
+                    "root_task_id": "task-1",
+                    "run_id": run_id,
+                }
+
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "exact stale prior run"
+                ):
+                    instance._ensure_restart_claim(
+                        state, instance._paths(state["mission_id"])
+                    )
+
+                self.assertEqual(1, backend.claims)
+                self.assertNotIn("restart_claim_recovery", state)
+
     def test_expired_or_revoked_claim_stops_active_reconciliation(self):
         with tempfile.TemporaryDirectory() as directory:
             state = {
@@ -8226,6 +8538,48 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 backend.runs[0]["metadata"]["mission_events"],
             )
 
+    def test_cleaned_state_reclaims_stale_run_before_native_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = FakeClient()
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            counters = {
+                "authors": 0, "reviews": 0, "worktrees": 0, "cleanups": 0,
+            }
+            instance = HermeticCoordinator(
+                approved, client, backend, root / "state", counters=counters
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "cleaned",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 1,
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+                "owner_answers": [],
+            })
+
+            with mock.patch.object(instance, "_events", return_value=[]):
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("8", result["state"]["run_id"])
+            self.assertEqual(2, backend.claims)
+
     def test_rejected_review_cleans_and_converges_after_lost_completion_response(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -8270,6 +8624,74 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             )
             with mock.patch.object(instance, "_review", side_effect=AssertionError("model rerun")):
                 self.assertIsNone(instance.tick())
+
+    def test_rejected_review_reclaims_exact_stale_run_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "review_rejected",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 2,
+                "root_task_id": "task-1",
+                "run_id": "7",
+            })
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("8", result["state"]["run_id"])
+            self.assertEqual(2, backend.claims)
+            cleanup.assert_called_once()
+
+    def test_rejection_cleaned_reclaims_stale_run_before_native_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            client = RejectionClient()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state"
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, {
+                "schema_version": 1,
+                "mission_id": "mission-a7-3",
+                "dispatch_profile": approved["dispatch_profile"],
+                "phase": "rejection_cleaned",
+                "branch": "codex/a7-3-vpnrouter-deadbeef",
+                "review_cycle": 2,
+                "root_task_id": "task-1",
+                "run_id": "7",
+            })
+
+            result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("8", result["state"]["run_id"])
+            self.assertEqual(2, backend.claims)
 
     def test_first_post_verify_failure_retries_once_and_succeeds(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -10039,6 +10461,40 @@ class TestCancelledCleanup(unittest.TestCase):
             self.assertEqual("cancelled", result["state"]["outcome"])
             self.assertEqual(1, backend.completes)
             self.assertEqual(1, backend.archives)
+            self.assertEqual([], client.published)
+
+    def test_cancelled_task_reclaims_exact_stale_run_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            mission_id = "m-cancelled-stale"
+            backend = FakeBackend()
+            approved = _cancelled_profile(root)
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            backend.task.update(status="ready", claim_expires=None)
+            backend.runs[0].update(
+                status="stale", outcome="stale", claim_expires=None
+            )
+            instance, client, backend, _ = _make_cancelled(
+                root,
+                {mission_id: _cancelled_mission(mission_id)},
+                backend=backend,
+                states=[{
+                    "mission_id": mission_id,
+                    "dispatch_profile": _CANCELLED_DP,
+                    "phase": "claimed",
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                }],
+            )
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("cancelled", result["state"]["outcome"])
+            self.assertEqual("8", result["state"]["run_id"])
+            self.assertEqual(2, backend.claims)
+            cleanup.assert_called_once()
             self.assertEqual([], client.published)
 
     def test_lost_completion_response(self):

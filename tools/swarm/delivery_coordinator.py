@@ -3050,6 +3050,132 @@ class DeliveryCoordinator:
         state["run_id"] = observed_run_id
         self._assert_claim(state)
 
+    def _restart_claim_recovery(
+        self, state: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        value = state.get("restart_claim_recovery")
+        if value is None:
+            return None
+        if (
+            not isinstance(value, dict)
+            or set(value) != {
+                "schema_version", "previous_run_id", "reclaim_token",
+            }
+            or value.get("schema_version") != 1
+            or not isinstance(value.get("previous_run_id"), str)
+            or not value["previous_run_id"]
+            or not isinstance(value.get("reclaim_token"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["reclaim_token"]) is None
+        ):
+            raise DeliveryError("restart claim recovery state is invalid")
+        return value
+
+    def _ensure_restart_claim(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path]
+    ) -> None:
+        """Recover an expired durable run without adopting another claimant."""
+        snapshot = self.backend.show(state["root_task_id"])
+        task = snapshot.get("task")
+        runs = snapshot.get("runs")
+        if (
+            not isinstance(task, dict)
+            or task.get("id") != state["root_task_id"]
+            or task.get("assignee") != self.profile["assignee"]
+            or not isinstance(runs, list)
+        ):
+            raise DeliveryError("Kanban task is outside the approved assignee/run contract")
+        active = [
+            run for run in runs
+            if isinstance(run, dict) and run.get("status") == "running"
+        ]
+        recovery = self._restart_claim_recovery(state)
+        if recovery is None and task.get("status") == "running":
+            if (
+                len(active) != 1
+                or str(active[0].get("id")) != str(state.get("run_id"))
+            ):
+                raise DeliveryError("refusing to adopt an undurable active Kanban run")
+            self._assert_claim(state)
+            return
+        previous_run_id = (
+            recovery["previous_run_id"]
+            if recovery is not None
+            else str(state.get("run_id") or "")
+        )
+        previous_runs = [
+            run for run in runs
+            if isinstance(run, dict)
+            and str(run.get("id")) == previous_run_id
+        ]
+        if (
+            not previous_run_id
+            or len(previous_runs) != 1
+            or previous_runs[0].get("status") != "stale"
+            or previous_runs[0].get("outcome") != "stale"
+            or previous_runs[0].get("profile") != self.profile["assignee"]
+        ):
+            raise DeliveryError("restart claim recovery lacks the exact stale prior run")
+        durable_run_id = str(state.get("run_id") or "")
+        active_run_ids = {
+            str(run.get("id")) for run in active
+            if isinstance(run, dict)
+        }
+        if durable_run_id not in {previous_run_id, *active_run_ids}:
+            raise DeliveryError("restart claim recovery durable run identity changed")
+        if recovery is None:
+            if task.get("status") != "ready" or active:
+                raise DeliveryError("Kanban task did not converge to a recoverable claim state")
+            recovery = {
+                "schema_version": 1,
+                "previous_run_id": previous_run_id,
+                "reclaim_token": hashlib.sha256(
+                    (
+                        "restart-claim-v1\n"
+                        f"{state['mission_id']}\n{state['root_task_id']}\n"
+                        f"{previous_run_id}"
+                    ).encode()
+                ).hexdigest(),
+            }
+            state["restart_claim_recovery"] = recovery
+            self._save(paths, state)
+        if task.get("status") == "ready" and not active:
+            if str(state.get("run_id")) != recovery["previous_run_id"]:
+                raise DeliveryError("restart claim recovery lost its durable prior run")
+            snapshot = self.backend.claim(
+                state["root_task_id"],
+                ttl_seconds=self.profile["claim_ttl_seconds"],
+                provenance=recovery["reclaim_token"],
+            )
+            task = snapshot.get("task")
+            runs = snapshot.get("runs")
+            if (
+                not isinstance(task, dict)
+                or task.get("id") != state["root_task_id"]
+                or task.get("assignee") != self.profile["assignee"]
+                or not isinstance(runs, list)
+            ):
+                raise DeliveryError("restart claim recovery changed the approved task owner")
+            active = [
+                run for run in runs
+                if isinstance(run, dict) and run.get("status") == "running"
+            ]
+        if (
+            task.get("status") != "running"
+            or len(active) != 1
+            or active[0].get("profile") != self.profile["assignee"]
+        ):
+            raise DeliveryError("restart claim recovery found a different active Kanban run")
+        previous_run_id = state.get("run_id")
+        state["run_id"] = str(active[0].get("id"))
+        try:
+            self._assert_claim(state, provenance=recovery["reclaim_token"])
+        except (DeliveryError, mission_adapter.AdapterError):
+            state["run_id"] = previous_run_id
+            raise
+        self._save(paths, state)
+        state.pop("restart_claim_recovery", None)
+        self._save(paths, state)
+
     def _assert_claim(
         self,
         state: dict[str, Any],
@@ -3089,7 +3215,7 @@ class DeliveryCoordinator:
         runs = snapshot.get("runs")
         if not isinstance(task, dict) or not isinstance(runs, list):
             raise DeliveryError("Kanban completion snapshot is invalid")
-        if task.get("status") == "running":
+        if task.get("status") in {"ready", "running"}:
             return False
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         expected_metadata = {"mission_events": self._events(state, cleanup=True)}
@@ -3283,7 +3409,7 @@ class DeliveryCoordinator:
         runs = snapshot.get("runs")
         if not isinstance(task, dict) or not isinstance(runs, list):
             raise DeliveryError("Kanban rejection snapshot is invalid")
-        if task.get("status") == "running":
+        if task.get("status") in {"ready", "running"}:
             return False
         matching = [run for run in runs if str(run.get("id")) == str(state["run_id"])]
         if (
@@ -3346,6 +3472,11 @@ class DeliveryCoordinator:
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
+        if state["phase"] in {
+            "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed",
+            "deployment_failed",
+        }:
+            self._ensure_restart_claim(state, paths)
         if state["phase"] == "review_rejected":
             self._publish_review_findings_notice(state)
         if state["phase"] in {
@@ -3366,7 +3497,7 @@ class DeliveryCoordinator:
             self._save(paths, state)
         if state["phase"] == "rejection_cleaned":
             if not self._recover_rejection_completion(state, paths):
-                self._assert_claim(state)
+                self._ensure_restart_claim(state, paths)
                 self.backend.complete(
                     state["root_task_id"],
                     result=result,
@@ -3453,8 +3584,11 @@ class DeliveryCoordinator:
             )
             require_claim = task_status not in {"done", "archived"}
             if require_claim:
-                self._ensure_claimed(state)
-                self._save(paths, state)
+                if state.get("run_id") is None:
+                    self._ensure_claimed(state)
+                    self._save(paths, state)
+                else:
+                    self._ensure_restart_claim(state, paths)
             preserve_remote = False
             if (
                 state.get("pr_number") is not None
@@ -3488,7 +3622,11 @@ class DeliveryCoordinator:
                 state["outcome"] = "cancelled"
                 self._save(paths, state)
             else:
-                self._ensure_claimed(state)
+                if state.get("run_id") is None:
+                    self._ensure_claimed(state)
+                    self._save(paths, state)
+                else:
+                    self._ensure_restart_claim(state, paths)
                 self.backend.complete(
                     state["root_task_id"],
                     result="cancelled",
@@ -6215,8 +6353,6 @@ class DeliveryCoordinator:
                 if state.get("phase") == "review_rejected":
                     return self._finish_rejection(state, paths)
             self._ensure_route(state, paths)
-            if isinstance(state.get("root_task_id"), str):
-                self._publish_available_telemetry(state, paths)
             ambiguous = self._ambiguous_state(state)
             if ambiguous is not None:
                 self._publish_ambiguous_notice(state, ambiguous)
@@ -6251,9 +6387,7 @@ class DeliveryCoordinator:
                 return capacity_wait
             if state["phase"] == "cleaned":
                 self._recover_task_completion(state, paths)
-            if state["phase"] not in {
-                "cleanup_pending", "cleaned", "task_completed", "complete"
-            }:
+            if state["phase"] not in {"task_completed", "complete"}:
                 if state.get("disk_space_wait") is not None or state["phase"] == "new":
                     disk_wait = self._disk_space_wait_result(
                         state, mission_id, paths
@@ -6261,9 +6395,17 @@ class DeliveryCoordinator:
                     if disk_wait is not None:
                         return disk_wait
                 if state["phase"] != "new":
-                    self._assert_claim(state)
+                    self._ensure_restart_claim(state, paths)
+            if state["phase"] not in {
+                "cleanup_pending", "cleaned", "task_completed", "complete"
+            }:
                 self._ensure_worktree(state, paths)
                 self._save(paths, state)
+            if (
+                state["phase"] != "new"
+                and isinstance(state.get("root_task_id"), str)
+            ):
+                self._publish_available_telemetry(state, paths)
 
             legacy_repair = self._migrate_legacy_post_verify_state(state, paths)
             if legacy_repair == "failed":
