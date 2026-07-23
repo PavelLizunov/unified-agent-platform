@@ -147,8 +147,9 @@ not acquire authority merely because they contain a sensitive word. Conversation
 “Should we integrate Claude as a new provider?” remains ordinary chat, while the direct authoritative execution
 primitive applies the same task-risk check immediately. The shared owner-answer writer rejects any answer that would
 add one of these capabilities; a clarification cannot expand the accepted task. On restart and cutover, MissionStore
-also preflights persisted accepted goals and answers before serving them. A legacy architecture goal is projected with
-the same gate, while a legacy unsupported goal or capability-bearing answer stops fail-closed before dispatch.
+also preflights persisted accepted goals and answers of every nonterminal mission before serving them. A legacy
+architecture goal is projected with the same gate, while a legacy unsupported goal or capability-bearing answer stops
+fail-closed before dispatch. Terminal history remains readable and cannot be resumed.
 
 Workspace forwards its existing stable optimistic message identity and selected project to the Central session
 stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice

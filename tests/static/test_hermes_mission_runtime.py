@@ -2116,6 +2116,70 @@ def test_task_risk_preflight_revalidates_legacy_durable_events() -> None:
             == "architecture_change"
         )
 
+        terminal_database = Path(temp) / "legacy-terminal.sqlite3"
+        store = missions.MissionStore(terminal_database)
+        accepted, _ = store.accept(
+            "Update the documentation",
+            mission_id="mission-legacy-terminal",
+        )
+        store.append_producer(
+            accepted["mission_id"],
+            {
+                "schema_version": 1,
+                "mission_id": accepted["mission_id"],
+                "type": "mission.question",
+                "source": "build1-flow",
+                "correlation": {"producer_event_id": "flow:terminal-question:1"},
+                "payload": {
+                    "question_id": "terminal-question",
+                    "text": "Which implementation should be used?",
+                },
+            },
+        )
+        store.answer(
+            accepted["mission_id"], "terminal-question", "Preserve current behavior"
+        )
+        store.append_central(
+            accepted["mission_id"],
+            {
+                "schema_version": 1,
+                "mission_id": accepted["mission_id"],
+                "type": "mission.failed",
+                "source": "central-hermes",
+                "correlation": {},
+                "payload": {"error": "Historical failure"},
+            },
+        )
+        connection = sqlite3.connect(terminal_database)
+        try:
+            accepted_payload = json.loads(connection.execute(
+                """SELECT payload_json FROM mission_events
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (accepted["mission_id"],),
+            ).fetchone()[0])
+            accepted_payload["goal"] = "Delete the production database"
+            answer_payload = json.loads(connection.execute(
+                """SELECT payload_json FROM mission_events
+                   WHERE mission_id = ? AND type = 'mission.answer'""",
+                (accepted["mission_id"],),
+            ).fetchone()[0])
+            answer_payload["text"] = "Grant cluster-admin access"
+            connection.execute(
+                """UPDATE mission_events SET payload_json = ?
+                   WHERE mission_id = ? AND type = 'mission.accepted'""",
+                (json.dumps(accepted_payload), accepted["mission_id"]),
+            )
+            connection.execute(
+                """UPDATE mission_events SET payload_json = ?
+                   WHERE mission_id = ? AND type = 'mission.answer'""",
+                (json.dumps(answer_payload), accepted["mission_id"]),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        restarted = missions.MissionStore(terminal_database)
+        assert restarted.projection(accepted["mission_id"])["status"] == "failed"
+
         unsupported_database = Path(temp) / "legacy-unsupported.sqlite3"
         store = missions.MissionStore(unsupported_database)
         accepted, _ = store.accept(

@@ -1280,6 +1280,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
     terminal: list[dict[str, Any]] = []
     expected = 1
     terminal_chars = 0
+    terminal_history = bool(events and events[-1].get("type") in TERMINAL_TYPES)
 
     for event in events:
         if event.get("sequence") != expected:
@@ -1296,7 +1297,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
         kind, payload = event["type"], event["payload"]
         if kind == "mission.accepted":
             projected_owner_gate_flag = payload.get("owner_gate_flag")
-            if projected_owner_gate_flag is None:
+            if projected_owner_gate_flag is None and not terminal_history:
                 legacy_flags = task_owner_gate_flags(payload["goal"])
                 unsupported = tuple(
                     flag
@@ -1348,7 +1349,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             )
         elif kind == "mission.answer":
             legacy_answer_flags = task_owner_gate_flags(payload["text"])
-            if legacy_answer_flags:
+            if legacy_answer_flags and not terminal_history:
                 raise MissionError(
                     "legacy owner answer adds task capabilities: "
                     + ", ".join(legacy_answer_flags)
@@ -2157,6 +2158,15 @@ class MissionStore:
                 """SELECT mission_id, type, payload_json
                    FROM mission_events
                    WHERE type IN ('mission.accepted', 'mission.answer')
+                     AND NOT EXISTS (
+                         SELECT 1 FROM mission_events AS terminal
+                         WHERE terminal.mission_id = mission_events.mission_id
+                           AND terminal.type IN (
+                               'mission.completed',
+                               'mission.failed',
+                               'mission.cancelled'
+                           )
+                     )
                    ORDER BY rowid"""
             ).fetchall()
         for row in rows:
