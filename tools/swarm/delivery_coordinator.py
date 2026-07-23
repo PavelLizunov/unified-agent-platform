@@ -924,6 +924,7 @@ class DeliveryCoordinator:
             raise DeliveryError("mission goal changed after the durable execution checkpoint")
         execution_class = mission.get("execution_class")
         expected_changed_files = mission.get("expected_changed_files")
+        owner_gate_flag = mission.get("owner_gate_flag")
         if (execution_class, expected_changed_files) != (None, None) and (
             execution_class != "routine_docs"
             or not isinstance(expected_changed_files, int)
@@ -931,6 +932,8 @@ class DeliveryCoordinator:
             or not 1 <= expected_changed_files <= 2
         ):
             raise DeliveryError("mission execution class is invalid")
+        if owner_gate_flag not in {None, "architecture_change"}:
+            raise DeliveryError("mission owner gate flag is invalid")
         if "execution_class" not in state and "expected_changed_files" not in state:
             state.update(
                 execution_class=execution_class,
@@ -943,6 +946,13 @@ class DeliveryCoordinator:
         ):
             raise DeliveryError(
                 "mission execution class changed after the durable checkpoint"
+            )
+        if "owner_gate_flag" not in state:
+            state["owner_gate_flag"] = owner_gate_flag
+            changed = True
+        elif state.get("owner_gate_flag") != owner_gate_flag:
+            raise DeliveryError(
+                "mission owner gate flag changed after the durable checkpoint"
             )
         if changed:
             self._save(paths, state)
@@ -1063,7 +1073,7 @@ class DeliveryCoordinator:
                 if self.profile["schema_version"] == 3
                 else self.profile["max_changed_files"]
             )
-            flags = self.profile["route_flags"]
+            flags = list(self.profile["route_flags"])
         else:
             changed_files = routine_limit
             complex_flags = set(
@@ -1073,6 +1083,11 @@ class DeliveryCoordinator:
                 flag for flag in self.profile["route_flags"]
                 if flag not in complex_flags
             ]
+        owner_gate_flag = state.get("owner_gate_flag")
+        if owner_gate_flag is not None:
+            if owner_gate_flag != "architecture_change":
+                raise DeliveryError("durable mission owner gate flag is invalid")
+            flags = sorted({*flags, owner_gate_flag})
         return {
             "schema_version": 1,
             "changed_files": changed_files,

@@ -758,3 +758,30 @@
   остаётся research-only: включение в coding delivery требует отдельного exact runtime canary и явного расширения
   OpenAI allowlist. Отдельный QA-agent не вводится; обязательные gates остаются детерминированными repo-contract
   проверками.
+
+## ADR-039 — Детерминированный task-risk gate до mission acceptance
+
+- **Контекст:** только profile-level `route_flags` защищали owner-gated границы. Обычная цель могла явно требовать
+  смену принятой архитектуры, destructive действие, новые credentials/authority, нового provider или local/GPU,
+  хотя зарегистрированный profile сам этих флагов не содержал. Делегировать такую классификацию модели до durable
+  intake нельзя: результат был бы недетерминированным и сам потребовал бы authority.
+- **Решение:** Central применяет к owner goal закрытый RU/EN action+object classifier до `mission.accepted`.
+  `architecture_change` сохраняется единственным optional `owner_gate_flag` принятой mission. Coordinator неизменно
+  связывает его с durable state, объединяет со статическими profile flags и использует существующий pre-author
+  exact-`APPROVE` protocol. `destructive`, `credentials_or_external_authority`, `new_provider` и `local_or_gpu`
+  отвергаются до mission с точной ошибкой `task requires separate capability setup: <flags>`: ответ внутри обычной
+  mission не может создать отсутствующую capability.
+- **Cutover/restart:** при каждом открытии durable MissionStore Central повторно проверяет уже сохранённые
+  `mission.accepted` и `mission.answer`. Legacy architecture goal без поля проецируется с
+  `architecture_change` и поэтому получает тот же gate; legacy unsupported goal или capability-bearing answer
+  останавливает runtime fail-closed до dispatch. Новые owner answers также проходят этот gate в общем
+  `MissionStore.answer()`, независимо от Workspace/Telegram ingress.
+- **False-positive boundary:** чувствительное слово без защищённого действия не выдаёт полномочий и не ставит gate.
+  Правка `docs/architecture.md`, ссылка на ADR, удаление test fixture, credential-redaction test, отрицательный
+  Claude-routing test, удаление устаревшего Ollama-текста и dry-run coverage остаются обычными задачами. При этом
+  docs-only optimization не снимает `architecture_change`: явная замена принятой архитектуры в ADR/README всё равно
+  требует exact `APPROVE`. Conversational admission выполняется раньше risk gate: вопрос о новом provider остаётся
+  обычным чатом, а прямой authoritative execution path классифицирует task risk немедленно.
+- **Отклонено:** LLM risk scorer до mission, свободный список task flags из browser/Telegram, APPROVE как универсальная
+  выдача credentials/destructive/provider/local authority, новый approval service и подтверждение расходов
+  подписки, штатных OpenAI routes, tests, PR/CI/merge или предусмотренного repo-contract deploy.

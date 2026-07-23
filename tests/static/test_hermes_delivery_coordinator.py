@@ -3642,6 +3642,51 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 )["status"],
             )
 
+    def test_task_architecture_gate_is_durably_unioned_with_profile_flags(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(
+                route_flags=["durable_state", "multi_platform"],
+                delivery_mode="none",
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-task-owner-gate")
+            state = instance._load_state("mission-task-owner-gate", paths)
+            mission = {
+                "mission_id": "mission-task-owner-gate",
+                "goal": "Update README only to replace the accepted architecture in ADR-031",
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+                "owner_gate_flag": "architecture_change",
+            }
+
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertEqual("architecture_change", state["owner_gate_flag"])
+            signals = instance._route_signals(state)
+            self.assertEqual(2, signals["changed_files"])
+            self.assertEqual(["architecture_change"], signals["flags"])
+            self.assertEqual(
+                "owner_approval_required",
+                coordinator.flow_contract.choose_delivery_route(
+                    instance.policy, signals
+                )["status"],
+            )
+
+            recovered = instance._load_state("mission-task-owner-gate", paths)
+            self.assertEqual("architecture_change", recovered["owner_gate_flag"])
+            self.assertEqual(signals, instance._route_signals(recovered))
+
+            changed = dict(mission)
+            changed.pop("owner_gate_flag")
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "owner gate flag changed"
+            ):
+                instance._bind_mission_goal(recovered, changed, paths)
+
     def test_registered_flow_pilot_profile_is_closed_and_reusable(self):
         registered = ROOT / "tools/swarm/profiles/delivery-flow-pilot-registered-v4.json"
         value = json.loads(registered.read_text(encoding="utf-8"))
