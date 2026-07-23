@@ -1447,6 +1447,54 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertNotIn("model_ambiguous", state)
             self.assertTrue((paths["directory"] / "author-1-last.txt").is_file())
             self.assertIn("OWNER_RESULT:", prompts[0])
+            self.assertIn("read every source explicitly required by the goal", prompts[0])
+
+    def test_reviewer_receives_the_exact_goal_and_required_source_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(
+                goal="Read https://example.invalid/handoff.md and create a plan",
+                codex_bin="codex",
+                codex_home=str(root / "codex-home"),
+            )
+            prompts = []
+
+            def runner(_command, **kwargs):
+                prompts.append(kwargs["input"])
+                raise RuntimeError("prompt captured")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            paths = instance._paths("review-goal-source")
+            state = {
+                "review_cycle": 1,
+                "candidate_sha": "candidate",
+                "prior_review_rejections": 0,
+                "prior_ci_failures": 0,
+                "prior_author_failures": 0,
+                "route_decisions": {},
+                "effective_route_decisions": {},
+            }
+            instance._ensure_route(state, paths)
+            with (
+                mock.patch.object(instance, "_assert_claim"),
+                mock.patch.object(instance, "_remove_worktree"),
+                mock.patch.object(instance, "_git", return_value="candidate"),
+                mock.patch.object(
+                    coordinator.flow_contract,
+                    "source_attestation",
+                    return_value={"sha256": "source"},
+                ),
+                mock.patch.object(instance, "_bound_pr", return_value={"isDraft": True}),
+                self.assertRaisesRegex(RuntimeError, "prompt captured"),
+            ):
+                instance._review(state, paths)
+
+            self.assertEqual(1, len(prompts))
+            self.assertIn(json.dumps(approved["goal"]), prompts[0])
+            self.assertIn("without reading a required source", prompts[0])
 
     def test_v4_successful_check_mutation_enters_guarded_candidate_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -76,6 +76,12 @@ def test_conversational_admission_requires_explicit_execution_intent() -> None:
         assert missions.is_execution_goal(execution), execution
     assert missions.routine_docs_file_limit("Обнови только README") == 2
     assert missions.routine_docs_file_limit("Update README only") == 2
+    assert missions.routine_docs_file_limit(
+        "По читай handoff и создай себе plan реализации в суфлер репо"
+    ) == 1
+    assert missions.routine_docs_file_limit(
+        "Create an implementation plan and then implement it"
+    ) is None
     assert missions.routine_docs_file_limit("Обнови README и код") is None
     assert missions.routine_docs_file_limit("Исправь простой баг") is None
 

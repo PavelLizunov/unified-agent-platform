@@ -163,6 +163,17 @@ _ROUTINE_DOCS_ONLY = re.compile(
     r"\bтолько\s+(?:файл\s+)?(?:readme(?:\.md)?|docs|документац\w*|документ\w*)\b",
     re.IGNORECASE,
 )
+_ROUTINE_PLAN_ONLY = re.compile(
+    r"\b(?:create|write|add)\s+(?:an?\s+)?(?:implementation\s+)?plan\b|"
+    r"\b(?:созда\w*|напиш\w*|добав\w*)\s+(?:себе\s+)?"
+    r"(?:plan|план\w*)(?:\s+(?:implementation|реализац\w*))?\b",
+    re.IGNORECASE,
+)
+_PLAN_AND_IMPLEMENT = re.compile(
+    r"(?:plan|план\w*).{0,80}\b(?:and|then|и|затем)\s+"
+    r"(?:implement|modify|change|code|реализ\w*|измен\w*|добав\w*)\b",
+    re.IGNORECASE,
+)
 _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
 _COMPLETION_DELIVERIES = {
     "pull_request": "merged",
@@ -281,9 +292,13 @@ def routine_docs_file_limit(text: object) -> int | None:
     if not isinstance(text, str):
         return None
     normalized = " ".join(text.split())[:4_000]
-    if not is_execution_goal(normalized) or not _ROUTINE_DOCS_ONLY.search(normalized):
+    if not is_execution_goal(normalized):
         return None
-    return 2
+    if _ROUTINE_DOCS_ONLY.search(normalized):
+        return 2
+    if _ROUTINE_PLAN_ONLY.search(normalized) and not _PLAN_AND_IMPLEMENT.search(normalized):
+        return 1
+    return None
 
 
 class MissionError(ValueError):
