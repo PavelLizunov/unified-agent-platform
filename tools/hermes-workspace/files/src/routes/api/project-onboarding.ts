@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { deleteCookie, setCookie } from '@tanstack/react-start/server'
 import { isAuthenticated } from '../../server/auth-middleware'
 import { gatewayFetch } from '../../server/gateway-capabilities'
 
@@ -30,21 +31,24 @@ function result(
   status: number,
   requestId?: string,
 ) {
-  const headers = new Headers()
   if (requestId) {
-    headers.append(
-      'Set-Cookie',
-      `${COOKIE}=${encodeURIComponent(requestId)}; Path=/; Max-Age=2592000; HttpOnly; SameSite=Strict`,
-    )
+    setCookie(COOKIE, requestId, {
+      path: '/',
+      maxAge: 2592000,
+      httpOnly: true,
+      sameSite: 'strict',
+    })
   }
   const onboarding = payload.onboarding as Record<string, unknown> | undefined
   if (onboarding?.checkpoint === 'ready' && typeof onboarding.project_id === 'string') {
-    headers.append(
-      'Set-Cookie',
-      `${PROJECT_COOKIE}=${encodeURIComponent(onboarding.project_id)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`,
-    )
+    setCookie(PROJECT_COOKIE, onboarding.project_id, {
+      path: '/',
+      maxAge: 31536000,
+      httpOnly: true,
+      sameSite: 'strict',
+    })
   }
-  return Response.json(payload, { status, headers })
+  return Response.json(payload, { status })
 }
 
 export const Route = createFileRoute('/api/project-onboarding')({
@@ -62,10 +66,12 @@ export const Route = createFileRoute('/api/project-onboarding')({
         try {
           const { response, payload } = await central(`/api/project-onboarding/${requestId}`)
           if (response.status === 404) {
-            return Response.json(
-              { onboarding: null },
-              { headers: { 'Set-Cookie': `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict` } },
-            )
+            deleteCookie(COOKIE, {
+              path: '/',
+              httpOnly: true,
+              sameSite: 'strict',
+            })
+            return Response.json({ onboarding: null })
           }
           return result(payload, response.status, requestId)
         } catch {

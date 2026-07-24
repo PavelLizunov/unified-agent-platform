@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { deleteCookie, setCookie } from '@tanstack/react-start/server'
 import { isAuthenticated } from '../../server/auth-middleware'
 import { gatewayFetch } from '../../server/gateway-capabilities'
 
@@ -80,14 +81,13 @@ export const Route = createFileRoute('/api/mission-projects')({
             if (project.status !== 'setup_required') {
               return Response.json({ error: 'Проект не требует настройки' }, { status: 409 })
             }
-            return Response.json(
-              { ok: true, setup_project_id: projectId },
-              {
-                headers: {
-                  'Set-Cookie': `${SETUP_COOKIE}=${encodeURIComponent(projectId)}; Path=/; Max-Age=86400; HttpOnly; SameSite=Strict`,
-                },
-              },
-            )
+            setCookie(SETUP_COOKIE, projectId, {
+              path: '/',
+              maxAge: 86400,
+              httpOnly: true,
+              sameSite: 'strict',
+            })
+            return Response.json({ ok: true, setup_project_id: projectId })
           }
           if (body?.mode !== undefined && body.mode !== 'select') {
             return Response.json({ error: 'Invalid project action' }, { status: 400 })
@@ -98,19 +98,18 @@ export const Route = createFileRoute('/api/mission-projects')({
               { status: 409 },
             )
           }
-          const headers = new Headers()
-          headers.append(
-            'Set-Cookie',
-            `${COOKIE}=${encodeURIComponent(projectId)}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Strict`,
-          )
-          headers.append(
-            'Set-Cookie',
-            `${SETUP_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict`,
-          )
-          return Response.json(
-            { ok: true, selected_project_id: projectId },
-            { headers },
-          )
+          setCookie(COOKIE, projectId, {
+            path: '/',
+            maxAge: 31536000,
+            httpOnly: true,
+            sameSite: 'strict',
+          })
+          deleteCookie(SETUP_COOKIE, {
+            path: '/',
+            httpOnly: true,
+            sameSite: 'strict',
+          })
+          return Response.json({ ok: true, selected_project_id: projectId })
         } catch (error) {
           return Response.json(
             { error: error instanceof Error ? error.message : 'Project catalog unavailable' },

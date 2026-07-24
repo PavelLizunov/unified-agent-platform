@@ -113,10 +113,12 @@ LEGACY_ADDED_FILES = {
 PREVIOUS_ADDED_FILES = {
     "src/routes/api/project-onboarding.ts": (
         "d727dfa55ac2eb266bff72cb87ea8d4c4c5b3482447fcf5fc14cb2a519de2977",
+        "5ca714881acafd83f3a8d308128ea7eafb2b98a8e8a5ff05d7c31155e44f12c5",
     ),
     "src/routes/api/mission-projects.ts": (
         "9e68a9e8e704cdccb39061e173e3c5ae7c841f450906b08787fcb1ab6dc01ce1",
         "e24378c6bd13f6bd4af0da76a7353b192e1c5ebcfb6aa6feb294ef7dea7a053b",
+        "2a86d13ea143f7250b1ed14a7bb9d393c611588180eff6148a580b40ed64a018",
     ),
     "src/components/settings/project-permissions.tsx": (
         "0fdbaf45acdadcad6a6657e33aea1f1adc63804fc5f5e45714ba3b47d010bd74",
