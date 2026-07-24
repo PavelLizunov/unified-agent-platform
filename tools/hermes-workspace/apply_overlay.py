@@ -119,6 +119,7 @@ PREVIOUS_ADDED_FILES = {
         "9e68a9e8e704cdccb39061e173e3c5ae7c841f450906b08787fcb1ab6dc01ce1",
         "e24378c6bd13f6bd4af0da76a7353b192e1c5ebcfb6aa6feb294ef7dea7a053b",
         "2a86d13ea143f7250b1ed14a7bb9d393c611588180eff6148a580b40ed64a018",
+        "186b9d7b0be214380b4c12cd890778238d03cf3bcd3afb74abfa5235c10ac19c",
     ),
     "src/components/settings/project-permissions.tsx": (
         "0fdbaf45acdadcad6a6657e33aea1f1adc63804fc5f5e45714ba3b47d010bd74",
@@ -127,6 +128,7 @@ PREVIOUS_ADDED_FILES = {
         "22b99cd0f61079d631d821b45817a37d35fe474166269408b7bc417b72f10f9a",
         "1d368904c3ee2fababb105b42cfa0539666bf7ddbe5580592c777d568f0194a0",
         "bc619f588a998525a662a4adf4831c9e9b82f407731433edc69a68bad5ad225c",
+        "fdd035f9dc77e7e743f447e71e857399dee9fd4bad8e687c3be6b250c6323b06",
     ),
     "src/routes/api/missions.ts": (
         "082ffe7f4d100d8a5a64fbde40893cfba1f98a1774c914acb2495ce1a857a243",

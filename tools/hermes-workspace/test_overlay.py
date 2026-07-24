@@ -559,6 +559,7 @@ def main() -> None:
         assert "setCookie(SETUP_COOKIE, projectId" in project_api
         assert "setCookie(COOKIE, projectId" in project_api
         assert "deleteCookie(SETUP_COOKIE" in project_api
+        assert "DELETE: async ({ request }) =>" in project_api
         assert "new Headers()" not in project_api
         assert "'Set-Cookie'" not in project_api
         onboarding_api = (
@@ -607,6 +608,9 @@ def main() -> None:
         assert "confirmed.selected_project_id !== selected" in project_settings
         assert "queryClient.invalidateQueries({ queryKey: ['uap', 'mission-projects'] })" in project_settings
         assert "fetch('/api/mission-projects', { cache: 'no-store' })" in project_settings
+        assert "method: 'DELETE'" in project_settings
+        assert "Не удалось закрыть настройку другого проекта" in project_settings
+        assert project_settings.index("method: 'DELETE'") < project_settings.index("method: 'POST'")
         status_position = project_settings.index(
             "{statusLabels[project.status] || project.status}"
         )

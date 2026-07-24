@@ -104,11 +104,6 @@ export const Route = createFileRoute('/api/mission-projects')({
             httpOnly: true,
             sameSite: 'strict',
           })
-          deleteCookie(SETUP_COOKIE, {
-            path: '/',
-            httpOnly: true,
-            sameSite: 'strict',
-          })
           return Response.json({ ok: true, selected_project_id: projectId })
         } catch (error) {
           return Response.json(
@@ -116,6 +111,17 @@ export const Route = createFileRoute('/api/mission-projects')({
             { status: 503 },
           )
         }
+      },
+      DELETE: async ({ request }) => {
+        if (!isAuthenticated(request)) {
+          return Response.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+        deleteCookie(SETUP_COOKIE, {
+          path: '/',
+          httpOnly: true,
+          sameSite: 'strict',
+        })
+        return Response.json({ ok: true })
       },
     },
   },

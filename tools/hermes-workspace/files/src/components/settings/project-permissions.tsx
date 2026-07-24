@@ -134,6 +134,13 @@ export function ProjectPermissions() {
     setSaving(true)
     setError('')
     try {
+      const clearResponse = await fetch('/api/mission-projects', {
+        method: 'DELETE',
+      })
+      const clearPayload = await clearResponse.json()
+      if (!clearResponse.ok) {
+        throw new Error(clearPayload.error || 'Не удалось закрыть настройку другого проекта')
+      }
       const response = await fetch('/api/mission-projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
