@@ -5833,6 +5833,173 @@ def test_incremental_gate_evidence_survives_restart_lost_response_and_retry() ->
             assert "progress decreased" in str(error)
 
 
+def test_pr_closed_accepts_stale_stale_completed_recovery_history() -> None:
+    """A clean crash-recovered canonical history (stale, stale, completed) must
+    gate the PR-closed terminal: exactly one mission.failed, no duplicate."""
+    with tempfile.TemporaryDirectory() as directory:
+        store = missions.MissionStore(Path(directory) / "missions.sqlite3")
+        mission_id = "mission-pr-closed-stale-recovery"
+        store.accept(
+            "Fix issue 39", mission_id=mission_id,
+            dispatch_profile="build1-vpnrouter-a7-3",
+        )
+
+        def publish(event_type: str, payload: dict, number: int) -> None:
+            store.append_producer(mission_id, {
+                "schema_version": 1, "mission_id": mission_id,
+                "type": event_type, "source": "build1-flow",
+                "correlation": {"producer_event_id": f"flow:prclosed:{number}"},
+                "payload": payload,
+            })
+
+        publish("task.upsert", {
+            "task_id": "task-1", "title": "Root", "status": "done",
+            "assignee": "coordinator",
+        }, 1)
+        # Canonical crash-recovered worker history: stale, stale, completed.
+        publish("worker.upsert", {
+            "worker_id": "task-1:run:76", "run_id": "76",
+            "profile": "coordinator", "status": "stale",
+        }, 2)
+        publish("worker.upsert", {
+            "worker_id": "task-1:run:77", "run_id": "77",
+            "profile": "coordinator", "status": "stale",
+        }, 3)
+        publish("worker.upsert", {
+            "worker_id": "task-1:run:82", "run_id": "82",
+            "profile": "coordinator", "status": "completed",
+        }, 4)
+        publish("gate.upsert", {"gate_id": "pull-request", "status": "failed"}, 5)
+        publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"}, 6)
+        publish("delivery.upsert", {
+            "kind": "pull_request", "status": "failed",
+            "url": "https://github.com/PavelLizunov/suflyor/pull/23",
+        }, 7)
+
+        failed = store.complete_if_ready(mission_id)
+        assert failed is not None and failed[1]
+        assert failed[0]["type"] == "mission.failed"
+        assert failed[0]["source"] == "central-hermes"
+        assert failed[0]["correlation"]["producer_event_id"] == "central:auto-pr-closed:v1"
+        assert store.projection(mission_id)["status"] == "failed"
+        # Replay does not append a duplicate terminal event.
+        assert store.complete_if_ready(mission_id) is None
+        assert store.projection(mission_id)["status"] == "failed"
+
+
+def test_pr_closed_worker_history_negatives_remain_nonterminal() -> None:
+    """Last worker not terminal, or an earlier completed/success/running/unknown
+    canonical worker, must keep the mission nonterminal."""
+    cases = {
+        "last-stale": (["stale", "stale"], "stale"),
+        "earlier-completed": (["completed"], "completed"),
+        "earlier-success": (["success"], "completed"),
+        "earlier-running": (["running"], "completed"),
+        "earlier-unknown": (["bogus-status"], "completed"),
+    }
+    for name, (earlier, last) in cases.items():
+        with tempfile.TemporaryDirectory() as directory:
+            store = missions.MissionStore(Path(directory) / "missions.sqlite3")
+            mission_id = f"mission-pr-closed-neg-{name}"
+            store.accept(
+                "Fix issue 39", mission_id=mission_id,
+                dispatch_profile="build1-vpnrouter-a7-3",
+            )
+            seq = {"n": 0}
+
+            def publish(event_type: str, payload: dict) -> None:
+                seq["n"] += 1
+                store.append_producer(mission_id, {
+                    "schema_version": 1, "mission_id": mission_id,
+                    "type": event_type, "source": "build1-flow",
+                    "correlation": {"producer_event_id": f"flow:neg:{seq['n']}"},
+                    "payload": payload,
+                })
+
+            publish("task.upsert", {
+                "task_id": "task-1", "title": "Root", "status": "done",
+                "assignee": "coordinator",
+            })
+            for index, status in enumerate(earlier):
+                publish("worker.upsert", {
+                    "worker_id": f"task-1:run:{index}", "run_id": str(index),
+                    "profile": "coordinator", "status": status,
+                })
+            publish("worker.upsert", {
+                "worker_id": f"task-1:run:{len(earlier)}",
+                "run_id": str(len(earlier)),
+                "profile": "coordinator", "status": last,
+            })
+            publish("gate.upsert", {"gate_id": "pull-request", "status": "failed"})
+            publish("gate.upsert", {"gate_id": "cleanup", "status": "passed"})
+            publish("delivery.upsert", {
+                "kind": "pull_request", "status": "failed",
+                "url": "https://github.com/PavelLizunov/suflyor/pull/23",
+            })
+
+            assert store.complete_if_ready(mission_id) is None
+            assert store.projection(mission_id)["status"] == "active"
+
+
+def test_completion_accepts_stale_then_completed_recovery_history() -> None:
+    """A successful crash-recovered mission (earlier canonical worker stale, final
+    completed) must complete through the real MissionStore: exactly one
+    mission.completed, no duplicate on replay, and the normal owner result valid.
+    Mirrors the exact existing successful task/gates/deliveries contract."""
+    with tempfile.TemporaryDirectory() as directory:
+        store = missions.MissionStore(Path(directory) / "missions.sqlite3")
+        mission_id = "mission-completion-stale-recovery"
+        store.accept(
+            "Fix issue 39", mission_id=mission_id,
+            dispatch_profile="build1-vpnrouter-a7-3",
+        )
+        seq = {"n": 0}
+
+        def publish(event_type: str, payload: dict) -> None:
+            seq["n"] += 1
+            store.append_producer(mission_id, {
+                "schema_version": 1, "mission_id": mission_id,
+                "type": event_type, "source": "build1-flow",
+                "correlation": {"producer_event_id": f"flow:complete:{seq['n']}"},
+                "payload": payload,
+            })
+
+        publish("task.upsert", {
+            "task_id": "task-1", "title": "Root", "status": "done",
+            "assignee": "coordinator",
+        })
+        # Canonical crash-recovered history: stale (run 76), completed (run 82).
+        publish("worker.upsert", {
+            "worker_id": "task-1:run:76", "run_id": "76",
+            "profile": "coordinator", "status": "stale",
+        })
+        publish("worker.upsert", {
+            "worker_id": "task-1:run:82", "run_id": "82",
+            "profile": "coordinator", "status": "completed",
+        })
+        # Exact existing successful delivery contract.
+        for gate_id in missions._COMPLETION_GATES:
+            publish("gate.upsert", {"gate_id": gate_id, "status": "passed"})
+        for kind, status in missions._COMPLETION_DELIVERIES.items():
+            payload = {"kind": kind, "status": status, "url": f"https://example.invalid/{kind}"}
+            if kind == "pull_request":
+                payload["summary"] = "Merged the fix."
+            publish("delivery.upsert", payload)
+
+        completed = store.complete_if_ready(mission_id)
+        assert completed is not None and completed[1]
+        assert completed[0]["type"] == "mission.completed"
+        assert completed[0]["source"] == "central-hermes"
+        assert completed[0]["correlation"]["producer_event_id"] == "central:auto-complete:v1"
+        # Normal owner result remains valid.
+        result = completed[0]["payload"]["result"]
+        assert isinstance(result, str) and "РЕЗУЛЬТАТ" in result
+        assert store.projection(mission_id)["status"] == "completed"
+        # Replay adds no duplicate terminal event.
+        assert store.complete_if_ready(mission_id) is None
+        assert store.projection(mission_id)["status"] == "completed"
+
+
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_conversational_admission_requires_explicit_execution_intent()
@@ -5902,6 +6069,9 @@ def main() -> None:
     test_accepted_schema_project_label_repository()
     test_incremental_gate_evidence_reconciles_with_terminal_batch()
     test_incremental_gate_evidence_survives_restart_lost_response_and_retry()
+    test_pr_closed_accepts_stale_stale_completed_recovery_history()
+    test_pr_closed_worker_history_negatives_remain_nonterminal()
+    test_completion_accepts_stale_then_completed_recovery_history()
     print("hermes mission runtime checks passed")
 
 

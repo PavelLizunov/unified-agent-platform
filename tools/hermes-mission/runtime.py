@@ -2309,6 +2309,13 @@ def _is_telemetry_worker(worker: dict[str, Any]) -> bool:
     return worker.get("worker_id") == "usage-total" and worker.get("profile") == "usage"
 
 
+# Safe non-final historical statuses for canonical workers that precede the
+# single terminal worker: a claim that was scheduled, or one that went stale
+# during crash recovery. A preceding completed/success/running/unknown status
+# is NOT a clean single-terminal recovery and must keep the mission nonterminal.
+_SAFE_HISTORICAL_WORKER_STATUSES = frozenset({"scheduled", "stale"})
+
+
 def _one_terminal_worker(
     workers: Any, terminal_statuses: set[str]
 ) -> bool:
@@ -2324,7 +2331,10 @@ def _one_terminal_worker(
     statuses = [worker.get("status") for worker in canonical]
     return (
         statuses[-1] in terminal_statuses
-        and all(status == "scheduled" for status in statuses[:-1])
+        and all(
+            status in _SAFE_HISTORICAL_WORKER_STATUSES
+            for status in statuses[:-1]
+        )
     )
 
 
