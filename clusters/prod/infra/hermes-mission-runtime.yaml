@@ -2782,8 +2782,8 @@ data:
         if explicit:
             return explicit.group(1).strip() or None
         natural = re.match(
-            r"^(?:(?:создай|сгенерируй|нарисуй)\s+(?:мне\s+)?(?:изображение|картинку|иллюстрацию|фото)|"
-            r"(?:create|generate|draw|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|illustration|photo))"
+            r"^(?:(?:создай|сгенерируй|нарисуй)\s+(?:мне\s+)?(?:изображение|картинку|иллюстрацию|фото|логотип)|"
+            r"(?:create|generate|draw|make)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|illustration|photo|logo))"
             r"\s*[:\-]?\s*(.+)$",
             text,
             re.I | re.S,
@@ -2799,6 +2799,30 @@ data:
             text,
             re.I,
         ))
+
+
+    _MIXED_MEDIA_CODE_VERB = re.compile(
+        r"\b(?:add|insert|integrate|use|place|implement|wire|put|embed|attach|"
+        r"добав\w*|встав\w*|интегрир\w*|использ\w*|размест\w*|реализ\w*|"
+        r"помест\w*|встро\w*|прилож\w*|подключ\w*|внедр\w*)\b",
+        re.IGNORECASE,
+    )
+    _MIXED_MEDIA_CODE_TARGET = re.compile(
+        r"\b(?:repo(?:sitory)?|code|project|app(?:lication)?|website|site|ui|page|"
+        r"component|file|readme|source|"
+        r"репозитор\w*|код\w*|проект\w*|приложени\w*|сайт\w*|интерфейс\w*|"
+        r"страниц\w*|компонент\w*|файл\w*)\b",
+        re.IGNORECASE,
+    )
+
+
+    def mixed_media_code_request(text: str) -> bool:
+        """Return True when text mixes an image prompt with a code-change target."""
+        value = str(text or "")
+        return bool(
+            _MIXED_MEDIA_CODE_VERB.search(value)
+            and _MIXED_MEDIA_CODE_TARGET.search(value)
+        )
 
 
     def media_topic_pairs() -> set[tuple[str, str]]:
@@ -5664,6 +5688,13 @@ data:
                     raise MissionError(
                         "subscription image editing is unavailable: the production Codex adapter does not pass source images"
                     )
+                if (
+                    image_generation_prompt(text) is not None
+                    and mixed_media_code_request(text)
+                ):
+                    raise MissionError(
+                        "image generation and project changes must be sent as separate messages"
+                    )
                 return self.ingest_media_goal(
                     text,
                     platform=platform,
@@ -5704,6 +5735,10 @@ data:
                 )
             media_prompt = image_generation_prompt(text)
             if media_prompt is not None:
+                if mixed_media_code_request(text):
+                    raise MissionError(
+                        "image generation and project changes must be sent as separate messages"
+                    )
                 return self.ingest_media_goal(
                     media_prompt,
                     platform=platform,

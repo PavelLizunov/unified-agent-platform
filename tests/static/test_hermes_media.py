@@ -558,6 +558,225 @@ def test_telegram_download_retries_transient_failure_only() -> None:
     assert permanent.calls == 1
 
 
+MIXED_REJECTION = "image generation and project changes must be sent as separate messages"
+
+
+def test_english_mixed_media_code_rejected() -> None:
+    """English natural mixed image+code request is rejected with no mission."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "generate an image: add a login form to the repository",
+                    platform="telegram",
+                    source_message_id="mix-en-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("English mixed request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+
+
+def test_russian_mixed_media_code_rejected() -> None:
+    """Russian natural mixed image+code request is rejected with no mission."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "сгенерируй изображение: добавь форму входа в репозиторий",
+                    platform="telegram",
+                    source_message_id="mix-ru-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("Russian mixed request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+
+
+def test_explicit_imagegen_mixed_rejected() -> None:
+    """Explicit $imagegen mixed image+code request is rejected with no mission."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "$imagegen add a login form to the project",
+                    platform="telegram",
+                    source_message_id="mix-explicit-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("explicit $imagegen mixed request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+
+
+def test_pure_image_prompts_remain_media() -> None:
+    """Pure image prompts without code targets remain media missions in a topic."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            for idx, prompt in enumerate([
+                "add a lighthouse",
+                "remove clouds",
+                "draw a login screen illustration",
+            ]):
+                accepted, created = store.ingest_owner_turn(
+                    prompt,
+                    platform="telegram",
+                    source_message_id=f"pure-{idx}",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="images-topic",
+                )
+                assert created, f"pure prompt must create a media mission: {prompt!r}"
+                assert accepted["payload"]["capability"] == "media.image.generate"
+
+
+def test_mixed_rejected_in_media_topic() -> None:
+    """Mixed image+code request in a configured media topic is rejected."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {
+            "HERMES_HOME": temporary,
+            "HERMES_MISSION_MEDIA_TOPICS": MEDIA_TOPICS_SUPERGROUP,
+        }
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "$imagegen add a login form to the project",
+                    platform="telegram",
+                    source_message_id="mix-topic-1",
+                    session_id="s1",
+                    chat_id="supergroup",
+                    thread_id="images-topic",
+                )
+                raise AssertionError("mixed request in media topic must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+
+
+def test_replay_after_mixed_rejection_creates_nothing() -> None:
+    """source_message_id replay after mixed rejection creates no receipt or event."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            for _attempt in range(2):
+                try:
+                    store.ingest_owner_turn(
+                        "$imagegen add a login form to the project",
+                        platform="telegram",
+                        source_message_id="mix-replay-1",
+                        session_id="s1",
+                        chat_id="729937253",
+                    )
+                    raise AssertionError("replay of mixed request must be rejected")
+                except missions.MissionError as error:
+                    assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+            assert store.latest() is None
+
+
+def test_mixed_generate_logo_in_app_ui_rejected() -> None:
+    """'generate a logo and use it in the app UI' is rejected with zero side effects."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "generate a logo and use it in the app UI",
+                    platform="telegram",
+                    source_message_id="mix-logo-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("mixed logo+code request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+            assert store.latest() is None
+
+
+def test_mixed_create_image_add_to_readme_rejected() -> None:
+    """'create an image and add it to README.md' is rejected with zero side effects."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "create an image and add it to README.md",
+                    platform="telegram",
+                    source_message_id="mix-readme-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("mixed image+README request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+            assert store.latest() is None
+
+
+def test_mixed_russian_attach_to_repo_rejected() -> None:
+    """Russian mixed image+repo request is rejected with zero side effects."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "Сгенерируй изображение и приложи его к репозиторию проекта",
+                    platform="telegram",
+                    source_message_id="mix-ru-attach-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("Russian mixed request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+            assert store.latest() is None
+
+
+def test_mixed_russian_embed_in_interface_rejected() -> None:
+    """'сгенерируй логотип и внедри его в интерфейс проекта' is rejected."""
+    with tempfile.TemporaryDirectory() as temporary:
+        env_patch = {"HERMES_HOME": temporary}
+        with mock.patch.dict(os.environ, env_patch, clear=False):
+            store = missions.MissionStore(pathlib.Path(temporary) / "m.sqlite3")
+            try:
+                store.ingest_owner_turn(
+                    "сгенерируй логотип и внедри его в интерфейс проекта",
+                    platform="telegram",
+                    source_message_id="mix-ru-embed-1",
+                    session_id="s1",
+                    chat_id="729937253",
+                )
+                raise AssertionError("Russian mixed request must be rejected")
+            except missions.MissionError as error:
+                assert MIXED_REJECTION in str(error)
+            assert store.list(100) == []
+            assert store.latest() is None
+
+
 if __name__ == "__main__":
     test_media_mission_is_durable_and_does_not_generate_twice()
     test_topic_routes_ordinary_text_to_media()
@@ -572,4 +791,14 @@ if __name__ == "__main__":
     test_malformed_config_blocks_owner_turn_with_zero_side_effects()
     test_media_topic_edit_request_fails_closed()
     test_telegram_download_retries_transient_failure_only()
+    test_english_mixed_media_code_rejected()
+    test_russian_mixed_media_code_rejected()
+    test_explicit_imagegen_mixed_rejected()
+    test_pure_image_prompts_remain_media()
+    test_mixed_rejected_in_media_topic()
+    test_replay_after_mixed_rejection_creates_nothing()
+    test_mixed_generate_logo_in_app_ui_rejected()
+    test_mixed_create_image_add_to_readme_rejected()
+    test_mixed_russian_attach_to_repo_rejected()
+    test_mixed_russian_embed_in_interface_rejected()
     print("hermes-media-ok")
