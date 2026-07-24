@@ -58,6 +58,8 @@ REQUIRED_PAYLOAD = {
     "artifact.upsert": {
         "artifact_id", "kind", "name", "media_type", "size_bytes", "sha256",
     },
+    "source.upsert": {"repo", "resolved_ref", "path", "content_sha256"},
+    "source.request": {"repo", "ref", "path"},
     "mission.completed": {"result"},
     "mission.failed": {"error"},
     "mission.cancelled": {"reason"},
@@ -69,6 +71,7 @@ PAYLOAD_FIELDS = {
         "dispatch_profile", "delivery_mode", "parent_mission_id",
         "capability", "execution_class", "expected_changed_files", "owner_gate_flag",
         "input_platform", "input_source_key_sha256", "input_source_message_sha256",
+        "source_request", "source_required",
     },
     "mission.notice": {
         "code", "message", "owner_action_required", "next_attempt_at",
@@ -118,6 +121,7 @@ _MEDIA_DISPATCH_PROFILE = "central-imagegen"
 _MEDIA_LEASE_SECONDS = 600
 _OWNER_GATE_QUESTION_PREFIX = "owner-gate:"
 _OWNER_GATE_APPROVAL = "APPROVE"
+_SOURCE_PREFLIGHT_QUESTION_PREFIX = "source-preflight:"
 _MAX_RETAINED_TERMINAL_MISSIONS = 100
 _RESEARCH_INTENT = re.compile(
     r"\b(?:research(?:_session)?|look\s+up|web\s+search|search\s+the\s+web|"
@@ -200,6 +204,42 @@ _REQUIRED_EXTERNAL_SOURCE = re.compile(
     r"\bhandoff\b|как\s+источник\w*)",
     re.IGNORECASE,
 )
+# Natural-language external-source references that carry no resolvable URL:
+# a handoff, an explicit external filesystem path, or a named artifact drawn
+# from another repository/host.  Conservative on purpose; over-matching only
+# adds fail-closed intake friction, never authority.
+_NATURAL_EXTERNAL_SOURCE = re.compile(
+    r"\bhandoff\b|handoff[- ]?\w+|"
+    r"(?:\b(?:read|use|follow|open|based\s+on|according\s+to|per|from|copy|"
+    r"replicate|implement|build)\b|"
+    r"прочит\w*|использ\w*|следу\w*|открой\w*|на\s+основе|согласно|"
+    r"скопиру\w*|повтор\w*|реализ\w*|сдела\w*)"
+    r".{0,120}(?:~/[^\s<>()]+|(?:\.\./)+[^\s<>()]+|\./[^\s<>()]+|"
+    r"(?<![\w.])/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+)|"
+    r"(?:design[- ]?doc|spec(?:ification)?|blueprint|tech[- ]?doc|"
+    r"план\w*|спецификац\w*|черт[её]ж\w*|документ\w*|файл\w*|"
+    r"file|document|repo(?:sitory)?|репозитор\w*|источник\w*)"
+    r".{0,60}(?:\bfrom\b|\bиз\b|\bin\b|\bв\b|\bс\b).{0,40}"
+    r"(?:repo(?:sitory)?|репозитор\w*|источник\w*|ops-?\d|сервер\w*|"
+    r"server|node|хост\w*|host)",
+    re.IGNORECASE,
+)
+# An exact GitHub source reference (blob/tree/raw URL with a ref AND a path).
+# Intake parses such a reference into the immutable mission ``source_request``;
+# vague, bare-repository or non-GitHub source descriptions still fail closed.
+_GITHUB_SOURCE_URL = re.compile(
+    r"https?://(?:www\.)?github\.com/"
+    r"(?P<owner>[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})?)"
+    r"/(?P<repo>[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})?)"
+    r"/(?:blob|tree|raw)/(?P<ref>[^/?#\s]+)/(?P<path>[^?#\s]+)",
+    re.IGNORECASE,
+)
+_SOURCE_REPO_SLUG = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})?/[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98})?$"
+)
+_SOURCE_REF_SHA = re.compile(r"^[0-9a-f]{40}$")
+_SOURCE_REF_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$")
+_SOURCE_UNTRUSTED_REF_TOKENS = ("..", "~", "^", ":", "?", "*", "[", "\\", "@{", "//")
 _TASK_RISK_PATTERNS = (
     (
         "architecture_change",
@@ -484,10 +524,112 @@ def is_read_only_execution_goal(text: object) -> bool:
 
 
 def requires_external_source(text: object) -> bool:
-    """Fail closed until external source material has an immutable transport."""
+    """Fail closed until external source material has an immutable transport.
+
+    Detects both URL-bearing source references and natural-language source
+    descriptions (handoff files, external paths, artifacts drawn from another
+    repository/host) so a vague required source cannot slip past intake."""
     if not isinstance(text, str):
         return False
-    return bool(_REQUIRED_EXTERNAL_SOURCE.search(" ".join(text.split())))
+    normalized = " ".join(text.split())
+    return bool(
+        _REQUIRED_EXTERNAL_SOURCE.search(normalized)
+        or _NATURAL_EXTERNAL_SOURCE.search(normalized)
+    )
+
+
+def _validate_source_ref(ref: object) -> str:
+    """Validate a git ref: a full 40-hex SHA (immutable) or a safe branch/tag
+    name.  Rejects malformed/untrusted refs fail-closed."""
+    if not isinstance(ref, str) or not ref or len(ref) > 200:
+        raise MissionError("invalid source ref")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in ref):
+        raise MissionError("invalid source ref")
+    if ref.startswith("-") or ref.startswith("/") or ref != ref.strip():
+        raise MissionError("untrusted source ref")
+    if _SOURCE_REF_SHA.fullmatch(ref):
+        return ref
+    if any(token in ref for token in _SOURCE_UNTRUSTED_REF_TOKENS):
+        raise MissionError("untrusted source ref")
+    if (
+        not _SOURCE_REF_NAME.fullmatch(ref)
+        or ref.endswith("/")
+        or ref.endswith(".")
+        or ref.endswith(".lock")
+        or "/." in ref
+        or "//" in ref
+    ):
+        raise MissionError("untrusted source ref")
+    return ref
+
+
+def _validate_source_path(path: object) -> str:
+    if not isinstance(path, str):
+        raise MissionError("invalid source path")
+    cleaned = path.strip()
+    if not cleaned or len(cleaned) > 512:
+        raise MissionError("invalid source path")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in cleaned):
+        raise MissionError("invalid source path")
+    if "\\" in cleaned or cleaned.startswith("~") or cleaned.startswith("/"):
+        raise MissionError("untrusted source path")
+    parts = cleaned.split("/")
+    if any(part in {"", "..", "."} for part in parts):
+        raise MissionError("untrusted source path")
+    return cleaned
+
+
+def validate_source_request(value: object) -> dict[str, Any]:
+    """Validate the closed immutable ``source_request`` mission structure."""
+    if not isinstance(value, dict) or set(value) != {"repo", "ref", "path"}:
+        raise MissionError("invalid source request")
+    repo = value["repo"]
+    if not isinstance(repo, str) or not _SOURCE_REPO_SLUG.fullmatch(repo):
+        raise MissionError("invalid source repository")
+    return {
+        "repo": repo,
+        "ref": _validate_source_ref(value["ref"]),
+        "path": _validate_source_path(value["path"]),
+    }
+
+
+def parse_source_request(text: object) -> dict[str, Any] | None:
+    """Parse one exact GitHub source reference (repo + ref + path) from a goal.
+
+    Returns a closed ``source_request`` or None when the goal carries no exact,
+    representable source reference.  Intake stores the parsed structure as
+    immutable mission data; a required source that cannot be represented exactly
+    fails conservatively before execution."""
+    if not isinstance(text, str):
+        return None
+    normalized = " ".join(text.split())
+    match = _GITHUB_SOURCE_URL.search(normalized)
+    if match is None:
+        return None
+    try:
+        return validate_source_request({
+            "repo": f"{match.group('owner')}/{match.group('repo')}",
+            "ref": match.group("ref"),
+            "path": match.group("path"),
+        })
+    except MissionError:
+        return None
+
+
+def parse_source_answer(text: object) -> dict[str, Any] | None:
+    """Parse one canonical same-target GitHub source reference from an owner
+    answer to the source-preflight question.
+
+    Requires a blob/tree/raw URL pinned to a FULL 40-hex commit SHA plus a
+    normalized path; branch/tag refs, bare repositories, non-GitHub URLs
+    (including raw.githubusercontent) and malformed refs/paths all yield None so
+    the answer fails closed and the mission stays blocked."""
+    request = parse_source_request(text)
+    if request is None:
+        return None
+    if not _SOURCE_REF_SHA.fullmatch(request["ref"]):
+        return None
+    return request
 
 
 def is_execution_goal(text: object) -> bool:
@@ -1061,6 +1203,13 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             ):
                 raise MissionError("invalid payload.expected_changed_files")
             continue
+        if name == "source_request":
+            validate_source_request(value)
+            continue
+        if name == "source_required":
+            if not isinstance(value, bool):
+                raise MissionError("invalid payload.source_required")
+            continue
         if name in {
             "input_tokens", "cached_input_tokens", "output_tokens",
             "reasoning_output_tokens", "model_requests", "max_request_input_tokens",
@@ -1168,6 +1317,19 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
             raise MissionError("invalid project repository")
     if event_type == "mission.accepted" and "project_label" in payload:
         _require_source_value(payload.get("project_label"), "project_label")
+    if event_type == "source.upsert":
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", payload.get("repo", "")):
+            raise MissionError("invalid source.upsert repo")
+        if not re.fullmatch(r"[0-9a-f]{40}", payload.get("resolved_ref", "")):
+            raise MissionError("invalid source.upsert resolved_ref")
+        if not isinstance(payload.get("path"), str) or not payload.get("path"):
+            raise MissionError("invalid source.upsert path")
+        if not re.fullmatch(r"[0-9a-f]{64}", payload.get("content_sha256", "")):
+            raise MissionError("invalid source.upsert content_sha256")
+    if event_type == "source.request":
+        validate_source_request(payload)
+        if not _SOURCE_REF_SHA.fullmatch(payload.get("ref", "")):
+            raise MissionError("source.request ref must be a full commit SHA")
     if event_type == "delivery.upsert":
         not_applicable = (
             payload.get("kind") == "delivery"
@@ -1277,6 +1439,9 @@ def empty_projection() -> dict[str, Any]:
         "expected_changed_files": None,
         "owner_gate_flag": None,
         "parent_mission_id": None,
+        "source_request": None,
+        "source_required": None,
+        "source_binding": None,
         "input_platform": None,
         "input_source_key_sha256": None,
         "input_source_message_sha256": None,
@@ -1354,6 +1519,8 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 expected_changed_files=payload.get("expected_changed_files"),
                 owner_gate_flag=projected_owner_gate_flag,
                 parent_mission_id=payload.get("parent_mission_id"),
+                source_request=payload.get("source_request"),
+                source_required=payload.get("source_required"),
                 input_platform=payload.get("input_platform"),
                 input_source_key_sha256=payload.get("input_source_key_sha256"),
                 input_source_message_sha256=payload.get("input_source_message_sha256"),
@@ -1410,6 +1577,28 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
             deliveries[str(payload["kind"])] = dict(payload)
         elif kind == "artifact.upsert":
             artifacts[str(payload["artifact_id"])] = dict(payload)
+        elif kind == "source.upsert":
+            binding = {
+                "repo": payload["repo"],
+                "resolved_ref": payload["resolved_ref"],
+                "path": payload["path"],
+                "content_sha256": payload["content_sha256"],
+            }
+            existing_binding = view.get("source_binding")
+            if existing_binding is not None and existing_binding != binding:
+                raise MissionError("source binding changed after it was published")
+            view["source_binding"] = binding
+        elif kind == "source.request":
+            request = {
+                "repo": payload["repo"],
+                "ref": payload["ref"],
+                "path": payload["path"],
+            }
+            existing_request = view.get("source_request")
+            if existing_request is not None and existing_request != request:
+                raise MissionError("source request changed after it was answered")
+            view["source_request"] = request
+            view["source_required"] = None
         elif kind == "mission.completed":
             view.update(
                 status="completed", stage="complete", progress_percent=100,
@@ -1907,6 +2096,15 @@ def _completion_result(view: dict[str, Any]) -> str:
         if len(paths) > 8:
             visible += f", ещё {len(paths) - 8}"
         lines.append(f"Изменённые файлы ({len(paths)}): {visible}")
+    source_binding = view.get("source_binding")
+    if isinstance(source_binding, dict):
+        lines.append(
+            "Источник: "
+            f"{compact(source_binding.get('repo'), 120)} @ "
+            f"{compact(source_binding.get('resolved_ref'), 40)} · "
+            f"{compact(source_binding.get('path'), 120)} · "
+            f"sha256:{compact(source_binding.get('content_sha256'), 64)}"
+        )
     elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
     if elapsed:
         lines.append(f"Время: {elapsed}")
@@ -3473,10 +3671,11 @@ class MissionStore:
                 chat_id=chat_id or None,
                 thread_id=thread_id or None,
             )
-        if requires_external_source(text):
-            raise MissionError(
-                "external source is not available through an immutable intake capability"
-            )
+        # A goal that requires a source is admitted as exactly one durable
+        # mission: an exact same-target reference is parsed into source_request;
+        # a source that cannot be represented exactly sets source_required so the
+        # coordinator raises the idempotent source-preflight owner question
+        # before any route/worktree/model/Git/PR/CI/deploy (never rejected here).
         draft = self._intake_draft(platform, scope_key)
         if draft:
             if platform == "telegram" and _project_alias(text) in _INTAKE_CANCEL_ALIASES:
@@ -3716,6 +3915,15 @@ class MissionStore:
         goal = str(goal or "").strip()
         if not goal or len(goal) > _MAX_OWNER_GOAL_CHARS:
             raise MissionError("invalid mission goal")
+        # Centralized fresh-accept derivation: every trusted callsite that
+        # creates a mission gets the same immutable source intent from the exact
+        # goal being accepted.  An exact same-target reference becomes
+        # source_request; a required source that cannot be represented exactly
+        # sets source_required so the coordinator raises its idempotent question.
+        source_request = parse_source_request(goal)
+        source_required: bool | None = (
+            True if requires_external_source(goal) and source_request is None else None
+        )
         derived_owner_gate_flag = task_owner_gate_flag(goal)
         if owner_gate_flag is None:
             owner_gate_flag = derived_owner_gate_flag
@@ -3823,6 +4031,20 @@ class MissionStore:
                     or (project_repository is not None and first["payload"].get("project_repository") is None)
                 )
                 and first["payload"].get("parent_mission_id") == parent_mission_id
+                and (
+                    first["payload"].get("source_request") == source_request
+                    or (
+                        source_request is not None
+                        and first["payload"].get("source_request") is None
+                    )
+                )
+                and (
+                    first["payload"].get("source_required") == source_required
+                    or (
+                        source_required is not None
+                        and first["payload"].get("source_required") is None
+                    )
+                )
                 and (exact_input or legacy_input)
             ):
                 if (
@@ -3855,6 +4077,10 @@ class MissionStore:
             )
         if parent_mission_id is not None:
             payload["parent_mission_id"] = parent_mission_id
+        if source_request is not None:
+            payload["source_request"] = source_request
+        if source_required is not None:
+            payload["source_required"] = source_required
         if input_source_key_sha256 is not None:
             payload.update(
                 input_platform=input_platform,
@@ -4082,6 +4308,30 @@ class MissionStore:
             and text != _OWNER_GATE_APPROVAL
         ):
             raise MissionError("owner gate answer must be exactly APPROVE")
+        # A source-preflight answer must be a canonical same-target GitHub source
+        # pinned to a full commit SHA + path; anything else fails closed here so
+        # the mission stays blocked on its one canonical question (no new mission,
+        # no second accepted event, no downstream execution).
+        source_answer = None
+        if question_id.startswith(_SOURCE_PREFLIGHT_QUESTION_PREFIX):
+            source_answer = parse_source_answer(text)
+            if source_answer is None:
+                raise MissionError(
+                    "source answer must be an exact GitHub source URL pinned to a "
+                    "full 40-character commit SHA with a path"
+                )
+            target_repo = self.projection(mission_id).get("project_repository")
+            # Fail closed when the target repository is unknown: never bind a
+            # source whose same-target authority cannot be verified, and commit
+            # neither event.
+            if not target_repo:
+                raise MissionError(
+                    "source answer requires a known target repository"
+                )
+            if source_answer["repo"] != target_repo:
+                raise MissionError(
+                    "source answer must reference the selected target repository"
+                )
         fingerprint = hashlib.sha256(question_id.encode("utf-8")).hexdigest()[:32]
         payload = {"question_id": question_id, "text": text}
         if source_message_id is not None:
@@ -4092,19 +4342,34 @@ class MissionStore:
             if source_message_id is None or source_platform not in {"workspace", "telegram"}:
                 raise MissionError("invalid owner answer platform")
             payload["source_platform"] = source_platform
-        return self.append_central(
-            mission_id,
-            {
+        answer_submission = {
+            "schema_version": SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "type": "mission.answer",
+            "source": "central-hermes",
+            "correlation": {
+                "producer_event_id": f"central:answer:{fingerprint}"
+            },
+            "payload": payload,
+        }
+        submissions = [answer_submission]
+        if source_answer is not None:
+            # Bind the immutable source request to the SAME mission via a closed
+            # event, atomically with the answer: an exception before commit leaves
+            # neither event, a same-answer replay converges without duplicate
+            # semantic events, and a changed answer fails closed as a collision.
+            submissions.append({
                 "schema_version": SCHEMA_VERSION,
                 "mission_id": mission_id,
-                "type": "mission.answer",
+                "type": "source.request",
                 "source": "central-hermes",
                 "correlation": {
-                    "producer_event_id": f"central:answer:{fingerprint}"
+                    "producer_event_id": f"central:source-request:{fingerprint}"
                 },
-                "payload": payload,
-            },
-        )
+                "payload": source_answer,
+            })
+        results = self._append_atomic(mission_id, submissions)
+        return results[0]
 
     def append_central(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         normalized = dict(submission)
@@ -4244,27 +4509,70 @@ class MissionStore:
     def _append(self, mission_id: str, submission: dict[str, Any]) -> tuple[dict[str, Any], bool]:
         mission_id = _require_id(mission_id, "mission_id")
         event = _validate_submission(mission_id, submission)
-        producer_id = event["correlation"].get("producer_event_id")
         with self._db() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            inserted, created = self._append_events_locked(connection, mission_id, [event])[0]
+            if (
+                created
+                and inserted["type"] == "mission.accepted"
+                and inserted["payload"].get("input_platform") == "workspace"
+            ):
+                target = self._default_workspace_telegram_target()
+                if target is not None:
+                    self._watch_target(
+                        connection, mission_id, "telegram", target[0], target[1]
+                    )
+        return inserted, created
+
+    def _append_atomic(
+        self, mission_id: str, submissions: list[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], bool]]:
+        """Atomically validate and append several logically-coupled events in ONE
+        transaction: either every event commits or none does.  Per-event closed-
+        schema validation, producer_event_id collision/idempotent-replay semantics,
+        sequence order, and terminal/tombstone rules are all preserved."""
+        mission_id = _require_id(mission_id, "mission_id")
+        events = [_validate_submission(mission_id, submission) for submission in submissions]
+        with self._db() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._append_events_locked(connection, mission_id, events)
+
+    def _append_events_locked(
+        self, connection: Any, mission_id: str, events: list[dict[str, Any]]
+    ) -> list[tuple[dict[str, Any], bool]]:
+        """Insert one or more already-validated events within an open BEGIN
+        IMMEDIATE transaction, returning (event, created) per event.  A producer
+        event id that already exists with identical content replays idempotently
+        (created=False); with different content it fails closed as a collision.
+        Sequence numbers are assigned in order across the whole batch."""
+        results: list[tuple[dict[str, Any], bool]] = []
+        rows = connection.execute(
+            "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence",
+            (mission_id,),
+        ).fetchall()
+        previous = [self._row(row) for row in rows]
+        for event in events:
+            producer_id = event["correlation"].get("producer_event_id")
             if event["type"] == "mission.accepted" and connection.execute(
                 "SELECT 1 FROM mission_tombstones WHERE mission_id = ?", (mission_id,)
             ).fetchone():
                 raise MissionError("mission id was already retired")
             if producer_id:
-                duplicate = connection.execute(
-                    "SELECT * FROM mission_events WHERE mission_id = ? AND producer_event_id = ?",
-                    (mission_id, producer_id),
-                ).fetchone()
-                if duplicate:
-                    stored = self._row(duplicate)
-                    if any(stored[key] != event[key] for key in ("type", "source", "correlation", "payload")):
+                duplicate = next(
+                    (
+                        item for item in previous
+                        if item["correlation"].get("producer_event_id") == producer_id
+                    ),
+                    None,
+                )
+                if duplicate is not None:
+                    if any(
+                        duplicate[key] != event[key]
+                        for key in ("type", "source", "correlation", "payload")
+                    ):
                         raise MissionError("producer event id collision")
-                    return stored, False
-            rows = connection.execute(
-                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY sequence", (mission_id,)
-            ).fetchall()
-            previous = [self._row(row) for row in rows]
+                    results.append((duplicate, False))
+                    continue
             if not previous and event["type"] != "mission.accepted":
                 raise MissionError("mission must start with mission.accepted")
             if previous and event["type"] == "mission.accepted":
@@ -4306,16 +4614,9 @@ class MissionStore:
                     producer_id,
                 ),
             )
-            if (
-                event["type"] == "mission.accepted"
-                and event["payload"].get("input_platform") == "workspace"
-            ):
-                target = self._default_workspace_telegram_target()
-                if target is not None:
-                    self._watch_target(
-                        connection, mission_id, "telegram", target[0], target[1]
-                    )
-        return event, True
+            previous.append(event)
+            results.append((event, True))
+        return results
 
     def watch(
         self,

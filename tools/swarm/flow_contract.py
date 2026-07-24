@@ -166,8 +166,33 @@ def validate_completion_evidence(value: dict[str, Any]) -> dict[str, Any]:
         top.add("input")
     if schema_version in {3, 5}:
         top.update({"interaction", "channels"})
+    # Bounded required-source provenance is present only when the mission bound
+    # an external source; it is optional so earlier evidence replays unchanged.
+    has_required_source = "required_source" in value
+    if has_required_source:
+        top.add("required_source")
     if set(value) != top or schema_version not in {1, 2, 3, 4, 5}:
         raise ContractError("completion evidence has an invalid schema")
+    if has_required_source:
+        required_source = value["required_source"]
+        if not isinstance(required_source, dict) or set(required_source) != {
+            "repo", "resolved_ref", "path", "content_sha256",
+        }:
+            raise ContractError("completion evidence required_source has an invalid schema")
+        if not isinstance(required_source["repo"], str) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", required_source["repo"]
+        ):
+            raise ContractError("completion evidence required_source repo is invalid")
+        if not isinstance(required_source["resolved_ref"], str) or not re.fullmatch(
+            r"[0-9a-f]{40}", required_source["resolved_ref"]
+        ):
+            raise ContractError("completion evidence required_source revision is invalid")
+        if not isinstance(required_source["path"], str) or not required_source["path"]:
+            raise ContractError("completion evidence required_source path is invalid")
+        if not isinstance(required_source["content_sha256"], str) or not re.fullmatch(
+            r"[0-9a-f]{64}", required_source["content_sha256"]
+        ):
+            raise ContractError("completion evidence required_source content hash is invalid")
     digest = _required_text(value, "sha256", "completion_evidence")
     unsigned = {key: item for key, item in value.items() if key != "sha256"}
     try:
