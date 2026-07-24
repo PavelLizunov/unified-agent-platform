@@ -1658,7 +1658,7 @@ def _validate_submission(mission_id: str, submission: dict[str, Any]) -> dict[st
         elif "url" not in payload:
             raise MissionError("delivery URL is required")
         if summary is not None and (
-            payload.get("kind") != "pull_request"
+            not (payload.get("kind") == "pull_request" or not_applicable)
             or not isinstance(summary, str)
             or summary != " ".join(summary.split())
             or not summary

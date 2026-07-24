@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import importlib
+import importlib.util
 import hashlib
 import io
 import json
@@ -4288,6 +4289,116 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "Documentation-only",
                 delivery_events[0]["payload"].get("summary", ""),
             )
+
+    def test_routine_docs_not_applicable_summary_survives_restart_replay(self):
+        """The coordinator's routine_docs not_applicable summary must pass both
+        the adapter restart replay and the mission runtime validation (every
+        restart used to fail with AdapterError here), while overlong,
+        non-normalized and wrong-kind summaries stay fail-closed in both."""
+        runtime_path = ROOT / "tools" / "hermes-mission" / "runtime.py"
+        runtime_spec = importlib.util.spec_from_file_location(
+            "uap_missions_serial_queue", runtime_path
+        )
+        assert runtime_spec and runtime_spec.loader
+        mission_runtime = importlib.util.module_from_spec(runtime_spec)
+        runtime_spec.loader.exec_module(mission_runtime)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = deploy_profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-summary")
+            state = instance._load_state("mission-routine-summary", paths)
+            mission = {
+                "mission_id": "mission-routine-summary",
+                "goal": "Обнови только README",
+                "delivery_mode": "none",
+                "execution_class": "routine_docs",
+                "expected_changed_files": 2,
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            state.update(
+                pr_url="https://example.invalid/pr/1",
+                default_sha="default-sha",
+                author_telemetry=None,
+                reviewer_telemetry=None,
+            )
+            with mock.patch.object(
+                instance, "_candidate_files", return_value=["README.md"]
+            ):
+                events = instance._events(state, cleanup=True)
+
+            source_event = next(
+                event for event in events
+                if event["type"] == "delivery.upsert"
+                and event["payload"].get("kind") == "delivery"
+                and event["payload"].get("status") == "not_applicable"
+            )
+            summary = source_event["payload"]["summary"]
+            self.assertIn("Documentation-only", summary)
+
+            mission_id = "mission-routine-summary"
+            task_id = "task-1"
+            worker_id = f"{task_id}:run:1"
+            mission_adapter = coordinator.mission_adapter
+
+            # Restart replay: the whole coordinator-generated batch must pass
+            # the adapter (this is what raised AdapterError on every restart).
+            produced = mission_adapter._worker_metadata_events(
+                mission_id, task_id, worker_id,
+                {"mission_events": copy.deepcopy(events)},
+            )
+            produced_not_applicable = next(
+                event for event in produced
+                if event["type"] == "delivery.upsert"
+                and event["payload"].get("status") == "not_applicable"
+            )
+            self.assertEqual(summary, produced_not_applicable["payload"]["summary"])
+            self.assertNotIn("url", produced_not_applicable["payload"])
+
+            # The mission runtime validation must accept the same event.
+            normalized = mission_runtime._producer_submission(
+                mission_id, produced_not_applicable
+            )
+            self.assertEqual(summary, normalized["payload"]["summary"])
+
+            def assert_both_layers_reject(payload):
+                with self.assertRaisesRegex(
+                    mission_adapter.AdapterError, "payload is invalid"
+                ):
+                    mission_adapter._worker_metadata_events(
+                        mission_id, task_id, worker_id,
+                        {"mission_events": [{
+                            "type": "delivery.upsert", "payload": dict(payload),
+                        }]},
+                    )
+                runtime_event = mission_adapter._producer_event(
+                    mission_id, "delivery.upsert", dict(payload),
+                    {"task_id": task_id, "worker_id": worker_id},
+                )
+                with self.assertRaises(mission_runtime.MissionError):
+                    mission_runtime._producer_submission(mission_id, runtime_event)
+
+            cases = {
+                "overlong": {
+                    "kind": "delivery", "status": "not_applicable",
+                    "summary": "x" * (mission_adapter.MAX_DELIVERY_SUMMARY_CHARS + 1),
+                },
+                "non_normalized": {
+                    "kind": "delivery", "status": "not_applicable",
+                    "summary": "Documentation-only  task",
+                },
+                "wrong_kind": {
+                    "kind": "default_branch", "status": "verified",
+                    "url": "https://example.invalid/commit/1",
+                    "summary": summary,
+                },
+            }
+            for name, payload in cases.items():
+                with self.subTest(name=name):
+                    assert_both_layers_reject(payload)
 
     def test_task_architecture_gate_is_durably_unioned_with_profile_flags(self):
         with tempfile.TemporaryDirectory() as directory:

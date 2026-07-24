@@ -772,7 +772,7 @@ def _worker_metadata_events(
                 or (
                     summary is not None
                     and (
-                        payload.get("kind") != "pull_request"
+                        not (payload.get("kind") == "pull_request" or not_applicable)
                         or not isinstance(summary, str)
                         or summary != " ".join(summary.split())
                         or not 0 < len(summary) <= MAX_DELIVERY_SUMMARY_CHARS
