@@ -2349,6 +2349,211 @@ def test_registered_owner_intake_is_deterministic_and_fail_closed() -> None:
             assert len(restarted.list(100)) == before
 
 
+def test_project_target_conflict_fails_closed_before_acceptance() -> None:
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "dashboard", "label": "Dashboard",
+                "repository": "PavelLizunov/dashboard", "summary": "Dashboard",
+                "aliases": ["dash board"], "dispatch_profile": "dashboard-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # Selecting vpnctl while the goal names vpnrouter's exact repository is a
+        # conflict and fails closed before any mission or event is accepted.
+        try:
+            store.ingest_owner_turn(
+                "Add a deterministic status command to PavelLizunov/VPNRouter",
+                platform="workspace",
+                project_id="vpnctl",
+                source_message_id="conflict-exact-other",
+                session_id="conflict-session",
+            )
+            raise AssertionError("exact other-repository goal was accepted")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "vpnctl"
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert store.list(100) == []
+
+        # Multiple distinct exact repository references fail closed (never pass).
+        try:
+            store.ingest_owner_turn(
+                "Add a status command to PavelLizunov/VPNRouter and PavelLizunov/dashboard",
+                platform="workspace",
+                project_id="vpnctl",
+                source_message_id="conflict-exact-multi",
+                session_id="conflict-session",
+            )
+            raise AssertionError("multiple exact-repository goal was accepted")
+        except missions.MissionProjectConflict as error:
+            assert sorted(p["project_id"] for p in error.mentioned) == [
+                "dashboard", "vpnrouter",
+            ]
+        assert store.list(100) == []
+
+        # A unique alias of exactly one other project is also a conflict.
+        try:
+            store.ingest_owner_turn(
+                "vpn router add a deterministic status command",
+                platform="workspace",
+                project_id="vpnctl",
+                source_message_id="conflict-alias",
+                session_id="conflict-session",
+            )
+            raise AssertionError("unique alias-mismatch goal was accepted")
+        except missions.MissionProjectConflict as error:
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert store.list(100) == []
+
+        # Naming the selected project's exact repository succeeds.
+        accepted, created = store.ingest_owner_turn(
+            "Add a deterministic status command to PavelLizunov/vpnctl",
+            platform="workspace",
+            project_id="vpnctl",
+            source_message_id="conflict-exact-same",
+            session_id="conflict-session",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+        # A goal with no repository reference succeeds for the selected project.
+        accepted, created = store.ingest_owner_turn(
+            "Add a deterministic status command",
+            platform="workspace",
+            project_id="vpnctl",
+            source_message_id="conflict-no-repo",
+            session_id="conflict-session",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+        # The selected exact repository plus an incidental generic alias of another
+        # project must not false-trigger a conflict.
+        accepted, created = store.ingest_owner_turn(
+            "Add a deterministic status command for PavelLizunov/vpnctl (vpn router compat)",
+            platform="workspace",
+            project_id="vpnctl",
+            source_message_id="conflict-exact-plus-alias",
+            session_id="conflict-session",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+        assert len(store.list(100)) == 3
+
+
+def test_project_target_conflict_uses_bounded_repo_tokens() -> None:
+    """Regression: vpnrouter-gateway must not false-match VPNRouter (P1)."""
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnrouter-gateway", "label": "vpnrouter-gateway",
+                "repository": "PavelLizunov/vpnrouter-gateway",
+                "summary": "VPN gateway",
+                "aliases": ["vpn gateway"], "dispatch_profile": "gateway-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # Selected vpnrouter-gateway, goal names its exact repo → succeeds and
+        # does NOT false-match PavelLizunov/VPNRouter via substring.
+        accepted, created = store.ingest_owner_turn(
+            "Add health check to PavelLizunov/vpnrouter-gateway",
+            platform="workspace",
+            project_id="vpnrouter-gateway",
+            source_message_id="bound-exact-gateway",
+            session_id="bound-session",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnrouter-gateway"
+
+        # Selected vpnrouter-gateway, goal names PavelLizunov/VPNRouter → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add health check to PavelLizunov/VPNRouter",
+                platform="workspace",
+                project_id="vpnrouter-gateway",
+                source_message_id="bound-exact-vpnrouter",
+                session_id="bound-session",
+            )
+            raise AssertionError("exact VPNRouter goal was accepted for gateway")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "vpnrouter-gateway"
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert len(store.list(100)) == 1
+
+    # Unregistered longer suffix must not count as the registered shorter repo.
+    catalog_short = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "vpnrouter", "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter", "summary": "VPN router",
+                "aliases": ["vpn router"], "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl", "summary": "VPN control",
+                "aliases": ["vpn ctl"], "dispatch_profile": "vpnctl-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog_short}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # Goal mentions PavelLizunov/vpnrouter-gateway (NOT registered) alongside
+        # the selected repo.  The longer token must not match PavelLizunov/VPNRouter
+        # as an exact other-repo reference.
+        accepted, created = store.ingest_owner_turn(
+            "Add PavelLizunov/vpnrouter-gateway health check to PavelLizunov/vpnctl",
+            platform="workspace",
+            project_id="vpnctl",
+            source_message_id="bound-longer-suffix",
+            session_id="bound-session-2",
+        )
+        assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+
 def test_registered_project_selection_is_durable_and_restart_safe() -> None:
     catalog = json.dumps({
         "schema_version": 1,
@@ -5256,6 +5461,8 @@ def main() -> None:
     test_producer_cannot_end_mission_or_decrease_progress()
     test_dispatch_profile_is_projected_and_immutable()
     test_registered_owner_intake_is_deterministic_and_fail_closed()
+    test_project_target_conflict_fails_closed_before_acceptance()
+    test_project_target_conflict_uses_bounded_repo_tokens()
     test_registered_project_selection_is_durable_and_restart_safe()
     test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
     test_owner_gate_accepts_only_exact_approval_without_clearing_question()
