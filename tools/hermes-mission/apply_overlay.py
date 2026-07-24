@@ -28,7 +28,12 @@ PATCHED_FILES = {
     "hermes_cli/main.py": "be64ed4ff2c3abcff3616cf8ae5e242fa4fc80a0871413a931e06fe2d33627cb",
     "gateway/run.py": "5377ee10307a7913e5b1e057052fe3b4a673f07efca73c5e91f78b3c77f25ef5",
     "gateway/platforms/api_server.py": "a37559cbaa226474683e089271034874c3b48094dd28fa10b63e36a66988cb17",  # gitleaks:allow -- pinned patched SHA-256
-    "plugins/platforms/telegram/adapter.py": "1de3833f45218ee6a408eebf199561578eb931db2fd2591343524ee2c3b350a6",
+    "plugins/platforms/telegram/adapter.py": "9ba65c90685a74313b367cd197c195597c615edd3abfa493cf09b4357f1bb33e",
+}
+PINNED_FILES = {
+    # The final-delivery compatibility shim uses these upstream internals.
+    # Refuse to start after an upstream change until the shim is revalidated.
+    "gateway/delivery_ledger.py": "6d8176a7a41dd3d30e86d6e0197fd6ff94f788214524c122b2654bd6534f60c6",
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -633,6 +638,12 @@ def connect(
         else:
             key = f"{split_key}:message:{event.message_id}"
         existing = self._pending_text_batches.get(key)
+        if (
+            existing is not None
+            and str(existing.message_id) == str(event.message_id)
+            and existing.text == event.text
+        ):
+            return
         if existing is None:''',
             "independent Telegram short-message identities",
         )
@@ -1802,6 +1813,9 @@ def main() -> None:
     else:
         selected_files = FILES
         active_patched = PATCHED_FILES
+        for relative, expected in PINNED_FILES.items():
+            if sha(root / relative) != expected:
+                raise SystemExit(f"upstream fingerprint mismatch: {relative}")
     if args.print_patched_hashes:
         for relative, expected in selected_files.items():
             path = root / relative

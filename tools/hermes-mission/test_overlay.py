@@ -47,6 +47,9 @@ def main() -> None:
             overlay.LEGACY_BUILD1_PATCHED_FILES["hermes_cli/kanban.py"]
         )
         assert "unknown" not in overlay.LEGACY_BUILD1_PATCHED_FILES["hermes_cli/kanban.py"]
+        assert overlay.PINNED_FILES["gateway/delivery_ledger.py"] == (
+            "6d8176a7a41dd3d30e86d6e0197fd6ff94f788214524c122b2654bd6534f60c6"
+        )
         atomic_target = pathlib.Path(temp) / "atomic-target.py"
         atomic_target.write_text("before\n", encoding="utf-8")
         with mock.patch.object(overlay.os, "replace", side_effect=OSError("simulated crash")):
@@ -225,6 +228,10 @@ def main() -> None:
             assert short._pending_text_batches[
                 "topic:sender:owner:message:101"
             ].text == "second"
+            enqueue_text_event(short, TextEvent("100", "first"))
+            assert short._pending_text_batches[
+                "topic:sender:owner:message:100"
+            ].text == "first"
 
             split = TextBatchHarness()
             enqueue_text_event(split, TextEvent("200", "a" * 4000))
@@ -839,6 +846,7 @@ def main() -> None:
             "hermes_cli/kanban_db.py",
             "hermes_cli/main.py",
             "gateway/run.py",
+            "gateway/delivery_ledger.py",
             "gateway/platforms/api_server.py",
             "plugins/platforms/telegram/adapter.py",
         ):
@@ -851,6 +859,11 @@ def main() -> None:
         assert image_apply.returncode == 0 and "overlay applied" in image_apply.stdout
         image_check = run(image_root, "--source-commit", COMMIT, "--check")
         assert image_check.returncode == 0 and image_check.stdout.count("exact-patched") == 9
+        ledger = image_root / "gateway/delivery_ledger.py"
+        ledger.write_bytes(ledger.read_bytes() + b"\n# tamper\n")
+        pinned_tamper = run(image_root, "--source-commit", COMMIT, "--check")
+        assert pinned_tamper.returncode != 0
+        assert "fingerprint mismatch: gateway/delivery_ledger.py" in pinned_tamper.stderr
 
         target = clone / "gateway/run.py"
         target.write_bytes(target.read_bytes() + b"\n# tamper\n")
