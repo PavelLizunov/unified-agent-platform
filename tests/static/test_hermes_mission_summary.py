@@ -385,6 +385,42 @@ def test_telemetry_workers_do_not_satisfy_completion_ready() -> None:
     ]))
 
 
+def test_usage_total_aggregate_is_telemetry_not_canonical() -> None:
+    base = dict(
+        goal="G", status="active", stage="verifying", progress_percent=90,
+        tasks=[{"task_id": "t1", "title": "T", "status": "done"}],
+        gates=[{"gate_id": g, "status": "passed"}
+               for g in ("tests", "review", "ci", "post-verify", "cleanup")],
+        deliveries=[
+            {"kind": "pull_request", "status": "merged", "url": "https://x/pr/1"},
+            {"kind": "default_branch", "status": "verified", "url": "https://x/c/1"},
+            {"kind": "delivery", "status": "not_applicable"},
+        ],
+        delivery_mode="none",
+    )
+    role_telemetry = [
+        {"worker_id": "author", "status": "completed", "profile": "author", "model": "gpt-5.6-sol"},
+        {"worker_id": "reviewer", "status": "completed", "profile": "reviewer", "model": "gpt-5.6-terra"},
+    ]
+    usage_total = {"worker_id": "usage-total", "status": "completed", "profile": "usage"}
+    canonical = {"worker_id": "coordinator-codex-auto-a7", "status": "completed",
+                 "profile": "coordinator-codex-auto-a7"}
+    # Exact observed event order: author, reviewer, usage-total, canonical → ready
+    assert m.completion_ready(_view(**base, workers=[
+        *role_telemetry, usage_total, canonical,
+    ]))
+    # Wrong worker_id with profile=usage stays canonical → fail-closed
+    wrong_id = {"worker_id": "usage-detail", "status": "completed", "profile": "usage"}
+    assert not m.completion_ready(_view(**base, workers=[
+        *role_telemetry, wrong_id, canonical,
+    ]))
+    # Wrong profile with worker_id=usage-total stays canonical → fail-closed
+    wrong_profile = {"worker_id": "usage-total", "status": "completed", "profile": "usage-detail"}
+    assert not m.completion_ready(_view(**base, workers=[
+        *role_telemetry, wrong_profile, canonical,
+    ]))
+
+
 def _stage(stage: str, progress: int, occurred_at: str, seq: int) -> dict:
     return {
         "schema_version": 1, "mission_id": MID, "type": "mission.stage",
@@ -630,6 +666,7 @@ def main() -> None:
     test_model_and_effort_validation()
     test_failed_mission_shows_telemetry_in_telegram()
     test_telemetry_workers_do_not_satisfy_completion_ready()
+    test_usage_total_aggregate_is_telemetry_not_canonical()
     test_role_telemetry_exposes_attested_per_role_details()
     test_role_telemetry_omits_unattested_per_role_details()
     test_active_telegram_elapsed_is_deterministic_across_replay()
