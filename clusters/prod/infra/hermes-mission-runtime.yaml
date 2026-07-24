@@ -19,30 +19,35 @@ data:
     import tempfile
 
 
-    UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
+    UPSTREAM_COMMIT = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
     FILES = {
-        "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
-        "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
-        "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
-        "hermes_cli/main.py": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
-        "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
-        "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",  # gitleaks:allow -- pinned source SHA-256
-        "plugins/platforms/telegram/adapter.py": "e5d5c7a7b168ce3503aa19f763d0b913eec8314ae57d6606584a82705021f302",
+        "hermes_cli/commands.py": "41d16ee11e4a358313e3b20bec9a3e243857f6d4a0b969bf26b8f0e7975cde9f",
+        "hermes_cli/kanban.py": "c91d1542d8fff562e77180de9feb83e6fda608ef5be6e9c5d524eea3c28ba4f4",
+        "hermes_cli/kanban_db.py": "6adf52e2e8445afe51ce1d3bbf1676ca550d525c9c17035bde026587d46e9c3b",
+        "hermes_cli/main.py": "d6bf89a33fb708376a7ab354cff8081a3c3726dbfb91d84bbb679cd667db596c",
+        "gateway/run.py": "c6e0f443772e4a8a7eac0d9ccf9a4f659de5fc5493c572a69a46e4c61a8aa966",
+        "gateway/platforms/api_server.py": "2b8725863c99617b756cfce44567bf8eec9ccf6c7a946269c1ae42260cafa0de",  # gitleaks:allow -- pinned source SHA-256
+        "plugins/platforms/telegram/adapter.py": "b4fab048d4986ab49615a1b5abb0dafeade4a25196578bf93cb065b793d67c8b",
     }
     PATCHED_FILES = {
-        "hermes_cli/commands.py": "23ba06478a1489c1aba7f61c2b49ce4ea134c1e6713cead2e3224dbe6f1036ae",
-        "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
-        "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
-        "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
-        "gateway/run.py": "64153621271347a881695090f75150277a4f47c4c6a10de5b5c4b38c03222d7d",
-        "gateway/platforms/api_server.py": "46575036133fae47eb2136fb4ec55b2117aa9af3a5fdc85f9a1f0846b232f7e7",  # gitleaks:allow -- pinned patched SHA-256
-        "plugins/platforms/telegram/adapter.py": "86722e5ce3d686d9b2046e38e2f2e871408c35798d066e3296ab6721de8a03ee",
+        "hermes_cli/commands.py": "baa727344aacefd6ba734215e10177085243a606db90b8db0088c0508db2cab0",
+        "hermes_cli/kanban.py": "8e2ee10eaf89b769b7a232ea490e6fe6e909db4c8173e7d1447ba67e3bca1045",
+        "hermes_cli/kanban_db.py": "482d53c69db8013afd52f431e00627579c5804262cc2a81bb3a3c2d21b0d7128",
+        "hermes_cli/main.py": "be64ed4ff2c3abcff3616cf8ae5e242fa4fc80a0871413a931e06fe2d33627cb",
+        "gateway/run.py": "3e9dd8b01f9b6298ebc237f5db2029c5b9629a35e93f4dfe7b96295881cbb199",
+        "gateway/platforms/api_server.py": "a37559cbaa226474683e089271034874c3b48094dd28fa10b63e36a66988cb17",  # gitleaks:allow -- pinned patched SHA-256
+        "plugins/platforms/telegram/adapter.py": "1b4864a3622b4d88dfdba8ec9b60b132bf4d0b1a06ab41a125157281f6dcbdca",
     }
     BUILD1_RUNTIME_FILES = (
         "hermes_cli/kanban.py",
         "hermes_cli/kanban_db.py",
         "hermes_cli/main.py",
     )
+    # Older legacy build1 patched hashes that still trigger a re-overlay from
+    # pristine (legacy-needs-overlay).  The current v0.18.0 patched hashes are NOT
+    # listed here: they equal BUILD1_PATCHED_FILES and are caught earlier as
+    # exact-patched, so listing them would be dead.  These hashes never affect the
+    # rendered ConfigMap, which is generated from the v0.19 source.
     LEGACY_BUILD1_PATCHED_FILES = {
         "hermes_cli/kanban.py": (
             "924dcf6b2b277575d1d065aff209347ce5abc96ab158bc80b749f4c3552992cd",
@@ -52,6 +57,24 @@ data:
         "hermes_cli/kanban_db.py": (
             "0af7473294f6ed83bdf9ad42adaa7837b40feffb12c53b41de7ec43b2ceece87",
         ),
+        # main.py's only legacy hash equalled BUILD1_PATCHED_FILES (caught earlier as
+        # exact-patched), so it was dead and removed; no legacy main.py hash remains.
+        "hermes_cli/main.py": (),
+    }
+
+    # Build-1 runs the PREVIOUS upstream pin (v0.18) until it is independently
+    # upgraded.  These tables are frozen at the v0.18 pristine/patched hashes so
+    # --build1-runtime never depends on the central UPSTREAM_COMMIT.
+    BUILD1_UPSTREAM_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
+    BUILD1_FILES = {
+        "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
+        "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
+        "hermes_cli/main.py": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
+    }
+    BUILD1_PATCHED_FILES = {
+        "hermes_cli/kanban.py": "f87ec03731d8a38acc198bfa77602354f30d57b14eeec01d31b080d6486d4305",
+        "hermes_cli/kanban_db.py": "44f462aec94cdc8f93ee00986ba2c90929d3c0c4b7dc79950eb6bb62a63e1500",
+        "hermes_cli/main.py": "6b5c98f313f2f99d751847ed893d40456fb4b046569dcb60d119a54e3f7d3132",
     }
     RUNTIME_SOURCE = pathlib.Path(__file__).with_name("runtime.py")
     RUNTIME_TARGET = "hermes_cli/uap_missions.py"
@@ -1147,9 +1170,9 @@ data:
             stream_and_tail = replace(
                 stream_and_tail,
                 '''        session_id = request.match_info["session_id"]
-            _, err = self._get_existing_session_or_404(session_id)''',
+            _, err = await self._get_existing_session_or_404(session_id)''',
                 '''        session_id = request.match_info["session_id"]
-            session_entry, err = self._get_existing_session_or_404(session_id)''',
+            session_entry, err = await self._get_existing_session_or_404(session_id)''',
                 "setup session binding lookup",
             )
             text = before_stream + stream_marker + stream_and_tail
@@ -1565,29 +1588,27 @@ data:
     '''
             text = replace(
                 text,
-                "    def _port_is_available(self) -> bool:",
-                methods + "    def _port_is_available(self) -> bool:",
+                "    def _api_key_passes_startup_guard(self) -> bool:",
+                methods + "    def _api_key_passes_startup_guard(self) -> bool:",
                 "mission handlers",
             )
             return replace(
                 text,
-                '''            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
-                self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
-                '''            self._app.router.add_post("/api/sessions/{session_id}/chat/stream", self._handle_session_chat_stream)
-                self._app.router.add_get("/api/mission-projects", self._handle_mission_projects)
-                self._app.router.add_post("/api/project-onboarding", self._handle_create_project_onboarding)
-                self._app.router.add_get("/api/project-onboarding/pending", self._handle_pending_project_onboarding)
-                self._app.router.add_get("/api/project-onboarding/{request_id}", self._handle_get_project_onboarding)
-                self._app.router.add_post("/api/project-onboarding/{request_id}/advance", self._handle_advance_project_onboarding)
-                self._app.router.add_post("/api/project-onboarding/{request_id}/invocation", self._handle_record_project_onboarding_invocation)
-                self._app.router.add_get("/api/missions", self._handle_list_missions)
-                self._app.router.add_post("/api/missions", self._handle_create_mission)
-                self._app.router.add_get("/api/missions/{mission_id}", self._handle_get_mission)
-                self._app.router.add_get("/api/missions/{mission_id}/artifacts/{artifact_id}", self._handle_get_mission_artifact)
-                self._app.router.add_post("/api/missions/{mission_id}/events", self._handle_append_mission_event)
-                self._app.router.add_post("/api/missions/{mission_id}/answer", self._handle_answer_mission)
-                self._app.router.add_post("/api/missions/{mission_id}/terminal", self._handle_finish_mission)
-                self._app.router.add_post("/v1/chat/completions", self._handle_chat_completions)''',
+                '''            ("POST", "/v1/chat/completions", self._handle_chat_completions),''',
+                '''            ("POST", "/v1/chat/completions", self._handle_chat_completions),
+                ("GET", "/api/mission-projects", self._handle_mission_projects),
+                ("POST", "/api/project-onboarding", self._handle_create_project_onboarding),
+                ("GET", "/api/project-onboarding/pending", self._handle_pending_project_onboarding),
+                ("GET", "/api/project-onboarding/{request_id}", self._handle_get_project_onboarding),
+                ("POST", "/api/project-onboarding/{request_id}/advance", self._handle_advance_project_onboarding),
+                ("POST", "/api/project-onboarding/{request_id}/invocation", self._handle_record_project_onboarding_invocation),
+                ("GET", "/api/missions", self._handle_list_missions),
+                ("POST", "/api/missions", self._handle_create_mission),
+                ("GET", "/api/missions/{mission_id}", self._handle_get_mission),
+                ("GET", "/api/missions/{mission_id}/artifacts/{artifact_id}", self._handle_get_mission_artifact),
+                ("POST", "/api/missions/{mission_id}/events", self._handle_append_mission_event),
+                ("POST", "/api/missions/{mission_id}/answer", self._handle_answer_mission),
+                ("POST", "/api/missions/{mission_id}/terminal", self._handle_finish_mission),''',
                 "mission routes",
             )
         raise SystemExit(f"no transform for {relative}")
@@ -1605,14 +1626,16 @@ data:
         head = args.source_commit or subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=root, text=True
         ).strip()
-        if head != UPSTREAM_COMMIT:
+        active_commit = BUILD1_UPSTREAM_COMMIT if args.build1_runtime else UPSTREAM_COMMIT
+        if head != active_commit:
             raise SystemExit("upstream commit fingerprint mismatch")
 
-        selected_files = (
-            {relative: FILES[relative] for relative in BUILD1_RUNTIME_FILES}
-            if args.build1_runtime
-            else FILES
-        )
+        if args.build1_runtime:
+            selected_files = BUILD1_FILES
+            active_patched = BUILD1_PATCHED_FILES
+        else:
+            selected_files = FILES
+            active_patched = PATCHED_FILES
         if args.print_patched_hashes:
             for relative, expected in selected_files.items():
                 path = root / relative
@@ -1633,14 +1656,14 @@ data:
             if actual == expected:
                 statuses.append(f"{relative}: source-needs-overlay")
                 source_paths.append((relative, path, path.read_text()))
-            elif actual == PATCHED_FILES[relative]:
+            elif actual == active_patched[relative]:
                 statuses.append(f"{relative}: exact-patched")
             elif (
                 args.build1_runtime
                 and actual in LEGACY_BUILD1_PATCHED_FILES.get(relative, ())
             ):
                 pristine = subprocess.check_output(
-                    ["git", "show", f"{UPSTREAM_COMMIT}:{relative}"],
+                    ["git", "show", f"{active_commit}:{relative}"],
                     cwd=root,
                     text=True,
                 )
@@ -1668,7 +1691,7 @@ data:
 
         for relative, path, source_text in source_paths:
             atomic_write(path, transform(relative, source_text))
-            if sha(path) != PATCHED_FILES[relative]:
+            if sha(path) != active_patched[relative]:
                 raise SystemExit(f"overlay output fingerprint mismatch: {relative}")
         for target, source in missing_assets:
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,7 @@ agents = configmap["data"]["agents-md"]
 profile_migration = configmap["data"]["profile-migrate.py"]
 
 assert model.get("provider"), "managed brain must pin model.provider"
-assert model.get("default"), "Hermes v0.18 managed brain must pin model.default"
+assert model.get("default"), "Hermes v0.19 managed brain must pin model.default"
 assert "model" not in model and "name" not in model, "legacy model-id aliases must not be used"
 assert guardrails["warnings_enabled"] is True
 assert guardrails["hard_stop_enabled"] is True

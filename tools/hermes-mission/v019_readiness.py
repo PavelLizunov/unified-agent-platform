@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """Read-only v0.19 upgrade-readiness probe for the pinned Hermes overlay.
 
-This tool DOES NOT change the production pin. It cryptographically verifies the
-upstream SOURCE of the current pin (v0.18.0 == upstream tag v2026.7.1 == commit
-``UPSTREAM_COMMIT``): the tag->commit mapping is confirmed via ``git ls-remote``
-and every fingerprinted source file is matched byte-for-byte against the
-overlay's ``FILES`` table.  The current image digest is an accepted historical
-production pin recorded from the manifest -- it is NOT independently re-pulled
-or signature-verified here.  Any new v0.19 digest requires independent
-registry/signature verification before it may be accepted.
+This tool DOES NOT change the production pin and does NOT verify the registry
+image digest.  The digest was verified out-of-band from the Docker Hub registry
+HEAD (manifest-list + amd64 child) on 2026-07-24 and is merely RECORDED in
+``CURRENT_PIN``; this probe never contacts the registry and makes no claim about
+it.  Likewise the tag->commit mapping (v2026.7.20 -> commit ``UPSTREAM_COMMIT``)
+is OUT-OF-BAND evidence recorded in ``CURRENT_PIN`` (confirmed separately via
+``git ls-remote --tags``); this probe does NOT re-derive or verify that mapping.
+What the probe DOES verify is that the exact RECORDED commit's source bytes match
+the overlay: it fetches the recorded commit and matches every fingerprinted
+source file byte-for-byte against the overlay's ``FILES`` table (current-baseline
+verification -- the recorded v2026.7.20 commit source must be pristine-clean
+against the overlay).
 
-The probe then measures how far each *candidate* "next" upstream tag has drifted
-from the overlay's fingerprint table. The output is the evidence a reviewer
-needs to decide which upstream tag (if any) becomes "v0.19" and which overlay
-insertions would have to be rebased.
-
-Upstream publishes DATE tags only (v2026.7.1, v2026.7.7, ...); there is no
-"v0.19" tag and no documented v0.19<->date-tag mapping, so this probe never
-asserts which candidate IS v0.19 -- it only reports verified facts.
+It then measures how far any tag strictly LATER than the current pin has drifted
+from the overlay's fingerprint table (later-tag drift).  Upstream publishes DATE
+tags only; the owner confirmed v2026.7.20 as the official stable release "Hermes
+Agent v0.19.0" (prerelease=false).  At this snapshot no upstream tag is later
+than v2026.7.20, so ``CANDIDATES`` is empty and the probe reports the verified
+current baseline only.  When upstream cuts a tag strictly after v2026.7.20, add
+it to ``CANDIDATES`` to extend the drift baseline.
 
 Network-gated and skip-friendly: if upstream cannot be cloned, it prints
 ``v019-readiness-skipped: <reason>`` and exits 0 so it never breaks an offline
@@ -50,31 +53,27 @@ FIXTURE = (
     / "hermes-v019-readiness.json"
 )
 
-# The production pin: internal label v0.18.0 == upstream tag v2026.7.1. The commit
+# The production pin: internal label v0.19.0 == upstream tag v2026.7.20. The commit
 # is the peeled tag object verified via `git ls-remote --tags` and matches the
-# overlay's UPSTREAM_COMMIT exactly.  The image_digest is an accepted historical
-# production pin recorded from the manifest (PR #35 lineage), NOT independently
-# re-pulled or signature-verified; any new v0.19 digest requires independent
-# registry/signature verification.
+# overlay's UPSTREAM_COMMIT exactly.  The image_digest was independently verified
+# from the Docker Hub registry HEAD (manifest-list sha256:f7b350...04a, amd64
+# child sha256:a6ce64...1c40) on 2026-07-24.
 CURRENT_PIN = {
-    "label": "v0.18.0",
-    "tag": "v2026.7.1",
-    "commit": "7c1a029553d87c43ecff8a3821336bc95872213b",
-    "image_digest": "sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f",
+    "label": "v0.19.0",
+    "tag": "v2026.7.20",
+    "commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+    "image_digest": "sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a",
 }
 
-# Candidate "next" upstream tags -- a POINT-IN-TIME snapshot taken 2026-07-24 of
-# every date tag published after v2026.7.1 (verified via `git ls-remote --tags`
-# https://github.com/NousResearch/hermes-agent; the commit is each tag's peeled
-# object). Upstream cuts new date tags frequently, so this list goes stale: refresh
-# it (re-run `git ls-remote --tags`) before relying on the drift report. None of
-# these is asserted to be "v0.19"; the owner/reviewer picks the target and verifies
-# its image digest. The commit SHAs themselves are immutable once a tag is cut.
-CANDIDATES = [
-    {"tag": "v2026.7.7", "commit": "f9eca7e15f1c2bfe5194aae5aa489af53c0a1a23"},
-    {"tag": "v2026.7.7.2", "commit": "9de9c25f620ff7f1ce0fd5457d596052d5159596"},
-    {"tag": "v2026.7.20", "commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"},
-]
+# Tags strictly LATER than the current pin (v2026.7.20 / v0.19.0), used as a
+# later-tag drift baseline.  The historical tags evaluated during the completed
+# v0.19 selection (v2026.7.7, v2026.7.7.2) are NOT candidates: they predate the
+# current pin and live on only in git history and the selection decision, never
+# in this list.  At this snapshot no upstream tag is later than v2026.7.20, so
+# the list is empty.  Add a tag here only once upstream cuts one strictly after
+# v2026.7.20; the current commit must NEVER appear here (regression-tested in
+# tests/static/test_hermes_v019_pin_guard.py).
+CANDIDATES: list[dict] = []
 
 
 def load_overlay():
@@ -113,8 +112,11 @@ def fetch_commit(clone: pathlib.Path, commit: str) -> bool:
     if fetched.returncode != 0:
         return False
     head = git("rev-parse", "FETCH_HEAD", cwd=clone).stdout.strip()
-    # Source integrity: the fetched commit must be the exact pinned SHA
-    # (cryptographic tag->commit verification via git's object model).
+    # Source integrity: the fetched HEAD must equal the exact recorded commit SHA,
+    # so the fingerprinted bytes probed below are the recorded commit's bytes.
+    # This verifies the RECORDED commit, NOT the tag->commit mapping -- that
+    # mapping is out-of-band evidence in CURRENT_PIN (confirmed separately via
+    # `git ls-remote --tags`), never re-derived here.
     return head == commit
 
 
@@ -182,7 +184,7 @@ def main() -> int:
             return 0
         report["current_pin_baseline"] = baseline
         # The current pin must be pristine-clean: every fingerprinted file in the
-        # verified v2026.7.1 source must match the overlay's FILES table exactly.
+        # verified v2026.7.20 source must match the overlay's FILES table exactly.
         for relative, entry in baseline.items():
             if entry["status"] != "unchanged":
                 print(

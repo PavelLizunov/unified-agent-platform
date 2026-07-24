@@ -1,16 +1,17 @@
 """Deterministic blocker guard for the Hermes Agent production pin (ADR-027/030).
 
-The production pin is a single atomic unit: the image digest pinned in the
-manifests, the overlay's ``UPSTREAM_COMMIT``, the initContainer ``--source-commit``
-and the overlay ``FILES`` fingerprint table MUST all describe the SAME upstream
-source. The fail-closed initContainer fingerprints the running image's source at
+The production pin is a single atomic unit: the image digest pinned in every
+deployment/backup/restore file, the overlay's ``UPSTREAM_COMMIT``, the
+initContainer ``--source-commit`` and the overlay ``FILES`` fingerprint table
+MUST all describe the SAME upstream source.  The current upgrade target is
+v0.19.0 (tag v2026.7.20); v0.18.0 remains accepted for rollback. The fail-closed initContainer fingerprints the running image's source at
 boot and CrashLoops the pod on any mismatch, so advancing only part of the unit
 (e.g. bumping the image to a "v0.19" candidate without rebasing+verifying the
 overlay) breaks production on the next roll.
 
 This guard locks production to the set of ACCEPTED pins below.  It PASSES while
-production sits on an accepted pin (currently v0.18.0) and FAILS CLOSED the
-moment the image digest moves to anything not in ``ACCEPTED_PINS``, or the pin
+every required file pins an accepted digest (currently v0.19.0) and FAILS
+CLOSED the moment any file's digest moves to anything not in ``ACCEPTED_PINS``, or the pin
 unit becomes internally inconsistent.  That is the deterministic blocker: an
 incomplete v0.19 upgrade cannot pass static-checks.
 
@@ -18,19 +19,19 @@ Provenance distinction (important):
   - The upstream source tag -> commit mapping and the source bytes ARE
     cryptographically verified (git ls-remote tag peel + fixture baseline
     byte-for-byte match against the overlay FILES table).
-  - The current image digest is an ACCEPTED HISTORICAL PRODUCTION PIN recorded
-    from the manifest (PR #35 lineage).  It was NOT independently re-pulled or
-    signature-verified in this guard.
+  - The v0.19.0 image digest (current upgrade target) was independently
+    verified from Docker Hub registry HEAD on 2026-07-24.
+  - The v0.18.0 digest is accepted historical rollback history (PR #35
+    lineage); it does NOT match the current overlay or manifests.
   - Any NEW v0.19 digest MUST be independently registry/signature-verified
     before it is added to ACCEPTED_PINS.
 
-To unlock a real v0.19, a future change must add an entry to ``ACCEPTED_PINS``
-with the verified image digest + upstream source commit, rebase the overlay
-(``FILES``/``PATCHED_FILES`` + every fragment) against that source, and refresh
-``tests/fixtures/hermes-v019-readiness.json`` -- only after the image digest is
-independently verified and the owner confirms which upstream tag is "v0.19".
-Upstream publishes date tags only; there is no "v0.19" tag, so this guard never
-accepts an invented digest.
+The v0.19.0 entry is present: its registry digest was independently verified
+from Docker Hub registry HEAD (manifest-list + amd64 child) on 2026-07-24,
+and the owner confirmed tag v2026.7.20 as the official stable release.
+v0.18.0 remains accepted as rollback history.  Any future NEW digest must
+be independently registry/signature-verified before it is added to
+``ACCEPTED_PINS``.
 
 Hermetic and offline (no network): it cross-checks the manifests, the overlay
 source and the committed readiness fixture. Runs as a plain script in CI's
@@ -44,6 +45,7 @@ import copy
 import importlib.util
 import json
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -52,35 +54,47 @@ ROOT = Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "tools" / "hermes-mission" / "apply_overlay.py"
 FIXTURE = ROOT / "tests" / "fixtures" / "hermes-v019-readiness.json"
 GITLEAKS_CONFIG = ROOT / ".gitleaks.toml"
-MANIFESTS = [
+# The two production deployment manifests must pin exactly one image digest (the
+# current v0.19.0).  production_digests() is scoped to THESE only.
+PRODUCTION_YAMLS = [
     ROOT / "clusters" / "prod" / "infra" / "hermes-agent.yaml",
     ROOT / "clusters" / "prod" / "infra" / "hermes-agent-backup.yaml",
 ]
+# Every file that must carry the production pin.  validate_per_file_digests
+# requires the current digest in each, permitting only ACCEPTED_PINS extras.
+# The restore script is included here (not in PRODUCTION_YAMLS) because it
+# legitimately carries BOTH the current digest and the accepted v0.18 rollback
+# digest, which would otherwise spuriously trip the "exactly one digest" rule.
+MANIFESTS = PRODUCTION_YAMLS + [
+    ROOT / "tests" / "ops" / "check-hermes-agent-restore.sh",
+]
 
 # Accepted production pins, keyed by the exact image digest pinned in the
-# manifests.  Add a v0.19 entry ONLY once its image digest is independently
-# registry/signature-verified; never invent one.
+# manifests.  v0.19.0 is the current upgrade target (digest independently
+# verified 2026-07-24).  v0.18.0 is accepted rollback history.  Any future
+# NEW digest must be independently verified; never invent one.
 #
-# v0.18.0 provenance (re-established 2026-07-24):
+# v0.18.0 provenance (accepted historical rollback pin, PR #35 lineage):
 #   - source_commit 7c1a029... is the peeled object of upstream tag v2026.7.1,
 #     confirmed by `git ls-remote --tags https://github.com/NousResearch/hermes-agent`
-#     (v2026.7.1 -> 7c1a029553d87c43ecff8a3821336bc95872213b); it equals the mission
-#     overlay's UPSTREAM_COMMIT (tools/hermes-mission/apply_overlay.py).
-#   - The readiness fixture re-fetched that commit and proved all 7 fingerprinted
-#     files match the overlay FILES table byte-for-byte (current_pin_baseline,
-#     every status == "unchanged"); this guard re-checks that below.
-#   - image_digest sha256:b6c019... is the value pinned in hermes-agent.yaml
-#     (bootstrap + gateway) and hermes-agent-backup.yaml, commented there as
-#     "v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02" (PR #35 lineage).
-#     NOTE: the digest is an accepted historical production pin recorded from the
-#     manifest, NOT independently re-pulled or signature-verified here -- which is
-#     exactly why a v0.19 entry is blocked until its digest IS independently
-#     registry/signature-verified.
+#     (v2026.7.1 -> 7c1a029553d87c43ecff8a3821336bc95872213b).
+#   - This pin does NOT match the current overlay UPSTREAM_COMMIT or manifests
+#     (those carry v0.19.0 / v2026.7.20).  It is retained solely as a verified
+#     rollback target.
+#   - image_digest sha256:b6c019... was pinned in hermes-agent.yaml (PR #35
+#     lineage, "v0.18.0, Docker tag v2026.7.1, pinned by digest 2026-07-02").
+#   - The v0.19.0 digest (current) was independently verified from Docker Hub
+#     registry HEAD on 2026-07-24.
 ACCEPTED_PINS = {
     "sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f": {
         "label": "v0.18.0",
         "tag": "v2026.7.1",
         "source_commit": "7c1a029553d87c43ecff8a3821336bc95872213b",
+    },
+    "sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a": {
+        "label": "v0.19.0",
+        "tag": "v2026.7.20",
+        "source_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
     },
 }
 
@@ -120,12 +134,11 @@ def validate_digest_accepted(digest: str) -> dict:
     """The digest must be in ACCEPTED_PINS.  Returns the pin entry."""
     if digest not in ACCEPTED_PINS:
         raise AssertionError(
-            "v0.19 upgrade BLOCKED: production image digest "
-            f"{digest} is not an accepted pin. "
-            f"Accepted pins: {sorted(ACCEPTED_PINS)}. Upstream publishes date tags "
-            "only (no 'v0.19' tag); do not advance the pin until the target image "
-            "digest is independently registry/signature-verified, the owner "
-            "confirms which tag is v0.19, and the overlay "
+            "unaccepted production image digest "
+            f"{digest}. "
+            f"Accepted pins: {sorted(ACCEPTED_PINS)}. Any NEW digest must be "
+            "independently registry/signature-verified and added to ACCEPTED_PINS "
+            "before it may appear in a production manifest, with the overlay "
             "(UPSTREAM_COMMIT/FILES/PATCHED_FILES + every fragment) is rebased "
             "and re-verified against that source."
         )
@@ -175,6 +188,14 @@ def validate_fixture_consistency(
     check(
         fixture.get("current_pin", {}).get("commit") == pin["source_commit"],
         "readiness fixture current_pin commit != verified pin source_commit",
+    )
+    check(
+        fixture.get("current_pin", {}).get("label") == pin["label"],
+        "readiness fixture current_pin label != verified pin label",
+    )
+    check(
+        fixture.get("current_pin", {}).get("tag") == pin["tag"],
+        "readiness fixture current_pin tag != verified pin tag",
     )
 
 
@@ -288,6 +309,7 @@ def validate_pin_unit(
     Raises AssertionError on any inconsistency.  All checks survive python -O."""
     digest = validate_single_digest(production_digests)
     pin = validate_digest_accepted(digest)
+    validate_per_file_digests(digest)
     validate_overlay_commit(overlay_upstream_commit, pin, digest)
     validate_source_commits(production_source_commits, pin)
     validate_fixture_consistency(
@@ -312,11 +334,49 @@ def load_overlay():
 
 
 def production_digests() -> set[str]:
+    """Image digests pinned in the two production YAMLs ONLY.
+
+    The restore script is deliberately excluded: it legitimately pins BOTH the
+    current digest and the accepted v0.18 rollback digest, so including it would
+    spuriously trip the "exactly one digest" rule.  The restore script's pins are
+    validated per-file by ``validate_per_file_digests`` instead.
+    """
     digests: set[str] = set()
-    for manifest in MANIFESTS:
+    for manifest in PRODUCTION_YAMLS:
         text = manifest.read_text(encoding="utf-8")
         digests.update(IMAGE_RE.findall(text))
     return digests
+
+
+
+def validate_per_file_digests(
+    expected_digest: str, texts: dict[str, str] | None = None
+) -> None:
+    """Each required file must contain the expected current digest.
+
+    Additional digests are permitted ONLY when they appear in ``ACCEPTED_PINS``
+    (e.g. the restore script's verified v0.18 rollback pin).  When *texts* is
+    supplied the validation runs hermetically over those ``{name: text}`` pairs
+    (negative tests); otherwise it reads every file in ``MANIFESTS``.
+    """
+    if texts is None:
+        texts = {
+            manifest.name: manifest.read_text(encoding="utf-8")
+            for manifest in MANIFESTS
+        }
+    for name, text in texts.items():
+        found = IMAGE_RE.findall(text)
+        check(
+            expected_digest in found,
+            f"{name}: expected current digest {expected_digest} not found",
+        )
+        for digest in found:
+            check(
+                digest in ACCEPTED_PINS,
+                f"{name}: contains unaccepted digest {digest}; only the current "
+                f"digest {expected_digest} or an ACCEPTED_PINS rollback digest "
+                "may appear",
+            )
 
 
 def production_source_commits() -> set[str]:
@@ -359,8 +419,10 @@ def main() -> None:
 # ---------------------------------------------------------------------------
 
 # Shared constants for the synthetic pin used by negative tests.
-_GOOD_DIGEST = "sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f"
-_GOOD_COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
+_GOOD_DIGEST = "sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
+_GOOD_COMMIT = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+# Accepted v0.18.0 rollback digest (the only permitted secondary pin).
+_V018_DIGEST = "sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f"
 # Read from the allowlisted fixture rather than committing literal 64-hex
 # fingerprint strings here (gitleaks generic-api-key would flag them).
 _GOOD_FILES: dict[str, str] = dict(
@@ -409,7 +471,7 @@ class UnacceptedDigest(unittest.TestCase):
 
     def test_unknown_digest_blocked(self) -> None:
         unknown = "sha256:" + "aa" * 32
-        with self.assertRaises(AssertionError, msg="v0.19 upgrade BLOCKED"):
+        with self.assertRaises(AssertionError, msg="unaccepted digest"):
             _run_guard(production_digests={unknown})
 
     def test_invented_v019_digest_blocked(self) -> None:
@@ -486,6 +548,200 @@ class FixtureMismatch(unittest.TestCase):
         fixture["schema"] = "hermes-v019-readiness/v999"
         with self.assertRaises(AssertionError, msg="schema"):
             _run_guard(fixture=fixture)
+
+
+class FixtureLabelTagMismatch(unittest.TestCase):
+    """BLOCK: fixture label/tag must agree with the verified pin."""
+
+    def test_fixture_label_mismatch(self) -> None:
+        fixture = _good_fixture()
+        fixture["current_pin"]["label"] = "v99.99.99"
+        with self.assertRaises(AssertionError, msg="current_pin label"):
+            _run_guard(fixture=fixture)
+
+    def test_fixture_tag_mismatch(self) -> None:
+        fixture = _good_fixture()
+        fixture["current_pin"]["tag"] = "v1999.1.1"
+        with self.assertRaises(AssertionError, msg="current_pin tag"):
+            _run_guard(fixture=fixture)
+
+
+class RestoreScriptPin(unittest.TestCase):
+    """BLOCK: restore script must carry the exact current digest pin.
+
+    Negative tests invoke the REAL injectable validator (``texts=``) so the
+    hermetic path and the production path share one implementation.
+    """
+
+    def test_missing_restore_pin(self) -> None:
+        """A restore script with no image pin fails per-file validation."""
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            validate_per_file_digests(
+                _GOOD_DIGEST, {"restore.sh": "hermes_image=\"\""}
+            )
+
+    def test_tag_only_restore_pin(self) -> None:
+        """A restore script with a tag (not digest) pin fails."""
+        with self.assertRaisesRegex(AssertionError, "not found"):
+            validate_per_file_digests(
+                _GOOD_DIGEST,
+                {"restore.sh": "hermes_image=\"nousresearch/hermes-agent:v0.19.0\""},
+            )
+
+
+class PerFileDigests(unittest.TestCase):
+    """BLOCK: per-file validation requires the current digest in every required
+    file and permits only ACCEPTED_PINS digests as extras."""
+
+    def test_production_yaml_missing_pin(self) -> None:
+        for name in ("hermes-agent.yaml", "hermes-agent-backup.yaml"):
+            with self.subTest(manifest=name):
+                with self.assertRaisesRegex(AssertionError, "not found"):
+                    validate_per_file_digests(
+                        _GOOD_DIGEST,
+                        {name: "image: nousresearch/hermes-agent:v0.19.0"},
+                    )
+
+    def test_production_yaml_wrong_digest(self) -> None:
+        bad = "sha256:" + "bb" * 32
+        for name in ("hermes-agent.yaml", "hermes-agent-backup.yaml"):
+            with self.subTest(manifest=name):
+                with self.assertRaisesRegex(AssertionError, "not found"):
+                    validate_per_file_digests(
+                        _GOOD_DIGEST,
+                        {name: f"image: nousresearch/hermes-agent@{bad}"},
+                    )
+
+    def test_restore_unaccepted_secondary_digest(self) -> None:
+        """Current digest present PLUS an unaccepted secondary digest fails."""
+        bad = "sha256:" + "cc" * 32
+        text = (
+            f"default: nousresearch/hermes-agent@{_GOOD_DIGEST}\n"
+            f"rollback: nousresearch/hermes-agent@{bad}\n"
+        )
+        with self.assertRaisesRegex(AssertionError, "unaccepted digest"):
+            validate_per_file_digests(
+                _GOOD_DIGEST, {"check-hermes-agent-restore.sh": text}
+            )
+
+    def test_restore_accepted_v018_secondary_ok(self) -> None:
+        """Current digest PLUS the accepted v0.18 rollback digest passes."""
+        text = (
+            f"default: nousresearch/hermes-agent@{_GOOD_DIGEST}\n"
+            f"rollback: nousresearch/hermes-agent@{_V018_DIGEST}\n"
+        )
+        validate_per_file_digests(
+            _GOOD_DIGEST, {"check-hermes-agent-restore.sh": text}
+        )
+
+
+class ManifestsCoverage(unittest.TestCase):
+    """BLOCK: the guard must cover exactly the production manifests + restore."""
+
+    def test_manifests_cover_required_files(self) -> None:
+        self.assertEqual(
+            sorted(m.name for m in MANIFESTS),
+            sorted(
+                [
+                    "hermes-agent.yaml",
+                    "hermes-agent-backup.yaml",
+                    "check-hermes-agent-restore.sh",
+                ]
+            ),
+        )
+        for manifest in MANIFESTS:
+            self.assertTrue(manifest.is_file(), f"{manifest} is missing")
+
+    def test_production_yamls_are_the_two_deployment_manifests(self) -> None:
+        self.assertEqual(
+            sorted(m.name for m in PRODUCTION_YAMLS),
+            sorted(["hermes-agent.yaml", "hermes-agent-backup.yaml"]),
+        )
+
+
+class RestoreModeEnum(unittest.TestCase):
+    """Restore script accepts only closed modes; unknown values fail before kubectl.
+
+    Each test sources ONLY the pre-kubectl selector: ``_HERMES_RESTORE_SOURCE_ONLY=1``
+    makes the script return immediately after defining ``select_hermes_image``,
+    so no test ever reaches kubectl or needs a reachable cluster.
+    """
+
+    _SELECT = (
+        "_HERMES_RESTORE_SOURCE_ONLY=1 . tests/ops/check-hermes-agent-restore.sh"
+        " && select_hermes_image %s"
+    )
+
+    def _run(self, mode_arg: str) -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(
+            ["sh", "-c", self._SELECT % mode_arg],
+            capture_output=True,
+            text=True,
+            cwd=str(ROOT),
+        )
+
+    def test_default_mode_selects_exact_v019(self) -> None:
+        """Empty mode selects the exact current v0.19.0 image."""
+        result = self._run('""')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "nousresearch/hermes-agent"
+            "@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a",
+        )
+
+    def test_v018_rollback_mode_selects_exact_digest(self) -> None:
+        """v0.18-rollback mode selects the exact accepted rollback image."""
+        result = self._run("v0.18-rollback")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "nousresearch/hermes-agent"
+            "@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f",
+        )
+
+    def test_unknown_mode_rejected(self) -> None:
+        """An unknown mode exits nonzero before any kubectl side effect."""
+        result = self._run("bogus")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HERMES_RESTORE_MODE", result.stderr)
+
+
+class ReadinessCandidates(unittest.TestCase):
+    """BLOCK: readiness CANDIDATES holds only tags strictly later than current."""
+
+    def _load_readiness(self):
+        spec = importlib.util.spec_from_file_location(
+            "v019_readiness",
+            ROOT / "tools" / "hermes-mission" / "v019_readiness.py",
+        )
+        module = importlib.util.module_from_spec(spec)
+        if spec.loader is None:
+            raise AssertionError("cannot load v019_readiness module")
+        spec.loader.exec_module(module)
+        return module
+
+    def test_current_commit_is_never_a_candidate(self) -> None:
+        readiness = self._load_readiness()
+        current_commit = readiness.CURRENT_PIN["commit"]
+        current_tag = readiness.CURRENT_PIN["tag"]
+        for candidate in readiness.CANDIDATES:
+            self.assertNotEqual(
+                candidate["commit"],
+                current_commit,
+                "current pin commit must never be a CANDIDATES entry",
+            )
+            self.assertNotEqual(
+                candidate["tag"],
+                current_tag,
+                "current pin tag must never be a CANDIDATES entry",
+            )
+
+    def test_fixture_candidates_exclude_current_commit(self) -> None:
+        fixture = _good_fixture()
+        current_commit = fixture["current_pin"]["commit"]
+        for candidate in fixture.get("candidates", []):
+            self.assertNotEqual(candidate["commit"], current_commit)
 
 
 class BaselineDrift(unittest.TestCase):

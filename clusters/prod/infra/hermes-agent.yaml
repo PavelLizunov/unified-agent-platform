@@ -43,7 +43,7 @@ spec:
       labels:
         app: hermes-agent
       annotations:
-        hermes-agent/config-rev: "v95-summary-api-cost"   # bump on EVERY ConfigMap/Secret change to roll the pod
+        hermes-agent/config-rev: "v96-v019-upgrade"   # bump on EVERY ConfigMap/Secret change to roll the pod
     spec:
       # local-path PVC is node-local; pin to the designated always-on worker.
       nodeSelector:
@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: bootstrap
-          image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
+          image: nousresearch/hermes-agent@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a  # v0.19.0 (Docker tag v2026.7.20), pinned by digest 2026-07-24
           env:
             - { name: HTTPS_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
             - { name: HTTP_PROXY, value: "http://singbox-egress-ha.uap-system.svc:12080" }
@@ -144,16 +144,14 @@ spec:
               #     (visible CrashLoop) instead. /config/managed-config = the bytes the gateway
               #     mounts at /etc/hermes/config.yaml.
               /opt/hermes/.venv/bin/python -c 'import yaml,sys; d=yaml.safe_load(open("/config/managed-config")) or {}; m=d.get("model",{}); sys.exit("FATAL: managed brain overlay missing model.provider/default") if not all(m.get(k) for k in ("provider","default")) else None'
-              # 2c) ADR-027: patch exact known defects in the pinned upstream v0.18 sources.
+              # 2c) ADR-027: patch exact known defects in the pinned upstream v0.19 sources.
               # Work on emptyDir copies; the official image stays immutable. Unknown source = fail closed.
               cp /opt/hermes/agent/display.py /runtime-compat/display.py
               cp /opt/hermes/agent/tool_guardrails.py /runtime-compat/tool_guardrails.py
               cp /opt/hermes/agent/codex_runtime.py /runtime-compat/codex_runtime.py
               cp /opt/hermes/agent/transports/codex_event_projector.py /runtime-compat/codex_event_projector.py
-              cp /opt/hermes/tui_gateway/server.py /runtime-compat/server.py
               cp /opt/hermes/cli.py /runtime-compat/cli.py
-              cp /opt/hermes/hermes_cli/dashboard_auth/middleware.py /runtime-compat/dashboard_auth_middleware.py
-              cp /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js /runtime-compat/web_index.js
+              cp /opt/hermes/hermes_cli/web_dist/assets/index-DE8KfxAS.js /runtime-compat/web_index.js
               /opt/hermes/.venv/bin/python /config/runtime-compat.py /runtime-compat
               # 2d) ADR-030: stage the exact pinned mission overlay in a second emptyDir.
               # The overlay fingerprints upstream before modifying it and fails closed on drift.
@@ -166,7 +164,7 @@ spec:
               cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
               cp /opt/hermes/plugins/platforms/telegram/adapter.py /mission-runtime/root/plugins/platforms/telegram/adapter.py
               /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
-                --source-commit 7c1a029553d87c43ecff8a3821336bc95872213b
+                --source-commit 3ef6bbd201263d354fd83ec55b3c306ded2eb72a
               cp /mission-runtime/root/hermes_cli/commands.py /mission-runtime/commands.py
               cp /mission-runtime/root/hermes_cli/kanban.py /mission-runtime/kanban.py
               cp /mission-runtime/root/hermes_cli/kanban_db.py /mission-runtime/kanban_db.py
@@ -220,7 +218,7 @@ spec:
             - { name: stt-runtime, mountPath: /stt-runtime }
       containers:
         - name: gateway
-          image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0 (Docker tag v2026.7.1), pinned by digest 2026-07-02
+          image: nousresearch/hermes-agent@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a  # v0.19.0 (Docker tag v2026.7.20), pinned by digest 2026-07-24
           args: ["gateway", "run"]
           env:
             - { name: HERMES_HOME, value: /opt/data }
@@ -307,10 +305,8 @@ spec:
             - { name: runtime-compat, mountPath: /opt/hermes/agent/tool_guardrails.py, subPath: tool_guardrails.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/agent/codex_runtime.py, subPath: codex_runtime.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/agent/transports/codex_event_projector.py, subPath: codex_event_projector.py, readOnly: true }
-            - { name: runtime-compat, mountPath: /opt/hermes/tui_gateway/server.py, subPath: server.py, readOnly: true }
             - { name: runtime-compat, mountPath: /opt/hermes/cli.py, subPath: cli.py, readOnly: true }
-            - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/dashboard_auth/middleware.py, subPath: dashboard_auth_middleware.py, readOnly: true }
-            - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/web_dist/assets/index-WrAtZQWO.js, subPath: web_index.js, readOnly: true }
+            - { name: runtime-compat, mountPath: /opt/hermes/hermes_cli/web_dist/assets/index-DE8KfxAS.js, subPath: web_index.js, readOnly: true }
             # ADR-030 central mission runtime, generated from the exact A6.3 overlay sources.
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/commands.py, subPath: commands.py, readOnly: true }
             - { name: mission-runtime, mountPath: /opt/hermes/hermes_cli/kanban.py, subPath: kanban.py, readOnly: true }

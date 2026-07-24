@@ -172,8 +172,9 @@ class HermesKanbanBackend:
             "create", f"Mission {mission_id}", "--body", goal,
             "--tenant", mission_id, "--created-by", "central-hermes",
             "--idempotency-key", f"central-mission:{mission_id}",
-            # Pinned Hermes v0.18.0 exposes ``running`` as the create-time
-            # spelling for an atomically persisted, unclaimed ``ready`` card.
+            # The Build-1 Hermes pin (v0.18.0 -- Build-1 intentionally lags the
+            # central pin) exposes ``running`` as the create-time spelling for an
+            # atomically persisted, unclaimed ``ready`` card.
             "--initial-status", "running" if allow_dispatch else "blocked",
         ]
         if workspace:

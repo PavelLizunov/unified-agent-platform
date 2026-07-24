@@ -2,11 +2,34 @@
 # Restore the latest R2 Hermes archive into a disposable PVC and validate it.
 set -eu
 
+# Closed restore-mode selector: resolves the hermes image for a given mode.
+# Sourced by static tests (with _HERMES_RESTORE_SOURCE_ONLY=1) without reaching
+# kubectl.  Only two modes accepted; anything else fails before any side effect.
+select_hermes_image() {
+  _mode="${1:-}"
+  case "$_mode" in
+    "")
+      echo "nousresearch/hermes-agent@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a"
+      ;;
+    v0.18-rollback)
+      echo "nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f"
+      ;;
+    *)
+      echo "FATAL: HERMES_RESTORE_MODE must be empty or v0.18-rollback" >&2
+      return 1 ;;
+  esac
+}
+
+# When sourced for testing, export only the selector function.
+if [ "${_HERMES_RESTORE_SOURCE_ONLY:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 namespace="${UAP_NAMESPACE:-uap-system}"
 suffix="$(date +%s)-$$"
 pvc="hermes-restore-canary-$suffix"
 job="hermes-restore-canary-$suffix"
-hermes_image="nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f"
+hermes_image="$(select_hermes_image "${HERMES_RESTORE_MODE:-}")" || exit 1
 rclone_image="rclone/rclone@sha256:623378ad0ff3ebd5cebf77720843c0e02edfe46e2d5b5ac6bed54c6371780dfb"
 
 cleanup() {

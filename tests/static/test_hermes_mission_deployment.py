@@ -19,15 +19,22 @@ module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(module)
 
 
+def check(condition: bool, message: str = "mission-deployment check failed") -> None:
+    """Raise AssertionError when *condition* is false.  Unlike bare ``assert``,
+    this is never stripped by ``python -O``."""
+    if not condition:
+        raise AssertionError(message)
+
+
 def main() -> None:
     generated = ROOT / "clusters/prod/infra/hermes-mission-runtime.yaml"
-    assert generated.read_text(encoding="utf-8") == module.render()
+    check(generated.read_text(encoding="utf-8") == module.render())
 
     deployment = (ROOT / "clusters/prod/infra/hermes-agent.yaml").read_text(encoding="utf-8")
     for fragment in (
         "name: hermes-mission-runtime",
         "name: mission-runtime",
-        "--source-commit 7c1a029553d87c43ecff8a3821336bc95872213b",
+        "--source-commit 3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
         "HERMES_MISSION_PRODUCER_KEY",
         "HERMES_MISSION_OWNER_KEY",
         "mountPath: /opt/hermes/hermes_cli/uap_missions.py",
@@ -37,7 +44,7 @@ def main() -> None:
         "mountPath: /opt/hermes/gateway/platforms/api_server.py",
         "mountPath: /opt/hermes/plugins/platforms/telegram/adapter.py",
     ):
-        assert fragment in deployment, fragment
+        check(fragment in deployment, fragment)
 
     manifest = next(
         document for document in yaml.safe_load_all(deployment)
@@ -45,70 +52,95 @@ def main() -> None:
         and document.get("metadata", {}).get("name") == "hermes-agent"
     )
     template = manifest["spec"]["template"]
-    assert template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v95-summary-api-cost"
-    )
+    check(template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
+        "v96-v019-upgrade"
+    ))
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
         if mount["name"] == "research-session"
     )
-    assert research_mount == {
+    web_mounts = [
+        m for m in template["spec"]["containers"][0]["volumeMounts"]
+        if "index-DE8KfxAS" in m.get("mountPath", "")
+    ]
+    check(len(web_mounts) == 1, "web bundle volumeMount missing")
+    web_mount = web_mounts[0]
+    check(research_mount == {
         "name": "research-session",
         "mountPath": "/opt/data/mcp/research_session.py",
         "subPath": "research_session.py",
         "readOnly": True,
-    }
+    })
     bootstrap = next(
         container for container in template["spec"]["initContainers"]
         if container["name"] == "bootstrap"
     )
     bootstrap_script = "\n".join(bootstrap["args"])
+    # Couple the bootstrap cp that patches the v0.19 web asset to the subPath
+    # mount that serves it: exactly one cp writes the asset, its source must be
+    # the mounted asset path, and its destination basename must equal the mount
+    # subPath (one occurrence each, exact equality).
+    web_cp = [
+        line.split()
+        for line in bootstrap_script.splitlines()
+        if line.strip().startswith("cp ") and "index-DE8KfxAS.js" in line
+    ]
+    check(len(web_cp) == 1, "expected exactly one web asset cp in bootstrap")
+    cp_src, cp_dst = web_cp[0][1], web_cp[0][2]
+    cp_dst_basename = cp_dst.rsplit("/", 1)[-1]
+    check(
+        web_mount["mountPath"] == cp_src,
+        f"web mount mountPath {web_mount['mountPath']} != bootstrap cp source {cp_src}",
+    )
+    check(
+        web_mount["subPath"] == cp_dst_basename,
+        f"web mount subPath {web_mount['subPath']} != cp destination basename "
+        f"{cp_dst_basename} (bootstrap cp -> {cp_dst})",
+    )
     managed_config = (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(
         encoding="utf-8"
     )
-    assert (
-        "UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions"
-        in managed_config
-    )
-    assert "HERMES_MISSION_TELEGRAM_CHAT_ID=-1004377555987" in managed_config
-    assert "HERMES_MISSION_TELEGRAM_THREAD_ID=2" in managed_config
-    assert "HERMES_MISSION_WORKSPACE_URL=http://100.85.56.31:3000" in managed_config
-    assert (
+    check("UAP_STT_REMOTE_URL=http://192.168.0.203:8090/v1/audio/transcriptions"
+        in managed_config)
+    check("HERMES_MISSION_TELEGRAM_CHAT_ID=-1004377555987" in managed_config)
+    check("HERMES_MISSION_TELEGRAM_THREAD_ID=2" in managed_config)
+    check("HERMES_MISSION_WORKSPACE_URL=http://100.85.56.31:3000" in managed_config)
+    check((
         "cp /opt/hermes/hermes_cli/kanban.py "
         "/mission-runtime/root/hermes_cli/kanban.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/hermes_cli/kanban.py "
         "/mission-runtime/kanban.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/hermes_cli/uap_media.py "
         "/mission-runtime/uap_media.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /opt/hermes/plugins/platforms/telegram/adapter.py "
         "/mission-runtime/root/plugins/platforms/telegram/adapter.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/plugins/platforms/telegram/adapter.py "
         "/mission-runtime/telegram_adapter.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /opt/hermes/hermes_cli/kanban_db.py "
         "/mission-runtime/root/hermes_cli/kanban_db.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/hermes_cli/kanban_db.py "
         "/mission-runtime/kanban_db.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /opt/hermes/hermes_cli/main.py "
         "/mission-runtime/root/hermes_cli/main.py"
-    ) in bootstrap_script
-    assert (
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/hermes_cli/main.py "
         "/mission-runtime/main.py"
-    ) in bootstrap_script
+    ) in bootstrap_script)
     for pinned in (
         "f719d70812344f4d0fb8c11c0887b190501a7465",
         "7d69952fb431a8d7800ed9910dc61fea37d8406bfe96d10bf24c8bd4b7c68623",
@@ -116,17 +148,17 @@ def main() -> None:
         "736f366beb8093eebd1a2ea694de48b6f87a34c6e5eb332384ba96fe3f4fceb3",
         "cp /mission-overlay/local_stt.py /stt-runtime/local_stt.py",
     ):
-        assert pinned in bootstrap_script, pinned
+        check(pinned in bootstrap_script, pinned)
     gateway = next(
         container for container in template["spec"]["containers"]
         if container["name"] == "gateway"
     )
     gateway_env = {entry["name"]: entry for entry in gateway["env"]}
-    assert "HERMES_MISSION_INTAKE_ROUTES" not in gateway_env
-    assert gateway_env["HERMES_OWNER_COMMANDS"]["value"] == (
+    check("HERMES_MISSION_INTAKE_ROUTES" not in gateway_env)
+    check(gateway_env["HERMES_OWNER_COMMANDS"]["value"] == (
         "projects,mission,status,help,stop"
-    )
-    assert gateway_env["HERMES_MISSION_PROJECTS"] == {
+    ))
+    check(gateway_env["HERMES_MISSION_PROJECTS"] == {
         "name": "HERMES_MISSION_PROJECTS",
         "valueFrom": {
             "configMapKeyRef": {
@@ -134,22 +166,22 @@ def main() -> None:
                 "key": "projects.json",
             }
         },
-    }
-    assert gateway_env["HERMES_MISSION_MEDIA_TOPICS"] == {
+    })
+    check(gateway_env["HERMES_MISSION_MEDIA_TOPICS"] == {
         "name": "HERMES_MISSION_MEDIA_TOPICS",
         "value": '[{"chat_id":"-1004377555987","thread_id":"3"}]',
-    }
+    })
     catalog_manifest = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-project-catalog.yaml").read_text(
             encoding="utf-8"
         )
     )
-    assert catalog_manifest["kind"] == "ConfigMap"
+    check(catalog_manifest["kind"] == "ConfigMap")
     projects = json.loads(catalog_manifest["data"]["projects.json"])
-    assert projects["schema_version"] == 2
-    assert len({project["project_id"] for project in projects["projects"]}) == len(
+    check(projects["schema_version"] == 2)
+    check(len({project["project_id"] for project in projects["projects"]}) == len(
         projects["projects"]
-    )
+    ))
     ready = {
         project["project_id"]: (
             project["repository"],
@@ -228,7 +260,7 @@ def main() -> None:
         ),
     }
     for project_id, expected in expected_ready.items():
-        assert ready[project_id] == expected
+        check(ready[project_id] == expected)
     installed_profiles = {}
     for path in (ROOT / "tools/swarm/profiles").glob("delivery-*-registered-v4.json"):
         profile = json.loads(path.read_text(encoding="utf-8"))
@@ -237,39 +269,39 @@ def main() -> None:
         if project["status"] != "ready":
             continue
         profile = installed_profiles[project["dispatch_profile"]]
-        assert profile["repo"] == project["repository"]
-        assert profile["delivery_mode"] == project["delivery_mode"]
-    assert sum(project["status"] == "setup_required" for project in projects["projects"]) >= 12
-    assert sum(project["status"] == "read_only" for project in projects["projects"]) == 3
-    assert sum(project["status"] == "archived" for project in projects["projects"]) == 7
-    assert next(
+        check(profile["repo"] == project["repository"])
+        check(profile["delivery_mode"] == project["delivery_mode"])
+    check(sum(project["status"] == "setup_required" for project in projects["projects"]) >= 12)
+    check(sum(project["status"] == "read_only" for project in projects["projects"]) == 3)
+    check(sum(project["status"] == "archived" for project in projects["projects"]) == 7)
+    check(next(
         project for project in projects["projects"] if project["project_id"] == "vpnrouter"
     )["test_targets"] == [
         "uap-build-1", "github-linux", "github-windows", "windows-brat"
-    ]
+    ])
     boosty = next(
         project for project in projects["projects"] if project["project_id"] == "boosty-api-rs"
     )
-    assert boosty["status"] == "read_only"
-    assert boosty["dispatch_profile"] is None
-    assert "boosty" not in boosty["aliases"]
-    assert "boosty" in next(
+    check(boosty["status"] == "read_only")
+    check(boosty["dispatch_profile"] is None)
+    check("boosty" not in boosty["aliases"])
+    check("boosty" in next(
         project for project in projects["projects"] if project["project_id"] == "vpnctl"
-    )["aliases"]
-    assert all(
+    )["aliases"])
+    check(all(
         next(project for project in projects["projects"] if project["project_id"] == project_id)[
             "category"
         ] == "active-maintained"
         for project_id in ("vpnrouter", "suflyor")
-    )
-    assert next(
+    ))
+    check(next(
         project for project in projects["projects"] if project["project_id"] == "wgturn-core"
-    )["status"] == "setup_required"
+    )["status"] == "setup_required")
     local_llm_lab = next(
         project for project in projects["projects"]
         if project["project_id"] == "local-llm-lab"
     )
-    assert local_llm_lab == {
+    check(local_llm_lab == {
         "project_id": "local-llm-lab",
         "label": "Local LLM Evaluation Lab",
         "repository": "PavelLizunov/local-llm-evaluation-lab",
@@ -284,86 +316,86 @@ def main() -> None:
         "category": "research",
         "status": "setup_required",
         "test_targets": ["desktop-m922ij2", "pavels-mac-mini"],
-    }
+    })
     staged_profile = installed_profiles["build1-local-llm-lab-registered-v4"]
-    assert staged_profile["repo"] == local_llm_lab["repository"]
-    assert staged_profile["delivery_mode"] == local_llm_lab["delivery_mode"]
-    assert local_llm_lab["dispatch_profile"] is None
+    check(staged_profile["repo"] == local_llm_lab["repository"])
+    check(staged_profile["delivery_mode"] == local_llm_lab["delivery_mode"])
+    check(local_llm_lab["dispatch_profile"] is None)
     runtime_spec = importlib.util.spec_from_file_location(
         "uap_mission_catalog_runtime", ROOT / "tools/hermes-mission/runtime.py"
     )
-    assert runtime_spec and runtime_spec.loader
+    check(runtime_spec and runtime_spec.loader)
     runtime = importlib.util.module_from_spec(runtime_spec)
     runtime_spec.loader.exec_module(runtime)
     previous_catalog = os.environ.get("HERMES_MISSION_PROJECTS")
     try:
         os.environ["HERMES_MISSION_PROJECTS"] = catalog_manifest["data"]["projects.json"]
-        assert len(runtime.public_intake_projects("workspace")) == len([
+        check(len(runtime.public_intake_projects("workspace")) == len([
             project for project in projects["projects"]
             if "workspace" in project["platforms"]
-        ])
-        assert len([
+        ]))
+        check(len([
             project for project in runtime.public_intake_projects("telegram")
             if project["status"] == "ready"
         ]) == len([
             project for project in projects["projects"]
             if "telegram" in project["platforms"] and project["status"] == "ready"
-        ])
+        ]))
     finally:
         if previous_catalog is None:
             os.environ.pop("HERMES_MISSION_PROJECTS", None)
         else:
             os.environ["HERMES_MISSION_PROJECTS"] = previous_catalog
-    assert {
+    check({
         "name": "HERMES_MISSION_OWNER_KEY",
         "valueFrom": {
             "secretKeyRef": {"name": "hermes-agent-owner", "key": "owner-key"}
         },
-    } in gateway["env"]
-    assert {
+    } in gateway["env"])
+    check({
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban.py",
         "subPath": "kanban.py",
         "readOnly": True,
-    } in gateway["volumeMounts"]
-    assert {
+    } in gateway["volumeMounts"])
+    check({
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/kanban_db.py",
         "subPath": "kanban_db.py",
         "readOnly": True,
-    } in gateway["volumeMounts"]
-    assert {
+    } in gateway["volumeMounts"])
+    check({
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/hermes_cli/main.py",
         "subPath": "main.py",
         "readOnly": True,
-    } in gateway["volumeMounts"]
-    assert {
+    } in gateway["volumeMounts"])
+    check({
         "name": "mission-runtime",
         "mountPath": "/opt/hermes/plugins/platforms/telegram/adapter.py",
         "subPath": "telegram_adapter.py",
         "readOnly": True,
-    } in gateway["volumeMounts"]
+    } in gateway["volumeMounts"])
     mission_runtime = next(
         volume for volume in template["spec"]["volumes"]
         if volume["name"] == "mission-runtime"
     )
-    assert mission_runtime == {"name": "mission-runtime", "emptyDir": {}}
-    assert {
+    check(mission_runtime == {"name": "mission-runtime", "emptyDir": {}})
+    check({
         "name": "stt-runtime",
         "mountPath": "/opt/uap-stt",
         "readOnly": True,
-    } in gateway["volumeMounts"]
-    assert next(
+    } in gateway["volumeMounts"])
+    check(next(
         volume for volume in template["spec"]["volumes"]
         if volume["name"] == "stt-runtime"
-    ) == {"name": "stt-runtime", "emptyDir": {}}
+    ) == {"name": "stt-runtime", "emptyDir": {}})
 
     config_map = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-agent-config.yaml").read_text(encoding="utf-8")
     )
     managed = yaml.safe_load(config_map["data"]["managed-config"])
-    assert managed["stt"] == {
+    check(managed["stt"] == {
         "enabled": True,
         "provider": "uap_local",
         "providers": {
@@ -383,28 +415,28 @@ def main() -> None:
                 "timeout": 90,
             }
         },
-    }
+    })
 
     resources = (ROOT / "clusters/prod/infra/kustomization.yaml").read_text(encoding="utf-8")
-    assert "hermes-mission-runtime.yaml" in resources
-    assert "hermes-project-catalog.yaml" in resources
-    assert "hermes-agent-mission.sops.yaml" in resources
-    assert "hermes-agent-owner.sops.yaml" in resources
+    check("hermes-mission-runtime.yaml" in resources)
+    check("hermes-project-catalog.yaml" in resources)
+    check("hermes-agent-mission.sops.yaml" in resources)
+    check("hermes-agent-owner.sops.yaml" in resources)
 
     owner_secret = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-agent-owner.sops.yaml").read_text(
             encoding="utf-8"
         )
     )
-    assert owner_secret["apiVersion"] == "v1"
-    assert owner_secret["kind"] == "Secret"
-    assert owner_secret["metadata"] == {
+    check(owner_secret["apiVersion"] == "v1")
+    check(owner_secret["kind"] == "Secret")
+    check(owner_secret["metadata"] == {
         "name": "hermes-agent-owner",
         "namespace": "uap-system",
-    }
-    assert set(owner_secret["data"]) == {"owner-key"}
-    assert owner_secret["data"]["owner-key"].startswith("ENC[AES256_GCM")
-    assert isinstance(owner_secret.get("sops"), dict)
+    })
+    check(set(owner_secret["data"]) == {"owner-key"})
+    check(owner_secret["data"]["owner-key"].startswith("ENC[AES256_GCM"))
+    check(isinstance(owner_secret.get("sops"), dict))
     print("hermes-mission-deployment-ok")
 
 

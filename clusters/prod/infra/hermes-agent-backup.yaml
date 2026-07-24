@@ -34,7 +34,7 @@ spec:
           initContainers:
             # 1) produce the FULL backup zip into a shared emptyDir (reads the PVC; no writes to it).
             - name: dump
-              image: nousresearch/hermes-agent@sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f  # v0.18.0, same digest as the gateway
+              image: nousresearch/hermes-agent@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a  # v0.19.0, same digest as the gateway
               command: ["/bin/sh", "-c"]
               securityContext:
                 runAsUser: 0       # dump-container file ops as root (NOTE: hermes backup itself still drops to uid 10000)
@@ -43,7 +43,7 @@ spec:
                   set -eu
                   ts=$(date +%Y%m%d-%H%M%S)
                   zip="/work/hermes-backup-$ts.zip"
-                  # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). Hermes v0.18
+                  # FULL backup (NOT --quick — --quick omits .codex/, the Codex brain). Hermes v0.19
                   # safely snapshots *.db, but not our *.sqlite3 MissionStore; the validator below
                   # replaces that raw entry (and any raw -wal/-shm/-journal sidecars) with one explicit
                   # sqlite3.backup() snapshot, and fails closed if a raw MissionStore sidecar leaks in.
