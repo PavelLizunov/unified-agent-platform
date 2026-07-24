@@ -44,6 +44,12 @@ class PostVerifyFailed(DeliveryError):
     pass
 
 
+class PrClosedExternally(DeliveryError):
+    def __init__(self, message: str, observed_head: str | None = None):
+        super().__init__(message)
+        self.observed_head = observed_head
+
+
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 _PROFILE_FIELDS = {
     "schema_version", "dispatch_profile", "goal", "repo", "remote",
@@ -77,10 +83,15 @@ _PRE_REVIEW_CI_SUMMARY = (
     "Required pre-review platform checks failed after the approved cycle limit"
 )
 _PRE_REVIEW_GATE_VERSION = 1
+_PR_INVENTORY_LIMIT = 10
 _POST_VERIFY_RESULT = "post_verify_failed"
 _POST_VERIFY_SUMMARY = "Post-verify failed twice on the exact merged revision"
 _DEPLOYMENT_RESULT = "deployment_failed"
 _DEPLOYMENT_SUMMARY = "Deployment failed twice for the exact merged revision"
+_PR_CLOSED_RESULT = "pr_closed_externally"
+_PR_CLOSED_SUMMARY = (
+    "Exact candidate PR was closed externally before merge; delivery stopped safely"
+)
 _LEGACY_POST_VERIFY_PHASES = {
     "post_verify_repair_pending",
     "post_verify_repair_waiting",
@@ -3851,6 +3862,18 @@ class DeliveryCoordinator:
                     {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}},
                 ],
             )
+        if state.get("failure_kind") == "pr_closed":
+            events = [
+                {"type": "gate.upsert", "payload": {"gate_id": gate_id, "status": "passed"}}
+                for gate_id in state.get("pr_closed_gates", [])
+            ]
+            events.append(
+                {"type": "gate.upsert", "payload": {"gate_id": "pull-request", "status": "failed"}}
+            )
+            events.append(
+                {"type": "gate.upsert", "payload": {"gate_id": "cleanup", "status": "passed"}}
+            )
+            return finish(_PR_CLOSED_RESULT, _PR_CLOSED_SUMMARY, events)
         return finish(
             _REJECTION_RESULT,
             _REJECTION_SUMMARY,
@@ -3931,20 +3954,52 @@ class DeliveryCoordinator:
         self._reconcile_rejected(state)
         return True
 
+    def _pr_closed_passed_gates(self, state: dict[str, Any]) -> list[str]:
+        gates: list[str] = []
+        if state.get("pre_review_gate_version") == _PRE_REVIEW_GATE_VERSION:
+            gates.append("tests")
+        phase = state.get("phase")
+        if phase in {"reviewed", "pr_open", "ci_green", "merged"}:
+            gates.append("review")
+        if phase in {"ci_green", "merged"}:
+            gates.append("ci")
+        return gates
+
+    def _fail_pr_closed(
+        self,
+        state: dict[str, Any],
+        paths: dict[str, pathlib.Path],
+        error: PrClosedExternally | None = None,
+    ) -> dict[str, Any]:
+        observed_head = getattr(error, "observed_head", None)
+        if isinstance(observed_head, str) and observed_head:
+            state["pr_head_sha"] = observed_head
+            state["candidate_push_sha"] = observed_head
+        state.update(
+            phase="pr_closed",
+            failure_kind="pr_closed",
+            failure_error=_bounded_diagnostic(
+                "exact candidate PR was closed externally before merge"
+            ),
+            pr_closed_gates=self._pr_closed_passed_gates(state),
+        )
+        self._save(paths, state)
+        return self._finish_rejection(state, paths)
+
     def _finish_rejection(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> dict[str, Any]:
         result, summary, events = self._failure_contract(state)
         if state["phase"] in {
             "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed",
-            "deployment_failed",
+            "deployment_failed", "pr_closed",
         }:
             self._ensure_restart_claim(state, paths)
         if state["phase"] == "review_rejected":
             self._publish_review_findings_notice(state)
         if state["phase"] in {
             "review_rejected", "author_checks_failed", "ci_failed", "post_verify_failed",
-            "deployment_failed",
+            "deployment_failed", "pr_closed",
         }:
             preserve_remote = False
             if (
@@ -4644,16 +4699,21 @@ class DeliveryCoordinator:
             info = json.loads(result.stdout) if not result.returncode else {}
         except (json.JSONDecodeError, TypeError):
             info = {}
-        if (
-            not isinstance(info, dict)
-            or info.get("number") != bound
-            or not isinstance(info.get("url"), str)
-            or info.get("state") != "OPEN"
-            or not isinstance(info.get("isDraft"), bool)
-            or info.get("headRefName") != state["branch"]
-            or info.get("baseRefName") != base
-            or _pr_head_oid(info) not in allowed_heads
-        ):
+        identity_exact = (
+            isinstance(info, dict)
+            and info.get("number") == bound
+            and isinstance(info.get("url"), str)
+            and isinstance(info.get("isDraft"), bool)
+            and info.get("headRefName") == state["branch"]
+            and info.get("baseRefName") == base
+            and _pr_head_oid(info) in allowed_heads
+        )
+        if identity_exact and info.get("state") == "CLOSED":
+            raise PrClosedExternally(
+                "exact coordinator-owned PR was closed externally before merge",
+                observed_head=_pr_head_oid(info),
+            )
+        if not identity_exact or info.get("state") != "OPEN":
             raise DeliveryError("durable PR changed before candidate delivery")
         return info
 
@@ -4666,6 +4726,8 @@ class DeliveryCoordinator:
             info = self._bound_pr(
                 state, allowed_heads=allowed_heads or {state["candidate_sha"]}
             )
+        except PrClosedExternally:
+            raise
         except DeliveryError:
             if isinstance(bound, int) and not isinstance(bound, bool):
                 self._restore_pr_draft(state, bound, fields)
@@ -4746,6 +4808,94 @@ class DeliveryCoordinator:
         state.update(phase="candidate_pushed", candidate_push_sha=candidate)
         self._save(paths, state)
 
+    def _inventory_branch_prs(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        """All-state inventory of PRs for the exact candidate branch/base.
+
+        Any nonzero exit, malformed JSON, or non-list result is ambiguous and
+        fails closed so a duplicate PR is never created. ``gh pr view <branch>``
+        is NOT proof of absence across CLOSED/MERGED states; only a successful
+        valid all-state list is.
+        """
+        result = self._run([
+            self.profile["gh_bin"], "pr", "list",
+            "--repo", self.profile["repo"],
+            "--head", state["branch"],
+            "--base", self.profile["default_branch"],
+            "--state", "all",
+            "--limit", str(_PR_INVENTORY_LIMIT),
+            "--json", "number,url,state,isDraft,headRefName,headRefOid,baseRefName",
+        ], check=False)
+        if result.returncode:
+            raise DeliveryError("pre-review PR inventory failed closed")
+        try:
+            records = json.loads(result.stdout)
+        except (json.JSONDecodeError, TypeError):
+            raise DeliveryError("pre-review PR inventory was malformed")
+        if not isinstance(records, list):
+            raise DeliveryError("pre-review PR inventory was not a list")
+        return records
+
+    def _exact_branch_record(self, state: dict[str, Any], record: Any) -> bool:
+        return (
+            isinstance(record, dict)
+            and isinstance(record.get("number"), int)
+            and isinstance(record.get("url"), str)
+            and isinstance(record.get("isDraft"), bool)
+            and record.get("headRefName") == state["branch"]
+            and record.get("baseRefName") == self.profile["default_branch"]
+            and _pr_head_oid(record) == state["candidate_sha"]
+        )
+
+    def _adopt_branch_record(
+        self, state: dict[str, Any], info: dict[str, Any], fields: str
+    ) -> dict[str, Any]:
+        if info.get("state") == "CLOSED":
+            # Exact coordinator-owned PR closed externally before merge: terminal.
+            # Never create, reopen, or ready it.
+            state["pr_number"] = info["number"]
+            state["pr_url"] = info["url"]
+            state["pr_base_branch"] = info["baseRefName"]
+            raise PrClosedExternally(
+                "exact coordinator-owned PR was closed externally before merge",
+                observed_head=state["candidate_sha"],
+            )
+        if info.get("state") != "OPEN":
+            # MERGED or any other state is not adoptable; fail closed, no replacement.
+            raise DeliveryError("pre-review PR is not adoptable before create")
+        if info["isDraft"] is not True:
+            self._restore_pr_draft(state, info["number"], fields)
+            raise DeliveryError("unreviewed candidate requires an exact draft PR")
+        return info
+
+    def _reconcile_branch_pr(
+        self, state: dict[str, Any], paths: dict[str, pathlib.Path], fields: str
+    ) -> dict[str, Any]:
+        records = self._inventory_branch_prs(state)
+        if len(records) > 1:
+            raise DeliveryError("pre-review PR inventory is ambiguous before create")
+        if len(records) == 1:
+            if not self._exact_branch_record(state, records[0]):
+                raise DeliveryError("pre-review PR identity mismatch before create")
+            return self._adopt_branch_record(state, records[0], fields)
+        # Zero records from a successful valid inventory is the ONLY precondition
+        # for exactly one create.
+        self._assert_claim(
+            state, min_remaining_seconds=self.profile["command_timeout_seconds"]
+        )
+        self._run([
+            self.profile["gh_bin"], "pr", "create", "--draft",
+            "--repo", self.profile["repo"],
+            "--base", self.profile["default_branch"],
+            "--head", state["branch"],
+            "--title", self.profile["pull_request_title"],
+            "--body", self.profile["pull_request_body"],
+        ], cwd=paths["author"], check=False)
+        # Reconcile the same all-state inventory; the create response may be lost.
+        records = self._inventory_branch_prs(state)
+        if len(records) != 1 or not self._exact_branch_record(state, records[0]):
+            raise DeliveryError("pre-review PR could not be created or recovered")
+        return self._adopt_branch_record(state, records[0], fields)
+
     def _ensure_candidate_pr(
         self, state: dict[str, Any], paths: dict[str, pathlib.Path]
     ) -> None:
@@ -4755,53 +4905,7 @@ class DeliveryCoordinator:
         fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
         bound = state.get("pr_number")
         if bound is None:
-            view = self._run([
-                self.profile["gh_bin"], "pr", "view", state["branch"],
-                "--repo", self.profile["repo"], "--json", fields,
-            ], check=False)
-            if view.returncode:
-                self._assert_claim(
-                    state, min_remaining_seconds=self.profile["command_timeout_seconds"]
-                )
-                self._run([
-                    self.profile["gh_bin"], "pr", "create", "--draft",
-                    "--repo", self.profile["repo"],
-                    "--base", self.profile["default_branch"],
-                    "--head", state["branch"],
-                    "--title", self.profile["pull_request_title"],
-                    "--body", self.profile["pull_request_body"],
-                ], cwd=paths["author"], check=False)
-                view = self._run([
-                    self.profile["gh_bin"], "pr", "view", state["branch"],
-                    "--repo", self.profile["repo"], "--json", fields,
-                ], check=False)
-            if view.returncode:
-                raise DeliveryError("pre-review draft PR could not be created or recovered")
-            try:
-                info = json.loads(view.stdout)
-            except (json.JSONDecodeError, TypeError):
-                info = {}
-            if (
-                not isinstance(info, dict)
-                or not isinstance(info.get("number"), int)
-                or not isinstance(info.get("url"), str)
-                or info.get("state") != "OPEN"
-                or not isinstance(info.get("isDraft"), bool)
-                or info.get("headRefName") != state["branch"]
-                or info.get("baseRefName") != self.profile["default_branch"]
-                or _pr_head_oid(info) != state["candidate_sha"]
-            ):
-                if (
-                    isinstance(info, dict)
-                    and isinstance(info.get("number"), int)
-                    and info.get("state") == "OPEN"
-                    and info.get("isDraft") is False
-                ):
-                    self._restore_pr_draft(state, info["number"], fields)
-                raise DeliveryError("GitHub returned an invalid pre-review draft PR")
-            if info["isDraft"] is not True:
-                self._restore_pr_draft(state, info["number"], fields)
-                raise DeliveryError("unreviewed candidate requires an exact draft PR")
+            info = self._reconcile_branch_pr(state, paths, fields)
             state.update(
                 pr_number=info["number"], pr_url=info["url"],
                 pr_head_sha=state["candidate_sha"],
@@ -5046,6 +5150,45 @@ class DeliveryCoordinator:
     def _restore_pr_draft(
         self, state: dict[str, Any], pr_number: int, fields: str
     ) -> None:
+        expected_heads = {
+            head
+            for head in (state.get("pr_head_sha"), state.get("candidate_sha"))
+            if isinstance(head, str) and head
+        }
+
+        durable_url = state.get("pr_url")
+
+        def _exact_open(info: dict[str, Any], draft: bool | None) -> bool:
+            url_ok = (
+                info.get("url") == durable_url
+                if isinstance(durable_url, str) and durable_url
+                else isinstance(info.get("url"), str)
+            )
+            return (
+                isinstance(info, dict)
+                and info.get("number") == pr_number
+                and url_ok
+                and info.get("state") == "OPEN"
+                and isinstance(info.get("isDraft"), bool)
+                and info.get("headRefName") == state["branch"]
+                and info.get("baseRefName") == self.profile["default_branch"]
+                and _pr_head_oid(info) in expected_heads
+                and (draft is None or info.get("isDraft") is draft)
+            )
+
+        before = self._run([
+            self.profile["gh_bin"], "pr", "view", str(pr_number),
+            "--repo", self.profile["repo"], "--json", fields,
+        ], check=False)
+        try:
+            info = json.loads(before.stdout) if not before.returncode else {}
+        except (json.JSONDecodeError, TypeError):
+            info = {}
+        # Never mutate (gh pr ready --undo) an unproven, mismatched, or non-OPEN PR.
+        if not _exact_open(info, draft=None):
+            raise DeliveryError("invalid post-review PR identity could not be restored to draft")
+        if info.get("isDraft") is True:
+            return
         self._run([
             self.profile["gh_bin"], "pr", "ready", str(pr_number), "--undo",
             "--repo", self.profile["repo"],
@@ -5058,14 +5201,7 @@ class DeliveryCoordinator:
             info = json.loads(restored.stdout) if not restored.returncode else {}
         except (json.JSONDecodeError, TypeError):
             info = {}
-        if (
-            not isinstance(info, dict)
-            or info.get("number") != pr_number
-            or info.get("state") != "OPEN"
-            or info.get("isDraft") is not True
-            or info.get("headRefName") != state["branch"]
-            or info.get("baseRefName") != self.profile["default_branch"]
-        ):
+        if not _exact_open(info, draft=True):
             raise DeliveryError("invalid post-review PR identity could not be restored to draft")
 
     def _pr(self, state: dict[str, Any], paths: dict[str, pathlib.Path]) -> None:
@@ -5095,6 +5231,19 @@ class DeliveryCoordinator:
                 )
             except (json.JSONDecodeError, TypeError):
                 previous = {}
+            previous_exact = (
+                isinstance(previous, dict)
+                and previous.get("number") == bound
+                and isinstance(previous.get("isDraft"), bool)
+                and previous.get("headRefName") == state["branch"]
+                and previous.get("baseRefName") == previous_base
+                and _pr_head_oid(previous) in {previous_head, state["candidate_sha"]}
+            )
+            if previous_exact and previous.get("state") == "CLOSED":
+                raise PrClosedExternally(
+                    "exact coordinator-owned PR was closed externally before merge",
+                    observed_head=_pr_head_oid(previous),
+                )
             if (
                 not isinstance(previous, dict)
                 or previous.get("number") != bound
@@ -5618,13 +5767,16 @@ class DeliveryCoordinator:
             self._assert_claim(
                 state, min_remaining_seconds=self.profile["command_timeout_seconds"]
             )
-        fields = "number,state,isDraft,headRefName,commits,baseRefName"
+        fields = "number,url,state,isDraft,headRefName,commits,baseRefName"
         expected_head = state.get("pr_head_sha")
         if not isinstance(expected_head, str) or not expected_head:
             raise DeliveryError("failed PR has no durable head identity")
         expected_base = state.get("pr_base_branch")
         if expected_base != self.profile["default_branch"]:
             raise DeliveryError("failed PR has no durable base identity")
+        durable_url = state.get("pr_url")
+        if not isinstance(durable_url, str) or not durable_url:
+            raise DeliveryError("failed PR has no durable URL identity")
 
         def inspect() -> dict[str, Any]:
             return json.loads(self._run(
@@ -5641,6 +5793,7 @@ class DeliveryCoordinator:
                 or _pr_head_oid(info) != expected_head
                 or info.get("baseRefName") != expected_base
                 or info.get("state") not in states
+                or info.get("url") != durable_url
             ):
                 raise DeliveryError("failed PR identity no longer matches the durable candidate")
 
@@ -5703,6 +5856,11 @@ class DeliveryCoordinator:
             or (info.get("state") == "OPEN" and info.get("isDraft") is False)
         ):
             return
+        if exact and info.get("state") == "CLOSED":
+            raise PrClosedExternally(
+                "exact coordinator-owned PR was closed externally before merge",
+                observed_head=_pr_head_oid(info),
+            )
         if isinstance(bound, int) and not isinstance(bound, bool):
             if not isinstance(info, dict) or not info or (
                 info.get("state") == "OPEN" and info.get("isDraft") is False
@@ -6775,6 +6933,7 @@ class DeliveryCoordinator:
             if state["phase"] in {
                 "review_rejected", "author_checks_failed", "ci_failed", "rejection_cleaned",
                 "post_verify_failed", "deployment_failed", "rejection_task_completed",
+                "pr_closed",
             }:
                 return self._finish_rejection(state, paths)
             if mission.get("status") == "completed":
@@ -6839,11 +6998,14 @@ class DeliveryCoordinator:
             ambiguous = self._ambiguous_state(state)
             if ambiguous is not None:
                 self._publish_ambiguous_notice(state, ambiguous)
-                recovered = (
-                    self._reconcile_ambiguous_reviewer(state, paths, ambiguous)
-                    if ambiguous["role"] == "reviewer"
-                    else self._reconcile_ambiguous_author(state, paths, ambiguous)
-                )
+                try:
+                    recovered = (
+                        self._reconcile_ambiguous_reviewer(state, paths, ambiguous)
+                        if ambiguous["role"] == "reviewer"
+                        else self._reconcile_ambiguous_author(state, paths, ambiguous)
+                    )
+                except PrClosedExternally as error:
+                    return self._fail_pr_closed(state, paths, error)
                 if not recovered:
                     return {
                         "action": "reconciling", "mission_id": mission_id, "state": state,
@@ -6959,7 +7121,10 @@ class DeliveryCoordinator:
                     "action": state["phase"], "mission_id": mission_id, "state": state,
                 }
 
-            stale_ci = self._recover_stale_pre_review_ci(state, paths)
+            try:
+                stale_ci = self._recover_stale_pre_review_ci(state, paths)
+            except PrClosedExternally as error:
+                return self._fail_pr_closed(state, paths, error)
             if stale_ci == "waiting":
                 return {
                     "action": "ci_retry_wait", "mission_id": mission_id,
@@ -7025,11 +7190,16 @@ class DeliveryCoordinator:
                     if state["phase"] == "ci_failed":
                         return self._finish_rejection(state, paths)
                     return {"action": state["phase"], "mission_id": mission_id, "state": state}
+                except PrClosedExternally as error:
+                    return self._fail_pr_closed(state, paths, error)
 
             if state["phase"] == "pre_review_ci_green":
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
-                self._require_draft_pr(state)
+                try:
+                    self._require_draft_pr(state)
+                except PrClosedExternally as error:
+                    return self._fail_pr_closed(state, paths, error)
                 self._publish_gate_evidence(state, "tests", "passed")
                 disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                 if disk_wait is not None:
@@ -7043,7 +7213,10 @@ class DeliveryCoordinator:
                     f"{self._review_budget_limit(state)}. Следом — слияние "
                     "либо автоматическое исправление замечаний.",
                 )
-                review = self._review(state, paths)
+                try:
+                    review = self._review(state, paths)
+                except PrClosedExternally as error:
+                    return self._fail_pr_closed(state, paths, error)
                 if review is None:
                     return {
                         "action": "capacity_wait", "mission_id": mission_id,
@@ -7057,7 +7230,10 @@ class DeliveryCoordinator:
             if state["phase"] == "reviewed":
                 self._assert_claim(state)
                 self._publish_stage(state, "reviewing", 65)
-                self._pr(state, paths)
+                try:
+                    self._pr(state, paths)
+                except PrClosedExternally as error:
+                    return self._fail_pr_closed(state, paths, error)
                 self._publish_stage(state, "delivering", 80)
 
             try:
@@ -7094,6 +7270,8 @@ class DeliveryCoordinator:
                 if state["phase"] == "ci_failed":
                     return self._finish_rejection(state, paths)
                 return {"action": state["phase"], "mission_id": mission_id, "state": state}
+            except PrClosedExternally as error:
+                return self._fail_pr_closed(state, paths, error)
 
             if state["phase"] == "merged":
                 self._assert_claim(state)
