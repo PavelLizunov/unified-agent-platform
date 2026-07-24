@@ -1136,6 +1136,376 @@ def test_source_answer_atomicity_and_fault_regression() -> None:
         assert _counts(store, no_repo_id) == (0, 0)
 
 
+def test_routine_small_classifier_has_closed_ru_en_corpus() -> None:
+    classify = missions.routine_small_expected_paths
+    # Positive: explicit limiter + narrow one-line operation + one/two exact files.
+    # Only ordinary docs/source paths are eligible; root manifests/locks and
+    # control-surface prefixes are forbidden (see near_miss below).
+    positives = {
+        "Fix typo only in README.md": ("README.md",),
+        "Fix the typo only in src/config.py": ("src/config.py",),
+        "Fix typo only in docs/note.md": ("docs/note.md",),
+        "Update the changelog only in CHANGELOG.md": ("CHANGELOG.md",),
+        "fix typo only in path/to/file.ext": ("path/to/file.ext",),
+        "Fix typo only in 123.md": ("123.md",),         # numeric-named file still admitted
+        "Fix typo only in README.md and CHANGELOG.md": (
+            "CHANGELOG.md", "README.md",
+        ),
+        "Обнови версию только в src/config.py": ("src/config.py",),
+        "Исправь опечатку только в src/main.py": ("src/main.py",),
+        "Обнови версию только в src/config.py и CHANGELOG.md": (
+            "CHANGELOG.md", "src/config.py",
+        ),
+        # Dotted version tokens are not bound; the real file still is.
+        "Update the version to 1.2.3 only in src/config.py": ("src/config.py",),
+        "Update the changelog for v2.0 only in CHANGELOG.md": ("CHANGELOG.md",),
+        "Обнови версию до 1.2.3 только в src/config.py": ("src/config.py",),
+        # Email/@host fragments are not bound; the real file still is.
+        "Fix typo only in README.md, cc user@example.com": ("README.md",),
+        "Notify user @example.com and fix typo only in README.md": (
+            "README.md",
+        ),
+    }
+    for goal, expected in positives.items():
+        assert classify(goal) == expected, goal
+
+    # Near-miss: never infer routine_small from simple/small/quick wording,
+    # ambiguous or unbounded filenames, or any risky/external/multi-file scope.
+    near_miss = (
+        "Исправь простой баг",                          # simple bug, no exact file
+        "Make a small quick fix",                       # simple/small/quick wording
+        "Make it quick only in README.md",              # no narrow operation
+        "Update README only",                           # docs-only (routine_docs class)
+        "Fix typo only in README.md and CHANGELOG.md and src/config.py",  # 3 files
+        "Fix typo only in *.toml",                      # wildcard
+        "Fix typo only in /etc/hosts",                  # POSIX absolute path
+        "Fix typo only in C:/Windows/system.ini",       # Windows absolute drive
+        "Fix typo only in ../etc/foo.txt",              # traversal
+        "Fix typo only in https://example.com/x.toml",  # URL
+        "Delete production data only in README.md",     # destructive risk flag
+        "Change the accepted security boundary only in README.md",  # owner gate
+        "Fix typo only in README.md; rm -rf /",         # shell syntax
+        "Fix typo only in README.md | tee x",           # shell pipe
+        "Add a new dependency only in README.md",       # dependency change
+        "Update the version to 1.2.3 only",             # bare version token, no file
+        "Set the version to v2.0 only",                 # bare version token, no file
+        "Обнови версию до 1.2.3 только",                # bare version token, no file
+        "Fix typo only in user@example.com",            # email is not a file
+        "Fix typo only in user @example.com",           # @host fragment is not a file
+        # --- Forbidden prefixes: CI, infra, tests, UAP orchestration ---
+        "Fix typo only in .git/hooks/pre-commit.sample",            # git internals / hooks
+        "Fix typo only in .github/workflows/ci.yml",                # CI workflow
+        "Fix typo only in .github/workflows/deploy.yaml",           # CI workflow (yaml)
+        "Fix typo only in .github/actions/setup/action.yml",        # custom action
+        "Fix typo only in .github/CODEOWNERS",                      # repo-config
+        "Fix typo only in .agents/profile.json",                    # UAP orchestration
+        "Fix typo only in clusters/prod/infra/hermes-mission-runtime.yaml",  # infra control
+        "Fix typo only in clusters/prod/apps/foo.yaml",             # infra control (apps)
+        "Fix typo only in infra/terraform/main.tf",                 # IaC
+        "Fix typo only in tests/static/test_foo.py",                # test suite
+        "Fix typo only in tools/hermes-mission/runtime.py",         # classifier/runtime
+        "Fix typo only in tools/hermes-workspace/server.py",        # workspace tooling
+        "Fix typo only in tools/swarm/delivery_coordinator.py",     # delivery coordinator
+        "Fix typo only in tools/swarm/flow_contract.py",            # flow contract
+        # --- Forbidden prefixes: autonomous agent config surfaces ---
+        "Fix typo only in .claude/settings.json",                   # agent config
+        "Fix typo only in .claude/commands/deploy.md",              # agent command
+        "Fix typo only in .codex/config.yaml",                      # agent config
+        "Fix typo only in .qwen/settings.json",                     # agent config
+        "Fix typo only in .cursor/rules.json",                      # agent config
+        # --- Case-insensitive prefix matching ---
+        "Fix typo only in .GitHub/workflows/ci.yml",                # capitalized prefix
+        "Fix typo only in .GITHUB/workflows/ci.yml",                # uppercase prefix
+        "Fix typo only in .Claude/settings.json",                   # capitalized agent
+        "Fix typo only in .AGENTS/profile.json",                    # uppercase agent
+        "Fix typo only in Clusters/prod/foo.yaml",                  # capitalized infra
+        "Fix typo only in TESTS/test_foo.py",                       # uppercase tests
+        # --- Forbidden basenames at root: repo-config / security ---
+        "Fix typo only in .gitattributes",                          # repo-config
+        "Fix typo only in .gitignore",                              # repo-config
+        "Fix typo only in .gitlab-ci.yml",                          # GitLab CI
+        "Fix typo only in .gitleaks.toml",                          # security config
+        "Fix typo only in .ragignore",                              # repo-config
+        "Fix typo only in .sops.yaml",                              # security config
+        # --- Forbidden basenames at root: dependency manifests ---
+        "Fix typo only in requirements.txt",                        # dependency manifest
+        "Fix typo only in requirements-dev.txt",                    # dependency manifest
+        # --- Forbidden basenames at root: build/dependency manifests and locks ---
+        "Fix typo only in Cargo.toml",                              # Rust manifest
+        "Fix typo only in Cargo.lock",                              # Rust lock
+        "Fix typo only in Dockerfile",                              # container build
+        "Fix typo only in Makefile",                                # build system
+        "Fix typo only in go.mod",                                  # Go manifest
+        "Fix typo only in go.sum",                                  # Go lock
+        "Fix typo only in package.json",                            # Node manifest
+        "Fix typo only in package-lock.json",                       # Node lock
+        "Fix typo only in pnpm-lock.yaml",                          # pnpm lock
+        "Fix typo only in poetry.lock",                             # Poetry lock
+        "Fix typo only in pyproject.toml",                          # Python manifest
+        "Fix typo only in setup.cfg",                               # Python config
+        "Fix typo only in setup.py",                                # Python build
+        "Fix typo only in tox.ini",                                 # Python test config
+        "Fix typo only in uv.lock",                                 # uv lock
+        "Fix typo only in yarn.lock",                               # Yarn lock
+        # --- Forbidden basenames at ANY depth (nested) ---
+        "Fix typo only in sub/pyproject.toml",                      # nested Python manifest
+        "Fix typo only in service/Dockerfile.dev",                  # Dockerfile variant
+        "Fix typo only in service/Dockerfile.prod",                 # Dockerfile variant
+        "Fix typo only in app/package-lock.json",                   # nested Node lock
+        "Fix typo only in lib/Cargo.lock",                          # nested Rust lock
+        "Fix typo only in lib/Cargo.toml",                          # nested Rust manifest
+        "Fix typo only in svc/requirements.txt",                    # nested dependency
+        "Fix typo only in svc/requirements-prod.txt",               # nested req variant
+        "Fix typo only in deep/nested/go.mod",                      # nested Go manifest
+        "Fix typo only in web/package.json",                        # nested Node manifest
+        "Fix typo only in build/Makefile",                          # nested build system
+        "Fix typo only in build/makefile",                          # nested lowercase make
+        "Fix typo only in ci/.gitlab-ci.yml",                       # nested GitLab CI
+        "Fix typo only in sub/.gitignore",                          # nested repo-config
+        "Fix typo only in sub/.gitleaks.toml",                      # nested security
+        "Fix typo only in sub/setup.py",                            # nested Python build
+        "Fix typo only in sub/tox.ini",                             # nested test config
+        # --- Case-insensitive basename matching ---
+        "Fix typo only in REQUIREMENTS.TXT",                        # uppercase dependency
+        "Fix typo only in Requirements.txt",                        # capitalized dependency
+        "Fix typo only in PYPROJECT.TOML",                          # uppercase manifest
+        "Fix typo only in DOCKERFILE",                              # uppercase container
+        "Fix typo only in MAKEFILE",                                # uppercase build
+        "Fix typo only in sub/REQUIREMENTS.TXT",                    # nested uppercase dep
+        "Fix typo only in sub/PYPROJECT.TOML",                      # nested uppercase
+        # --- Mixed safe+forbidden: the forbidden path poisons the whole goal ---
+        "Fix typo only in README.md and .github/workflows/ci.yml",  # safe + workflow
+        "Fix typo only in .github/workflows/ci.yml and CHANGELOG.md",  # workflow + safe
+        "Fix typo only in src/main.py and requirements.txt",        # safe + dependency
+        "Fix typo only in docs/note.md and pyproject.toml",         # safe + manifest
+        "Fix typo only in README.md and tests/test_foo.py",         # safe + test
+        "Fix typo only in infra/main.tf and src/config.py",         # IaC + safe
+        "Fix typo only in README.md and .claude/settings.json",     # safe + agent config
+        "Fix typo only in src/main.py and sub/pyproject.toml",      # safe + nested manifest
+        "Fix typo only in README.md and service/Dockerfile.dev",    # safe + Dockerfile var
+        "Fix typo only in docs/note.md and .GitHub/workflows/ci.yml",  # safe + case prefix
+        "Исправь опечатку только в .github/workflows/ci.yml",       # RU: CI workflow
+        "Исправь опечатку только в requirements.txt",               # RU: dependency
+        "Исправь опечатку только в pyproject.toml",                 # RU: manifest
+        "Исправь опечатку только в .claude/settings.json",          # RU: agent config
+        "Исправь опечатку только в sub/pyproject.toml",             # RU: nested manifest
+    )
+    for goal in near_miss:
+        assert classify(goal) is None, goal
+    assert classify(None) is None
+
+    # Version tokens and email hosts are never extracted, even alongside a file.
+    assert missions.closed_repo_path("1.2.3") is None
+    assert missions.closed_repo_path("v2.0") is None
+    assert missions.closed_repo_path("dir/2.0.1") is None
+    assert missions.closed_repo_path("123.md") == "123.md"
+    for goal in (
+        "Update the version to 1.2.3 only in src/config.py",
+        "Fix typo only in README.md, cc user@example.com",
+    ):
+        result = classify(goal)
+        assert result is not None
+        assert all("@" not in path for path in result), goal
+        assert result == ("src/config.py",) or result == ("README.md",), goal
+
+
+def test_routine_small_class_is_durable_and_closed() -> None:
+    routes = json.dumps({
+        "workspace": {
+            "dispatch_profile": "build1-registered",
+            "delivery_mode": "none",
+        },
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_INTAKE_ROUTES": routes}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.ingest_owner_goal(
+            "Fix typo only in README.md",
+            platform="workspace",
+            source_message_id="routine-small-1",
+            session_id="routine-small-session",
+        )
+        assert created
+        assert accepted["payload"]["execution_class"] == "routine_small"
+        assert accepted["payload"]["expected_changed_files"] == 1
+        assert accepted["payload"]["expected_changed_paths"] == ["README.md"]
+        projection = store.projection(accepted["mission_id"])
+        assert projection["execution_class"] == "routine_small"
+        assert projection["expected_changed_files"] == 1
+        assert projection["expected_changed_paths"] == ["README.md"]
+
+        # Idempotent replay returns the exact same acceptance.
+        replay, replay_created = store.ingest_owner_goal(
+            "Fix typo only in README.md",
+            platform="workspace",
+            source_message_id="routine-small-1",
+            session_id="routine-small-session",
+        )
+        assert not replay_created and replay == accepted
+
+        # A two-file goal binds both exact paths immutably.
+        two, two_created = store.ingest_owner_goal(
+            "Fix typo only in README.md and CHANGELOG.md",
+            platform="workspace",
+            source_message_id="routine-small-2",
+            session_id="routine-small-session",
+        )
+        assert two_created
+        assert two["payload"]["expected_changed_files"] == 2
+        assert two["payload"]["expected_changed_paths"] == [
+            "CHANGELOG.md", "README.md",
+        ]
+
+        # Ordinary code missions stay unclassed.
+        ordinary, ordinary_created = store.ingest_owner_goal(
+            "Исправь простой баг",
+            platform="workspace",
+            source_message_id="ordinary-small-1",
+            session_id="routine-small-session",
+        )
+        assert ordinary_created
+        assert "execution_class" not in ordinary["payload"]
+
+        # A different replay (changed paths) collides instead of mutating.
+        try:
+            store.accept(
+                "Fix typo only in README.md",
+                mission_id=accepted["mission_id"],
+                execution_class="routine_small",
+                expected_changed_files=1,
+                expected_changed_paths=["OTHER.md"],
+                delivery_mode="none",
+            )
+            raise AssertionError("changed routine_small paths were accepted as a replay")
+        except missions.MissionError as error:
+            assert str(error) == "mission already accepted with different parameters"
+
+        # Closed validation rejects malformed execution-class triples.
+        for index, (execution_class, expected_changed_files, paths) in enumerate((
+            ("routine_small", 1, None),
+            ("routine_small", 3, ["a.toml"]),
+            ("routine_small", 1, ["a.toml", "a.toml"]),
+            ("routine_small", 1, ["../a.toml"]),
+            ("routine_small", 1, ["/etc/a.toml"]),
+            ("routine_small", 1, ["1.2.3"]),            # version token, not a file
+            ("routine_small", 1, ["v2.0"]),             # version token, not a file
+            ("routine_small", 1, ["user@example.com"]),  # email, not a file
+            ("routine_docs", 2, ["a.toml"]),
+            ("arbitrary", 1, ["a.toml"]),
+            # Closed non-routine surfaces are rejected at the accept() boundary too.
+            ("routine_small", 1, [".github/workflows/ci.yml"]),          # CI workflow
+            ("routine_small", 1, [".github/actions/setup/action.yml"]),  # custom action
+            ("routine_small", 1, [".agents/profile.json"]),              # UAP orchestration
+            ("routine_small", 1, ["clusters/prod/infra/foo.yaml"]),      # infra control
+            ("routine_small", 1, ["infra/terraform/main.tf"]),           # IaC
+            ("routine_small", 1, ["tests/static/test_foo.py"]),          # test suite
+            ("routine_small", 1, ["tools/hermes-mission/runtime.py"]),   # classifier
+            ("routine_small", 1, ["tools/hermes-workspace/server.py"]),  # workspace
+            ("routine_small", 1, ["tools/swarm/delivery_coordinator.py"]),  # coordinator
+            ("routine_small", 1, ["tools/swarm/flow_contract.py"]),      # flow contract
+            ("routine_small", 1, [".gitattributes"]),                    # repo-config
+            ("routine_small", 1, [".gitignore"]),                        # repo-config
+            ("routine_small", 1, [".gitlab-ci.yml"]),                    # GitLab CI
+            ("routine_small", 1, [".gitleaks.toml"]),                    # security config
+            ("routine_small", 1, [".ragignore"]),                        # repo-config
+            ("routine_small", 1, [".sops.yaml"]),                        # security config
+            ("routine_small", 1, ["requirements.txt"]),                  # dependency
+            ("routine_small", 1, ["requirements-dev.txt"]),              # dependency
+            ("routine_small", 1, ["pyproject.toml"]),                    # Python manifest
+            ("routine_small", 1, ["Cargo.toml"]),                        # Rust manifest
+            ("routine_small", 1, ["Dockerfile"]),                        # container build
+            ("routine_small", 1, ["Makefile"]),                          # build system
+            ("routine_small", 1, ["go.mod"]),                            # Go manifest
+            ("routine_small", 1, ["package.json"]),                      # Node manifest
+            # Agent config prefixes
+            ("routine_small", 1, [".claude/settings.json"]),             # agent config
+            ("routine_small", 1, [".codex/config.yaml"]),                # agent config
+            ("routine_small", 1, [".qwen/settings.json"]),               # agent config
+            ("routine_small", 1, [".cursor/rules.json"]),                # agent config
+            # Case-insensitive prefix/basename matching
+            ("routine_small", 1, [".GitHub/workflows/ci.yml"]),          # capitalized
+            ("routine_small", 1, ["REQUIREMENTS.TXT"]),                  # uppercase dep
+            ("routine_small", 1, ["PYPROJECT.TOML"]),                    # uppercase manifest
+            # Nested forbidden basenames at any depth
+            ("routine_small", 1, ["sub/pyproject.toml"]),                # nested manifest
+            ("routine_small", 1, ["service/Dockerfile.dev"]),            # Dockerfile var
+            ("routine_small", 1, ["app/package-lock.json"]),             # nested lock
+            ("routine_small", 1, ["lib/Cargo.lock"]),                    # nested Rust lock
+            ("routine_small", 1, ["svc/requirements.txt"]),              # nested dep
+            ("routine_small", 1, ["svc/requirements-prod.txt"]),         # nested req var
+            ("routine_small", 1, ["build/makefile"]),                    # nested lowercase
+            ("routine_small", 1, ["ci/.gitlab-ci.yml"]),                 # nested GitLab CI
+            ("routine_small", 1, ["sub/.gitignore"]),                    # nested config
+            # Mixed safe+forbidden two-file goals
+            ("routine_small", 2, ["README.md", ".github/workflows/ci.yml"]),  # mixed
+            ("routine_small", 2, ["docs/note.md", "pyproject.toml"]),    # mixed manifest
+            ("routine_small", 2, ["README.md", ".claude/settings.json"]),  # mixed agent
+            ("routine_small", 2, ["src/main.py", "sub/pyproject.toml"]),  # mixed nested
+            ("routine_small", 2, ["README.md", "service/Dockerfile.dev"]),  # mixed Docker
+        )):
+            try:
+                store.accept(
+                    "Invalid routine_small class",
+                    mission_id=f"mission-invalid-small-{index}",
+                    execution_class=execution_class,
+                    expected_changed_files=expected_changed_files,
+                    expected_changed_paths=paths,
+                    delivery_mode="none",
+                )
+                raise AssertionError("invalid routine_small execution class was accepted")
+            except missions.MissionError as error:
+                assert "execution class" in str(error)
+
+
+def test_routine_small_keeps_profile_delivery_mode() -> None:
+    """routine_small keeps the target delivery mode; deploy is never skipped."""
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "vpnctl", "label": "vpnctl",
+                "repository": "PavelLizunov/vpnctl",
+                "summary": "VPN control daemon", "aliases": ["vpnctl"],
+                "dispatch_profile": "build1-vpnctl-registered-v4",
+                "delivery_mode": "deploy", "platforms": ["workspace", "telegram"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.ingest_owner_goal(
+            "Fix typo only in src/config.py",
+            platform="workspace",
+            source_message_id="routine-small-deploy-1",
+            session_id="routine-small-deploy-session",
+            project_id="vpnctl",
+        )
+        assert created
+        assert accepted["payload"]["execution_class"] == "routine_small"
+        assert accepted["payload"]["delivery_mode"] == "deploy"
+        projection = store.projection(accepted["mission_id"])
+        assert projection["delivery_mode"] == "deploy"
+        assert projection["execution_class"] == "routine_small"
+        assert projection["expected_changed_paths"] == ["src/config.py"]
+
+        # routine_docs on the same target still forces effective none mode.
+        docs, docs_created = store.ingest_owner_goal(
+            "Обнови только README",
+            platform="workspace",
+            source_message_id="routine-small-deploy-2",
+            session_id="routine-small-deploy-session",
+            project_id="vpnctl",
+        )
+        assert docs_created
+        assert docs["payload"]["execution_class"] == "routine_docs"
+        assert docs["payload"]["delivery_mode"] == "none"
+
+
 def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> None:
     catalog = json.dumps({
         "schema_version": 2,
@@ -4687,6 +5057,9 @@ def main() -> None:
     test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance()
     test_routine_docs_class_is_durable_and_closed()
     test_routine_docs_on_deploy_target_gets_effective_none_mode()
+    test_routine_small_classifier_has_closed_ru_en_corpus()
+    test_routine_small_class_is_durable_and_closed()
+    test_routine_small_keeps_profile_delivery_mode()
     test_existing_project_setup_context_is_catalog_owned_and_fail_closed()
     test_project_onboarding_is_idempotent_restart_safe_and_forward_only()
     test_reconnect_projects_one_canonical_state()

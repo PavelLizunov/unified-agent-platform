@@ -663,6 +663,97 @@ def exclusive_lock(path: pathlib.Path):
         handle.close()
 
 
+# --- routine_small path policy (duplicated from tools/hermes-mission/runtime.py) ---
+# The runtime overlay cannot import coordinator modules, so this policy is kept
+# as an exact duplicate.  Deterministic alignment tests in
+# tests/static/test_hermes_delivery_coordinator.py verify the two copies agree.
+
+# Conservative boundary: every prefix that controls CI, infra, tests, or UAP
+# orchestration is forbidden; every dependency/build/security/control basename
+# is forbidden at ANY directory depth.  Matching is case-insensitive for
+# classification; the original path is preserved for confinement.
+# Ordinary docs/source paths remain eligible.
+_ROUTINE_SMALL_FORBIDDEN_PREFIXES = (
+    ".agents/",               # UAP orchestration / agent config
+    ".claude/",               # autonomous agent config
+    ".codex/",                # autonomous agent config
+    ".cursor/",               # autonomous agent config
+    ".git/",                  # git internals / hooks
+    ".github/",               # workflows, actions, and all repo-config
+    ".qwen/",                 # autonomous agent config
+    "clusters/",              # k3s/Flux infra control
+    "infra/",                 # infrastructure-as-code
+    "tests/",                 # test suite
+    "tools/hermes-mission/",  # mission runtime / classifier
+    "tools/hermes-workspace/",  # workspace tooling
+    "tools/swarm/",           # delivery coordinator / swarm
+)
+# All entries are lowercase; matched against the casefolded basename at any depth.
+_ROUTINE_SMALL_FORBIDDEN_BASENAMES = frozenset({
+    # repo-config / security
+    ".gitattributes",
+    ".gitignore",
+    ".gitlab-ci.yml",
+    ".gitleaks.toml",
+    ".ragignore",
+    ".sops.yaml",
+    # build/dependency manifests and locks
+    "cargo.lock",
+    "cargo.toml",
+    "dockerfile",
+    "go.mod",
+    "go.sum",
+    "makefile",
+    "package-lock.json",
+    "package.json",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+    "pyproject.toml",
+    "setup.cfg",
+    "setup.py",
+    "tox.ini",
+    "uv.lock",
+    "yarn.lock",
+})
+
+
+def _routine_small_path_allowed(path: str) -> bool:
+    """Return False for paths in closed non-routine surfaces."""
+    lowered = path.casefold()
+    if any(lowered.startswith(prefix) for prefix in _ROUTINE_SMALL_FORBIDDEN_PREFIXES):
+        return False
+    basename = lowered.rsplit("/", 1)[-1]
+    if basename in _ROUTINE_SMALL_FORBIDDEN_BASENAMES:
+        return False
+    if basename.startswith("dockerfile."):
+        return False
+    if basename.startswith("requirements") and basename.endswith(".txt"):
+        return False
+    return True
+
+
+def _closed_repo_path(value: object) -> str | None:
+    """Return the value only if it is one exact, bounded repo-relative file path."""
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip()
+    if not candidate or len(candidate) > 256 or candidate != value:
+        return None
+    if "\\" in candidate or candidate.startswith("/"):
+        return None
+    if not re.fullmatch(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*", candidate):
+        return None
+    segments = candidate.split("/")
+    if any(not segment or set(segment) <= {"."} for segment in segments):
+        return None
+    if "." not in segments[-1]:
+        return None
+    extension = segments[-1].rsplit(".", 1)[-1]
+    if not any(character.isalpha() for character in extension):
+        return None
+    return candidate
+
+
 class DeliveryCoordinator:
     def __init__(
         self,
@@ -948,13 +1039,28 @@ class DeliveryCoordinator:
         elif stored_goal != goal or stored_digest != digest:
             raise DeliveryError("mission goal changed after the durable execution checkpoint")
         expected_changed_files = mission.get("expected_changed_files")
+        expected_changed_paths = mission.get("expected_changed_paths")
         owner_gate_flag = mission.get("owner_gate_flag")
         if (execution_class, expected_changed_files) != (None, None) and (
-            execution_class != "routine_docs"
+            execution_class not in {"routine_docs", "routine_small"}
             or not isinstance(expected_changed_files, int)
             or isinstance(expected_changed_files, bool)
             or not 1 <= expected_changed_files <= 2
         ):
+            raise DeliveryError("mission execution class is invalid")
+        if execution_class == "routine_small":
+            if (
+                not isinstance(expected_changed_paths, list)
+                or len(expected_changed_paths) != expected_changed_files
+                or expected_changed_paths != sorted(set(expected_changed_paths))
+                or any(
+                    _closed_repo_path(item) != item
+                    or not _routine_small_path_allowed(item)
+                    for item in expected_changed_paths
+                )
+            ):
+                raise DeliveryError("mission execution class is invalid")
+        elif expected_changed_paths is not None:
             raise DeliveryError("mission execution class is invalid")
         if owner_gate_flag not in {None, "architecture_change"}:
             raise DeliveryError("mission owner gate flag is invalid")
@@ -962,11 +1068,13 @@ class DeliveryCoordinator:
             state.update(
                 execution_class=execution_class,
                 expected_changed_files=expected_changed_files,
+                expected_changed_paths=expected_changed_paths,
             )
             changed = True
         elif (
             state.get("execution_class") != execution_class
             or state.get("expected_changed_files") != expected_changed_files
+            or state.get("expected_changed_paths") != expected_changed_paths
         ):
             raise DeliveryError(
                 "mission execution class changed after the durable checkpoint"
@@ -1017,19 +1125,34 @@ class DeliveryCoordinator:
         return sorted(files)
 
     @staticmethod
-    def _routine_docs_limit(state: dict[str, Any]) -> int | None:
+    def _small_class_limit(state: dict[str, Any]) -> int | None:
         execution_class = state.get("execution_class")
         expected_changed_files = state.get("expected_changed_files")
         if (execution_class, expected_changed_files) == (None, None):
             return None
         if (
-            execution_class != "routine_docs"
+            execution_class not in {"routine_docs", "routine_small"}
             or not isinstance(expected_changed_files, int)
             or isinstance(expected_changed_files, bool)
             or not 1 <= expected_changed_files <= 2
         ):
             raise DeliveryError("durable mission execution class is invalid")
         return expected_changed_files
+
+    @staticmethod
+    def _routine_small_paths(state: dict[str, Any]) -> list[str] | None:
+        if state.get("execution_class") != "routine_small":
+            return None
+        paths = state.get("expected_changed_paths")
+        if (
+            not isinstance(paths, list)
+            or not paths
+            or len(paths) > 2
+            or any(not isinstance(item, str) or not item for item in paths)
+            or paths != sorted(set(paths))
+        ):
+            raise DeliveryError("durable mission execution class is invalid")
+        return paths
 
     def _validate_execution_scope(
         self,
@@ -1039,8 +1162,15 @@ class DeliveryCoordinator:
         exact_legacy: bool = False,
     ) -> list[str]:
         validated = self._validate_changed_scope(files, exact_legacy=exact_legacy)
-        routine_limit = self._routine_docs_limit(state)
+        routine_limit = self._small_class_limit(state)
         if routine_limit is None:
+            return validated
+        if state.get("execution_class") == "routine_small":
+            requested = self._routine_small_paths(state)
+            if len(validated) > routine_limit or not set(validated) <= set(requested):
+                raise DeliveryError(
+                    "routine small candidate escaped its exact requested file set"
+                )
             return validated
         if len(validated) > routine_limit or any(
             not (
@@ -1090,7 +1220,7 @@ class DeliveryCoordinator:
         return self._validate_execution_scope(state, files)
 
     def _route_signals(self, state: dict[str, Any]) -> dict[str, Any]:
-        routine_limit = self._routine_docs_limit(state)
+        routine_limit = self._small_class_limit(state)
         if routine_limit is None:
             changed_files = (
                 len(self.profile["required_files"])
@@ -2605,11 +2735,11 @@ class DeliveryCoordinator:
         return value
 
     def _correction_budget(self, state: dict[str, Any]) -> int:
-        return 1 if self._routine_docs_limit(state) is not None else self.profile["max_review_cycles"]
+        return 1 if self._small_class_limit(state) is not None else self.profile["max_review_cycles"]
 
     def _review_budget_limit(self, state: dict[str, Any]) -> int:
         base = self._correction_budget(state) + 1
-        if self._routine_docs_limit(state) is not None:
+        if self._small_class_limit(state) is not None:
             return base
         escalation = self._review_escalation(state)
         return base * 2 if escalation and escalation["status"] == "continued" else base
@@ -4325,10 +4455,17 @@ class DeliveryCoordinator:
         last = paths["directory"] / f"author-{cycle}-last.txt"
         findings = _sanitize_findings(state.get("review_findings", []))
         owner_answers = self._owner_answers(state)
-        routine_limit = self._routine_docs_limit(state)
+        routine_limit = self._small_class_limit(state)
+        routine_small_paths = self._routine_small_paths(state)
         if self.profile["schema_version"] == 3:
             scope_prompt = (
                 f"Exact allowed files: {json.dumps(self.profile['required_files'])}\n"
+            )
+        elif routine_small_paths is not None:
+            scope_prompt = (
+                "Routine small-change boundary: change only these exact files "
+                f"{json.dumps(routine_small_paths)} (at most {routine_limit}); "
+                "do not create, rename, or touch any other file.\n"
             )
         elif routine_limit is not None:
             scope_prompt = (
@@ -4874,7 +5011,7 @@ class DeliveryCoordinator:
         if cycle >= self._review_budget_limit(state):
             state["review_findings"] = verification["findings"]
             if (
-                self._routine_docs_limit(state) is None
+                self._small_class_limit(state) is None
                 and self._review_escalation(state) is None
             ):
                 self._begin_review_escalation(state, paths)
