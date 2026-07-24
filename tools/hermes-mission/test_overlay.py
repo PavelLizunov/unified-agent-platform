@@ -16,7 +16,7 @@ from unittest import mock
 
 TOOL = pathlib.Path(__file__).with_name("apply_overlay.py")
 INSTALLER = TOOL.parents[1] / "swarm" / "install_flow_v2.py"
-COMMIT = "7c1a029553d87c43ecff8a3821336bc95872213b"
+COMMIT = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
 UPSTREAM = "https://github.com/NousResearch/hermes-agent"
 
 
@@ -31,6 +31,8 @@ def run(*args: object) -> subprocess.CompletedProcess[str]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkout", nargs="?", type=pathlib.Path)
+    parser.add_argument("--build1-checkout", type=pathlib.Path, default=None,
+                        help="Local v0.18 checkout for the build1 regression")
     args = parser.parse_args()
     source = args.checkout.resolve() if args.checkout else UPSTREAM
     with tempfile.TemporaryDirectory(prefix="hermes-mission-overlay-") as temp:
@@ -67,6 +69,36 @@ def main() -> None:
             stdout=subprocess.DEVNULL,
         )
 
+        # --- Build-1 exact v0.18 regression (separate root) ---
+        import apply_overlay as _ov_b1
+        b1_commit = _ov_b1.BUILD1_UPSTREAM_COMMIT
+        b1_root = pathlib.Path(temp) / "build1-hermes"
+        b1_root.mkdir()
+        # A supplied --build1-checkout is used as a LOCAL git source (no network):
+        # the exact v0.18 commit is fetched from it by SHA, exactly as the central
+        # checkout fetches COMMIT from `source`.  Without a checkout the commit is
+        # fetched from UPSTREAM (network).  Either way the working tree comes from
+        # the exact commit object, so the v0.18 exact-hash check holds and never
+        # depends on the supplied checkout's working-tree state.
+        b1_source = args.build1_checkout.resolve() if args.build1_checkout else UPSTREAM
+        subprocess.run(["git", "init", "--quiet"], cwd=b1_root, check=True)
+        subprocess.run(
+            ["git", "fetch", "--quiet", "--depth=1", str(b1_source), b1_commit],
+            cwd=b1_root, check=True, timeout=120,
+        )
+        subprocess.run(
+            ["git", "checkout", "--quiet", "--detach", "FETCH_HEAD"],
+            cwd=b1_root, check=True, stdout=subprocess.DEVNULL,
+        )
+        # Apply + check the v0.18 build1 overlay on the exact v0.18 root
+        b1_apply = run(b1_root, "--source-commit", b1_commit, "--build1-runtime")
+        assert b1_apply.returncode == 0, f"build1 apply failed: {b1_apply.stderr}"
+        b1_check = run(b1_root, "--source-commit", b1_commit, "--build1-runtime", "--check")
+        assert b1_check.returncode == 0, f"build1 check failed: {b1_check.stderr}"
+        assert b1_check.stdout.count("exact-patched") == 3, (
+            f"build1 expected 3 exact-patched, got: {b1_check.stdout}"
+        )
+        # Installer against the exact v0.18 root
         if INSTALLER.is_file():
             installer_spec = importlib.util.spec_from_file_location(
                 "install_flow_v2", INSTALLER
@@ -75,24 +107,10 @@ def main() -> None:
             assert installer_spec.loader
             installer_spec.loader.exec_module(installer)
             build1_home = pathlib.Path(temp) / "build1-home"
-            installer.install(INSTALLER.parent, build1_home, clone)
-            installer.check(INSTALLER.parent, build1_home, clone)
+            installer.install(INSTALLER.parent, build1_home, b1_root)
+            installer.check(INSTALLER.parent, build1_home, b1_root)
             for installed in installer._files(INSTALLER.parent).values():
                 assert (build1_home / installed).is_file()
-        else:
-            build1_apply = run(
-                clone, "--source-commit", COMMIT, "--build1-runtime"
-            )
-            assert build1_apply.returncode == 0, build1_apply.stderr
-            build1_check = run(
-                clone,
-                "--source-commit",
-                COMMIT,
-                "--build1-runtime",
-                "--check",
-            )
-            assert build1_check.returncode == 0, build1_check.stderr
-            assert build1_check.stdout.count("exact-patched") == 3
         assert not (clone / "hermes_cli/uap_missions.py").exists()
 
         before = run(clone, "--check")
@@ -135,7 +153,11 @@ def main() -> None:
         assert "Не удалось создать задачу" in gateway
         assert "Mission intake unavailable" not in gateway
         assert "voice transcription failed" not in gateway
-        assert api.count('self._app.router.add_') >= 4
+        assert '_http_route_table' in api
+        assert 'def _api_key_passes_startup_guard' in api
+        assert 'def _port_is_available' not in api
+        assert 'add_route' in api
+        assert api.count('"/api/mission') >= 4
         for route in (
             '"/api/missions"',
             '"/api/mission-projects"',
@@ -680,6 +702,21 @@ def main() -> None:
         tampered = run(clone)
         assert tampered.returncode != 0
         assert "fingerprint mismatch" in tampered.stderr
+
+
+
+        # --- Native v0.19 replacements (read from the exact v0.19 clone) ---
+        middleware = (clone / "hermes_cli/dashboard_auth/middleware.py").read_text(encoding="utf-8")
+        assert "supports_password" in middleware, "v0.19 middleware must natively guard SSO password providers"
+        server = (clone / "tui_gateway/server.py").read_text(encoding="utf-8")
+        assert "stored_session_id" in server, "v0.19 server.py must natively emit stored_session_id"
+
+    # --- Build-1 module-level regression ---
+    import apply_overlay as ov_mod
+    assert ov_mod.BUILD1_UPSTREAM_COMMIT == "7c1a029553d87c43ecff8a3821336bc95872213b"
+    assert set(ov_mod.BUILD1_FILES) == {"hermes_cli/kanban.py", "hermes_cli/kanban_db.py", "hermes_cli/main.py"}
+    assert set(ov_mod.BUILD1_PATCHED_FILES) == set(ov_mod.BUILD1_FILES)
+    assert ov_mod.UPSTREAM_COMMIT != ov_mod.BUILD1_UPSTREAM_COMMIT
 
     print("hermes mission overlay checks passed")
 

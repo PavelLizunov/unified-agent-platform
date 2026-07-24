@@ -66,15 +66,19 @@ SQLite). For a REPL that survives the drop server-side, wrap in tmux (already on
 Dashboard: `http://<node-ip>:30911`, basic auth (user `pavel`, password in the `hermes-agent-dashboard`
 SOPS Secret).
 
-> **v0.18.0 gotcha:** the root `/` auto-redirects to a login route that **500s** (BasicAuthProvider vs an
-> OAuth-redirect code path). **Go to `/login` directly** — e.g. bookmark `http://192.168.0.202:30911/login`.
-> The form there works. Upstream login-refactor bug; the REPL and Telegram are unaffected.
+> **Dashboard root (`/`):** v0.19 is **expected to serve `/`** — upstream fixed the password-provider
+> OAuth auto-redirect path that made `/` 500 in v0.18. **Verify both `/` and `/login` work live after
+> the upgrade** (smoke step in `docs/hermes-v019-upgrade.md`). Going to **`/login` directly** (e.g.
+> bookmark `http://192.168.0.202:30911/login`) is only the **v0.18 rollback fallback**: on v0.18 the
+> root `/` auto-redirects to a login route that 500s (BasicAuthProvider vs an OAuth-redirect code path).
+> The REPL and Telegram are unaffected either way.
 
 **Hermes Desktop app** (best GUI, Win + Mac) — install from
 [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/), then Settings -> Gateway ->
 **Remote gateway** -> URL `http://192.168.0.202:30911`, sign in `pavel`. The app posts credentials
-directly (not via the broken root redirect), so it should be unaffected by the `/login` gotcha — confirm
-with the install. Install pull blocked from RU? Route through the VLESS proxy `192.168.0.202:30880`.
+directly and does NOT depend on the browser root-redirect path, so the v0.18-only `/login` fallback does
+not apply to it. The desktop app and the browser (`/` and `/login`) are separate surfaces — confirm both
+in the post-upgrade smoke. Install pull blocked from RU? Route through the VLESS proxy `192.168.0.202:30880`.
 "Install as app" in Chrome/Edge on the dashboard gives an app icon without installing anything.
 
 ## 3. Telegram

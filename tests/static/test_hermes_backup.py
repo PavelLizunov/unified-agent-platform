@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
-import re
 import sqlite3
+import subprocess
 import tempfile
 import zipfile
 from contextlib import closing
@@ -147,12 +147,24 @@ def main() -> None:
     assert "hermes-agent-restore-ok" in restore_canary
     # The disposable restore canary must run the SAME pinned runtime as the gateway, so a
     # validated restore proves the deployed image can recover state (no silent version lag).
-    restore_image = re.search(
-        r'^hermes_image="([^"]+)"', restore_canary, re.MULTILINE
+    # Source ONLY the pre-kubectl selector (_HERMES_RESTORE_SOURCE_ONLY=1 makes the script
+    # return right after defining select_hermes_image, so kubectl is never reached) and
+    # execute its DEFAULT mode. Do not re-parse the function body -- run the real selector.
+    selector = subprocess.run(
+        ["sh", "-c",
+         "_HERMES_RESTORE_SOURCE_ONLY=1 . tests/ops/check-hermes-agent-restore.sh"
+         ' && select_hermes_image ""'],
+        capture_output=True,
+        text=True,
+        cwd=str(ROOT),
     )
-    assert restore_image, "restore canary must pin hermes_image"
-    assert restore_image.group(1) == gateway["image"], (
-        "restore canary image must match the pinned gateway runtime"
+    assert selector.returncode == 0, (
+        f"restore canary default-mode selector failed: {selector.stderr.strip()}"
+    )
+    restore_image = selector.stdout.strip()
+    assert restore_image == gateway["image"], (
+        "restore canary image must match the pinned gateway runtime: "
+        f"selector returned {restore_image!r}, gateway pins {gateway['image']!r}"
     )
 
     with tempfile.TemporaryDirectory() as temporary:

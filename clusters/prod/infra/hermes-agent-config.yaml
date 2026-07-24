@@ -9,7 +9,7 @@ metadata:
   name: hermes-agent-config
   namespace: uap-system
 data:
-  # ADR-027: exact, fail-closed compatibility patch for the pinned v0.18 image.
+  # ADR-027: exact, fail-closed compatibility patch for the pinned v0.19 image.
   # Receives a directory containing copies of the affected upstream files and is safe to run twice.
   runtime-compat.py: |
     from pathlib import Path
@@ -48,37 +48,34 @@ data:
     patch("tool_guardrails.py", failure_old + "\n    if tool_name == \"terminal\":\n",
           failure_new + "    if tool_name == \"terminal\":\n")
 
-    codex_event_old = "\n".join((
-        "        def _on_codex_event(note: dict) -> None:",
-        "            # Bridge Codex app-server item/started notifications to Hermes",
+    codex_guard_old = "\n".join((
+        "            if item_type in _CODEX_TOOL_ITEM_TYPES:",
+        "                _fire_tool_completed(item)",
+        "            elif item_type == \"agentMessage\":",
         "",
     ))
-    codex_event_new = "\n".join((
-        "        def _on_codex_event(note: dict) -> None:",
-        "            # Codex owns this runtime's inner tool loop, so apply Hermes'",
-        "            # failure thresholds to completed command events and interrupt",
-        "            # the subprocess turn once the next identical call is blocked.",
-        "            item = (note.get(\"params\") or {}).get(\"item\") or {}",
-        "            if note.get(\"method\") == \"item/completed\" and item.get(\"type\") == \"commandExecution\":",
-        "                exit_code = item.get(\"exitCode\")",
-        "                if exit_code is not None and exit_code != 0:",
-        "                    args = {\"command\": item.get(\"command\") or \"\", \"cwd\": item.get(\"cwd\") or \"\"}",
-        "                    result = f\"[exit {exit_code}]\\\\n{item.get('aggregatedOutput') or ''}\"",
-        "                    decision = agent._tool_guardrails.after_call(",
-        "                        \"exec_command\", args, result, failed=True,",
-        "                    )",
-        "                    if not decision.should_halt:",
-        "                        decision = agent._tool_guardrails.before_call(\"exec_command\", args)",
-        "                    if decision.should_halt or not decision.allows_execution:",
-        "                        agent._set_tool_guardrail_halt(decision)",
-        "                        session = getattr(agent, \"_codex_session\", None)",
-        "                        if session is not None:",
-        "                            session.request_interrupt()",
-        "",
-        "            # Bridge Codex app-server item/started notifications to Hermes",
+    codex_guard_new = "\n".join((
+        "            if item_type in _CODEX_TOOL_ITEM_TYPES:",
+        "                _fire_tool_completed(item)",
+        "                if item_type == \"commandExecution\":",
+        "                    exit_code = item.get(\"exitCode\")",
+        "                    if exit_code is not None and exit_code != 0:",
+        "                        args = {\"command\": item.get(\"command\") or \"\", \"cwd\": item.get(\"cwd\") or \"\"}",
+        "                        result = f\"[exit {exit_code}]\\\\n{item.get('aggregatedOutput') or ''}\"",
+        "                        decision = agent._tool_guardrails.after_call(",
+        "                            \"exec_command\", args, result, failed=True,",
+        "                        )",
+        "                        if not decision.should_halt:",
+        "                            decision = agent._tool_guardrails.before_call(\"exec_command\", args)",
+        "                        if decision.should_halt or not decision.allows_execution:",
+        "                            agent._set_tool_guardrail_halt(decision)",
+        "                            session = getattr(agent, \"_codex_session\", None)",
+        "                            if session is not None:",
+        "                                session.request_interrupt()",
+        "            elif item_type == \"agentMessage\":",
         "",
     ))
-    patch("codex_runtime.py", codex_event_old, codex_event_new)
+    patch("codex_runtime.py", codex_guard_old, codex_guard_new)
 
     codex_result_old = "    # If the turn signalled the underlying client is wedged (deadline\n"
     codex_result_new = "\n".join((
@@ -90,14 +87,10 @@ data:
         "        turn.interrupted = False",
         "        turn.error = None",
         "",
-        "    terminal_message = next((",
-        "        message for message in reversed(turn.projected_messages)",
-        "        if message.get(\"role\") in {\"assistant\", \"tool\"}",
-        "    ), None)",
         "    if (",
-        "        terminal_message is None",
-        "        or terminal_message.get(\"role\") != \"assistant\"",
-        "        or not str(terminal_message.get(\"content\") or \"\").strip()",
+        "        not turn.interrupted",
+        "        and turn.error is None",
+        "        and not str(turn.final_text or \"\").strip()",
         "    ):",
         "        failure_text = (",
         "            \"Codex app-server turn ended after a tool result without a terminal \"",
@@ -117,7 +110,7 @@ data:
     cli_exit_old = "\n".join((
         "                        if isinstance(result, dict) and result.get(\"failed\"):",
         "                            _exit_code = 1",
-        "",
+        "                            if os.environ.get(\"HERMES_KANBAN_TASK\") and result.get(",
     ))
     cli_exit_new = "\n".join((
         "                        if isinstance(result, dict) and (",
@@ -126,23 +119,9 @@ data:
         "                            or result.get(\"completed\") is False",
         "                        ):",
         "                            _exit_code = 1",
-        "",
+        "                            if os.environ.get(\"HERMES_KANBAN_TASK\") and result.get(",
     ))
     patch("cli.py", cli_exit_old, cli_exit_new)
-
-    sso_old = "\n".join((
-        "    provider = providers[0]",
-        "    prefix = prefix_from_request(request)",
-        "",
-    ))
-    sso_new = "\n".join((
-        "    provider = providers[0]",
-        "    if getattr(provider, \"supports_password\", False):",
-        "        return None",
-        "    prefix = prefix_from_request(request)",
-        "",
-    ))
-    patch("dashboard_auth_middleware.py", sso_old, sso_new)
 
     projector_old = "\n".join((
         "        if item_type == \"userMessage\":",
@@ -157,24 +136,14 @@ data:
     ))
     patch("codex_event_projector.py", projector_old, projector_new)
 
-    session_info_old = "\n".join((
-        "    info: dict = {",
-        "        \"model\": getattr(agent, \"model\", \"\"),",
-    ))
-    session_info_new = "\n".join((
-        "    info: dict = {",
-        "        \"session_id\": session_key,",
-        "        \"model\": getattr(agent, \"model\", \"\"),",
-    ))
-    patch("server.py", session_info_old, session_info_new)
-
-    web_old = "if(n===`session.info`){let e=oq(a);e!==void 0&&i?.(e)}"
+    web_old = "if(n===`session.info`){let e=LJ(a);e!==void 0&&i?.(e)}"
     web_new = (
-        "if(n===`session.info`){let e=a.session_id;if(e){let t=new URL(window.location.href);"
+        "if(n===`session.info`){let e=a.stored_session_id;if(e){let t=new URL(window.location.href);"
         "t.searchParams.set(`resume`,e),window.history.replaceState(window.history.state,``,t)}"
-        "let n=oq(a);n!==void 0&&i?.(n)}"
+        "let n=LJ(a);n!==void 0&&i?.(n)}"
     )
     patch("web_index.js", web_old, web_new)
+
 
   config.yaml: |
     # Brain: the Codex subprocess (codex_app_server) owns the tool loop. The default
@@ -249,7 +218,7 @@ data:
     model:
       provider: openai-codex
       openai_runtime: codex_app_server
-      # Hermes v0.18 canonical model-id leaf. Do not use the legacy `model` alias:
+      # Hermes canonical model-id leaf. Do not use the legacy `model` alias:
       # an existing PVC `model.default` wins over it and silently bypasses GitOps.
       default: gpt-5.6-luna
     # Circuit-breaker for repeated tool failures/no-progress. Managed because a

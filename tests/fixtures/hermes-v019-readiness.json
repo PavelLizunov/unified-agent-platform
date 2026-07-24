@@ -1,189 +1,51 @@
 {
-  "candidates": [
-    {
-      "commit": "f9eca7e15f1c2bfe5194aae5aa489af53c0a1a23",
-      "drifted": [
-        "gateway/platforms/api_server.py",
-        "gateway/run.py",
-        "hermes_cli/commands.py",
-        "hermes_cli/main.py",
-        "plugins/platforms/telegram/adapter.py"
-      ],
-      "files": {
-        "gateway/platforms/api_server.py": {
-          "sha256": "d819f04f4f3a7d2c7f2d3b5befb13aa50dc0df7ca8416909f65f6d214e8c7b66",
-          "status": "drifted"
-        },
-        "gateway/run.py": {
-          "sha256": "6f1bf4710ec350841c11cbcc8243d585287c2082e39fb5ed18bde0c1a0d647fa",
-          "status": "drifted"
-        },
-        "hermes_cli/commands.py": {
-          "sha256": "5abcedd2d90ea0fe5ff8a0c09a5a8865b37c69249066d08063307163c14063c7",
-          "status": "drifted"
-        },
-        "hermes_cli/kanban.py": {
-          "sha256": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
-          "status": "unchanged"
-        },
-        "hermes_cli/kanban_db.py": {
-          "sha256": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
-          "status": "unchanged"
-        },
-        "hermes_cli/main.py": {
-          "sha256": "c9d1965fdb2e6d7b4d54aca3ad7a7fc3ab7cdc70fff34be625ae2582144be60e",
-          "status": "drifted"
-        },
-        "plugins/platforms/telegram/adapter.py": {
-          "sha256": "65ebabb14bfc735cdeb2bf69c815a4106cbd01f525b3164584661d5cdb4dd77c",
-          "status": "drifted"
-        }
-      },
-      "missing": [],
-      "tag": "v2026.7.7",
-      "unchanged": [
-        "hermes_cli/kanban.py",
-        "hermes_cli/kanban_db.py"
-      ]
-    },
-    {
-      "commit": "9de9c25f620ff7f1ce0fd5457d596052d5159596",
-      "drifted": [
-        "gateway/platforms/api_server.py",
-        "gateway/run.py",
-        "hermes_cli/commands.py",
-        "hermes_cli/main.py",
-        "plugins/platforms/telegram/adapter.py"
-      ],
-      "files": {
-        "gateway/platforms/api_server.py": {
-          "sha256": "d819f04f4f3a7d2c7f2d3b5befb13aa50dc0df7ca8416909f65f6d214e8c7b66",
-          "status": "drifted"
-        },
-        "gateway/run.py": {
-          "sha256": "6f1bf4710ec350841c11cbcc8243d585287c2082e39fb5ed18bde0c1a0d647fa",
-          "status": "drifted"
-        },
-        "hermes_cli/commands.py": {
-          "sha256": "5abcedd2d90ea0fe5ff8a0c09a5a8865b37c69249066d08063307163c14063c7",
-          "status": "drifted"
-        },
-        "hermes_cli/kanban.py": {
-          "sha256": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
-          "status": "unchanged"
-        },
-        "hermes_cli/kanban_db.py": {
-          "sha256": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
-          "status": "unchanged"
-        },
-        "hermes_cli/main.py": {
-          "sha256": "c9d1965fdb2e6d7b4d54aca3ad7a7fc3ab7cdc70fff34be625ae2582144be60e",
-          "status": "drifted"
-        },
-        "plugins/platforms/telegram/adapter.py": {
-          "sha256": "65ebabb14bfc735cdeb2bf69c815a4106cbd01f525b3164584661d5cdb4dd77c",
-          "status": "drifted"
-        }
-      },
-      "missing": [],
-      "tag": "v2026.7.7.2",
-      "unchanged": [
-        "hermes_cli/kanban.py",
-        "hermes_cli/kanban_db.py"
-      ]
-    },
-    {
-      "commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
-      "drifted": [
-        "gateway/platforms/api_server.py",
-        "gateway/run.py",
-        "hermes_cli/commands.py",
-        "hermes_cli/kanban.py",
-        "hermes_cli/kanban_db.py",
-        "hermes_cli/main.py",
-        "plugins/platforms/telegram/adapter.py"
-      ],
-      "files": {
-        "gateway/platforms/api_server.py": {
-          "sha256": "2b8725863c99617b756cfce44567bf8eec9ccf6c7a946269c1ae42260cafa0de",
-          "status": "drifted"
-        },
-        "gateway/run.py": {
-          "sha256": "c6e0f443772e4a8a7eac0d9ccf9a4f659de5fc5493c572a69a46e4c61a8aa966",
-          "status": "drifted"
-        },
-        "hermes_cli/commands.py": {
-          "sha256": "41d16ee11e4a358313e3b20bec9a3e243857f6d4a0b969bf26b8f0e7975cde9f",
-          "status": "drifted"
-        },
-        "hermes_cli/kanban.py": {
-          "sha256": "c91d1542d8fff562e77180de9feb83e6fda608ef5be6e9c5d524eea3c28ba4f4",
-          "status": "drifted"
-        },
-        "hermes_cli/kanban_db.py": {
-          "sha256": "6adf52e2e8445afe51ce1d3bbf1676ca550d525c9c17035bde026587d46e9c3b",
-          "status": "drifted"
-        },
-        "hermes_cli/main.py": {
-          "sha256": "d6bf89a33fb708376a7ab354cff8081a3c3726dbfb91d84bbb679cd667db596c",
-          "status": "drifted"
-        },
-        "plugins/platforms/telegram/adapter.py": {
-          "sha256": "b4fab048d4986ab49615a1b5abb0dafeade4a25196578bf93cb065b793d67c8b",
-          "status": "drifted"
-        }
-      },
-      "missing": [],
-      "tag": "v2026.7.20",
-      "unchanged": []
-    }
-  ],
+  "candidates": [],
   "current_pin": {
-    "commit": "7c1a029553d87c43ecff8a3821336bc95872213b",
-    "image_digest": "sha256:b6c019227889e6675424a2b6223b2cafdd36bf7d1048d1ddd8e043b880d6cc0f",
-    "label": "v0.18.0",
-    "tag": "v2026.7.1"
+    "commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+    "image_digest": "sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a",
+    "label": "v0.19.0",
+    "tag": "v2026.7.20"
   },
   "current_pin_baseline": {
     "gateway/platforms/api_server.py": {
-      "sha256": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",
+      "sha256": "2b8725863c99617b756cfce44567bf8eec9ccf6c7a946269c1ae42260cafa0de",
       "status": "unchanged"
     },
     "gateway/run.py": {
-      "sha256": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
+      "sha256": "c6e0f443772e4a8a7eac0d9ccf9a4f659de5fc5493c572a69a46e4c61a8aa966",
       "status": "unchanged"
     },
     "hermes_cli/commands.py": {
-      "sha256": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
+      "sha256": "41d16ee11e4a358313e3b20bec9a3e243857f6d4a0b969bf26b8f0e7975cde9f",
       "status": "unchanged"
     },
     "hermes_cli/kanban.py": {
-      "sha256": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
+      "sha256": "c91d1542d8fff562e77180de9feb83e6fda608ef5be6e9c5d524eea3c28ba4f4",
       "status": "unchanged"
     },
     "hermes_cli/kanban_db.py": {
-      "sha256": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
+      "sha256": "6adf52e2e8445afe51ce1d3bbf1676ca550d525c9c17035bde026587d46e9c3b",
       "status": "unchanged"
     },
     "hermes_cli/main.py": {
-      "sha256": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
+      "sha256": "d6bf89a33fb708376a7ab354cff8081a3c3726dbfb91d84bbb679cd667db596c",
       "status": "unchanged"
     },
     "plugins/platforms/telegram/adapter.py": {
-      "sha256": "e5d5c7a7b168ce3503aa19f763d0b913eec8314ae57d6606584a82705021f302",
+      "sha256": "b4fab048d4986ab49615a1b5abb0dafeade4a25196578bf93cb065b793d67c8b",
       "status": "unchanged"
     }
   },
   "overlay_files": {
-    "gateway/platforms/api_server.py": "303f84d485c67a96d86f88badb5d111e842e5744448f30a18353e6a4c30c0240",
-    "gateway/run.py": "f25c56ba85a471e864264bad27e4dd656102a36199a78fc79c7540c95dbcea79",
-    "hermes_cli/commands.py": "028c9aa215dc7796bc9f12125bc6ebd03474e3d32f196e6dcd18c4f41841223a",
-    "hermes_cli/kanban.py": "81ab118098c027c9737b2d8f623d2b47aef340cf7d5ac81362c1759777bc3702",
-    "hermes_cli/kanban_db.py": "7ea3133148f82006840fa4883c8ce5e588945e26c1fde3889cb55a48ceec7c64",
-    "hermes_cli/main.py": "188b313db842bc449143438b1630b733eeea1e17e9c8d7dd04c9be9c229e8e74",
-    "plugins/platforms/telegram/adapter.py": "e5d5c7a7b168ce3503aa19f763d0b913eec8314ae57d6606584a82705021f302"
+    "gateway/platforms/api_server.py": "2b8725863c99617b756cfce44567bf8eec9ccf6c7a946269c1ae42260cafa0de",
+    "gateway/run.py": "c6e0f443772e4a8a7eac0d9ccf9a4f659de5fc5493c572a69a46e4c61a8aa966",
+    "hermes_cli/commands.py": "41d16ee11e4a358313e3b20bec9a3e243857f6d4a0b969bf26b8f0e7975cde9f",
+    "hermes_cli/kanban.py": "c91d1542d8fff562e77180de9feb83e6fda608ef5be6e9c5d524eea3c28ba4f4",
+    "hermes_cli/kanban_db.py": "6adf52e2e8445afe51ce1d3bbf1676ca550d525c9c17035bde026587d46e9c3b",
+    "hermes_cli/main.py": "d6bf89a33fb708376a7ab354cff8081a3c3726dbfb91d84bbb679cd667db596c",
+    "plugins/platforms/telegram/adapter.py": "b4fab048d4986ab49615a1b5abb0dafeade4a25196578bf93cb065b793d67c8b"
   },
-  "overlay_upstream_commit": "7c1a029553d87c43ecff8a3821336bc95872213b",
+  "overlay_upstream_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
   "schema": "hermes-v019-readiness/v1",
   "upstream": "https://github.com/NousResearch/hermes-agent"
 }

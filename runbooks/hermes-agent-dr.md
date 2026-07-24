@@ -22,12 +22,13 @@ brain** (`.codex/{memories_1,goals_1,state_5}.sqlite`), `kanban.db`, `cron/jobs.
   zip to **`r2:uap-k3s-snapshots/hermes-agent-backup/`**. Retention: keep the **most recent 7**.
 - **Secret `hermes-agent-backup-r2`** (SOPS) — the `[r2]` rclone remote (reused from the existing R2
   access; same bucket as the etcd snapshots, distinct folder).
-- The backup is a **consistent** snapshot. `hermes backup` v0.18 uses `sqlite3.backup()` for `.db` files,
-  but treats the UAP `missions-v1.sqlite3` as a normal file. Before upload, the repo-owned validator
-  creates a separate `sqlite3.backup()` snapshot and atomically replaces that raw ZIP entry **plus any raw
-  `missions-v1.sqlite3-wal/-shm/-journal` sidecars** — the WAL-mode live copy is not safe to archive next to
-  the fresh snapshot, and the manifest check **fails closed** if a raw MissionStore sidecar leaks through.
-  The live PVC is never modified. FULL zip is ~40M today (it also sweeps in regeneratable `node_modules`/logs).
+- The backup is a **consistent** snapshot. `hermes backup` (v0.19, like pre-upgrade v0.18) uses
+  `sqlite3.backup()` for `.db` files, but treats the UAP `missions-v1.sqlite3` as a normal file. Before
+  upload, the repo-owned validator creates a separate `sqlite3.backup()` snapshot and atomically replaces
+  that raw ZIP entry **plus any raw `missions-v1.sqlite3-wal/-shm/-journal` sidecars** — the WAL-mode live
+  copy is not safe to archive next to the fresh snapshot, and the manifest check **fails closed** if a raw
+  MissionStore sidecar leaks through. The live PVC is never modified. FULL zip is ~40M today (it also sweeps
+  in regeneratable `node_modules`/logs).
 - **Completeness is enforced** (this was a silent gap — the old check only verified one `.codex/*.sqlite`):
   a manifest check **fails** the job on an empty/corrupt zip or a missing **hard-required** file
   (`state.db`, `missions-v1.sqlite3`, `auth.json` — always-present, owned by uid 10000). Both required
@@ -47,16 +48,19 @@ so the deployed worker matches the self-tested one. After a `hermes-agent` roll,
 
 ```bash
 kubectl -n uap-system get deploy hermes-agent -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
-# -> nousresearch/hermes-agent@sha256:b6c01922...   (v0.18.0)
+# -> nousresearch/hermes-agent@sha256:f7b35053...   (v0.19.0)
+# Pre-upgrade rollback pin: sha256:b6c01922... (v0.18.0)
 POD=$(kubectl -n uap-system get pods -l app=hermes-agent -o name | grep -v backup | head -1)
 kubectl -n uap-system exec "$POD" -c gateway -- sh -lc \
   '/opt/hermes/.venv/bin/hermes --version; /opt/data/.local/bin/codex --version; /opt/data/.local/bin/claude --version'
-# expected: Hermes Agent v0.18.0 ; codex-cli 0.142.0 ; 2.1.193 (Claude Code)
+# expected: Hermes Agent v0.19.0 ; codex-cli 0.142.0 ; 2.1.193 (Claude Code)
+# Pre-upgrade rollback: Hermes Agent v0.18.0
 
 # The backup dump image must match the gateway image exactly:
 kubectl -n uap-system get cronjob hermes-agent-backup \
   -o jsonpath='{.spec.jobTemplate.spec.template.spec.initContainers[?(@.name=="dump")].image}{"\n"}'
-# -> the same b6c01922... digest
+# -> the same f7b35053... digest (v0.19.0)
+# Pre-upgrade rollback: b6c01922... (v0.18.0)
 ```
 
 The CLIs are seed-if-absent on the PVC, so bumping the pinned `npm i -g ...@version` in
@@ -111,7 +115,7 @@ sh tests/ops/check-hermes-agent-restore.sh
 ```
 
 The script pulls the latest archive with the existing in-cluster R2 Secret, imports it with the same
-v0.18 image into a uniquely named `local-path` PVC, verifies both SQLite databases and reads the restored
+pinned image into a uniquely named `local-path` PVC, verifies both SQLite databases and reads the restored
 `mission_events` table. Its `trap` removes only the uniquely named Job and disposable PVC. It never mounts
 or mutates `hermes-agent-data`, never prints credentials or mission contents, and is safe to repeat.
 
