@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import asyncio
 import importlib.util
 import os
 import pathlib
@@ -155,6 +156,109 @@ def main() -> None:
         assert "Не удалось создать задачу" in gateway
         assert "Mission intake unavailable" not in gateway
         assert "voice transcription failed" not in gateway
+        assert 'key = f"{split_key}:message:{event.message_id}"' in telegram
+        telegram_tree = ast.parse(telegram)
+        telegram_adapter = next(
+            node for node in telegram_tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "TelegramAdapter"
+        )
+        enqueue_node = next(
+            node for node in telegram_adapter.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "_enqueue_text_event"
+        )
+        enqueue_module = ast.fix_missing_locations(
+            ast.Module(body=[enqueue_node], type_ignores=[])
+        )
+        enqueue_namespace = {
+            "asyncio": asyncio,
+            "logger": mock.Mock(),
+            "MessageEvent": object,
+        }
+        exec(
+            compile(enqueue_module, "<telegram-enqueue>", "exec"),
+            enqueue_namespace,
+        )
+        enqueue_text_event = enqueue_namespace["_enqueue_text_event"]
+
+        class TextSource:
+            def __init__(self, user_id):
+                self.user_id = user_id
+
+        class TextEvent:
+            def __init__(self, message_id, text, user_id="owner"):
+                self.message_id = message_id
+                self.text = text
+                self.source = TextSource(user_id)
+                self.media_urls = []
+                self.media_types = []
+
+        class TextBatchHarness:
+            _SPLIT_THRESHOLD = 4000
+
+            def __init__(self):
+                self._pending_text_batches = {}
+                self._pending_text_batch_tasks = {}
+
+            @staticmethod
+            def _should_drop_delayed_delivery():
+                return False
+
+            @staticmethod
+            def _text_batch_key(_event):
+                return "topic"
+
+            async def _flush_text_batch(self, _key):
+                await asyncio.sleep(60)
+
+        async def check_text_batch_identities():
+            short = TextBatchHarness()
+            enqueue_text_event(short, TextEvent("100", "first"))
+            enqueue_text_event(short, TextEvent("101", "second"))
+            assert set(short._pending_text_batches) == {
+                "topic:sender:owner:message:100",
+                "topic:sender:owner:message:101",
+            }
+            assert short._pending_text_batches[
+                "topic:sender:owner:message:100"
+            ].text == "first"
+            assert short._pending_text_batches[
+                "topic:sender:owner:message:101"
+            ].text == "second"
+
+            split = TextBatchHarness()
+            enqueue_text_event(split, TextEvent("200", "a" * 4000))
+            enqueue_text_event(split, TextEvent("201", "tail"))
+            assert set(split._pending_text_batches) == {"topic:sender:owner"}
+            assert split._pending_text_batches[
+                "topic:sender:owner"
+            ].message_id == "200"
+            assert split._pending_text_batches[
+                "topic:sender:owner"
+            ].text.endswith("\ntail")
+
+            other_sender = TextBatchHarness()
+            enqueue_text_event(
+                other_sender, TextEvent("300", "a" * 4000, user_id="owner-a")
+            )
+            enqueue_text_event(
+                other_sender, TextEvent("301", "tail", user_id="owner-b")
+            )
+            assert set(other_sender._pending_text_batches) == {
+                "topic:sender:owner-a",
+                "topic:sender:owner-b:message:301",
+            }
+
+            tasks = [
+                *short._pending_text_batch_tasks.values(),
+                *split._pending_text_batch_tasks.values(),
+                *other_sender._pending_text_batch_tasks.values(),
+            ]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        asyncio.run(check_text_batch_identities())
         assert "def _delivery_ledger_confirms_final_delivery(" in gateway
         assert "_already_streamed or _ledger_delivered" in gateway
         gateway_tree = ast.parse(gateway)
