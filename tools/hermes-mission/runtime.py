@@ -516,6 +516,7 @@ _GATE_LABELS = {
     "deployment": "деплой",
     "cleanup": "очистка",
     "execution": "выполнение",
+    "pull-request": "пул-реквест",
 }
 _ALLOWED_WORKER_MODELS = {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
 _ALLOWED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
@@ -2774,6 +2775,19 @@ def rejection_ready(view: dict[str, Any]) -> bool:
         {"execution": "failed", "cleanup": "passed"},
     ):
         return not deliveries or deliveries == {"pull_request": "failed"}
+    if gates in (
+        {"pull-request": "failed", "cleanup": "passed"},
+        {"tests": "passed", "pull-request": "failed", "cleanup": "passed"},
+        {
+            "tests": "passed", "review": "passed",
+            "pull-request": "failed", "cleanup": "passed",
+        },
+        {
+            "tests": "passed", "review": "passed", "ci": "passed",
+            "pull-request": "failed", "cleanup": "passed",
+        },
+    ):
+        return not deliveries or deliveries == {"pull_request": "failed"}
     if gates == {
         "tests": "passed", "review": "passed", "ci": "failed", "cleanup": "passed",
     }:
@@ -2818,6 +2832,13 @@ def _rejection_terminal(view: dict[str, Any]) -> tuple[str, dict[str, str]] | No
     if gates.get("ci") == "failed":
         return "central:auto-ci-failed:v1", {
             "error": "Обязательный CI не прошёл после разрешённого числа попыток",
+        }
+    if gates.get("pull-request") == "failed":
+        return "central:auto-pr-closed:v1", {
+            "error": (
+                "Точный PR кандидата был закрыт извне до слияния; "
+                "доставка безопасно остановлена"
+            ),
         }
     return "central:auto-review-rejected:v1", {
         "error": "Независимое ревью отклонило результат",

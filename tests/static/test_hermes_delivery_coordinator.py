@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import importlib
 import importlib.util
@@ -24,6 +25,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools" / "swarm"))
 coordinator = importlib.import_module("delivery_coordinator")
 installer = importlib.import_module("install_flow_v2")
+_RUNTIME_PATH = ROOT / "tools" / "hermes-mission" / "runtime.py"
+_RUNTIME_SPEC = importlib.util.spec_from_file_location("uap_missions_runtime", _RUNTIME_PATH)
+runtime = importlib.util.module_from_spec(_RUNTIME_SPEC)
+_RUNTIME_SPEC.loader.exec_module(runtime)
 
 
 def profile(root: pathlib.Path) -> dict:
@@ -5737,6 +5742,20 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     push_calls += 1
                     remote_head = "candidate-sha"
                     output = ""
+                elif command[0:3] == ["gh", "pr", "list"]:
+                    self.assertIn("all", command)
+                    if not pr_exists:
+                        output = "[]"
+                    else:
+                        output = json.dumps([{
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": True,
+                            "headRefName": "codex/fix",
+                            "headRefOid": "candidate-sha",
+                            "baseRefName": approved["default_branch"],
+                        }])
                 elif command[0:3] == ["gh", "pr", "view"]:
                     if not pr_exists:
                         return subprocess.CompletedProcess(
@@ -6129,11 +6148,24 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                         command, 0,
                         stdout="candidate-sha\trefs/heads/codex/fix\n", stderr="",
                     )
-                if command[0:3] == ["gh", "pr", "view"]:
+                if command[0:3] == ["gh", "pr", "list"]:
+                    self.assertIn("all", command)
                     if not pr_exists:
                         return subprocess.CompletedProcess(
-                            command, 1, stdout="", stderr="no pull request"
+                            command, 0, stdout="[]", stderr=""
                         )
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=json.dumps([{
+                            "number": 39,
+                            "url": "https://example.invalid/pr/39",
+                            "state": "OPEN",
+                            "isDraft": not pr_ready,
+                            "headRefName": "codex/fix",
+                            "headRefOid": "candidate-sha",
+                            "baseRefName": approved["default_branch"],
+                        }]), stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "view"]:
                     output = json.dumps({
                         "number": 39,
                         "url": "https://example.invalid/pr/39",
@@ -6395,7 +6427,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 command[0:3] == ["gh", "pr", "ready"] for command in commands
             ))
 
-    def test_ready_identity_race_restores_the_pr_to_draft_before_stopping(self):
+    def test_ready_identity_race_with_mismatched_head_fails_closed_without_redraft(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -6449,12 +6481,13 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             with mock.patch.object(instance, "_validate_review"):
                 with self.assertRaisesRegex(
                     coordinator.DeliveryError,
-                    "pre-review PR did not become ready at the exact candidate",
+                    "could not be restored to draft",
                 ):
                     instance._pr(state, {"author": root})
 
-            self.assertTrue(draft)
-            self.assertEqual(1, sum(
+            # Mismatched head: no draft-restore mutation is issued.
+            self.assertFalse(draft)
+            self.assertEqual(0, sum(
                 command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
                 for command in commands
             ))
@@ -6529,7 +6562,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 for command in commands
             ))
 
-    def test_restart_redrafts_an_unreviewed_replacement_head(self):
+    def test_restart_refuses_to_redraft_a_mismatched_replacement_head(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
             approved = profile(root)
@@ -6537,9 +6570,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             backend = FakeBackend()
             backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
             draft = False
+            commands = []
 
             def runner(command, **_kwargs):
                 nonlocal draft
+                commands.append(command)
                 if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
                     draft = True
                     return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -6574,12 +6609,19 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             }
             with (
                 mock.patch.object(instance, "_validate_review"),
-                self.assertRaisesRegex(coordinator.DeliveryError, "changed before repair push"),
+                self.assertRaisesRegex(
+                    coordinator.DeliveryError, "could not be restored to draft"
+                ),
             ):
                 instance._pr(state, {"author": root})
-            self.assertTrue(draft)
+            # Unproven head identity: no gh pr ready mutation is issued.
+            self.assertFalse(draft)
+            self.assertEqual(0, sum(
+                command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
+                for command in commands
+            ))
 
-    def test_ready_replacement_is_redrafted_at_every_delivery_checkpoint(self):
+    def test_ready_replacement_mismatch_fails_closed_at_every_checkpoint(self):
         candidate = {
             "number": 39,
             "url": "https://example.invalid/pr/39",
@@ -6594,11 +6636,11 @@ class DeliveryCoordinatorTests(unittest.TestCase):
         renamed = {**replacement, "headRefName": "renamed-or-replaced"}
         renamed_draft = {**renamed, "isDraft": True}
         for checkpoint, views in (
-            ("mid-pr", [candidate, replacement, replacement_draft]),
-            ("resumed", [replacement, replacement_draft]),
+            ("mid-pr", [candidate, replacement, replacement_draft, replacement_draft]),
+            ("resumed", [replacement, replacement_draft, replacement_draft]),
             ("resumed-unverifiable", [[], replacement_draft]),
-            ("initial-unbound", [replacement, replacement_draft]),
-            ("initial-unbound-renamed", [renamed, renamed_draft]),
+            ("initial-unbound", [replacement, replacement_draft, replacement_draft]),
+            ("initial-unbound-renamed", [renamed, renamed_draft, renamed_draft]),
         ):
             with self.subTest(checkpoint=checkpoint), tempfile.TemporaryDirectory() as directory:
                 root = pathlib.Path(directory)
@@ -6609,6 +6651,10 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
                 def runner(command, **_kwargs):
                     commands.append(command)
+                    if command[0:3] == ["gh", "pr", "list"]:
+                        return subprocess.CompletedProcess(
+                            command, 0, stdout=json.dumps([next(responses)]), stderr=""
+                        )
                     if command[0:3] == ["gh", "pr", "view"]:
                         return subprocess.CompletedProcess(
                             command, 0, stdout=json.dumps(next(responses)), stderr=""
@@ -6628,7 +6674,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "pr_base_branch": approved["default_branch"],
                 }
                 with self.assertRaisesRegex(
-                    coordinator.DeliveryError, "PR identity|pre-review draft PR"
+                    coordinator.DeliveryError,
+                    "PR identity|pre-review draft PR|could not be restored",
                 ):
                     if checkpoint == "mid-pr":
                         with (
@@ -6645,7 +6692,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                             instance._ensure_candidate_pr(state, {"author": root})
                     else:
                         instance._assert_pr_head(state)
-                self.assertEqual(1, sum(
+                # Mismatched/unknown identity: never mutate the PR.
+                self.assertEqual(0, sum(
                     command[0:3] == ["gh", "pr", "ready"] and "--undo" in command
                     for command in commands
                 ))
@@ -7430,17 +7478,26 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "number": 39, "state": "OPEN", "isDraft": False,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "OPEN", "isDraft": False,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
                 {
-                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "OPEN", "isDraft": False,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
                 {
-                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "OPEN", "isDraft": True,
+                    "headRefName": "codex/fix",
+                    "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+                },
+                {
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "OPEN", "isDraft": True,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
@@ -7470,6 +7527,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "candidate_sha": "candidate-sha",
                 "pr_head_sha": "candidate-sha",
                 "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
             })
             self.assertTrue(preserved)
             self.assertEqual(1, sum(
@@ -7494,6 +7552,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "candidate_sha": "candidate-sha",
                     "pr_head_sha": "candidate-sha",
                     "pr_base_branch": approved["default_branch"],
+                    "pr_url": "https://example.invalid/pr/39",
                 })
             self.assertFalse(any(command[0:3] == ["gh", "pr", "close"] for command in commands))
             self.assertFalse(any(command[0] == "git" for command in commands))
@@ -7505,7 +7564,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             approved.update(gh_bin="gh", codex_home=str(root / "codex"))
             commands = []
             views = [{
-                "number": 39, "state": "OPEN", "isDraft": True,
+                "number": 39, "url": "https://example.invalid/pr/39",
+                "state": "OPEN", "isDraft": True,
                 "headRefName": "codex/fix",
                 "commits": [{"oid": "candidate-sha"}],
                 "baseRefName": approved["default_branch"],
@@ -7535,6 +7595,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "candidate_sha": "candidate-sha",
                 "pr_head_sha": "candidate-sha",
                 "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
             }
 
             preserved = instance._finalize_failed_pr(
@@ -7550,7 +7611,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
 
             commands.clear()
             views.append({
-                "number": 39, "state": "OPEN", "isDraft": True,
+                "number": 39, "url": "https://example.invalid/pr/39",
+                "state": "OPEN", "isDraft": True,
                 "headRefName": "codex/fix",
                 "commits": [{"oid": "different-sha"}],
                 "baseRefName": approved["default_branch"],
@@ -7569,12 +7631,14 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "number": 39, "state": "CLOSED", "isDraft": False,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "CLOSED", "isDraft": False,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
                 {
-                    "number": 39, "state": "CLOSED", "isDraft": False,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "CLOSED", "isDraft": False,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
@@ -7606,6 +7670,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 "candidate_sha": "candidate-sha",
                 "pr_head_sha": "candidate-sha",
                 "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
             })
 
             self.assertFalse(preserved)
@@ -7628,7 +7693,8 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             commands = []
             views = [
                 {
-                    "number": 39, "state": "OPEN", "isDraft": True,
+                    "number": 39, "url": "https://example.invalid/pr/39",
+                    "state": "OPEN", "isDraft": True,
                     "headRefName": "codex/fix",
                     "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
                 },
@@ -7656,6 +7722,7 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                     "candidate_sha": "unpublished-repair",
                     "pr_head_sha": "candidate-sha",
                     "pr_base_branch": approved["default_branch"],
+                    "pr_url": "https://example.invalid/pr/39",
                 })
             self.assertFalse(any(command[0] == "git" and "push" in command for command in commands))
 
@@ -10657,6 +10724,1090 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             # Failed PR inserted for non-post_verify
             deliveries = [e for e in events if e["type"] == "delivery.upsert"]
             self.assertTrue(any(d["payload"]["status"] == "failed" for d in deliveries))
+
+    def _pr_closed_client(self):
+        class RuntimePolicyClient(RejectionClient):
+            """Applies the REAL Central rejection policy (runtime.rejection_ready)
+            to the coordinator-published gate/delivery events."""
+            def __init__(self):
+                super().__init__()
+                self._published = []
+            def publish(self, _mission_id, event):
+                if self.mission["status"] != "active":
+                    raise coordinator.mission_adapter.AdapterError("mission is terminal")
+                self.stages.append(event)
+                self._published.append(event)
+                gates = {}
+                deliveries = {}
+                for item in self._published:
+                    if item.get("type") == "gate.upsert":
+                        gates[item["payload"]["gate_id"]] = item["payload"]["status"]
+                    elif item.get("type") == "delivery.upsert":
+                        deliveries[item["payload"]["kind"]] = item["payload"]["status"]
+                view = runtime.empty_projection()
+                view.update(
+                    status="active",
+                    question=None,
+                    tasks=[{"status": "done"}],
+                    workers=[{"worker_id": "task:run:7", "status": "completed"}],
+                    gates=[{"gate_id": k, "status": v} for k, v in gates.items()],
+                    deliveries=[{"kind": k, "status": v} for k, v in deliveries.items()],
+                )
+                if runtime.rejection_ready(view):
+                    self.mission["status"] = "failed"
+        return RuntimePolicyClient()
+
+    def _closed_pr_views(self, approved, head="candidate-sha", state="CLOSED"):
+        view = {
+            "number": 39,
+            "url": "https://example.invalid/pr/39",
+            "state": state,
+            "isDraft": True,
+            "headRefName": "codex/fix",
+            "headRefOid": head,
+            "baseRefName": approved["default_branch"],
+        }
+        return [dict(view), dict(view)]
+
+    def _pr_closed_state(self, approved):
+        return {
+            "schema_version": 1,
+            "mission_id": "mission-a7-3",
+            "dispatch_profile": approved["dispatch_profile"],
+            "phase": "pr_closed",
+            "failure_kind": "pr_closed",
+            "failure_error": "exact candidate PR was closed externally before merge",
+            "branch": "codex/fix",
+            "candidate_sha": "candidate-sha",
+            "pr_number": 39,
+            "pr_url": "https://example.invalid/pr/39",
+            "pr_head_sha": "candidate-sha",
+            "pr_base_branch": approved["default_branch"],
+            "review_cycle": 1,
+            "crash_injected": False,
+            "root_task_id": "task-1",
+            "run_id": "7",
+        }
+
+    def test_exact_closed_candidate_pr_reaches_terminal_failed_without_reopen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = self._closed_pr_views(approved)
+            remote_heads = ["candidate-sha\trefs/heads/codex/fix\n", ""]
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(views.pop(0))
+                elif command[0] == "git" and "ls-remote" in command:
+                    output = remote_heads.pop(0)
+                elif command[0] == "git" and "push" in command and "--delete" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, self._pr_closed_state(approved))
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(1, cleanup.call_count)
+            # Owner-closed PR is never reopened or replaced.
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "create"] for c in commands))
+            # Cleanup deletes only the exact lease-pinned remote branch.
+            deletion = next(c for c in commands if c[0] == "git" and "--delete" in c)
+            self.assertIn(
+                "--force-with-lease=refs/heads/codex/fix:candidate-sha", deletion
+            )
+            # Exactly one truthful terminal result reaches Kanban.
+            self.assertEqual("pr_closed_externally", backend.task["result"])
+            self.assertEqual(
+                instance._failure_contract(result["state"])[2],
+                backend.runs[0]["metadata"]["mission_events"],
+            )
+
+    def test_closed_pr_with_mismatched_identity_stays_fail_closed_without_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+
+            # Exact CLOSED identity -> sentinel, and no draft-restore is attempted.
+            exact_commands = []
+            exact_views = self._closed_pr_views(approved)
+
+            def exact_runner(command, **_kwargs):
+                exact_commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(exact_views.pop(0))
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            exact = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=exact_runner
+            )
+            exact_state = {
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+            }
+            with self.assertRaises(coordinator.PrClosedExternally):
+                exact._require_draft_pr(exact_state)
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in exact_commands))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "create"] for c in exact_commands))
+
+            # Mismatched CLOSED identity -> generic fail-closed error, no cleanup.
+            mismatch_commands = []
+            mismatch_views = self._closed_pr_views(approved, head="other-sha")
+
+            def mismatch_runner(command, **_kwargs):
+                mismatch_commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(mismatch_views.pop(0))
+                elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            mismatch = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=mismatch_runner
+            )
+            with self.assertRaises(coordinator.DeliveryError) as raised:
+                mismatch._require_draft_pr(dict(exact_state))
+            self.assertNotIsInstance(raised.exception, coordinator.PrClosedExternally)
+            self.assertFalse(
+                any(c[0] == "git" and "--delete" in c for c in mismatch_commands)
+            )
+
+    def test_closed_pr_terminal_replay_does_not_duplicate_cleanup_or_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = self._closed_pr_views(approved)
+            remote_heads = ["candidate-sha\trefs/heads/codex/fix\n", ""]
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(views.pop(0))
+                elif command[0] == "git" and "ls-remote" in command:
+                    output = remote_heads.pop(0)
+                elif command[0] == "git" and "push" in command and "--delete" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, self._pr_closed_state(approved))
+
+            with mock.patch.object(instance, "_cleanup") as cleanup:
+                with self.assertRaisesRegex(
+                    coordinator.mission_adapter.AdapterError, "lost completion response"
+                ):
+                    instance.tick()
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            # Cleanup ran exactly once across the crash/replay boundary.
+            self.assertEqual(1, cleanup.call_count)
+            deletes = [c for c in commands if c[0] == "git" and "--delete" in c]
+            self.assertEqual(1, len(deletes))
+            # Terminal events match the contract exactly (no duplication on replay).
+            self.assertEqual(
+                instance._failure_contract(result["state"])[2],
+                backend.runs[0]["metadata"]["mission_events"],
+            )
+            # A fresh coordinator on the same state sees nothing left to do.
+            restarted = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            self.assertIsNone(restarted.tick())
+
+    def _pr_closed_runner(self, commands, views, remote_heads, head="candidate-sha"):
+        def runner(command, **_kwargs):
+            commands.append(command)
+            if command[0:3] == ["gh", "pr", "view"]:
+                output = json.dumps(views.pop(0))
+            elif command[0] == "git" and "rev-parse" in command and "HEAD" in command:
+                output = head
+            elif command[0] == "git" and "status" in command:
+                output = ""
+            elif command[0] == "git" and "ls-remote" in command:
+                output = remote_heads.pop(0)
+            elif command[0] == "git" and "push" in command and "--delete" in command:
+                output = ""
+            elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                output = ""
+            else:
+                raise AssertionError(command)
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+        return runner
+
+    def _candidate_pr_open_state(self, approved):
+        return {
+            "schema_version": 1,
+            "mission_id": "mission-a7-3",
+            "dispatch_profile": approved["dispatch_profile"],
+            "phase": "candidate_pr_open",
+            "branch": "codex/fix",
+            "candidate_sha": "candidate-sha",
+            "candidate_push_sha": "candidate-sha",
+            "pr_number": 39,
+            "pr_url": "https://example.invalid/pr/39",
+            "pr_head_sha": "candidate-sha",
+            "pr_base_branch": approved["default_branch"],
+            "review_cycle": 1,
+            "crash_injected": True,
+            "root_task_id": "task-1",
+            "run_id": "7",
+            "prior_review_rejections": 0,
+            "prior_ci_failures": 0,
+            "prior_author_failures": 0,
+            "route_decisions": {},
+            "effective_route_decisions": {},
+            "owner_answers": [],
+        }
+
+    def test_candidate_pr_open_exact_closed_pr_transitions_to_terminal_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = self._closed_pr_views(approved) + self._closed_pr_views(approved)[:1]
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            remote_heads = [present, present, ""]
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state",
+                runner=self._pr_closed_runner(commands, views, remote_heads),
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, self._candidate_pr_open_state(approved))
+
+            with (
+                mock.patch.object(instance, "_ensure_owner_gate_question", return_value=None),
+                mock.patch.object(instance, "_ensure_source_preflight", return_value=None),
+                mock.patch.object(instance, "_ensure_worktree", return_value=None),
+                mock.patch.object(
+                    instance, "_ensure_route", return_value={"decision_id": "test-route"}
+                ),
+                mock.patch.object(instance, "_actor", return_value={"model": "test-reviewer"}),
+                mock.patch.object(instance, "_publish_progress_notice", return_value=None),
+                mock.patch.object(instance, "_publish_stage", return_value=None),
+                mock.patch.object(instance, "_publish_available_telemetry", return_value=None),
+                mock.patch.object(instance, "_publish_gate_evidence", return_value=None),
+                mock.patch.object(instance, "_capacity_wait_result", return_value=None),
+                mock.patch.object(instance, "_disk_space_wait_result", return_value=None),
+                mock.patch.object(instance, "_migrate_legacy_post_verify_state", return_value=None),
+                mock.patch.object(instance, "_cleanup") as cleanup,
+            ):
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            # Durable terminal checkpoint was written before cleanup.
+            self.assertEqual("pr_closed", result["state"]["failure_kind"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(1, cleanup.call_count)
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "create"] for c in commands))
+            deletion = next(c for c in commands if c[0] == "git" and "--delete" in c)
+            self.assertIn(
+                "--force-with-lease=refs/heads/codex/fix:candidate-sha", deletion
+            )
+            self.assertEqual("pr_closed_externally", backend.task["result"])
+            self.assertEqual(
+                instance._failure_contract(result["state"])[2],
+                backend.runs[0]["metadata"]["mission_events"],
+            )
+
+    def _ambiguous_reviewer_setup(self, approved, instance, paths):
+        state = {
+            "schema_version": 1,
+            "mission_id": "mission-a7-3",
+            "dispatch_profile": approved["dispatch_profile"],
+            "phase": "pre_review_ci_green",
+            "branch": "codex/fix",
+            "review_cycle": 1,
+            "base_sha": "base-sha",
+            "candidate_sha": "candidate-sha",
+            "candidate_push_sha": "candidate-sha",
+            "pre_review_gate_version": coordinator._PRE_REVIEW_GATE_VERSION,
+            "pre_review_ci_checks": [{"name": "test", "outcome": "SUCCESS"}],
+            "pr_number": 39,
+            "pr_url": "https://example.invalid/pr/39",
+            "pr_head_sha": "candidate-sha",
+            "pr_base_branch": approved["default_branch"],
+            "pr_is_draft": True,
+            "prior_review_rejections": 0,
+            "prior_ci_failures": 0,
+            "prior_author_failures": 0,
+            "route_decisions": {},
+            "effective_route_decisions": {},
+            "owner_answers": [],
+            "root_task_id": "task-1",
+            "run_id": "7",
+            "author_summary": {},
+            "author_telemetry": {},
+            "crash_injected": True,
+        }
+        route = instance._ensure_route(state, paths)
+        state["model_ambiguous"] = {
+            "schema_version": 1,
+            "role": "reviewer",
+            "quality_epoch": 0,
+            "route_decision_id": route["decision_id"],
+            "candidate_sha": "candidate-sha",
+            "status": "reconciling",
+            "error_class": "ambiguous_result",
+            "last_error_sha256": "a" * 64,
+        }
+        instance._save(paths, state)
+        paths["review"].mkdir(parents=True)
+        return state
+
+    def _ambiguous_reviewer_mocks(self, instance, cleanup):
+        return (
+            mock.patch.object(instance, "_ensure_owner_gate_question", return_value=None),
+            mock.patch.object(instance, "_ensure_source_preflight", return_value=None),
+            mock.patch.object(instance, "_publish_ambiguous_notice", return_value=None),
+            mock.patch.object(instance, "_publish_stage", return_value=None),
+            mock.patch.object(instance, "_publish_available_telemetry", return_value=None),
+            mock.patch.object(instance, "_model_unit_is_gone", return_value=True),
+            mock.patch.object(instance, "_cleanup", cleanup),
+        )
+
+    def test_ambiguous_reviewer_restart_exact_closed_pr_routes_to_terminal_failed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = self._closed_pr_views(approved) + self._closed_pr_views(approved)[:1]
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            remote_heads = [present, present, ""]
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state",
+                runner=self._pr_closed_runner(commands, views, remote_heads),
+            )
+            paths = instance._paths("mission-a7-3")
+            self._ambiguous_reviewer_setup(approved, instance, paths)
+
+            cleanup = mock.Mock()
+            patches = self._ambiguous_reviewer_mocks(instance, cleanup)
+            with contextlib.ExitStack() as stack:
+                for patch in patches:
+                    stack.enter_context(patch)
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            self.assertEqual("pr_closed", result["state"]["failure_kind"])
+            self.assertEqual("failed", client.mission["status"])
+            self.assertEqual(1, cleanup.call_count)
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "create"] for c in commands))
+            self.assertEqual("pr_closed_externally", backend.task["result"])
+
+    def test_ambiguous_reviewer_restart_mismatched_pr_stays_generic_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            views = self._closed_pr_views(approved, head="other-sha")
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            remote_heads = [present]
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state",
+                runner=self._pr_closed_runner(commands, views, remote_heads),
+            )
+            paths = instance._paths("mission-a7-3")
+            self._ambiguous_reviewer_setup(approved, instance, paths)
+
+            cleanup = mock.Mock()
+            patches = self._ambiguous_reviewer_mocks(instance, cleanup)
+            with contextlib.ExitStack() as stack:
+                for patch in patches:
+                    stack.enter_context(patch)
+                with self.assertRaises(coordinator.DeliveryError) as raised:
+                    instance.tick()
+
+            # Mismatched CLOSED PR is NOT the sentinel and is NOT auto-cleaned.
+            self.assertNotIsInstance(raised.exception, coordinator.PrClosedExternally)
+            self.assertFalse(any(c[0] == "git" and "--delete" in c for c in commands))
+            self.assertEqual(0, cleanup.call_count)
+            persisted = coordinator.mission_adapter._read_json(paths["state"])
+            self.assertNotEqual("pr_closed", persisted.get("phase"))
+            self.assertNotEqual("pr_closed", persisted.get("failure_kind"))
+            self.assertEqual("active", client.mission["status"])
+
+    def _closed_terminal_runner(self, commands, views, remote_heads, deletes, head="candidate-sha"):
+        def runner(command, **_kwargs):
+            commands.append(command)
+            if command[0:3] == ["gh", "pr", "view"]:
+                output = json.dumps(views.pop(0))
+            elif command[0] == "git" and "rev-parse" in command and "HEAD" in command:
+                output = head
+            elif command[0] == "git" and "ls-remote" in command:
+                output = remote_heads.pop(0)
+            elif command[0] == "git" and "push" in command and "--delete" in command:
+                deletes.append(command)
+                output = ""
+            elif command[0] == "git" and "worktree" in command and "prune" in command:
+                output = ""
+            elif command[0] == "git" and "branch" in command and "-D" in command:
+                output = ""
+            elif command[0] == "git" and "branch" in command and "--list" in command:
+                output = ""
+            elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                output = ""
+            else:
+                raise AssertionError(command)
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+        return runner
+
+    def _candidate_pr_open_mocks(self, instance, *, mock_cleanup):
+        patchers = [
+            mock.patch.object(instance, "_ensure_owner_gate_question", return_value=None),
+            mock.patch.object(instance, "_ensure_source_preflight", return_value=None),
+            mock.patch.object(instance, "_ensure_worktree", return_value=None),
+            mock.patch.object(instance, "_ensure_route", return_value={"decision_id": "test-route"}),
+            mock.patch.object(instance, "_actor", return_value={"model": "test-reviewer"}),
+            mock.patch.object(instance, "_publish_progress_notice", return_value=None),
+            mock.patch.object(instance, "_publish_stage", return_value=None),
+            mock.patch.object(instance, "_publish_available_telemetry", return_value=None),
+            mock.patch.object(instance, "_publish_gate_evidence", return_value=None),
+            mock.patch.object(instance, "_capacity_wait_result", return_value=None),
+            mock.patch.object(instance, "_disk_space_wait_result", return_value=None),
+            mock.patch.object(instance, "_migrate_legacy_post_verify_state", return_value=None),
+        ]
+        cleanup = None
+        if mock_cleanup:
+            cleanup = mock.patch.object(instance, "_cleanup")
+            patchers.append(cleanup)
+        return patchers, cleanup
+
+    def test_pr_closed_failure_contract_satisfies_real_runtime_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            for variant, passed_gates in (
+                ("cleanup-only", []),
+                ("+tests", ["tests"]),
+                ("+tests+review", ["tests", "review"]),
+            ):
+                with self.subTest(variant=variant):
+                    result, _summary, events = instance._failure_contract({
+                        "failure_kind": "pr_closed",
+                        "pr_closed_gates": passed_gates,
+                        "pr_url": "https://example.invalid/pr/39",
+                    })
+                    self.assertEqual("pr_closed_externally", result)
+                    gates = {}
+                    deliveries = {}
+                    for event in events:
+                        if event["type"] == "gate.upsert":
+                            gates[event["payload"]["gate_id"]] = event["payload"]["status"]
+                        elif event["type"] == "delivery.upsert":
+                            deliveries[event["payload"]["kind"]] = event["payload"]["status"]
+                    self.assertEqual("failed", gates.get("pull-request"))
+                    self.assertEqual("passed", gates.get("cleanup"))
+                    for gate_id in passed_gates:
+                        self.assertEqual("passed", gates.get(gate_id))
+                    view = runtime.empty_projection()
+                    view.update(
+                        status="active",
+                        question=None,
+                        tasks=[{"status": "done"}],
+                        workers=[{"worker_id": "task:run:7", "status": "completed"}],
+                        gates=[{"gate_id": k, "status": v} for k, v in gates.items()],
+                        deliveries=[{"kind": k, "status": v} for k, v in deliveries.items()],
+                    )
+                    self.assertTrue(runtime.rejection_ready(view))
+                    terminal = runtime._rejection_terminal(view)
+                    self.assertIsNotNone(terminal)
+                    self.assertEqual("central:auto-pr-closed:v1", terminal[0])
+                    self.assertEqual({"pull_request": "failed"}, deliveries)
+
+    def test_pr_closed_persists_exact_observed_head_for_lease_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            deletes = []
+            views = self._closed_pr_views(approved) + self._closed_pr_views(approved)[:1]
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            remote_heads = [present, present, ""]
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state",
+                runner=self._closed_terminal_runner(commands, views, remote_heads, deletes),
+            )
+            paths = instance._paths("mission-a7-3")
+            state = self._candidate_pr_open_state(approved)
+            state["pr_head_sha"] = "old-sha"  # stale durable head before the close
+            instance._save(paths, state)
+
+            patchers, cleanup = self._candidate_pr_open_mocks(instance, mock_cleanup=True)
+            with contextlib.ExitStack() as stack:
+                for patch in patchers:
+                    stack.enter_context(patch)
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            # Observed exact head replaced the stale durable head before cleanup.
+            self.assertEqual("candidate-sha", result["state"]["pr_head_sha"])
+            self.assertEqual("candidate-sha", result["state"]["candidate_push_sha"])
+            self.assertEqual(1, len(deletes))
+            self.assertIn("--force-with-lease=refs/heads/codex/fix:candidate-sha", deletes[0])
+            self.assertNotIn("old-sha", " ".join(deletes[0]))
+
+    def test_pr_closed_terminal_runs_real_cleanup_without_mock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            deletes = []
+            views = self._closed_pr_views(approved) + self._closed_pr_views(approved)[:1]
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            # _assert_candidate_branch, _finalize_failed_pr (pre/post), _cleanup remote check
+            remote_heads = [present, present, "", ""]
+            instance = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state",
+                runner=self._closed_terminal_runner(commands, views, remote_heads, deletes),
+            )
+            paths = instance._paths("mission-a7-3")
+            instance._save(paths, self._candidate_pr_open_state(approved))
+
+            patchers, cleanup = self._candidate_pr_open_mocks(instance, mock_cleanup=False)
+            self.assertIsNone(cleanup)
+            with contextlib.ExitStack() as stack:
+                for patch in patchers:
+                    stack.enter_context(patch)
+                result = instance.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            # Real lease-pinned remote branch deletion happened exactly once.
+            self.assertEqual(1, len(deletes))
+            self.assertIn("--force-with-lease=refs/heads/codex/fix:candidate-sha", deletes[0])
+            # Real cleanup ran the disposable-branch sequence.
+            self.assertTrue(any(
+                c[0] == "git" and "branch" in c and "-D" in c for c in commands
+            ))
+            self.assertTrue(any(
+                c[0] == "git" and "worktree" in c and "prune" in c for c in commands
+            ))
+            # Durable checkpoint sequence reached the terminal outcome.
+            self.assertEqual("pr_closed", result["state"]["failure_kind"])
+
+    def test_lost_create_response_then_external_close_creates_once_and_terminal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            client = self._pr_closed_client()
+            backend = RejectionBackend()
+            backend.fail_after_complete_once = False
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            deletes = []
+            create_count = {"n": 0}
+            pr_state = {"state": None}  # None = no PR exists yet
+            present = "candidate-sha\trefs/heads/codex/fix\n"
+            # run1 _assert_candidate_branch; run2 _assert_candidate_branch;
+            # run2 _finalize_failed_pr pre-delete; run2 _finalize_failed_pr post-delete
+            remote_heads = [present, present, present, ""]
+            closed_record = {
+                "number": 39, "url": "https://example.invalid/pr/39",
+                "state": "CLOSED", "isDraft": True, "headRefName": "codex/fix",
+                "headRefOid": "candidate-sha", "baseRefName": approved["default_branch"],
+            }
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "list"]:
+                    self.assertIn("all", command)
+                    if pr_state["state"] is None:
+                        output = "[]"
+                    else:
+                        output = json.dumps([closed_record])
+                elif command[0:3] == ["gh", "pr", "create"]:
+                    create_count["n"] += 1
+                    pr_state["state"] = "CLOSED"  # created, then externally closed
+                    # Killed before any post-create read/checkpoint.
+                    raise coordinator.InjectedCrash("killed before post-create checkpoint")
+                elif command[0:3] == ["gh", "pr", "view"]:
+                    output = json.dumps(closed_record)
+                elif command[0] == "git" and "rev-parse" in command and "HEAD" in command:
+                    output = "candidate-sha"
+                elif command[0] == "git" and "ls-remote" in command:
+                    output = remote_heads.pop(0)
+                elif command[0] == "git" and "push" in command and "--delete" in command:
+                    deletes.append(command)
+                    output = ""
+                elif command[0] == "git" and "worktree" in command and "prune" in command:
+                    output = ""
+                elif command[0] == "git" and "branch" in command and "-D" in command:
+                    output = ""
+                elif command[0] == "git" and "branch" in command and "--list" in command:
+                    output = ""
+                elif command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    output = ""
+                else:
+                    raise AssertionError(command)
+                return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+            def fresh_state():
+                return {
+                    "schema_version": 1,
+                    "mission_id": "mission-a7-3",
+                    "dispatch_profile": approved["dispatch_profile"],
+                    "phase": "candidate_pushed",
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                    "candidate_push_sha": "candidate-sha",
+                    "review_cycle": 1,
+                    "crash_injected": True,
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                    "prior_review_rejections": 0,
+                    "prior_ci_failures": 0,
+                    "prior_author_failures": 0,
+                    "route_decisions": {},
+                    "effective_route_decisions": {},
+                    "owner_answers": [],
+                }
+
+            # Run 1: all-state inventory empty -> exactly one create -> killed before
+            # any post-create read/checkpoint.
+            run1 = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            paths = run1._paths("mission-a7-3")
+            run1._save(paths, fresh_state())
+            patchers, _ = self._candidate_pr_open_mocks(run1, mock_cleanup=True)
+            with contextlib.ExitStack() as stack:
+                for patch in patchers:
+                    stack.enter_context(patch)
+                with self.assertRaises(coordinator.InjectedCrash):
+                    run1.tick()
+            self.assertEqual(1, create_count["n"])
+            self.assertIsNone(
+                coordinator.mission_adapter._read_json(paths["state"]).get("pr_number")
+            )
+
+            # Run 2 (restart, same durable state): all-state inventory returns the
+            # exact CLOSED PR -> terminal, no second create.
+            run2 = coordinator.DeliveryCoordinator(
+                approved, client, backend, root / "state", runner=runner
+            )
+            run2._save(paths, fresh_state())
+            patchers, _ = self._candidate_pr_open_mocks(run2, mock_cleanup=True)
+            with contextlib.ExitStack() as stack:
+                for patch in patchers:
+                    stack.enter_context(patch)
+                result = run2.tick()
+
+            self.assertEqual("complete", result["action"])
+            self.assertEqual("pr_closed_externally", result["state"]["outcome"])
+            self.assertEqual("failed", client.mission["status"])
+            # Exactly one create total; no ready/reopen/replacement.
+            self.assertEqual(1, create_count["n"])
+            self.assertEqual(1, sum(
+                1 for c in commands if c[0:3] == ["gh", "pr", "create"]
+            ))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+            # The all-state inventory (gh pr list --state all) happened before the
+            # only create.
+            list_idx = [i for i, c in enumerate(commands) if c[0:3] == ["gh", "pr", "list"]]
+            create_idx = [i for i, c in enumerate(commands) if c[0:3] == ["gh", "pr", "create"]]
+            self.assertTrue(list_idx and create_idx)
+            self.assertLess(list_idx[0], create_idx[0])
+            self.assertIn("--state", commands[list_idx[0]])
+            self.assertIn("all", commands[list_idx[0]])
+            # Exact observed-head lease cleanup, one terminal result.
+            self.assertEqual(1, len(deletes))
+            self.assertIn("--force-with-lease=refs/heads/codex/fix:candidate-sha", deletes[0])
+            self.assertEqual("pr_closed_externally", backend.task["result"])
+
+    def test_pre_create_inventory_negatives_fail_closed_without_mutation(self):
+        candidate = {
+            "number": 39, "url": "https://example.invalid/pr/39",
+            "state": "OPEN", "isDraft": True, "headRefName": "codex/fix",
+            "headRefOid": "candidate-sha", "baseRefName": "main",
+        }
+        cases = {
+            "malformed-json": (0, "{not-json"),
+            "non-list-result": (0, "{}"),
+            "nonzero-exit": (1, ""),
+            "multiple-records": (0, json.dumps([candidate, {**candidate, "number": 40}])),
+            "mismatched-head": (0, json.dumps([{**candidate, "headRefOid": "other-sha"}])),
+            "merged-not-adoptable": (0, json.dumps([{**candidate, "state": "MERGED", "isDraft": False}])),
+        }
+        for name, (rc, stdout) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+                commands = []
+
+                def runner(command, **_kwargs):
+                    commands.append(command)
+                    if command[0:3] == ["gh", "pr", "list"]:
+                        return subprocess.CompletedProcess(command, rc, stdout=stdout, stderr="")
+                    if command[0] == "git" and "ls-remote" in command:
+                        return subprocess.CompletedProcess(
+                            command, 0, stdout="candidate-sha\trefs/heads/codex/fix\n", stderr=""
+                        )
+                    if command[0] == "git" and "rev-parse" in command and "HEAD" in command:
+                        return subprocess.CompletedProcess(command, 0, stdout="candidate-sha", stderr="")
+                    raise AssertionError(command)
+
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+                )
+                state = {
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                    "candidate_push_sha": "candidate-sha",
+                    "pr_base_branch": approved["default_branch"],
+                }
+                with mock.patch.object(instance, "_assert_candidate_branch"):
+                    with self.assertRaises(coordinator.DeliveryError) as raised:
+                        instance._ensure_candidate_pr(state, {"author": root})
+                # Ambiguous/mismatched/MERGED stays generic fail-closed (not the sentinel).
+                self.assertNotIsInstance(raised.exception, coordinator.PrClosedExternally)
+                # Zero create, zero ready, zero branch mutation.
+                self.assertFalse(any(c[0:3] == ["gh", "pr", "create"] for c in commands))
+                self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+                self.assertFalse(any(c[0] == "git" and "--delete" in c for c in commands))
+
+    def test_pr_closed_passed_gates_table_through_real_mission_store(self):
+        pv = coordinator._PRE_REVIEW_GATE_VERSION
+        cases = [
+            ("candidate_pr_open", {"phase": "candidate_pr_open"}, []),
+            ("pre_review_ci_green", {"phase": "pre_review_ci_green", "pre_review_gate_version": pv}, ["tests"]),
+            ("reviewed", {"phase": "reviewed", "pre_review_gate_version": pv}, ["tests", "review"]),
+            ("pr_open", {"phase": "pr_open", "pre_review_gate_version": pv}, ["tests", "review"]),
+            ("ci_green", {"phase": "ci_green", "pre_review_gate_version": pv}, ["tests", "review", "ci"]),
+        ]
+        for name, state, expected in cases:
+            with self.subTest(phase=name), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), FakeBackend(), root / "state"
+                )
+                # 1. Truthful gate mapping per phase.
+                self.assertEqual(expected, instance._pr_closed_passed_gates(state))
+                # 2. Derive the actual coordinator-emitted contract.
+                result, _summary, events = instance._failure_contract({
+                    "failure_kind": "pr_closed",
+                    "pr_closed_gates": expected,
+                    "pr_url": "https://example.invalid/pr/39",
+                })
+                self.assertEqual("pr_closed_externally", result)
+                # 3. Feed that contract through a REAL MissionStore runtime policy.
+                store = runtime.MissionStore(root / "missions.sqlite3")
+                mission_id = f"mission-pr-closed-{name}"
+                store.accept(
+                    "Fix issue 39", mission_id=mission_id,
+                    dispatch_profile=approved["dispatch_profile"],
+                )
+                seq = {"n": 0}
+
+                def publish(event_type, payload):
+                    seq["n"] += 1
+                    store.append_producer(mission_id, {
+                        "schema_version": 1,
+                        "mission_id": mission_id,
+                        "type": event_type,
+                        "source": "build1-flow",
+                        "correlation": {"producer_event_id": f"flow:prclosed:{seq['n']}"},
+                        "payload": payload,
+                    })
+
+                publish("task.upsert", {
+                    "task_id": "task-1", "title": "Root", "status": "done",
+                    "assignee": "coordinator",
+                })
+                publish("worker.upsert", {
+                    "worker_id": "task-1:run:1", "run_id": "1",
+                    "profile": "coordinator", "status": "completed",
+                })
+                for event in events:
+                    publish(event["type"], event["payload"])
+                failed = store.complete_if_ready(mission_id)
+                self.assertIsNotNone(failed)
+                self.assertTrue(failed[1])
+                self.assertEqual("mission.failed", failed[0]["type"])
+                self.assertEqual(
+                    "central:auto-pr-closed:v1",
+                    failed[0]["correlation"]["producer_event_id"],
+                )
+                self.assertEqual("failed", store.projection(mission_id)["status"])
+
+    def test_restore_pr_draft_refuses_url_mismatch_before_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            commands = []
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=json.dumps({
+                            "number": 39,
+                            "url": "https://example.invalid/pr/OTHER",
+                            "state": "OPEN",
+                            "isDraft": False,
+                            "headRefName": "codex/fix",
+                            "headRefOid": "candidate-sha",
+                            "baseRefName": approved["default_branch"],
+                        }), stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state", runner=runner
+            )
+            state = {
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_number": 39,
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
+            }
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "could not be restored to draft"
+            ):
+                instance._restore_pr_draft(
+                    state, 39, "number,url,state,isDraft,headRefName,commits,baseRefName"
+                )
+            # URL mismatch: no draft-restore mutation is issued.
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+
+    @staticmethod
+    def _requested_fields(command):
+        return command[command.index("--json") + 1].split(",")
+
+    def test_finalize_failed_pr_restores_exact_open_ready_pr_with_requested_fields_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            draft = {"v": False}  # exact OPEN *ready* (non-draft) failed PR
+            full_record = {
+                "number": 39,
+                "url": "https://example.invalid/pr/39",
+                "state": "OPEN",
+                "headRefName": "codex/fix",
+                "commits": [{"oid": "candidate-sha"}],
+                "baseRefName": approved["default_branch"],
+            }
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    # Production-shaped fake: return ONLY the requested --json fields.
+                    fields = self._requested_fields(command)
+                    record = {**full_record, "isDraft": draft["v"]}
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=json.dumps({k: v for k, v in record.items() if k in fields}),
+                        stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    draft["v"] = True
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                if command[0] == "git" and "ls-remote" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="candidate-sha\trefs/heads/codex/fix\n", stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            preserved = instance._finalize_failed_pr({
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "pr_number": 39,
+                "branch": "codex/fix",
+                "candidate_sha": "candidate-sha",
+                "pr_head_sha": "candidate-sha",
+                "pr_base_branch": approved["default_branch"],
+                "pr_url": "https://example.invalid/pr/39",
+            })
+
+            # Exact OPEN ready failed PR is returned to draft and preserved.
+            self.assertTrue(preserved)
+            self.assertTrue(draft["v"])
+            self.assertEqual(1, sum(
+                c[0:3] == ["gh", "pr", "ready"] and "--undo" in c for c in commands
+            ))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "close"] for c in commands))
+            self.assertFalse(any(c[0] == "git" and "--delete" in c for c in commands))
+
+    def test_finalize_failed_pr_url_mismatch_fails_closed_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = profile(root)
+            approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+            commands = []
+            full_record = {
+                "number": 39,
+                "url": "https://example.invalid/pr/OTHER",
+                "state": "OPEN",
+                "isDraft": False,
+                "headRefName": "codex/fix",
+                "commits": [{"oid": "candidate-sha"}],
+                "baseRefName": approved["default_branch"],
+            }
+
+            def runner(command, **_kwargs):
+                commands.append(command)
+                if command[0:3] == ["gh", "pr", "view"]:
+                    fields = self._requested_fields(command)
+                    return subprocess.CompletedProcess(
+                        command, 0,
+                        stdout=json.dumps({k: v for k, v in full_record.items() if k in fields}),
+                        stderr="",
+                    )
+                if command[0:3] == ["gh", "pr", "ready"] and "--undo" in command:
+                    return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+                if command[0] == "git" and "ls-remote" in command:
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout="candidate-sha\trefs/heads/codex/fix\n", stderr=""
+                    )
+                raise AssertionError(command)
+
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), backend, root / "state", runner=runner
+            )
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError,
+                "failed PR identity no longer matches the durable candidate",
+            ):
+                instance._finalize_failed_pr({
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                    "pr_number": 39,
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                    "pr_head_sha": "candidate-sha",
+                    "pr_base_branch": approved["default_branch"],
+                    "pr_url": "https://example.invalid/pr/39",
+                })
+            # URL mismatch: no ready, no close, no branch deletion.
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "ready"] for c in commands))
+            self.assertFalse(any(c[0:3] == ["gh", "pr", "close"] for c in commands))
+            self.assertFalse(any(c[0] == "git" and "--delete" in c for c in commands))
+
+    def test_finalize_failed_pr_requires_durable_url_before_any_mutation(self):
+        for case, pr_url in (("missing", None), ("blank", ""), ("wrong-type", 39)):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = pathlib.Path(directory)
+                approved = profile(root)
+                approved.update(gh_bin="gh", codex_home=str(root / "codex"))
+                backend = FakeBackend()
+                backend.claim("task-1", ttl_seconds=approved["claim_ttl_seconds"])
+                commands = []
+
+                def runner(command, **_kwargs):
+                    commands.append(command)
+                    raise AssertionError(command)
+
+                instance = coordinator.DeliveryCoordinator(
+                    approved, FakeClient(), backend, root / "state", runner=runner
+                )
+                state = {
+                    "root_task_id": "task-1",
+                    "run_id": "7",
+                    "pr_number": 39,
+                    "branch": "codex/fix",
+                    "candidate_sha": "candidate-sha",
+                    "pr_head_sha": "candidate-sha",
+                    "pr_base_branch": approved["default_branch"],
+                }
+                if pr_url is not None:
+                    state["pr_url"] = pr_url
+                # Missing/blank/wrong-type durable URL fails closed BEFORE any
+                # inspection or mutation (even the read-only gh pr view).
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError, "no durable URL identity"
+                ):
+                    instance._finalize_failed_pr(state)
+                self.assertEqual([], commands)
 
 
 class CancelledClient:
