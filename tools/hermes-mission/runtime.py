@@ -2153,8 +2153,10 @@ def telegram_text(view: dict[str, Any]) -> str:
 
 
 def _is_telemetry_worker(worker: dict[str, Any]) -> bool:
-    """True for informational author/reviewer telemetry records."""
-    return isinstance(worker.get("profile"), str) and worker["profile"] in _ROLE_LABELS
+    """True for informational author/reviewer/usage-aggregate telemetry records."""
+    if isinstance(worker.get("profile"), str) and worker["profile"] in _ROLE_LABELS:
+        return True
+    return worker.get("worker_id") == "usage-total" and worker.get("profile") == "usage"
 
 
 def _one_terminal_worker(
