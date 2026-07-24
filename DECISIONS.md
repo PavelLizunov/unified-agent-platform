@@ -786,3 +786,32 @@
 - **Отклонено:** LLM risk scorer до mission, свободный список task flags из browser/Telegram, APPROVE как универсальная
   выдача credentials/destructive/provider/local authority, новый approval service и подтверждение расходов
   подписки, штатных OpenAI routes, tests, PR/CI/merge или предусмотренного repo-contract deploy.
+
+## ADR-040 — DRAFT (не принят): каталожная cross-repo read authority для required-source
+
+> **Статус: DRAFT — не принят, не подключён к runtime.** Требуется отдельное owner-решение.
+> Сегодня cross-repo источник намеренно заблокирован (см. ниже); этот ADR лишь описывает
+> возможный будущий механизм и ничего не изменяет.
+
+- **Контекст:** текущий required-source preflight (source-preflight gate) разрешает миссии читать
+  только точный источник из того же репозитория, что и выбранный target (selected-target authority).
+  Любой cross-repo источник (goal ссылается на репозиторий, отличный от target) отвергается fail-closed
+  до author/reviewer и любого Git mutation/push/PR/CI/deploy и ведёт к idempotent owner question.
+  Это сознательная граница: чтение чужого приватного репозитория — новая authority, которой сегодня
+  нет ни у одного profile/catalog.
+- **Предложение (будущее, не принято):** разрешать cross-repo read только когда он явно объявлен
+  владельцем в каталоге проектов:
+  - каталожная запись target-проекта декларирует `source_allowlist` — замкнутый список `owner/name`
+    репозиториев, которые миссия этого проекта может читать как источник;
+  - каждый такой источник дополнительно привязывается к конкретной credential-ref (read-only
+    installation/token), объявленной владельцем; coordinator никогда не создаёт и не расширяет
+    credential-ref сам;
+  - source_request по-прежнему immutable (repo/ref/path), парсится один раз на intake, а binding
+    pin-ит immutable commit SHA и content SHA-256; cross-repo fetch идёт только через объявленную
+    credential-ref, без сохранения token/secret URL.
+- **Почему сейчас отклонено:** это новая cross-repo authority и новая credential-ref поверхность.
+  Они требуют явного owner-одобрения, ревизии каталога и отдельного canary; до этого действует
+  same-target-only ограничение, а cross-repo источник остаётся fail-closed.
+- **Что НЕ делается этим ADR:** не добавляется profile/catalog поле `source_allowlist`, не добавляется
+  live credential-ref поверхность, не изменяется runtime/coordinator — текст носит исключительно
+  проектный характер.

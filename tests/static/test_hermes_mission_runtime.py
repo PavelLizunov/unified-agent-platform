@@ -259,20 +259,63 @@ def test_owner_turn_admission_is_authoritative_before_project_routing() -> None:
                 assert str(error) == "owner turn is not an execution goal"
         assert store.latest() is None
 
-        try:
-            store.ingest_owner_turn(
-                "Implement the plan from https://example.invalid/spec.md",
+        # A goal that requires a source is admitted as exactly one durable
+        # mission (never rejected pre-mission).  A non-GitHub URL source cannot
+        # be represented exactly, so it sets source_required and leaves
+        # source_request unset; the coordinator raises the idempotent question.
+        unresolvable, created = store.ingest_owner_turn(
+            "Implement the plan from https://example.invalid/spec.md",
+            platform="workspace",
+            source_message_id="external-source",
+            session_id="external-source-session",
+        )
+        assert created
+        assert unresolvable["payload"].get("source_required") is True
+        assert unresolvable["payload"].get("source_request") is None
+
+        # Natural-language source descriptions behave the same: admitted with
+        # source_required=True and no exact source_request.
+        for index, vague in enumerate((
+            "реализуй точно по handoff-файлу ~/handoff/plan.md с ops-1",
+            "implement exactly per the design-doc from the vpnrouter repository",
+        )):
+            assert missions.requires_external_source(vague), vague
+            assert missions.parse_source_request(vague) is None, vague
+            accepted_vague, created_vague = store.ingest_owner_turn(
+                vague,
                 platform="workspace",
-                source_message_id="external-source",
+                source_message_id=f"vague-source-{index}",
                 session_id="external-source-session",
-                project_id="uap",
             )
-            raise AssertionError("external source goal was accepted")
-        except missions.MissionError as error:
-            assert str(error) == (
-                "external source is not available through an immutable intake capability"
-            )
-        assert store.latest() is None
+            assert created_vague, vague
+            assert accepted_vague["payload"].get("source_required") is True, vague
+            assert accepted_vague["payload"].get("source_request") is None, vague
+
+        # An exact GitHub source reference is parsed into the immutable
+        # source_request (and does not set source_required).
+        github_source = (
+            "Implement per https://github.com/PavelLizunov/unified-agent-platform/"
+            "blob/main/docs/spec.md"
+        )
+        assert missions.requires_external_source(github_source)
+        assert missions.parse_source_request(github_source) == {
+            "repo": "PavelLizunov/unified-agent-platform",
+            "ref": "main",
+            "path": "docs/spec.md",
+        }
+        accepted_exact, created_exact = store.ingest_owner_turn(
+            github_source,
+            platform="workspace",
+            source_message_id="exact-source",
+            session_id="external-source-session",
+        )
+        assert created_exact
+        assert accepted_exact["payload"]["source_request"] == {
+            "repo": "PavelLizunov/unified-agent-platform",
+            "ref": "main",
+            "path": "docs/spec.md",
+        }
+        assert accepted_exact["payload"].get("source_required") is None
 
         accepted, created = store.ingest_owner_turn(
             "/run Обнови только README",
@@ -665,6 +708,432 @@ def test_routine_docs_on_deploy_target_gets_effective_none_mode() -> None:
     # Normal none mission keeps the original wording
     normal_text = missions._completion_result({"delivery_mode": "none"})
     assert "не настроен" in normal_text
+
+
+def test_source_request_is_immutable_and_survives_project_selection() -> None:
+    # Target project is Suflyor; the goal hints a source in local-llm-lab.  The
+    # parsed source_request must be preserved verbatim (it can never silently
+    # switch to the target repo) and replayed deterministically.
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "suflyor", "label": "Suflyor",
+                "repository": "PavelLizunov/suflyor",
+                "summary": "Prompter", "aliases": ["suflyor"],
+                "dispatch_profile": "build1-suflyor-registered-v4",
+                "delivery_mode": "none", "platforms": ["workspace"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+            {
+                "project_id": "local-llm-lab", "label": "Local LLM Lab",
+                "repository": "PavelLizunov/local-llm-evaluation-lab",
+                "summary": "LLM lab", "aliases": ["llm lab"],
+                "dispatch_profile": None,
+                "delivery_mode": "none", "platforms": ["workspace"],
+                "category": "research", "status": "setup_required",
+                "test_targets": ["desktop-m922ij2"],
+            },
+        ],
+    })
+    goal = (
+        "Implement per https://github.com/PavelLizunov/local-llm-evaluation-lab/"
+        "blob/main/spec.md"
+    )
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.ingest_owner_turn(
+            goal,
+            platform="workspace",
+            source_message_id="source-replay",
+            session_id="source-replay-session",
+            project_id="suflyor",
+        )
+        assert created
+        # Target is Suflyor, but the immutable source request keeps local-llm-lab.
+        assert accepted["payload"]["project_id"] == "suflyor"
+        assert accepted["payload"]["source_request"] == {
+            "repo": "PavelLizunov/local-llm-evaluation-lab",
+            "ref": "main",
+            "path": "spec.md",
+        }
+        projection = store.projection(accepted["mission_id"])
+        assert projection["source_request"]["repo"] == (
+            "PavelLizunov/local-llm-evaluation-lab"
+        )
+
+        # Replay of the exact same turn is idempotent and preserves the source.
+        replayed, replay_created = store.ingest_owner_turn(
+            goal,
+            platform="workspace",
+            source_message_id="source-replay",
+            session_id="source-replay-session",
+            project_id="suflyor",
+        )
+        assert not replay_created
+        assert replayed["payload"]["source_request"] == (
+            accepted["payload"]["source_request"]
+        )
+
+        # Reusing the same source identity with a different (switched) source is
+        # rejected as a collision; the source can never be silently swapped.
+        switched = (
+            "Implement per https://github.com/PavelLizunov/suflyor/blob/main/spec.md"
+        )
+        try:
+            store.ingest_owner_turn(
+                switched,
+                platform="workspace",
+                source_message_id="source-replay",
+                session_id="source-replay-session",
+                project_id="suflyor",
+            )
+            raise AssertionError("switched source was accepted on replay")
+        except missions.MissionError as error:
+            assert "already accepted" in str(error)
+
+
+def test_fresh_direct_accept_derives_source_request() -> None:
+    # P1-C: a fresh direct MissionStore.accept (the producer/API path) must not
+    # create a mission with an exact GitHub source URL but source_request=None;
+    # the source_request is derived centrally from the accepted goal.
+    goal = (
+        "Implement per https://github.com/PavelLizunov/unified-agent-platform/"
+        "blob/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/docs/spec.md"
+    )
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": ""}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.accept(
+            goal,
+            mission_id="mission-direct-source",
+            dispatch_profile="build1-direct",
+        )
+        assert created
+        assert accepted["payload"]["source_request"] == {
+            "repo": "PavelLizunov/unified-agent-platform",
+            "ref": "a" * 40,
+            "path": "docs/spec.md",
+        }
+        assert accepted["payload"].get("source_required") is None
+
+        # A fresh accept of a required-but-unrepresentable source sets
+        # source_required and leaves source_request unset.
+        vague, vague_created = store.accept(
+            "implement exactly per the handoff file ~/handoff/plan.md",
+            mission_id="mission-direct-vague",
+            dispatch_profile="build1-direct",
+        )
+        assert vague_created
+        assert vague["payload"].get("source_required") is True
+        assert vague["payload"].get("source_request") is None
+
+
+def test_legacy_pre_feature_accept_replays_without_collision() -> None:
+    # P1-C: a mission accepted before this feature (stored without
+    # source_request/source_required) replays deterministically and is never
+    # silently retrofitted or collided when the same goal is accepted again.
+    goal = (
+        "Implement per https://github.com/PavelLizunov/unified-agent-platform/"
+        "blob/main/docs/spec.md"
+    )
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": ""}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        mission_id = "mission-legacy-source"
+        # Simulate a pre-feature accepted event: no source_request/source_required.
+        store._append(mission_id, {
+            "schema_version": missions.SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "type": "mission.accepted",
+            "source": "central-hermes",
+            "correlation": {},
+            "payload": {"goal": goal, "dispatch_profile": "build1-legacy"},
+        })
+        replayed, created = store.accept(
+            goal, mission_id=mission_id, dispatch_profile="build1-legacy",
+        )
+        assert not created
+        # The stored legacy event is returned verbatim: no retrofit.
+        assert replayed["payload"].get("source_request") is None
+        assert replayed["payload"].get("source_required") is None
+        assert store.projection(mission_id)["source_request"] is None
+
+
+def test_owner_visible_terminal_result_carries_source_provenance() -> None:
+    # P1-D: the owner-visible terminal result (used by Telegram and Workspace)
+    # carries bounded source provenance — repo, resolved full commit SHA,
+    # normalized path and content SHA-256; no URL/token/body.
+    view = missions.empty_projection()
+    view["delivery_mode"] = "none"
+    view["source_binding"] = {
+        "repo": "PavelLizunov/unified-agent-platform",
+        "resolved_ref": "a" * 40,
+        "path": "docs/spec.md",
+        "content_sha256": "b" * 64,
+    }
+    result = missions._completion_result(view)
+    assert "PavelLizunov/unified-agent-platform" in result
+    assert "a" * 40 in result
+    assert "docs/spec.md" in result
+    assert "b" * 64 in result
+    assert "http" not in result
+    assert "token" not in result
+
+
+def test_source_preflight_answer_binds_same_mission_idempotently() -> None:
+    # Answering the source-preflight question with a canonical same-target GitHub
+    # URL pinned to a full commit SHA binds an immutable source.request to the
+    # SAME mission (no new mission, no second accepted event); invalid answers
+    # fail closed and leave the mission blocked; replay is idempotent.
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "suflyor", "label": "Suflyor",
+                "repository": "PavelLizunov/suflyor",
+                "summary": "Prompter", "aliases": ["suflyor"],
+                "dispatch_profile": "build1-suflyor-registered-v4",
+                "delivery_mode": "none", "platforms": ["workspace", "telegram"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+        ],
+    })
+    sha = "a" * 40
+    question_id = "source-preflight:" + "b" * 24
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, created = store.ingest_owner_turn(
+            "implement exactly per the handoff file ~/handoff/plan.md",
+            platform="workspace",
+            source_message_id="src-answer",
+            session_id="src-answer-session",
+            project_id="suflyor",
+        )
+        assert created
+        mission_id = accepted["mission_id"]
+        assert accepted["payload"].get("source_required") is True
+        before_count = len(store.list(100))
+        # The coordinator publishes the canonical source-preflight question.
+        store.append_central(mission_id, {
+            "schema_version": missions.SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "type": "mission.question",
+            "source": "central-hermes",
+            "correlation": {"producer_event_id": "central:q:source-preflight"},
+            "payload": {"question_id": question_id, "text": "provide an exact source"},
+        })
+        # Invalid answers fail closed: non-URL, branch ref, cross-repo, malformed.
+        cross = f"https://github.com/PavelLizunov/other/blob/{sha}/docs/spec.md"
+        for bad in (
+            "not a url at all",
+            "https://github.com/PavelLizunov/suflyor/blob/main/docs/spec.md",
+            cross,
+            "https://example.invalid/spec.md",
+            f"https://github.com/PavelLizunov/suflyor/blob/{sha}/../etc/passwd",
+        ):
+            try:
+                store.answer(mission_id, question_id, bad)
+                raise AssertionError(f"invalid source answer accepted: {bad}")
+            except missions.MissionError:
+                pass
+        assert store.projection(mission_id).get("source_request") is None
+        assert store.projection(mission_id).get("source_required") is True
+        assert len(store.list(100)) == before_count  # no new mission created
+
+        # A valid same-target answer pinned to a full SHA binds the source.
+        valid = f"Use https://github.com/PavelLizunov/suflyor/blob/{sha}/docs/spec.md please"
+        store.answer(
+            mission_id, question_id, valid,
+            source_message_id="ans-1", source_platform="workspace",
+        )
+        proj = store.projection(mission_id)
+        assert proj["mission_id"] == mission_id  # same mission, not a new one
+        assert proj["source_request"] == {
+            "repo": "PavelLizunov/suflyor", "ref": sha, "path": "docs/spec.md",
+        }
+        assert proj.get("source_required") is None  # resolved truthfully
+        assert len(store.list(100)) == before_count  # still exactly one mission
+
+        # Idempotent replay of the same answer dedups cleanly.
+        store.answer(
+            mission_id, question_id, valid,
+            source_message_id="ans-1", source_platform="workspace",
+        )
+        # A changed answer to the same question is a producer-event collision:
+        # it is rejected and the first recorded answer/source binding stands
+        # (no terminal corruption, no second source.request).
+        changed = f"Use https://github.com/PavelLizunov/suflyor/blob/{sha}/other/path.md"
+        try:
+            store.answer(mission_id, question_id, changed)
+            raise AssertionError("changed source answer did not collide")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+        proj = store.projection(mission_id)
+        assert proj["source_request"] == {
+            "repo": "PavelLizunov/suflyor", "ref": sha, "path": "docs/spec.md",
+        }
+        # Exactly one source.request event was committed.
+        events = store.events(mission_id)
+        assert sum(1 for e in events if e["type"] == "source.request") == 1
+
+        # Telegram-style answer path binds identically on its own mission/question.
+        tg_accepted, tg_created = store.ingest_owner_turn(
+            "implement exactly per the design-doc from the vpnrouter repository",
+            platform="telegram",
+            source_message_id="src-answer-tg",
+            session_id="src-answer-tg-session",
+            chat_id="-1004377555987",
+            thread_id="2",
+            project_id="suflyor",
+        )
+        assert tg_created
+        tg_mission_id = tg_accepted["mission_id"]
+        tg_question_id = "source-preflight:" + "c" * 24
+        store.append_central(tg_mission_id, {
+            "schema_version": missions.SCHEMA_VERSION,
+            "mission_id": tg_mission_id,
+            "type": "mission.question",
+            "source": "central-hermes",
+            "correlation": {"producer_event_id": "central:q:source-preflight-tg"},
+            "payload": {"question_id": tg_question_id, "text": "provide an exact source"},
+        })
+        store.answer(
+            tg_mission_id, tg_question_id, valid,
+            source_message_id="tg-ans-1", source_platform="telegram",
+        )
+        tg_proj = store.projection(tg_mission_id)
+        assert tg_proj["source_request"] == {
+            "repo": "PavelLizunov/suflyor", "ref": sha, "path": "docs/spec.md",
+        }
+        tg_answer = next(
+            e for e in store.events(tg_mission_id) if e["type"] == "mission.answer"
+        )
+        assert tg_answer["payload"]["source_platform"] == "telegram"
+
+
+def test_source_answer_atomicity_and_fault_regression() -> None:
+    # P1-1/P1-2 fault regression: mission.answer + source.request commit atomically
+    # (an injected failure between the two insertions rolls back BOTH); a missing
+    # project_repository fails closed committing zero events; replay converges with
+    # exactly one mission.answer and one source.request; invalid/cross-repo/changed
+    # answers commit zero new events.
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [
+            {
+                "project_id": "suflyor", "label": "Suflyor",
+                "repository": "PavelLizunov/suflyor",
+                "summary": "Prompter", "aliases": ["suflyor"],
+                "dispatch_profile": "build1-suflyor-registered-v4",
+                "delivery_mode": "none", "platforms": ["workspace"],
+                "category": "active-maintained", "status": "ready",
+                "test_targets": ["uap-build-1"],
+            },
+        ],
+    })
+    sha = "a" * 40
+    question_id = "source-preflight:" + "d" * 24
+    valid = f"https://github.com/PavelLizunov/suflyor/blob/{sha}/docs/spec.md"
+
+    def _open_source_mission(store, mid, qid):
+        store.append_central(mid, {
+            "schema_version": missions.SCHEMA_VERSION, "mission_id": mid,
+            "type": "mission.question", "source": "central-hermes",
+            "correlation": {"producer_event_id": f"central:q:{qid}"},
+            "payload": {"question_id": qid, "text": "provide an exact source"},
+        })
+
+    def _counts(store, mid):
+        events = store.events(mid)
+        return (
+            sum(1 for e in events if e["type"] == "mission.answer"),
+            sum(1 for e in events if e["type"] == "source.request"),
+        )
+
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, _ = store.ingest_owner_turn(
+            "implement exactly per the handoff file ~/handoff/plan.md",
+            platform="workspace", source_message_id="fault-src",
+            session_id="fault-src-session", project_id="suflyor",
+        )
+        mission_id = accepted["mission_id"]
+        _open_source_mission(store, mission_id, question_id)
+
+        # (1) Injected failure BETWEEN the two insertions rolls back BOTH events.
+        real_project = missions.project
+
+        def failing_project(events):
+            if any(e.get("type") == "mission.answer" for e in events):
+                raise RuntimeError("injected failure between insertions")
+            return real_project(events)
+
+        with mock.patch.object(missions, "project", failing_project):
+            try:
+                store.answer(mission_id, question_id, valid)
+                raise AssertionError("injected failure did not propagate")
+            except RuntimeError as error:
+                assert "injected failure" in str(error)
+        assert _counts(store, mission_id) == (0, 0)  # neither event committed
+
+        # (2) Invalid / cross-repo / branch-ref answers commit zero new events.
+        cross = f"https://github.com/PavelLizunov/other/blob/{sha}/docs/spec.md"
+        for bad in (
+            "not a url",
+            "https://github.com/PavelLizunov/suflyor/blob/main/docs/spec.md",
+            cross,
+        ):
+            try:
+                store.answer(mission_id, question_id, bad)
+                raise AssertionError(f"invalid answer accepted: {bad}")
+            except missions.MissionError:
+                pass
+            assert _counts(store, mission_id) == (0, 0)
+
+        # (3) A valid answer commits exactly one mission.answer + one source.request.
+        store.answer(mission_id, question_id, valid)
+        assert _counts(store, mission_id) == (1, 1)
+
+        # (4) Same-answer replay converges: still exactly one of each (idempotent).
+        store.answer(mission_id, question_id, valid)
+        assert _counts(store, mission_id) == (1, 1)
+
+        # (5) Changed answer fails closed as a collision; counts unchanged.
+        changed = f"https://github.com/PavelLizunov/suflyor/blob/{sha}/other/path.md"
+        try:
+            store.answer(mission_id, question_id, changed)
+            raise AssertionError("changed answer did not collide")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+        assert _counts(store, mission_id) == (1, 1)
+
+        # (6) P1-2: a mission with NO project_repository fails closed committing
+        # zero events (same-target authority cannot be verified).
+        no_repo_id = "mission-no-repo-source"
+        store.accept(
+            "implement exactly per the handoff file ~/handoff/plan.md",
+            mission_id=no_repo_id, dispatch_profile="build1-suflyor-registered-v4",
+        )
+        no_repo_qid = "source-preflight:" + "e" * 24
+        _open_source_mission(store, no_repo_id, no_repo_qid)
+        assert store.projection(no_repo_id).get("project_repository") is None
+        try:
+            store.answer(no_repo_id, no_repo_qid, valid)
+            raise AssertionError("source answer accepted without target repository")
+        except missions.MissionError as error:
+            assert "target repository" in str(error)
+        assert _counts(store, no_repo_id) == (0, 0)
 
 
 def test_existing_project_setup_context_is_catalog_owned_and_fail_closed() -> None:
@@ -4208,6 +4677,12 @@ def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
     test_conversational_admission_requires_explicit_execution_intent()
     test_owner_turn_admission_is_authoritative_before_project_routing()
+    test_source_request_is_immutable_and_survives_project_selection()
+    test_fresh_direct_accept_derives_source_request()
+    test_legacy_pre_feature_accept_replays_without_collision()
+    test_owner_visible_terminal_result_carries_source_provenance()
+    test_source_preflight_answer_binds_same_mission_idempotently()
+    test_source_answer_atomicity_and_fault_regression()
     test_task_owner_gate_classifier_has_closed_ru_en_corpus()
     test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance()
     test_routine_docs_class_is_durable_and_closed()

@@ -53,7 +53,7 @@ while a sensitive idempotency key is rejected instead of being mutated and break
 
 | Type | Required payload | Projection effect |
 |---|---|---|
-| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile`, `execution_class`, `expected_changed_files`, `owner_gate_flag` | status becomes `active`, stage `accepted` |
+| `mission.accepted` | `goal`; optional `project_id`, `dispatch_profile`, `execution_class`, `expected_changed_files`, `owner_gate_flag`, `source_request` | status becomes `active`, stage `accepted` |
 | `mission.stage` | `stage`, `progress_percent` | updates the owner-visible stage/progress |
 | `mission.notice` | `code`, `message`, `owner_action_required`; optional `next_attempt_at` | reports a bounded operational wait/recovery without changing progress |
 | `mission.question` | `question_id`, `text` | status becomes `waiting_owner` |
@@ -156,6 +156,43 @@ add one of these capabilities; a clarification cannot expand the accepted task. 
 also preflights persisted accepted goals and answers of every nonterminal mission before serving them. A legacy
 architecture goal is projected with the same gate, while a legacy unsupported goal or capability-bearing answer stops
 fail-closed before dispatch. Terminal history remains readable and cannot be resumed.
+
+Ordinary intake also parses a goal that depends on an external source into one closed, immutable
+`source_request` (`repo`, `ref`, `path`) stored on `mission.accepted`; the coordinator never reparses
+the free-form goal and replays the same `source_request` deterministically. A goal that requires a source
+which cannot be represented exactly (natural-language handoff/design-doc references, bare-repository or
+non-GitHub URLs, malformed refs/paths) is still admitted as exactly one durable mission carrying
+`source_required` (with no `source_request`); it is never rejected pre-mission. Before routing, target
+worktree/branch creation, the author/reviewer turns and any Git mutation/push/PR/CI/deploy, the
+coordinator's source-preflight gate resolves the `source_request` against the already-declared
+selected-target authority only: the source repository must equal the mission's target repository. A
+`source_required` mission with no exact `source_request` enters one idempotent `waiting_owner`
+source-preflight question that asks the owner to ANSWER with an exact same-target commit SHA plus path
+and states that cross-repo reads need separately approved authority. The question is answerable: a
+canonical same-target GitHub URL pinned to a full 40-hex commit SHA + normalized path is validated by
+Central and bound to the SAME mission via a closed `source.request` event (no new mission, no second
+`mission.accepted`, no retrofit of legacy accepted events); the coordinator then resumes the same
+mission/task/run and resolves/fetches by that immutable SHA before route/worktree/model/Git. The same
+answer replay is idempotent; a changed answer is a producer-event collision and the first binding stands;
+an ambiguous/non-URL/branch-ref/cross-repo/malformed answer is rejected fail-closed and the mission stays
+`waiting_owner` on its one canonical question with no downstream execution. The
+ref is resolved read-only to an immutable full commit SHA, the bounded source content is fetched by that
+SHA through the existing authenticated `gh` boundary, durably bound to a content SHA-256 and redacted
+provenance, and made available to both the author and the reviewer. Content matching a narrow credential
+pattern (Authorization/Bearer, GitHub/AGE/AWS/Slack tokens, PEM private-key headers, URL userinfo) is
+rejected fail-closed before durable storage or model input (never persisted/sent verbatim,
+never silently redacted), while benign prose and Windows/path-like text is accepted. The raw content is
+written as a private artifact (`required-source.txt`,
+owner-only file in an owner-only parent) inside the per-mission state directory, so it shares the existing
+completed-state retention and cleanup; the author and reviewer prompts re-read that artifact and re-check
+its UTF-8 SHA-256 against the binding immediately before every turn, failing closed on a missing or
+tampered artifact even after a candidate commit. A bound source is re-fetched by its
+immutable SHA and verified fail-closed on restart; changed content or provenance is rejected and never
+adopted. Any cross-repo, unapproved or unavailable source fails closed before execution with one
+idempotent owner question; no credential or secret-bearing URL is persisted. The coordinator publishes a
+`source.upsert` event so the owner-visible projection/terminal result and the completion evidence both
+carry the bounded source provenance (repo, resolved commit SHA, normalized path, content SHA-256).
+Catalog-declared cross-repo read authority is a separate unaccepted draft (ADR-040) and is not wired in.
 
 Workspace forwards its existing stable optimistic message identity and selected project to the Central session
 stream; Telegram uses the authenticated platform message ID after canonical session/topic recovery. Telegram voice
