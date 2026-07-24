@@ -254,6 +254,13 @@ spec:
                 configMapKeyRef:
                   name: hermes-project-catalog
                   key: projects.json
+            # Keep ordinary Telegram conversation in the two UAP-owned topics.
+            # Other group topics require an explicit bot mention or reply.
+            - { name: TELEGRAM_REQUIRE_MENTION, value: "true" }
+            - { name: TELEGRAM_FREE_RESPONSE_TOPICS, value: "-1004377555987:2,-1004377555987:3" }
+            # Route unattended Hermes notices and cron results to Code.
+            - { name: TELEGRAM_HOME_CHANNEL, value: "-1004377555987" }
+            - { name: TELEGRAM_HOME_CHANNEL_THREAD_ID, value: "2" }
             # Telegram forum-topic allowlist for media routing.  JSON array of
             # exact {"chat_id","thread_id"} pair objects whose ordinary text/voice
             # deterministically enters media.image.generate instead of project

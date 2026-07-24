@@ -171,6 +171,22 @@ def main() -> None:
         "name": "HERMES_MISSION_MEDIA_TOPICS",
         "value": '[{"chat_id":"-1004377555987","thread_id":"3"}]',
     })
+    check(gateway_env["TELEGRAM_REQUIRE_MENTION"] == {
+        "name": "TELEGRAM_REQUIRE_MENTION",
+        "value": "true",
+    })
+    check(gateway_env["TELEGRAM_FREE_RESPONSE_TOPICS"] == {
+        "name": "TELEGRAM_FREE_RESPONSE_TOPICS",
+        "value": "-1004377555987:2,-1004377555987:3",
+    })
+    check(gateway_env["TELEGRAM_HOME_CHANNEL"] == {
+        "name": "TELEGRAM_HOME_CHANNEL",
+        "value": "-1004377555987",
+    })
+    check(gateway_env["TELEGRAM_HOME_CHANNEL_THREAD_ID"] == {
+        "name": "TELEGRAM_HOME_CHANNEL_THREAD_ID",
+        "value": "2",
+    })
     catalog_manifest = yaml.safe_load(
         (ROOT / "clusters/prod/infra/hermes-project-catalog.yaml").read_text(
             encoding="utf-8"
