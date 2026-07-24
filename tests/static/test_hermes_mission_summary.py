@@ -161,7 +161,7 @@ def test_completion_uses_delivery_summary_and_never_echoes_goal() -> None:
             "url": "https://example.invalid/pr/1", "summary": summary,
         }],
     ))
-    assert result.startswith(summary)
+    assert "РЕЗУЛЬТАТ\n" + summary in result
     assert goal not in result
     fallback = m._completion_result(_view(goal=goal, status="completed"))
     assert "подробное описание результата недоступно" in fallback
@@ -226,10 +226,9 @@ def test_completion_role_telemetry_usage_and_unattested_cost() -> None:
     assert "выход 30,7 тыс." in r
     assert "запросы к моделям 81" in r
     assert "Инструменты: shell 64 · ненулевой код 13 · web search 6" in r
-    # No attested official price contract -> cost is reported as not attested,
-    # never an invented API-equivalent.
-    assert m._COST_UNATTESTED in r
-    assert "API-эквивалент" not in r and "$" not in r
+    # No max_request_input_tokens in telemetry -> pricing fails closed.
+    assert "API-эквивалент: недоступен" in r
+    assert "$" not in r
     r2 = m._completion_result(_view(goal="G", status="completed",
                                     workers=[{"worker_id": "w", "status": "done"}]))
     assert "Автор (" not in r2
@@ -256,7 +255,7 @@ def test_completion_keeps_usage_statistics_when_details_are_truncated() -> None:
     result = m._completion_result(v)
     assert len(result) <= m._MAX_COMPLETION_RESULT_CHARS
     assert "Статистика финальных прогонов:" in result
-    assert m._COST_UNATTESTED in result
+    assert "API-эквивалент: недоступен" in result
 
 
 def test_completion_partial_telemetry_preserves_roles_and_never_prices() -> None:
@@ -274,7 +273,7 @@ def test_completion_partial_telemetry_preserves_roles_and_never_prices() -> None
     assert "вход 100" not in partial_result
 
     # A large single run is ordinary attested telemetry: tokens + runtime-reported
-    # cache are shown, but cost is never priced (no attested official price).
+    # cache are shown, but cost fails closed (no max_request_input_tokens).
     large = _view(goal="G", status="completed", workers=[
         _worker("author", "gpt-5.6-sol", input_tokens=300000,
                 cached_input_tokens=250000, output_tokens=1000, model_requests=1),
@@ -282,8 +281,8 @@ def test_completion_partial_telemetry_preserves_roles_and_never_prices() -> None
     rendered = m._completion_result(large)
     assert "Статистика финальных прогонов:" in rendered
     assert "runtime-кэш (подтверждено runtime, не биллинг) 250 тыс. (83,3%)" in rendered
-    assert m._COST_UNATTESTED in rendered
-    assert "API-эквивалент" not in rendered and "$" not in rendered
+    assert "API-эквивалент: недоступен" in rendered
+    assert "$" not in rendered
 
 
 def test_store_end_to_end_label_telemetry_timestamps() -> None:
@@ -480,20 +479,20 @@ def test_active_telegram_elapsed_is_deterministic_across_replay() -> None:
 
 
 def test_usage_statistics_honest_markers() -> None:
-    """Cache ratio only from attested input+cached; cost is never invented."""
+    """Cache ratio only from attested input+cached; cost fails closed without full telemetry."""
     cases = [
         # name, workers, must_contain, must_not_contain
-        ("cache not attested -> explicit cache marker, cost unattested",
+        ("cache not attested -> explicit cache marker, cost fails closed",
          [_worker("author", "gpt-5.6-sol", input_tokens=5000, output_tokens=100,
                   model_requests=3)],
-         ["вход 5 тыс.", "runtime-кэш: недоступно", m._COST_UNATTESTED],
-         ["API-эквивалент", "$"]),
-        ("fully attested -> runtime cache ratio + unattested cost, never a price",
+         ["вход 5 тыс.", "runtime-кэш: недоступно", "API-эквивалент: недоступен"],
+         ["$"]),
+        ("fully attested but no max_request -> runtime cache ratio + fail-closed cost",
          [_worker("author", "gpt-5.6-sol", input_tokens=5000, cached_input_tokens=4000,
                   output_tokens=100, model_requests=3)],
          ["runtime-кэш (подтверждено runtime, не биллинг) 4 тыс. (80,0%)",
-          "новый вход 1 тыс.", m._COST_UNATTESTED],
-         ["недоступно", "API-эквивалент", "$"]),
+          "новый вход 1 тыс.", "API-эквивалент: недоступен"],
+         ["недоступно", "$"]),
         ("one role missing telemetry -> aggregate unavailable, discarded preserved",
          [_worker("author", "gpt-5.6-sol", input_tokens=5000, cached_input_tokens=4000,
                   output_tokens=100, attempts_discarded=2),
@@ -501,13 +500,13 @@ def test_usage_statistics_honest_markers() -> None:
          ["Статистика финальных прогонов: совокупный расход, кэш и API-стоимость недоступны",
           "как минимум 2 предыдущих или отброшенных прогонов не входят"],
          ["API-эквивалент", "вход ", "$"]),
-        ("cumulative usage profile also emits the unattested-cost line",
+        ("cumulative usage profile -> cost fails closed (no role telemetry)",
          [_worker("usage", None, input_tokens=5000, cached_input_tokens=4000,
                   output_tokens=100, model_requests=3)],
          ["Накопительный подтверждённый расход",
           "runtime-кэш (подтверждено runtime, не биллинг) 4 тыс. (80,0%)",
-          m._COST_UNATTESTED],
-         ["API-эквивалент", "$"]),
+          "API-эквивалент: недоступен"],
+         ["$"]),
     ]
     for name, workers, must_contain, must_not in cases:
         joined = "\n".join(m._usage_statistics_lines(workers))
@@ -601,7 +600,9 @@ def test_telegram_deep_link_is_exact_and_optional() -> None:
         "os.environ", {"HERMES_MISSION_WORKSPACE_URL": "http://100.85.56.31:3000"}, clear=False,
     ):
         text = m.telegram_text(view)
-    assert f"Подробнее: http://100.85.56.31:3000/dashboard?mission={MID}" in text
+    link = f"Подробнее: http://100.85.56.31:3000/dashboard?mission={MID}"
+    assert link in text
+    assert link in text.split("\n\n", 1)[0]
     # No configured Workspace base -> no invented link.
     with mock.patch.dict("os.environ", {}, clear=True):
         assert "Подробнее:" not in m.telegram_text(view)
@@ -652,6 +653,270 @@ def test_duplicate_producer_event_is_idempotent_in_projection() -> None:
         assert m.telegram_text(first) == m.telegram_text(second)
 
 
+def _priced_worker(profile: str, model: str, **kw) -> dict:
+    """Build a fully attested worker for pricing tests."""
+    defaults = dict(
+        input_tokens=10_000, cached_input_tokens=8_000, output_tokens=500,
+        model_requests=3, max_request_input_tokens=10_000, attempts_discarded=0,
+    )
+    defaults.update(kw)
+    return _worker(profile, model, **defaults)
+
+
+def _priced_pair(author_model="gpt-5.6-sol", reviewer_model="gpt-5.6-luna",
+                 author_kw=None, reviewer_kw=None) -> list[dict]:
+    """Build a complete author+reviewer+usage-total set for pricing tests."""
+    a = _priced_worker("author", author_model, **(author_kw or {}))
+    r = _priced_worker("reviewer", reviewer_model, **(reviewer_kw or {}))
+    agg_fields = ("input_tokens", "cached_input_tokens", "output_tokens", "model_requests")
+    agg = _worker("usage", None, worker_id="usage-total", attempts_discarded=0,
+                  max_request_input_tokens=max(
+                      a.get("max_request_input_tokens", 0),
+                      r.get("max_request_input_tokens", 0)),
+                  **{f: (a.get(f, 0) or 0) + (r.get(f, 0) or 0) for f in agg_fields})
+    return [a, r, agg]
+
+
+def test_api_cost_luna_sol_example() -> None:
+    """Luna+Sol mission yields about $0.15–$0.18 API equivalent."""
+    workers = _priced_pair(
+        author_kw=dict(input_tokens=50_000, cached_input_tokens=40_000,
+                       output_tokens=3_000, model_requests=10,
+                       max_request_input_tokens=50_000),
+        reviewer_kw=dict(input_tokens=5_000, cached_input_tokens=4_000,
+                         output_tokens=300, model_requests=2,
+                         max_request_input_tokens=5_000),
+    )
+    lines = m._api_cost_lines(workers)
+    assert len(lines) == 1
+    line = lines[0]
+    assert "API-эквивалент:" in line
+    assert "~$0,16" in line and "0,18" in line
+    assert "не списание с подписки" in line
+    assert "запись кэша" in line
+    assert "прайс 2026-07-24" in line
+    assert "недоступен" not in line
+
+
+def test_api_cost_terra_sol() -> None:
+    """Terra reviewer + Sol author pricing."""
+    workers = _priced_pair(
+        reviewer_model="gpt-5.6-terra",
+        author_kw=dict(input_tokens=100_000, cached_input_tokens=80_000,
+                       output_tokens=5_000, model_requests=20,
+                       max_request_input_tokens=100_000),
+        reviewer_kw=dict(input_tokens=20_000, cached_input_tokens=15_000,
+                         output_tokens=1_000, model_requests=5,
+                         max_request_input_tokens=20_000),
+    )
+    lines = m._api_cost_lines(workers)
+    assert len(lines) == 1
+    assert "~$0,32" in lines[0] and "0,35" in lines[0]
+
+
+def test_api_cost_canary_regression() -> None:
+    """Actual canary telemetry: Luna author + Sol reviewer → $0.15–$0.18."""
+    workers = [
+        _priced_worker("author", "gpt-5.6-luna",
+                       input_tokens=62_247, cached_input_tokens=52_992,
+                       output_tokens=934, model_requests=5,
+                       max_request_input_tokens=13_089),
+        _priced_worker("reviewer", "gpt-5.6-sol",
+                       input_tokens=64_937, cached_input_tokens=46_336,
+                       output_tokens=622, model_requests=4,
+                       max_request_input_tokens=17_036),
+        _worker("usage", None, worker_id="usage-total",
+                input_tokens=127_184, cached_input_tokens=99_328,
+                output_tokens=1_556, model_requests=9,
+                max_request_input_tokens=17_036, attempts_discarded=0),
+    ]
+    lines = m._api_cost_lines(workers)
+    assert len(lines) == 1
+    assert "~$0,15" in lines[0] and "0,18" in lines[0]
+    assert "недоступен" not in lines[0]
+
+
+def test_api_cost_single_amount_when_equal() -> None:
+    """When all input is cached, min == max and one amount is shown."""
+    workers = _priced_pair(
+        author_model="gpt-5.6-luna", reviewer_model="gpt-5.6-luna",
+        author_kw=dict(input_tokens=1_000_000, cached_input_tokens=1_000_000,
+                       output_tokens=100_000, model_requests=1,
+                       max_request_input_tokens=200_000),
+        reviewer_kw=dict(input_tokens=1_000, cached_input_tokens=1_000,
+                         output_tokens=0, model_requests=1,
+                         max_request_input_tokens=1_000),
+    )
+    lines = m._api_cost_lines(workers)
+    assert len(lines) == 1
+    assert "~$" in lines[0]
+    assert "–" not in lines[0].split("~$")[1].split(" ")[0]
+
+
+def test_api_cost_sub_cent() -> None:
+    """Positive cost under $0.01 renders 'менее $0,01', not ~$0,00."""
+    workers = _priced_pair(
+        author_model="gpt-5.6-luna", reviewer_model="gpt-5.6-luna",
+        author_kw=dict(input_tokens=1, cached_input_tokens=0,
+                       output_tokens=0, model_requests=1,
+                       max_request_input_tokens=1),
+        reviewer_kw=dict(input_tokens=1, cached_input_tokens=0,
+                         output_tokens=0, model_requests=1,
+                         max_request_input_tokens=1),
+    )
+    lines = m._api_cost_lines(workers)
+    assert "менее $0,01" in lines[0]
+    assert "0,00" not in lines[0]
+
+
+def test_api_cost_fail_closed() -> None:
+    """Consolidated fail-closed cases."""
+    ok = _priced_pair()
+    cases = [
+        ("incomplete role set",
+         [_priced_worker("author", "gpt-5.6-sol")],
+         "неполный набор ролей"),
+        ("duplicate roles",
+         [_priced_worker("author", "gpt-5.6-sol"),
+          _priced_worker("author", "gpt-5.6-luna"),
+          _priced_worker("reviewer", "gpt-5.6-luna")],
+         "дублирующиеся"),
+        ("unknown model",
+         [_priced_worker("author", "claude-sonnet-4"),
+          _priced_worker("reviewer", "gpt-5.6-luna")],
+         "не в аттестованном прайсе"),
+        ("missing max_request_input_tokens",
+         [_worker("author", "gpt-5.6-sol", input_tokens=1000,
+                  cached_input_tokens=800, output_tokens=100,
+                  model_requests=2, attempts_discarded=0),
+          _priced_worker("reviewer", "gpt-5.6-luna")],
+         "max_request_input_tokens"),
+        ("missing attempts_discarded",
+         [_worker("author", "gpt-5.6-sol", input_tokens=1000,
+                  cached_input_tokens=800, output_tokens=100,
+                  model_requests=2, max_request_input_tokens=1000),
+          _priced_worker("reviewer", "gpt-5.6-luna")],
+         "attempts_discarded"),
+        ("long context >272K",
+         _priced_pair(author_kw=dict(max_request_input_tokens=300_000)),
+         "272K"),
+        ("discarded attempts on role",
+         _priced_pair(author_kw=dict(attempts_discarded=1)),
+         "отброшенные"),
+        ("no usage-total aggregate",
+         _priced_pair()[:2],
+         "usage-total"),
+        ("aggregate input mismatch",
+         [_priced_worker("author", "gpt-5.6-sol"),
+          _priced_worker("reviewer", "gpt-5.6-luna"),
+          _worker("usage", None, worker_id="usage-total",
+                  input_tokens=99_999, cached_input_tokens=16_000,
+                  output_tokens=1_000, model_requests=6,
+                  max_request_input_tokens=10_000, attempts_discarded=0)],
+         "агрегат не совпадает"),
+        ("aggregate max_request mismatch",
+         [_priced_worker("author", "gpt-5.6-sol"),
+          _priced_worker("reviewer", "gpt-5.6-luna"),
+          _worker("usage", None, worker_id="usage-total",
+                  input_tokens=20_000, cached_input_tokens=16_000,
+                  output_tokens=1_000, model_requests=6,
+                  max_request_input_tokens=99_999, attempts_discarded=0)],
+         "max_request_input_tokens"),
+        ("aggregate discarded != 0",
+         [_priced_worker("author", "gpt-5.6-sol"),
+          _priced_worker("reviewer", "gpt-5.6-luna"),
+          _worker("usage", None, worker_id="usage-total",
+                  input_tokens=20_000, cached_input_tokens=16_000,
+                  output_tokens=1_000, model_requests=6,
+                  max_request_input_tokens=10_000, attempts_discarded=2)],
+         "отброшенные"),
+    ]
+    for name, workers, needle in cases:
+        lines = m._api_cost_lines(workers)
+        assert "недоступен" in lines[0], name
+        assert needle in lines[0], (name, needle)
+        assert "$" not in lines[0], name
+    # Matching aggregate passes.
+    lines = m._api_cost_lines(ok)
+    assert "недоступен" not in lines[0]
+    assert "~$" in lines[0]
+
+
+def test_api_cost_no_old_phrase() -> None:
+    """The obsolete 'прайса нет' / 'официального прайса' phrase is gone."""
+    joined = "\n".join(m._usage_statistics_lines(_priced_pair()))
+    assert "прайса нет" not in joined
+    assert "официального прайса" not in joined
+    assert "не подтверждена" not in joined
+
+
+def test_completion_result_sections() -> None:
+    """_completion_result uses РЕЗУЛЬТАТ/ДОСТАВКА/РЕСУРСЫ sections with bullets."""
+    v = _view(
+        goal="G", status="completed",
+        started_at="2026-07-21T10:00:00.000Z", updated_at="2026-07-21T11:30:00.000Z",
+        deliveries=[{"kind": "pull_request", "status": "merged",
+                     "url": "https://x/pr/1", "summary": "Done."}],
+        gates=[{"gate_id": "tests", "status": "passed"}],
+        workers=_priced_pair(),
+    )
+    r = m._completion_result(v)
+    sections = r.split("\n\n")
+    assert len(sections) >= 3
+    assert sections[0].startswith("РЕЗУЛЬТАТ\n")
+    assert "Done." in sections[0]
+    assert "ДОСТАВКА И ПРОВЕРКИ" in r
+    assert "• PR:" in r
+    assert "• Проверки:" in r
+    assert "РЕСУРСЫ" in r
+    assert "• Время: 1ч 30м" in r
+    assert "• Автор (финальный прогон)" in r
+    assert "• API-эквивалент:" in r
+    assert "**" not in r and "<b>" not in r
+
+
+def test_telegram_text_sections_and_bullets() -> None:
+    """telegram_text uses blank-line sections and bullet-prefixed telemetry."""
+    view = _view(
+        mission_id=MID, project_label="UAP", status="failed", error="CI failed",
+        goal="Fix the bug",
+        workers=[
+            _priced_worker("author", "gpt-5.6-sol",
+                           input_tokens=50_000, cached_input_tokens=40_000,
+                           output_tokens=3_000, model_requests=10),
+        ],
+    )
+    text = m.telegram_text(view)
+    sections = text.split("\n\n")
+    assert len(sections) >= 3, f"expected >=3 sections, got {len(sections)}"
+    assert "UAP" in sections[0] and "Статус:" in sections[0]
+    assert "Подробнее:" not in text  # no configured Workspace URL in this case
+    assert any("• Автор" in s for s in sections), "telemetry must be bulleted"
+    assert "Задачи" in sections[-1] and "Исполнители" in sections[-1]
+    assert "API-эквивалент:" in text
+    assert "**" not in text and "<b>" not in text and "<i>" not in text
+
+
+def test_telegram_text_active_sections() -> None:
+    """Active mission has separated header, info, telemetry and counts."""
+    view = _view(
+        mission_id=MID, project_label="Test", status="active",
+        stage="implementing", progress_percent=40, sequence=3,
+        goal="Build feature",
+        workers=[
+            _priced_worker("author", "gpt-5.6-sol",
+                           input_tokens=10_000, cached_input_tokens=8_000,
+                           output_tokens=500, model_requests=3),
+        ],
+    )
+    text = m.telegram_text(view)
+    sections = text.split("\n\n")
+    assert len(sections) >= 3
+    assert "Цель: Build feature" in text
+    assert "• Автор (последний завершённый прогон)" in text
+    assert "Сейчас:" in text
+
+
 def main() -> None:
     test_headline_telegram_text_and_backward_compat()
     test_active_telegram_has_workspace_link_progress_and_honest_usage_scope()
@@ -675,6 +940,16 @@ def main() -> None:
     test_telegram_deep_link_is_exact_and_optional()
     test_long_goal_and_result_are_bounded()
     test_duplicate_producer_event_is_idempotent_in_projection()
+    test_api_cost_luna_sol_example()
+    test_api_cost_terra_sol()
+    test_api_cost_canary_regression()
+    test_api_cost_single_amount_when_equal()
+    test_api_cost_sub_cent()
+    test_api_cost_fail_closed()
+    test_api_cost_no_old_phrase()
+    test_completion_result_sections()
+    test_telegram_text_sections_and_bullets()
+    test_telegram_text_active_sections()
 
 
 if __name__ == "__main__":

@@ -2201,14 +2201,27 @@ data:
     _ALLOWED_WORKER_MODELS = {"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"}
     _ALLOWED_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
     _ROLE_LABELS = {"author": "Автор", "reviewer": "Ревьюер"}
-    # Internal OpenAI route aliases (luna/sol/terra) have no repository- or
-    # runtime-attested official API price contract. The owner views therefore never
-    # estimate API cost or cache billing — they report cost as not attested by the
-    # subscription runtime. No price table lives in this repo on purpose.
-    _COST_UNATTESTED = (
-        "API-стоимость: не подтверждена — официального прайса для внутренних "
-        "маршрутов нет, runtime подписки стоимость не аттестует"
-    )
+    # Dated API price snapshot (per 1M tokens). Sources:
+    #   https://developers.openai.com/api/docs/models/gpt-5.6-luna
+    #   https://developers.openai.com/api/docs/models/gpt-5.6-terra
+    #   https://developers.openai.com/api/docs/models/gpt-5.6-sol
+    # For prompts >272K input tokens: input x2, output x1.5 (whole request).
+    # GPT-5.6 cache writes are 1.25x uncached input.
+    _API_PRICE_DATE = "2026-07-24"
+    _API_PRICES: dict[str, dict[str, Decimal]] = {
+        "gpt-5.6-luna": {
+            "input": Decimal("1.00"), "cached": Decimal("0.10"), "output": Decimal("6.00"),
+        },
+        "gpt-5.6-terra": {
+            "input": Decimal("2.50"), "cached": Decimal("0.25"), "output": Decimal("15.00"),
+        },
+        "gpt-5.6-sol": {
+            "input": Decimal("5.00"), "cached": Decimal("0.50"), "output": Decimal("30.00"),
+        },
+    }
+    _LONG_CONTEXT_THRESHOLD = 272_000
+    _CACHE_WRITE_FACTOR = Decimal("1.25")
+    _PER_MILLION = Decimal("1000000")
     _STAGE_LABELS = {
         "accepted": "Цель принята",
         "planning": "Планирование",
@@ -3863,12 +3876,19 @@ data:
 
 
     def telegram_text(view: dict[str, Any]) -> str:
-        """Render the compact Telegram view from the exact Workspace projection."""
+        """Render the compact Telegram view from the exact Workspace projection.
+
+        Sections are separated by blank lines; telemetry items use a bullet
+        prefix so the message is scannable in plain-text Telegram (no parse_mode).
+        Order: status/project → result → links/goal/notice → telemetry → counts.
+        """
         status = view.get("status") or "unknown"
         stage = view.get("stage") or "unknown"
         headline = _headline(view)
         project_tag = _project_tag(view)
-        lines = [
+
+        # -- Section 1: status / project ----------------------------------------
+        header = [
             f"{project_tag} · {headline}" if project_tag else headline,
             f"ID: {_short_mission_id(view.get('mission_id'))}",
             f"Этап: {_STAGE_LABELS.get(stage, stage)} · {view.get('progress_percent', 0)}%",
@@ -3876,18 +3896,24 @@ data:
         ]
         workspace_url = _workspace_mission_url(view)
         if workspace_url:
-            lines.append(f"Подробнее: {workspace_url}")
-        if status in ("active", "waiting_owner"):
-            elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
-            if elapsed:
-                lines.append(f"В работе: {elapsed}")
-            lines.extend(_active_update_lines(view))
+            header.append(f"Подробнее: {workspace_url}")
+
+        # -- Section 2: result / error ------------------------------------------
+        # _completion_result already carries section headers; do not prepend a label.
+        result_block: list[str] = []
+        if view.get("result"):
+            result_block.append(view["result"])
+        if view.get("error"):
+            result_block.append(f"Ошибка: {view['error']}")
+
+        # -- Section 3: links / goal / question / notice ------------------------
+        info_block: list[str] = []
         goal = view.get("goal")
         if isinstance(goal, str) and goal.strip():
             short_goal = " ".join(goal.split())
             if len(short_goal) > 120:
                 short_goal = short_goal[:119].rstrip() + "…"
-            lines.append(f"Цель: {short_goal}")
+            info_block.append(f"Цель: {short_goal}")
         if view.get("question"):
             question = view["question"]
             text = question["text"]
@@ -3897,47 +3923,53 @@ data:
                     "это изменение только для этой задачи, ответьте обычным сообщением "
                     "(не командой): APPROVE."
                 )
-            lines.append(f"Нужен ваш ответ: {text}")
+            info_block.append(f"Нужен ваш ответ: {text}")
         if view.get("answer"):
-            lines.append(f"Ответ принят: {view['answer']['text']}")
+            info_block.append(f"Ответ принят: {view['answer']['text']}")
         if view.get("notice"):
             notice = view["notice"]
-            lines.append(f"Обновление: {_NOTICE_LABELS.get(notice['code'], notice['message'])}")
+            info_block.append(f"Обновление: {_NOTICE_LABELS.get(notice['code'], notice['message'])}")
             cycle = notice.get("cycle")
             cycle_limit = notice.get("cycle_limit")
             if (
                 isinstance(cycle, int) and not isinstance(cycle, bool)
                 and isinstance(cycle_limit, int) and not isinstance(cycle_limit, bool)
             ):
-                lines.append(f"Цикл: {cycle} из {cycle_limit}")
+                info_block.append(f"Цикл: {cycle} из {cycle_limit}")
             notice_url = notice.get("url")
             if isinstance(notice_url, str) and notice_url != workspace_url:
-                lines.append(f"Текущий результат: {notice_url}")
+                info_block.append(f"Текущий результат: {notice_url}")
             if notice.get("next_attempt_at"):
-                lines.append(f"Следующая автоматическая попытка (UTC): {notice['next_attempt_at']}")
-            lines.append(
+                info_block.append(f"Следующая автоматическая попытка (UTC): {notice['next_attempt_at']}")
+            info_block.append(
                 "Требуется ваше действие."
                 if notice["owner_action_required"]
                 else "От вас ничего не требуется."
             )
-        if view.get("result"):
-            lines.append(f"Итог: {view['result']}")
-        if view.get("error"):
-            lines.append(f"Ошибка: {view['error']}")
+
+        # -- Section 4: resources / telemetry -----------------------------------
+        telemetry_block: list[str] = []
+        if status in ("active", "waiting_owner"):
+            elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
+            if elapsed:
+                telemetry_block.append(f"В работе: {elapsed}")
+            telemetry_block.extend(_active_update_lines(view))
         if status in ("active", "waiting_owner", "failed", "cancelled"):
             workers = view.get("workers", [])
             final = status in ("failed", "cancelled")
             role_lines = _role_telemetry_lines(workers, final=final)
             usage_lines = _usage_statistics_lines(workers, final=final)
-            lines.extend(role_lines)
-            lines.extend(usage_lines)
+            telemetry_block.extend(f"• {line}" for line in role_lines)
+            telemetry_block.extend(f"• {line}" for line in usage_lines)
             if status in ("active", "waiting_owner") and not role_lines and not usage_lines:
-                lines.append(
+                telemetry_block.append(
                     "Текущий расход модели: подтверждённый usage появится после "
                     "завершённого подтверждённого запуска (во время прогона модель "
                     "не отдаёт итоговый usage)."
                 )
-        lines.append(
+
+        # -- Section 5: compact counts ------------------------------------------
+        counts = (
             "Задачи {tasks} · Исполнители {workers} · Проверки {gates} · Результаты {deliveries}".format(
                 tasks=len(view.get("tasks", [])),
                 workers=sum(1 for w in view.get("workers", []) if isinstance(w, dict) and not _is_telemetry_worker(w)),
@@ -3945,7 +3977,9 @@ data:
                 deliveries=len(view.get("deliveries", [])),
             )
         )
-        return "\n".join(lines)
+
+        sections = [header, result_block, info_block, telemetry_block, [counts]]
+        return "\n\n".join("\n".join(s) for s in sections if s)
 
 
     def _is_telemetry_worker(worker: dict[str, Any]) -> bool:
@@ -4054,6 +4088,92 @@ data:
         return str(value)
 
 
+    def _format_usd(value: Decimal) -> str:
+        """Format a Decimal USD amount with comma decimal separator, no trailing zeros."""
+        text = str(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+        return text.replace(".", ",")
+
+
+    def _api_cost_lines(workers: list[dict[str, Any]]) -> list[str]:
+        """Conservative API-equivalent cost from attested telemetry, or fail-closed reason.
+
+        Strict prerequisites: complete role set (author+reviewer) without duplicates,
+        every role fully attested (incl. attempts_discarded==0), exactly one usage-total
+        aggregate matching role sums + max_request_input + discarded==0.
+        """
+        _FAIL = "API-эквивалент: недоступен — "
+        role_telemetry = [
+            w for w in workers
+            if isinstance(w, dict) and w.get("profile") in _ROLE_LABELS
+        ]
+        if not role_telemetry:
+            return [f"{_FAIL}нет телеметрии по ролям."]
+        profiles = [w.get("profile") for w in role_telemetry]
+        if len(profiles) != len(set(profiles)):
+            return [f"{_FAIL}дублирующиеся роли."]
+        if set(profiles) != set(_ROLE_LABELS):
+            return [f"{_FAIL}неполный набор ролей."]
+        required = ("input_tokens", "cached_input_tokens", "output_tokens",
+                    "model_requests", "max_request_input_tokens")
+        for worker in role_telemetry:
+            model = worker.get("model")
+            if not isinstance(model, str) or model not in _API_PRICES:
+                return [f"{_FAIL}модель {model!r} не в аттестованном прайсе."]
+            for field in required:
+                if _metric(worker, field) is None:
+                    return [f"{_FAIL}неполная телеметрия ({field})."]
+            if _metric(worker, "attempts_discarded") is None:
+                return [f"{_FAIL}неполная телеметрия (attempts_discarded)."]
+            if (_metric(worker, "cached_input_tokens") or 0) > (_metric(worker, "input_tokens") or 0):
+                return [f"{_FAIL}кэш превышает вход."]
+            if (_metric(worker, "max_request_input_tokens") or 0) > _LONG_CONTEXT_THRESHOLD:
+                return [f"{_FAIL}длинный контекст (>272K), прайс отличается."]
+            if _metric(worker, "attempts_discarded") != 0:
+                return [f"{_FAIL}есть отброшенные прогоны."]
+        usage_total = [
+            w for w in workers
+            if isinstance(w, dict) and w.get("worker_id") == "usage-total" and w.get("profile") == "usage"
+        ]
+        if len(usage_total) != 1:
+            return [f"{_FAIL}нет ровно одного агрегата usage-total."]
+        agg = usage_total[0]
+        for field in ("input_tokens", "cached_input_tokens", "output_tokens", "model_requests"):
+            role_sum = sum(_metric(w, field) or 0 for w in role_telemetry)
+            if _metric(agg, field) != role_sum:
+                return [f"{_FAIL}агрегат не совпадает с суммой ролей ({field})."]
+        role_max = max(_metric(w, "max_request_input_tokens") or 0 for w in role_telemetry)
+        if _metric(agg, "max_request_input_tokens") != role_max:
+            return [f"{_FAIL}агрегат не совпадает с суммой ролей (max_request_input_tokens)."]
+        if _metric(agg, "attempts_discarded") != 0:
+            return [f"{_FAIL}агрегат: есть отброшенные прогоны."]
+        min_cost = Decimal(0)
+        max_cost = Decimal(0)
+        for worker in role_telemetry:
+            prices = _API_PRICES[worker["model"]]
+            total_in = Decimal(_metric(worker, "input_tokens") or 0)
+            cached = Decimal(_metric(worker, "cached_input_tokens") or 0)
+            uncached = total_in - cached
+            output = Decimal(_metric(worker, "output_tokens") or 0)
+            base = (
+                uncached * prices["input"]
+                + cached * prices["cached"]
+                + output * prices["output"]
+            ) / _PER_MILLION
+            write_premium = uncached * prices["input"] * (_CACHE_WRITE_FACTOR - 1) / _PER_MILLION
+            min_cost += base
+            max_cost += base + write_premium
+        if max_cost < Decimal("0.01"):
+            amount = "менее $0,01"
+        elif min_cost == max_cost:
+            amount = f"~${_format_usd(min_cost)}"
+        else:
+            amount = f"~${_format_usd(min_cost)}–{_format_usd(max_cost)}"
+        return [
+            f"API-эквивалент: {amount} (не списание с подписки; "
+            f"диапазон учитывает возможную запись кэша; прайс {_API_PRICE_DATE})"
+        ]
+
+
     def _usage_statistics_lines(
         workers: list[dict[str, Any]], *, final: bool = True
     ) -> list[str]:
@@ -4142,12 +4262,16 @@ data:
                 f"Инструменты: shell {command_calls} · ненулевой код {failed_commands} · web search {searches}"
             )
 
-        lines.append(_COST_UNATTESTED)
+        lines.extend(_api_cost_lines(workers))
         return lines
 
 
     def _completion_result(view: dict[str, Any]) -> str:
-        """Render one bounded owner result from the already verified projection."""
+        """Render one bounded owner result from the already verified projection.
+
+        Plain-text sections separated by blank lines:
+        РЕЗУЛЬТАТ → ДОСТАВКА И ПРОВЕРКИ → РЕСУРСЫ.
+        """
         def compact(value: Any, limit: int) -> str:
             text = " ".join(str(value or "").split())
             return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
@@ -4157,16 +4281,22 @@ data:
             for item in view.get("deliveries", [])
             if isinstance(item, dict)
         }
+
+        # -- РЕЗУЛЬТАТ --
         owner_result = deliveries.get("pull_request", {}).get("summary")
-        lines = [
+        summary = (
             compact(owner_result, _MAX_DELIVERY_SUMMARY_CHARS)
             if isinstance(owner_result, str) and owner_result.strip()
             else "Изменения внесены, проверены и слиты; подробное описание результата недоступно."
-        ]
+        )
+        result_section = ["РЕЗУЛЬТАТ", summary]
+
+        # -- ДОСТАВКА И ПРОВЕРКИ --
+        delivery_lines: list[str] = []
         for label, kind in (("PR", "pull_request"), ("Merge-коммит", "default_branch")):
             url = deliveries.get(kind, {}).get("url")
             if isinstance(url, str) and url.strip():
-                lines.append(f"{label}: {compact(url, 512)}")
+                delivery_lines.append(f"• {label}: {compact(url, 512)}")
         gates = view.get("gates", [])
         if gates and all(isinstance(g, dict) for g in gates):
             passed = []
@@ -4182,25 +4312,25 @@ data:
                 if passed:
                     parts.append(", ".join(passed) + " — пройдены")
                 parts.append(", ".join(failed) + " — не пройдены")
-                lines.append(f"Проверки: {'; '.join(parts)}")
+                delivery_lines.append(f"• Проверки: {'; '.join(parts)}")
             elif passed:
-                lines.append(f"Проверки: {', '.join(passed)} — пройдены")
+                delivery_lines.append(f"• Проверки: {', '.join(passed)} — пройдены")
             else:
-                lines.append("Проверки: нет данных о проверках")
+                delivery_lines.append("• Проверки: нет данных о проверках")
         else:
-            lines.append("Проверки: нет данных о проверках")
+            delivery_lines.append("• Проверки: нет данных о проверках")
         if view.get("delivery_mode") == "none":
             if view.get("execution_class") == "routine_docs":
-                lines.append("Деплой: не требуется — задача только для документации")
+                delivery_lines.append("• Деплой: не требуется — задача только для документации")
             else:
-                lines.append("Деплой: не настроен для этого проекта")
+                delivery_lines.append("• Деплой: не настроен для этого проекта")
         elif view.get("delivery_mode") == "deploy":
             deployment = deliveries.get("deployment", {})
             environment = deployment.get("environment")
             revision = deployment.get("deployed_revision")
             if deployment.get("status") == "verified" and environment and revision:
-                lines.append(
-                    f"Деплой: {compact(environment, 128)} · ревизия {compact(revision, 12)} · проверен"
+                delivery_lines.append(
+                    f"• Деплой: {compact(environment, 128)} · ревизия {compact(revision, 12)} · проверен"
                 )
         paths = sorted({
             item.get("path")
@@ -4211,30 +4341,40 @@ data:
             visible = ", ".join(compact(path, 120) for path in paths[:8])
             if len(paths) > 8:
                 visible += f", ещё {len(paths) - 8}"
-            lines.append(f"Изменённые файлы ({len(paths)}): {visible}")
+            delivery_lines.append(f"• Изменённые файлы ({len(paths)}): {visible}")
         source_binding = view.get("source_binding")
         if isinstance(source_binding, dict):
-            lines.append(
-                "Источник: "
+            delivery_lines.append(
+                "• Источник: "
                 f"{compact(source_binding.get('repo'), 120)} @ "
                 f"{compact(source_binding.get('resolved_ref'), 40)} · "
                 f"{compact(source_binding.get('path'), 120)} · "
                 f"sha256:{compact(source_binding.get('content_sha256'), 64)}"
             )
+
+        # -- РЕСУРСЫ --
+        resource_lines: list[str] = []
         elapsed = _format_elapsed(view.get("started_at"), view.get("updated_at"))
         if elapsed:
-            lines.append(f"Время: {elapsed}")
+            resource_lines.append(f"• Время: {elapsed}")
         workers = view.get("workers", [])
-        telemetry_lines = _role_telemetry_lines(workers) + _usage_statistics_lines(workers)
-        body = "\n".join(lines)
-        suffix = "\n".join(telemetry_lines)
-        result = body + ("\n" + suffix if suffix else "")
+        resource_lines.extend(f"• {line}" for line in _role_telemetry_lines(workers))
+        resource_lines.extend(f"• {line}" for line in _usage_statistics_lines(workers))
+
+        sections: list[list[str]] = [result_section]
+        if delivery_lines:
+            sections.append(["ДОСТАВКА И ПРОВЕРКИ", *delivery_lines])
+        if resource_lines:
+            sections.append(["РЕСУРСЫ", *resource_lines])
+        result = "\n\n".join("\n".join(s) for s in sections)
         if len(result) <= _MAX_COMPLETION_RESULT_CHARS:
             return result
-        if suffix and len(suffix) + 2 < _MAX_COMPLETION_RESULT_CHARS:
-            available = _MAX_COMPLETION_RESULT_CHARS - len(suffix) - 1
-            body = body[:available - 1].rstrip() + "…"
-            return body + "\n" + suffix
+        resource_block = "\n\n".join("\n".join(s) for s in sections[2:]) if len(sections) > 2 else ""
+        if resource_block and len(resource_block) + 2 < _MAX_COMPLETION_RESULT_CHARS:
+            available = _MAX_COMPLETION_RESULT_CHARS - len(resource_block) - 2
+            head = "\n\n".join("\n".join(s) for s in sections[:2])
+            head = head[:available - 1].rstrip() + "…"
+            return head + "\n\n" + resource_block
         return result[:_MAX_COMPLETION_RESULT_CHARS - 1].rstrip() + "…"
 
 
