@@ -555,7 +555,12 @@ def main() -> None:
         assert "project.status !== 'ready'" in project_api
         assert "body?.mode === 'setup'" in project_api
         assert "uap_project_setup" in project_api
-        assert "HttpOnly; SameSite=Strict" in project_api
+        assert "import { deleteCookie, setCookie } from '@tanstack/react-start/server'" in project_api
+        assert "setCookie(SETUP_COOKIE, projectId" in project_api
+        assert "setCookie(COOKIE, projectId" in project_api
+        assert "deleteCookie(SETUP_COOKIE" in project_api
+        assert "new Headers()" not in project_api
+        assert "'Set-Cookie'" not in project_api
         onboarding_api = (
             clone / "src/routes/api/project-onboarding.ts"
         ).read_text()
@@ -568,7 +573,12 @@ def main() -> None:
         assert "uap_mission_project" in onboarding_api
         assert "process.env.HERMES_MISSION_OWNER_KEY?.trim()" in onboarding_api
         assert "'X-Hermes-Mission-Owner-Key': ownerKey" in onboarding_api
-        assert onboarding_api.count("HttpOnly; SameSite=Strict") == 3
+        assert "import { deleteCookie, setCookie } from '@tanstack/react-start/server'" in onboarding_api
+        assert "setCookie(COOKIE, requestId" in onboarding_api
+        assert "setCookie(PROJECT_COOKIE, onboarding.project_id" in onboarding_api
+        assert "deleteCookie(COOKIE" in onboarding_api
+        assert "new Headers()" not in onboarding_api
+        assert "'Set-Cookie'" not in onboarding_api
         assert all(field not in onboarding_api for field in (
             "shell_command", "source_checkout", "dispatch_profile", "model_id",
         ))
