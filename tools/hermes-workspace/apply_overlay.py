@@ -28,6 +28,8 @@ FILES = {
 "src/routes/settings/index.tsx": "ba25520be3c3e53b760dd40e77c2fb84d67098a029e274c5c32882244fb540a9",
 "src/screens/chat/components/chat-sidebar.tsx": "a5bd23e6c678c620ba5251cd94b26facba6d8c9f124dbff6c98efc860e49707c",
 "src/components/command-palette.tsx": "29a9c16810544572dea66ddef084c9f872df378176f70a173ea5d36301fc8ed4",
+"src/screens/chat/components/message-item.tsx": "375d24774808f9943cf03972d9d7f0254473271dbfe8fe4e4d105b7b61cb5c63",
+"src/screens/chat/components/message-actions-bar.tsx": "14f6e0c7135a1035718be02c5f296f9934996e21d473586f24897848784c4054",
 }
 PATCHED_FILES = {
 "src/server/gateway-capabilities.ts": "8d37e5895ff40899242200d24f88e2e2e17ea0651f8575581bbc1c2a829c91c7",
@@ -47,12 +49,14 @@ PATCHED_FILES = {
 "src/routes/api/hermes-tasks.ts": "901c10488536ff4000e1d45dc773f9fd5328ae7db99ce18d53782f0cd47dd591",
 "src/routes/api/claude-jobs.ts": "3c0ba0116b4e87252580058571b822d47590b64a3b2e699b6afd16329bc49321",
 "src/routes/api/conductor-spawn.ts": "23da2c21a6fb4398c8801f07222488d6c2f64b5b21bbb2857344621f5e4b5956",
-"src/screens/chat/chat-screen.tsx": "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77",
+"src/screens/chat/chat-screen.tsx": "5ae01227fc3e2ead75f1c03f0eb9e075e74adbd2edf72ee8d20abfac7df7b8d4",
 "src/screens/dashboard/dashboard-screen.tsx": "492a3b47faf03a319024c1f6f351c8d7a664505d50b85653a0de4b5ec869afc1",
 "src/components/settings/settings-sidebar.tsx": "4e8e540d7b5e1a2dd42847249a5431f8372a01fc2d847ae9c962dce98e85300d",
 "src/routes/settings/index.tsx": "3f4ccf742d4cb98adabc563c555cd2fee6b7f42d736b8cd19aa2b57b9712f87b",
 "src/screens/chat/components/chat-sidebar.tsx": "321334173ba996d7b77819d6b84ec2d2488657ab0cb58c4b5091109314a96feb",
 "src/components/command-palette.tsx": "a7c343e6a39e1e9e623107626512a68b66e4ac73c577917ac5164be24020a2ab",
+"src/screens/chat/components/message-item.tsx": "3e53d0e104732c7da5b949559cde9e6c3a0c3a97434b62c825f875200a6fcfdf",
+"src/screens/chat/components/message-actions-bar.tsx": "2691dee85e70727ba0d7124ab71f254560a3ab98ad960828f49cf1d8d0eab58b",
 }
 LEGACY_FILES = {
 "src/server/gateway-capabilities.ts": "d599c442441be9763e0d6d3c4fb999783e326ad61ea7261064d79337cac840e5",
@@ -77,6 +81,7 @@ PREVIOUS_PATCHED_FILES = {
 ),
 "src/screens/chat/chat-screen.tsx": (
     "d20725179b11de51faebd0f35a54b6716d0343d094c87e65e30da5680469c9da",
+    "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77",
 ),
 "src/components/mobile-hamburger-menu.tsx": (
     "9f6bd64d1b5bdf6e8913c2d87e870be5767a8ec606ecf777740d6d4602f15deb",
@@ -512,6 +517,98 @@ export const Route""", "sessions central-only flag")
     window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
     runPaletteSlashCommand(pendingCommand)
   }, [runPaletteSlashCommand, statusQuery.data?.ok])""", "pending command waits for backend")
+        text = replace(text, """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      cancelStreaming()
+    }
+  }, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])""", """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      if (!pendingStartRef.current) {
+        cancelStreaming()
+      }
+    }
+  }, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])""", "nav cancel preserves pending send")
+        text = replace(text, """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+            }),
+          )
+        }
+        activeSendRef.current = null""", """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          const boundedError = messageText.slice(0, 200)
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+              errorMessage: boundedError,
+            }),
+          )
+        }
+        activeSendRef.current = null""", "onError attaches bounded error")
+        text = replace(text, """    refetchInterval: 60_000, // Re-check every 60s to clear stale errors
+  })
+  // Don't show errors for new chats or when SSE is connected""", """    refetchInterval: 60_000, // Re-check every 60s to clear stale errors
+  })
+  const missionProjectsQuery = useQuery({
+    queryKey: ['uap', 'mission-projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/mission-projects')
+      if (!res.ok) return null
+      return (await res.json()) as {
+        projects?: Array<{ project_id: string; label?: string; repository?: string }>
+        selected_project_id?: string | null
+      } | null
+    },
+    retry: false,
+  })
+  const selectedProject = useMemo(() => {
+    const data = missionProjectsQuery.data
+    if (!data?.selected_project_id || !Array.isArray(data.projects)) return null
+    return data.projects.find((p) => p.project_id === data.selected_project_id) ?? null
+  }, [missionProjectsQuery.data])
+  // Don't show errors for new chats or when SSE is connected""", "mission projects query")
+        text = replace(text, """              onUndo={undefined}
+              onClear={undefined}
+            />
+          )}
+
+          {errorNotice && (""", """              onUndo={undefined}
+              onClear={undefined}
+            />
+          )}
+
+          {!compact && (
+            <div className="flex items-center gap-2 border-b border-[var(--theme-border)] px-4 py-1.5 text-xs text-[var(--theme-muted)]">
+              {selectedProject ? (
+                <>
+                  <span className="font-medium text-[var(--theme-text)]">{selectedProject.label || selectedProject.project_id}</span>
+                  {selectedProject.repository ? (
+                    <span className="truncate opacity-70">{selectedProject.repository}</span>
+                  ) : null}
+                </>
+              ) : (
+                <span>Проект не выбран</span>
+              )}
+              <a
+                href="/settings?section=projects"
+                className="ml-auto shrink-0 text-[var(--theme-accent)] hover:underline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void navigate({ to: '/settings', search: { section: 'projects' } })
+                }}
+              >
+                Настройки
+              </a>
+            </div>
+          )}
+
+          {errorNotice && (""", "selected project strip")
     elif rel == "src/routes/api/send-stream.ts":
         text = replace(text, """const SESSION_BOOTSTRAP_KEYS = new Set(['main', 'new'])
 
@@ -763,6 +860,64 @@ export const NATIVE_CONDUCTOR_MODE_NOTE""", "conductor central-only flag")
             "    ].filter((action) => !CENTRAL_ONLY_BLOCKED_SCREEN_IDS.has(action.id)),\n    [navigate],\n  )",
             "command palette blocked filter",
         )
+    elif rel == "src/screens/chat/components/message-item.tsx":
+        text = replace(text, """function rawTimestamp(message: ChatMessage): number | null {""", """function getMessageErrorMessage(message: ChatMessage): string | undefined {
+  const raw = (message as Record<string, unknown>).errorMessage
+  return typeof raw === 'string' && raw.trim() ? raw.slice(0, 200) : undefined
+}
+
+function rawTimestamp(message: ChatMessage): number | null {""", "message error helper")
+        text = replace(text, """          isFailed={isUser && (isFailed || isStuckSending)}
+          onRetry={""", """          isFailed={isUser && (isFailed || isStuckSending)}
+          errorMessage={isUser && isFailed ? getMessageErrorMessage(message) : undefined}
+          onRetry={""", "message error prop")
+    elif rel == "src/screens/chat/components/message-actions-bar.tsx":
+        text = replace(text, """  isFailed?: boolean
+  onRetry?: () => void
+}""", """  isFailed?: boolean
+  errorMessage?: string
+  onRetry?: () => void
+}""", "actions bar error type")
+        text = replace(text, """  isFailed = false,
+  onRetry,
+}: MessageActionsBarProps) {""", """  isFailed = false,
+  errorMessage,
+  onRetry,
+}: MessageActionsBarProps) {""", "actions bar error param")
+        text = replace(text, """      {isFailed && onRetry && (
+        <TooltipProvider>
+          <TooltipRoot>
+            <TooltipTrigger
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+            >
+              <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.6} />
+              <span className="text-[11px] font-medium">Retry</span>
+            </TooltipTrigger>
+            <TooltipContent side="top">Resend failed message</TooltipContent>
+          </TooltipRoot>
+        </TooltipProvider>
+      )}""", """      {isFailed && onRetry && (
+        <TooltipProvider>
+          <TooltipRoot>
+            <TooltipTrigger
+              type="button"
+              onClick={onRetry}
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
+            >
+              <HugeiconsIcon icon={RefreshIcon} size={14} strokeWidth={1.6} />
+              <span className="text-[11px] font-medium">Retry</span>
+            </TooltipTrigger>
+            <TooltipContent side="top">Resend failed message</TooltipContent>
+          </TooltipRoot>
+        </TooltipProvider>
+      )}
+      {isFailed && errorMessage && (
+        <span className="max-w-[240px] truncate text-[11px] text-red-500" title={errorMessage}>
+          {errorMessage}
+        </span>
+      )}""", "actions bar error display")
     return text
 
 def upgrade_legacy(rel, text):
@@ -796,7 +951,8 @@ def upgrade_legacy(rel, text):
 
 def upgrade_previous(rel, text):
     if rel == "src/screens/chat/chat-screen.tsx":
-        return replace(text, """  useEffect(() => {
+        if "if (statusQuery.data?.ok !== true) return" not in text:
+            text = replace(text, """  useEffect(() => {
     const pendingCommand = window.sessionStorage.getItem(
       CHAT_PENDING_COMMAND_STORAGE_KEY,
     )
@@ -814,6 +970,103 @@ def upgrade_previous(rel, text):
     window.sessionStorage.removeItem(CHAT_PENDING_COMMAND_STORAGE_KEY)
     runPaletteSlashCommand(pendingCommand)
   }, [runPaletteSlashCommand, statusQuery.data?.ok])""", "pending command waits for backend upgrade")
+        if "if (!pendingStartRef.current)" not in text:
+            text = replace(text, """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      cancelStreaming()
+    }
+  }, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])""", """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      if (!pendingStartRef.current) {
+        cancelStreaming()
+      }
+    }
+  }, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])""", "nav cancel preserves pending send upgrade")
+        if "errorMessage: boundedError" not in text:
+            text = replace(text, """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+            }),
+          )
+        }
+        activeSendRef.current = null""", """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          const boundedError = messageText.slice(0, 200)
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+              errorMessage: boundedError,
+            }),
+          )
+        }
+        activeSendRef.current = null""", "onError attaches bounded error upgrade")
+        if "missionProjectsQuery" not in text:
+            text = replace(text, """    refetchInterval: 60_000, // Re-check every 60s to clear stale errors
+  })
+  // Don't show errors for new chats or when SSE is connected""", """    refetchInterval: 60_000, // Re-check every 60s to clear stale errors
+  })
+  const missionProjectsQuery = useQuery({
+    queryKey: ['uap', 'mission-projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/mission-projects')
+      if (!res.ok) return null
+      return (await res.json()) as {
+        projects?: Array<{ project_id: string; label?: string; repository?: string }>
+        selected_project_id?: string | null
+      } | null
+    },
+    retry: false,
+  })
+  const selectedProject = useMemo(() => {
+    const data = missionProjectsQuery.data
+    if (!data?.selected_project_id || !Array.isArray(data.projects)) return null
+    return data.projects.find((p) => p.project_id === data.selected_project_id) ?? null
+  }, [missionProjectsQuery.data])
+  // Don't show errors for new chats or when SSE is connected""", "mission projects query upgrade")
+        if "Проект не выбран" not in text:
+            text = replace(text, """              onUndo={undefined}
+              onClear={undefined}
+            />
+          )}
+
+          {errorNotice && (""", """              onUndo={undefined}
+              onClear={undefined}
+            />
+          )}
+
+          {!compact && (
+            <div className="flex items-center gap-2 border-b border-[var(--theme-border)] px-4 py-1.5 text-xs text-[var(--theme-muted)]">
+              {selectedProject ? (
+                <>
+                  <span className="font-medium text-[var(--theme-text)]">{selectedProject.label || selectedProject.project_id}</span>
+                  {selectedProject.repository ? (
+                    <span className="truncate opacity-70">{selectedProject.repository}</span>
+                  ) : null}
+                </>
+              ) : (
+                <span>Проект не выбран</span>
+              )}
+              <a
+                href="/settings?section=projects"
+                className="ml-auto shrink-0 text-[var(--theme-accent)] hover:underline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void navigate({ to: '/settings', search: { section: 'projects' } })
+                }}
+              >
+                Настройки
+              </a>
+            </div>
+          )}
+
+          {errorNotice && (""", "selected project strip upgrade")
+        return text
     if rel == "src/routes/api/sessions.ts":
         if "if (CENTRAL_ONLY) {\n              return json({ ok: false, error: SESSIONS_API_UNAVAILABLE_MESSAGE" in text:
             text = replace(text, """          if (capabilities.dashboard.available && !capabilities.enhancedChat) {

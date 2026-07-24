@@ -302,9 +302,146 @@ def main() -> None:
         assert "setPendingGeneration(false)" in new_chat
         assert "if (statusQuery.data?.ok !== true) return" in chat_screen
         assert "[runPaletteSlashCommand, statusQuery.data?.ok]" in chat_screen
+        # Nav-cancel race guard: pendingStartRef must gate cancelStreaming so a
+        # just-started pending send survives the new->concrete navKey transition.
+        nav_start = chat_screen.index("const navCancelKeyRef = useRef<string | null>(null)")
+        nav_end = chat_screen.index(
+            "}, [activeCanonicalKey, activeFriendlyId, isNewChat, cancelStreaming])",
+            nav_start,
+        )
+        nav_block = chat_screen[nav_start:nav_end]
+        assert "if (!pendingStartRef.current)" in nav_block
+        guard_pos = nav_block.index("if (!pendingStartRef.current)")
+        cancel_pos = nav_block.index("cancelStreaming()", guard_pos)
+        assert guard_pos < cancel_pos
+        # onError must attach a bounded server-derived error to the failed message.
+        on_error_start = chat_screen.index("onError: useCallback(")
+        on_error_end = chat_screen.index("onMessageAccepted:", on_error_start)
+        on_error_block = chat_screen[on_error_start:on_error_end]
+        assert "const boundedError = messageText.slice(0, 200)" in on_error_block
+        assert "errorMessage: boundedError" in on_error_block
+        # Selected-project strip reads GET /api/mission-projects.
+        assert "missionProjectsQuery" in chat_screen
+        assert "selectedProject" in chat_screen
+        assert "/api/mission-projects" in chat_screen
+        assert "Проект не выбран" in chat_screen
+        assert "/settings?section=projects" in chat_screen
+        # message-item renders the error next to Retry.
+        message_item = (clone / "src/screens/chat/components/message-item.tsx").read_text()
+        assert "function getMessageErrorMessage(message: ChatMessage): string | undefined" in message_item
+        assert "errorMessage={isUser && isFailed ? getMessageErrorMessage(message) : undefined}" in message_item
+        # message-actions-bar accepts and renders errorMessage.
+        actions_bar = (clone / "src/screens/chat/components/message-actions-bar.tsx").read_text()
+        assert "errorMessage?: string" in actions_bar
+        assert "{isFailed && errorMessage && (" in actions_bar
 
         chat_screen_path = clone / "src/screens/chat/chat-screen.tsx"
-        previous_chat_screen = chat_screen.replace(
+        # Derive the intermediate 7b9 fixture by removing the nav-cancel guard,
+        # onError bounded error, mission-projects query, and project strip.
+        intermediate_chat_screen = chat_screen.replace(
+            """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      if (!pendingStartRef.current) {
+        cancelStreaming()
+      }
+    }""",
+            """    if (navCancelKeyRef.current !== navKey) {
+      navCancelKeyRef.current = navKey
+      cancelStreaming()
+    }""",
+            1,
+        ).replace(
+            """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          const boundedError = messageText.slice(0, 200)
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+              errorMessage: boundedError,
+            }),
+          )
+        }""",
+            """        if (activeSend?.clientId && !isMissingAuth(messageText)) {
+          updateHistoryMessageByClientIdEverywhere(
+            queryClient,
+            activeSend.clientId,
+            (message) => ({
+              ...message,
+              status: 'error',
+            }),
+          )
+        }""",
+            1,
+        ).replace(
+            """  const missionProjectsQuery = useQuery({
+    queryKey: ['uap', 'mission-projects'],
+    queryFn: async () => {
+      const res = await fetch('/api/mission-projects')
+      if (!res.ok) return null
+      return (await res.json()) as {
+        projects?: Array<{ project_id: string; label?: string; repository?: string }>
+        selected_project_id?: string | null
+      } | null
+    },
+    retry: false,
+  })
+  const selectedProject = useMemo(() => {
+    const data = missionProjectsQuery.data
+    if (!data?.selected_project_id || !Array.isArray(data.projects)) return null
+    return data.projects.find((p) => p.project_id === data.selected_project_id) ?? null
+  }, [missionProjectsQuery.data])
+  // Don't show errors for new chats or when SSE is connected""",
+            """  // Don't show errors for new chats or when SSE is connected""",
+            1,
+        ).replace(
+            """          {!compact && (
+            <div className="flex items-center gap-2 border-b border-[var(--theme-border)] px-4 py-1.5 text-xs text-[var(--theme-muted)]">
+              {selectedProject ? (
+                <>
+                  <span className="font-medium text-[var(--theme-text)]">{selectedProject.label || selectedProject.project_id}</span>
+                  {selectedProject.repository ? (
+                    <span className="truncate opacity-70">{selectedProject.repository}</span>
+                  ) : null}
+                </>
+              ) : (
+                <span>Проект не выбран</span>
+              )}
+              <a
+                href="/settings?section=projects"
+                className="ml-auto shrink-0 text-[var(--theme-accent)] hover:underline"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void navigate({ to: '/settings', search: { section: 'projects' } })
+                }}
+              >
+                Настройки
+              </a>
+            </div>
+          )}
+
+          {errorNotice && (""",
+            """          {errorNotice && (""",
+            1,
+        )
+        chat_screen_path.write_text(intermediate_chat_screen, encoding="utf-8")
+        assert hashlib.sha256(chat_screen_path.read_bytes()).hexdigest() == (
+            "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77"
+        )
+        intermediate_chat_check = run(clone, "--check")
+        assert intermediate_chat_check.returncode == 0
+        assert "src/screens/chat/chat-screen.tsx: previous-needs-overlay" in (
+            intermediate_chat_check.stdout
+        )
+        assert run(clone).returncode == 0
+        assert hashlib.sha256(chat_screen_path.read_bytes()).hexdigest() == (
+            "5ae01227fc3e2ead75f1c03f0eb9e075e74adbd2edf72ee8d20abfac7df7b8d4"
+        )
+
+        # Derive the old d207 fixture from the intermediate by also removing
+        # the pending-command gate.
+        previous_chat_screen = intermediate_chat_screen.replace(
             """  useEffect(() => {
     if (statusQuery.data?.ok !== true) return
     const pendingCommand = window.sessionStorage.getItem(
@@ -337,7 +474,7 @@ def main() -> None:
         )
         assert run(clone).returncode == 0
         assert hashlib.sha256(chat_screen_path.read_bytes()).hexdigest() == (
-            "7b9e6a3bb701d43b25f2c766296c66ba70c90469ea39ff607886cc471098cf77"
+            "5ae01227fc3e2ead75f1c03f0eb9e075e74adbd2edf72ee8d20abfac7df7b8d4"
         )
 
         sessions_path = clone / "src/routes/api/sessions.ts"
