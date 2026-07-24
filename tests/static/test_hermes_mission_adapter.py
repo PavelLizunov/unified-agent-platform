@@ -1004,6 +1004,21 @@ class MissionAdapterTests(unittest.TestCase):
             valid[0]["payload"]["summary"],
         )
 
+        not_applicable_valid = adapter._worker_metadata_events(
+            "mission-1", "task-1", "worker-1",
+            {"mission_events": [{
+                "type": "delivery.upsert",
+                "payload": {
+                    "kind": "delivery", "status": "not_applicable",
+                    "summary": "Documentation-only task; production deploy is not applicable",
+                },
+            }]},
+        )
+        self.assertEqual(
+            "Documentation-only task; production deploy is not applicable",
+            not_applicable_valid[0]["payload"]["summary"],
+        )
+
         for summary in ("x" * 701, "two\nlines"):
             with self.subTest(summary=summary[:20]):
                 with self.assertRaisesRegex(adapter.AdapterError, "payload is invalid"):
