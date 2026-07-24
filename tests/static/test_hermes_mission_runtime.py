@@ -2445,18 +2445,22 @@ def test_project_target_conflict_fails_closed_before_acceptance() -> None:
         )
         assert created and accepted["payload"]["project_id"] == "vpnctl"
 
-        # The selected exact repository plus an incidental generic alias of another
-        # project must not false-trigger a conflict.
-        accepted, created = store.ingest_owner_turn(
-            "Add a deterministic status command for PavelLizunov/vpnctl (vpn router compat)",
-            platform="workspace",
-            project_id="vpnctl",
-            source_message_id="conflict-exact-plus-alias",
-            session_id="conflict-session",
-        )
-        assert created and accepted["payload"]["project_id"] == "vpnctl"
+        # The selected exact repository plus a separate alias of another project
+        # still fails closed: the repository strengthens the selected span but
+        # does not suppress a separate other-project mention.
+        try:
+            store.ingest_owner_turn(
+                "Add a deterministic status command for PavelLizunov/vpnctl (vpn router compat)",
+                platform="workspace",
+                project_id="vpnctl",
+                source_message_id="conflict-exact-plus-alias",
+                session_id="conflict-session",
+            )
+            raise AssertionError("selected repo + separate other alias must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
 
-        assert len(store.list(100)) == 3
+        assert len(store.list(100)) == 2
 
 
 def test_project_target_conflict_uses_bounded_repo_tokens() -> None:
@@ -2552,6 +2556,403 @@ def test_project_target_conflict_uses_bounded_repo_tokens() -> None:
             session_id="bound-session-2",
         )
         assert created and accepted["payload"]["project_id"] == "vpnctl"
+
+
+def test_project_target_conflict_selected_project_id_precedence() -> None:
+    """Regression: selected project_id embedded alias must not false-trigger.
+
+    Live bug: selected project_id is uap-macos-onboarding-proof-20260720 and
+    the goal says "В проекте uap-macos-onboarding-proof-20260720 измени только
+    src/lib.rs …".  The Unified Agent Platform project has short alias "uap"
+    which is a prefix of the selected project_id.  The normalized alias matcher
+    splits on hyphens, producing a false "uap" token.  The fix: an exact bounded
+    mention of the selected project_id takes precedence over shorter embedded
+    aliases of other projects.
+    """
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "uap",
+                "label": "Unified Agent Platform",
+                "repository": "PavelLizunov/unified-agent-platform",
+                "summary": "Self-hosted AI platform",
+                "aliases": ["uap"],
+                "dispatch_profile": "build1-uap-v4",
+                "delivery_mode": "deploy",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "uap-macos-onboarding-proof-20260720",
+                "label": "macOS Onboarding Proof",
+                "repository": "PavelLizunov/uap-macos-onboarding-proof-20260720",
+                "summary": "macOS onboarding proof of concept",
+                "aliases": ["macos onboarding"],
+                "dispatch_profile": "build1-macos-onboarding-v1",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # 1. Exact live Russian string: selected project_id mentioned explicitly.
+        #    The short alias "uap" of the other project is embedded in the
+        #    selected project_id and must NOT trigger a conflict.
+        accepted, created = store.ingest_owner_turn(
+            "В проекте uap-macos-onboarding-proof-20260720 измени только src/lib.rs "
+            "и добавь unit-тест для новой функции",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="live-russian-string",
+            session_id="precedence-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        # 2. Overlapping ids/aliases: bare "uap" as a standalone word in the goal
+        #    while the selected project is the longer id → conflict (the bare
+        #    "uap" is an explicit project_id of the other project).
+        try:
+            store.ingest_owner_turn(
+                "В проекте uap-macos-onboarding-proof-20260720 и uap измени src/lib.rs",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="overlap-two-ids",
+                session_id="precedence-session",
+            )
+            raise AssertionError("two explicit project targets must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "uap-macos-onboarding-proof-20260720"
+            assert [p["project_id"] for p in error.mentioned] == ["uap"]
+
+        # 3. Selected full repository mentioned → succeeds.
+        accepted, created = store.ingest_owner_turn(
+            "Add health check to PavelLizunov/uap-macos-onboarding-proof-20260720",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="selected-full-repo",
+            session_id="precedence-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        # 4. Explicit other full repository → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add health check to PavelLizunov/unified-agent-platform",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="other-full-repo",
+                session_id="precedence-session",
+            )
+            raise AssertionError("explicit other repository must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "uap-macos-onboarding-proof-20260720"
+            assert [p["project_id"] for p in error.mentioned] == ["uap"]
+
+        # 5. Two explicit project targets (both project_ids as bounded tokens).
+        try:
+            store.ingest_owner_turn(
+                "Add uap-macos-onboarding-proof-20260720 config into uap runtime",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="two-explicit-ids",
+                session_id="precedence-session",
+            )
+            raise AssertionError("two explicit distinct targets must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert [p["project_id"] for p in error.mentioned] == ["uap"]
+
+        # 6. Source-request exclusion: a GitHub source URL referencing the other
+        #    project's repository is a cross-repo source, not a target conflict.
+        accepted, created = store.ingest_owner_turn(
+            "Implement per https://github.com/PavelLizunov/unified-agent-platform/"
+            "blob/abc123/README.md in uap-macos-onboarding-proof-20260720",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="source-request-exclusion",
+            session_id="precedence-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        assert len(store.list(100)) == 3
+
+
+def test_project_target_conflict_embedding_aware_alias_label() -> None:
+    """Embedding-aware alias/label conflict detection.
+
+    A shorter other-project alias is ignored only when wholly embedded inside
+    a longer selected-project identifier span.  A separate occurrence of
+    another project's alias or label still fails closed.  Shared aliases do
+    not create embedding spans.
+    """
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "uap",
+                "label": "Unified Agent Platform",
+                "repository": "PavelLizunov/unified-agent-platform",
+                "summary": "Self-hosted AI platform",
+                "aliases": ["uap"],
+                "dispatch_profile": "build1-uap-v4",
+                "delivery_mode": "deploy",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "uap-macos-onboarding-proof-20260720",
+                "label": "macOS Onboarding Proof",
+                "repository": "PavelLizunov/uap-macos-onboarding-proof-20260720",
+                "summary": "macOS onboarding proof of concept",
+                "aliases": ["macos onboarding"],
+                "dispatch_profile": "build1-macos-onboarding-v1",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnrouter",
+                "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter",
+                "summary": "VPN router",
+                "aliases": ["vpn router"],
+                "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # 1. Selected alias plus distinct other alias: "macos onboarding" is the
+        #    selected alias, "vpn router" is a separate other alias → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add macos onboarding and vpn router integration status command",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="embed-alias-plus-other",
+                session_id="embed-session",
+            )
+            raise AssertionError("selected alias + distinct other alias must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "uap-macos-onboarding-proof-20260720"
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert store.list(100) == []
+
+        # 2. Selected label containing a shorter other alias: the label
+        #    "macOS Onboarding Proof" normalizes to "macos onboarding proof"
+        #    which embeds "onboarding" — but "uap" is embedded in the selected
+        #    project_id span.  No separate other mention → succeeds.
+        accepted, created = store.ingest_owner_turn(
+            "Add a status command to macos onboarding proof",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="embed-label-contains-shorter",
+            session_id="embed-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        # 3. Separate other label: "VPNRouter" label as a separate mention
+        #    alongside the selected project → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add uap-macos-onboarding-proof-20260720 status to vpnrouter",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="embed-separate-other-label",
+                session_id="embed-session",
+            )
+            raise AssertionError("separate other label must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert len(store.list(100)) == 1
+
+        # 4. Shared alias ambiguity: when an alias appears in both the selected
+        #    and another project's alias list, it must NOT create an embedding
+        #    span.  Catalog validation normally prevents shared aliases on one
+        #    platform, so test the defense-in-depth via direct call.
+        shared_projects = [
+            {
+                "project_id": "proj-a",
+                "label": "Project A",
+                "repository": "owner/proj-a",
+                "summary": "First",
+                "aliases": ["shared", "alpha"],
+                "dispatch_profile": "a-v1",
+                "delivery_mode": "none",
+                "platforms": ["workspace"],
+            },
+            {
+                "project_id": "proj-b",
+                "label": "Project B",
+                "repository": "owner/proj-b",
+                "summary": "Second",
+                "aliases": ["shared", "beta"],
+                "dispatch_profile": "b-v1",
+                "delivery_mode": "none",
+                "platforms": ["workspace"],
+            },
+        ]
+        with mock.patch.object(
+            missions, "registered_intake_projects", return_value=shared_projects
+        ):
+            try:
+                missions._check_project_target_conflict(
+                    "workspace", "proj-a", "Add a shared status command"
+                )
+                raise AssertionError("shared alias must not create an embedding span")
+            except missions.MissionProjectConflict as error:
+                assert error.selected["project_id"] == "proj-a"
+                assert [p["project_id"] for p in error.mentioned] == ["proj-b"]
+
+    # 5. Selected id plus separate other alias: the selected project_id span
+    #    embeds the first "uap", but a second standalone "uap" is separate.
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+        try:
+            store.ingest_owner_turn(
+                "Add uap-macos-onboarding-proof-20260720 config into uap runtime",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="embed-id-plus-separate-alias",
+                session_id="embed-session-2",
+            )
+            raise AssertionError("separate other alias alongside selected id must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "uap-macos-onboarding-proof-20260720"
+            assert [p["project_id"] for p in error.mentioned] == ["uap"]
+        assert store.list(100) == []
+
+
+def test_project_target_conflict_repo_span_and_multi_other() -> None:
+    """Selected repository is a span, not a suppressor; multiple others fail closed."""
+    catalog = json.dumps({
+        "schema_version": 1,
+        "projects": [
+            {
+                "project_id": "uap",
+                "label": "Unified Agent Platform",
+                "repository": "PavelLizunov/unified-agent-platform",
+                "summary": "Self-hosted AI platform",
+                "aliases": ["uap"],
+                "dispatch_profile": "build1-uap-v4",
+                "delivery_mode": "deploy",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "uap-macos-onboarding-proof-20260720",
+                "label": "macOS Onboarding Proof",
+                "repository": "PavelLizunov/uap-macos-onboarding-proof-20260720",
+                "summary": "macOS onboarding proof of concept",
+                "aliases": ["macos onboarding"],
+                "dispatch_profile": "build1-macos-onboarding-v1",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+            {
+                "project_id": "vpnrouter",
+                "label": "VPNRouter",
+                "repository": "PavelLizunov/VPNRouter",
+                "summary": "VPN router",
+                "aliases": ["vpn router"],
+                "dispatch_profile": "vpnrouter-v4",
+                "delivery_mode": "none",
+                "platforms": ["workspace", "telegram"],
+            },
+        ],
+    })
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        database = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(database)
+
+        # 1. Selected full repository plus separate other project_id → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add PavelLizunov/uap-macos-onboarding-proof-20260720 status to vpnrouter",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="repo-span-other-id",
+                session_id="repo-span-session",
+            )
+            raise AssertionError("selected repo + separate other project_id must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert error.selected["project_id"] == "uap-macos-onboarding-proof-20260720"
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert store.list(100) == []
+
+        # 2. Selected full repository plus separate other alias → conflict.
+        try:
+            store.ingest_owner_turn(
+                "Add PavelLizunov/uap-macos-onboarding-proof-20260720 and vpn router status",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="repo-span-other-alias",
+                session_id="repo-span-session",
+            )
+            raise AssertionError("selected repo + separate other alias must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert [p["project_id"] for p in error.mentioned] == ["vpnrouter"]
+        assert store.list(100) == []
+
+        # 3. Selected project_id plus two distinct other aliases/labels → conflict
+        #    with BOTH mentioned projects included.
+        try:
+            store.ingest_owner_turn(
+                "Add uap-macos-onboarding-proof-20260720 status to uap and vpn router",
+                platform="workspace",
+                project_id="uap-macos-onboarding-proof-20260720",
+                source_message_id="two-distinct-others",
+                session_id="repo-span-session",
+            )
+            raise AssertionError("two distinct other mentions must fail closed")
+        except missions.MissionProjectConflict as error:
+            assert sorted(p["project_id"] for p in error.mentioned) == [
+                "uap", "vpnrouter",
+            ]
+        assert store.list(100) == []
+
+        # 4. Only embedded shorter aliases in selected repository/project_id
+        #    still accepted (the live bug case).
+        accepted, created = store.ingest_owner_turn(
+            "В проекте uap-macos-onboarding-proof-20260720 измени только src/lib.rs",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="embedded-only-accepted",
+            session_id="repo-span-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        # 5. Source URL referencing another project's repo plus selected target
+        #    still accepted (source-request exclusion intact).
+        accepted, created = store.ingest_owner_turn(
+            "Implement per https://github.com/PavelLizunov/VPNRouter/"
+            "blob/abc123/README.md in uap-macos-onboarding-proof-20260720",
+            platform="workspace",
+            project_id="uap-macos-onboarding-proof-20260720",
+            source_message_id="source-url-plus-selected",
+            session_id="repo-span-session",
+        )
+        assert created
+        assert accepted["payload"]["project_id"] == "uap-macos-onboarding-proof-20260720"
+
+        assert len(store.list(100)) == 2
 
 
 def test_registered_project_selection_is_durable_and_restart_safe() -> None:
@@ -5463,6 +5864,9 @@ def main() -> None:
     test_registered_owner_intake_is_deterministic_and_fail_closed()
     test_project_target_conflict_fails_closed_before_acceptance()
     test_project_target_conflict_uses_bounded_repo_tokens()
+    test_project_target_conflict_selected_project_id_precedence()
+    test_project_target_conflict_embedding_aware_alias_label()
+    test_project_target_conflict_repo_span_and_multi_other()
     test_registered_project_selection_is_durable_and_restart_safe()
     test_bound_ordinary_owner_turn_answers_once_and_survives_restart()
     test_owner_gate_accepts_only_exact_approval_without_clearing_question()

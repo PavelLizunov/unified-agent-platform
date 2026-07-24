@@ -1051,6 +1051,55 @@ def _repo_token_in_text(repository: str, text: str) -> bool:
         start = idx + 1
 
 
+def _add_normalized_spans(
+    normalized: str, identifier: str, spans: list[tuple[int, int]]
+) -> None:
+    """Record every character span where *identifier* appears in *normalized*."""
+    if not identifier:
+        return
+    needle = f" {identifier} "
+    start = 0
+    while True:
+        idx = normalized.find(needle, start)
+        if idx < 0:
+            return
+        spans.append((idx + 1, idx + 1 + len(identifier)))
+        start = idx + 1
+
+
+def _has_separate_mention(
+    normalized: str, project: dict[str, Any], selected_spans: list[tuple[int, int]],
+    goal: str = "",
+) -> bool:
+    """True when any alias/label of *project* occurs outside selected spans.
+
+    An occurrence wholly inside a selected-identifier span is an embedded
+    fragment of the selected project's own identifier (e.g. ``uap`` inside
+    ``uap macos onboarding proof 20260720``), not a separate target mention.
+    A candidate that does not appear as a bounded token in the original goal
+    text (e.g. ``vpnrouter`` inside ``vpnrouter-gateway``) is also skipped.
+    """
+    candidates = [a.casefold() for a in project["aliases"]]
+    label = _project_alias(project.get("label", ""))
+    if label:
+        candidates.append(label)
+    for token in candidates:
+        if goal and not _repo_token_in_text(token, goal):
+            continue
+        needle = f" {token} "
+        start = 0
+        while True:
+            idx = normalized.find(needle, start)
+            if idx < 0:
+                break
+            tok_start = idx + 1
+            tok_end = tok_start + len(token)
+            if not any(s <= tok_start and tok_end <= e for s, e in selected_spans):
+                return True
+            start = idx + 1
+    return False
+
+
 def _check_project_target_conflict(
     platform: str, selected_project_id: str, goal: str
 ) -> None:
@@ -1058,12 +1107,19 @@ def _check_project_target_conflict(
 
     An exact registered repository reference in the goal must agree with the
     explicitly selected project_id; one *or several* distinct exact repository
-    references to other projects are a conflict and fail closed.  When no exact
-    repository is mentioned, a unique unambiguous alias of exactly one *other*
-    project is also a conflict.  Generic aliases are ignored when an exact
-    repository reference is present.  A parsed source_request repo is a
+    references to other projects are a conflict and fail closed.  An explicit
+    bounded project_id of a different project also fails closed.  Any non-empty
+    set of separately mentioned other-project aliases or labels fails closed
+    with all mentioned projects included.  A parsed source_request repo is a
     cross-repo source, not a target conflict, so the source project is excluded
     from both exact and alias matching.
+
+    A shorter other-project alias is ignored only when its occurrence is wholly
+    embedded in a longer explicit selected-project identifier (project_id,
+    repository, unambiguous alias, or label).  A *separate* occurrence of
+    another project's id, repository, label, or alias still fails closed even
+    when the selected project is also explicitly mentioned.  Shared
+    aliases/labels do not count as unambiguous selected identifiers.
     """
     projects = registered_intake_projects(platform)
     selected = next(
@@ -1081,17 +1137,52 @@ def _check_project_target_conflict(
     ]
     if exact_others:
         raise MissionProjectConflict(selected, exact_others)
-    if _repo_token_in_text(selected["repository"], goal):
-        return
+    # Explicit bounded project_id of a different project.
+    id_others = [
+        p for p in projects
+        if p["project_id"] != selected_project_id
+        and p["repository"].casefold() != source_repo
+        and _repo_token_in_text(p["project_id"], goal)
+    ]
     normalized = f" {_project_alias(goal)} "
+    # Collect every alias and normalized label across all projects so that
+    # shared identifiers are excluded from the unambiguous selected set.
+    all_identifiers: dict[str, set[str]] = {}
+    for p in projects:
+        for alias in p["aliases"]:
+            all_identifiers.setdefault(alias.casefold(), set()).add(p["project_id"])
+        p_label = _project_alias(p.get("label", ""))
+        if p_label:
+            all_identifiers.setdefault(p_label, set()).add(p["project_id"])
+    # Build character spans covered by the selected project's own identifiers.
+    # The project_id and repository are always unique; aliases/labels qualify
+    # only when they are not shared with another project.  A selected
+    # repository mention strengthens the span set instead of suppressing
+    # separate other-project targets.
+    selected_spans: list[tuple[int, int]] = []
+    _add_normalized_spans(normalized, _project_alias(selected["project_id"]), selected_spans)
+    _add_normalized_spans(normalized, _project_alias(selected["repository"]), selected_spans)
+    for alias in selected.get("aliases", []):
+        norm = alias.casefold()
+        if all_identifiers.get(norm, set()) == {selected_project_id}:
+            _add_normalized_spans(normalized, norm, selected_spans)
+    sel_label = _project_alias(selected.get("label", ""))
+    if sel_label and all_identifiers.get(sel_label, set()) == {selected_project_id}:
+        _add_normalized_spans(normalized, sel_label, selected_spans)
+    # Check other projects' aliases and labels; an occurrence wholly embedded
+    # inside a selected-identifier span is ignored, a separate one is not.
+    # Combine with explicit project_id matches; any non-empty set of separately
+    # mentioned other projects fails closed with all mentioned included.
     alias_others = [
         p for p in projects
         if p["project_id"] != selected_project_id
         and p["repository"].casefold() != source_repo
-        and any(f" {alias} " in normalized for alias in p["aliases"])
+        and _has_separate_mention(normalized, p, selected_spans, goal)
     ]
-    if len(alias_others) == 1:
-        raise MissionProjectConflict(selected, alias_others)
+    mentioned_ids = {p["project_id"] for p in id_others}
+    combined = id_others + [p for p in alias_others if p["project_id"] not in mentioned_ids]
+    if combined:
+        raise MissionProjectConflict(selected, combined)
 
 
 def image_generation_prompt(value: str) -> str | None:
