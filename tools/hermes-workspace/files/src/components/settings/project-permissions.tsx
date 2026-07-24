@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { CHAT_PENDING_COMMAND_STORAGE_KEY } from '@/screens/chat/chat-events'
 
@@ -61,7 +62,7 @@ const onboardingLabels: Record<Onboarding['checkpoint'], string> = {
 }
 
 async function projectPayload() {
-  const response = await fetch('/api/mission-projects')
+  const response = await fetch('/api/mission-projects', { cache: 'no-store' })
   const payload = await response.json()
   if (!response.ok) throw new Error(payload.error || 'Не удалось загрузить проекты')
   return payload
@@ -75,6 +76,7 @@ async function onboardingPayload() {
 }
 
 export function ProjectPermissions() {
+  const queryClient = useQueryClient()
   const [projects, setProjects] = useState<Project[]>([])
   const [selected, setSelected] = useState('')
   const [saved, setSaved] = useState('')
@@ -139,7 +141,15 @@ export function ProjectPermissions() {
       })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || 'Не удалось сохранить выбор')
+      if (payload.selected_project_id !== selected) {
+        throw new Error('Сервер подтвердил другой проект')
+      }
+      const confirmed = await projectPayload()
+      if (confirmed.selected_project_id !== selected) {
+        throw new Error('Выбор не сохранился — повторите попытку')
+      }
       setSaved(selected)
+      void queryClient.invalidateQueries({ queryKey: ['uap', 'mission-projects'] })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Не удалось сохранить выбор')
     } finally {

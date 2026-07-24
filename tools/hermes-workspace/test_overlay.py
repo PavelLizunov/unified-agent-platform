@@ -591,6 +591,12 @@ def main() -> None:
         assert "/discuss Задай 3–5 коротких вопросов" in project_settings
         assert "Не используй инструменты" in project_settings
         assert "window.location.assign('/chat/new')" in project_settings
+        # Save flow: server-confirmed selection + follow-up GET + query invalidation.
+        assert "useQueryClient" in project_settings
+        assert "payload.selected_project_id !== selected" in project_settings
+        assert "confirmed.selected_project_id !== selected" in project_settings
+        assert "queryClient.invalidateQueries({ queryKey: ['uap', 'mission-projects'] })" in project_settings
+        assert "fetch('/api/mission-projects', { cache: 'no-store' })" in project_settings
         status_position = project_settings.index(
             "{statusLabels[project.status] || project.status}"
         )
