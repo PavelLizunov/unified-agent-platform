@@ -3658,6 +3658,428 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 )["status"],
             )
 
+    def test_routine_small_uses_standard_route_and_confines_exact_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(
+                allowed_path_prefixes=["."],
+                max_changed_files=60,
+                route_flags=["durable_state", "multi_platform", "security_boundary"],
+                delivery_mode="none",
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-small")
+            state = instance._load_state("mission-routine-small", paths)
+            mission = {
+                "mission_id": "mission-routine-small",
+                "goal": "Fix typo only in src/config.py",
+                "delivery_mode": "none",
+                "execution_class": "routine_small",
+                "expected_changed_files": 1,
+                "expected_changed_paths": ["src/config.py"],
+            }
+            instance._bind_mission_goal(state, mission, paths)
+
+            # Standard Luna->Sol route despite the complex profile ceiling/flags.
+            signals = instance._route_signals(state)
+            self.assertEqual(1, signals["changed_files"])
+            self.assertEqual([], signals["flags"])
+            route = instance._ensure_route(state, paths)
+            self.assertEqual("gpt-5.6-luna", route["author"]["model"])
+            self.assertEqual("medium", route["author"]["reasoning_effort"])
+            self.assertEqual("gpt-5.6-sol", route["reviewer"]["model"])
+            self.assertEqual("low", route["reviewer"]["reasoning_effort"])
+            self.assertEqual(1, instance._correction_budget(state))
+            self.assertEqual(2, instance._review_budget_limit(state))
+
+            # Candidate must stay exactly within the requested file set.
+            self.assertEqual(
+                ["src/config.py"],
+                instance._validate_execution_scope(state, {"src/config.py"}),
+            )
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine small"):
+                instance._validate_execution_scope(state, {"src/runtime.py"})
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine small"):
+                instance._validate_execution_scope(
+                    state, {"src/config.py", "CHANGELOG.md"}
+                )
+
+            # Class, count and exact paths are durable across restart.
+            recovered = instance._load_state("mission-routine-small", paths)
+            self.assertEqual("routine_small", recovered["execution_class"])
+            self.assertEqual(1, recovered["expected_changed_files"])
+            self.assertEqual(["src/config.py"], recovered["expected_changed_paths"])
+            self.assertEqual(route, instance._ensure_route(recovered, paths))
+
+            # Quality failures still escalate the route via existing counters.
+            recovered["prior_author_failures"] = 1
+            escalated = instance._ensure_route(recovered, paths)
+            self.assertEqual("gpt-5.6-sol", escalated["author"]["model"])
+            self.assertEqual("gpt-5.6-terra", escalated["reviewer"]["model"])
+
+            # Changing the exact paths after the checkpoint is rejected.
+            changed = dict(mission, expected_changed_paths=["OTHER.py"])
+            with self.assertRaisesRegex(
+                coordinator.DeliveryError, "execution class changed"
+            ):
+                instance._bind_mission_goal(recovered, changed, paths)
+
+            # Rename within requested files: both names must be requested.
+            rename_mission = {
+                "mission_id": "mission-routine-small-rename",
+                "goal": "Fix typo only in new.toml and old.toml",
+                "delivery_mode": "none",
+                "execution_class": "routine_small",
+                "expected_changed_files": 2,
+                "expected_changed_paths": ["new.toml", "old.toml"],
+            }
+            rename_paths = instance._paths("mission-routine-small-rename")
+            rename_state = instance._load_state("mission-routine-small-rename", rename_paths)
+            instance._bind_mission_goal(rename_state, rename_mission, rename_paths)
+            # A rename old.toml -> new.toml surfaces both names under --no-renames.
+            self.assertEqual(
+                ["new.toml", "old.toml"],
+                instance._validate_execution_scope(
+                    rename_state, {"old.toml", "new.toml"}
+                ),
+            )
+            # A rename touching an unrequested file is rejected on the escaping side.
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine small"):
+                instance._validate_execution_scope(
+                    rename_state, {"old.toml", "surprise.toml"}
+                )
+
+            # Owner-gate flags remain binding even though complex flags are stripped.
+            owner_profile = dict(approved)
+            owner_profile["route_flags"] = ["architecture_change", "durable_state"]
+            owner_instance = coordinator.DeliveryCoordinator(
+                owner_profile, FakeClient(), FakeBackend(), root / "owner-state"
+            )
+            owner_paths = owner_instance._paths("mission-routine-small-gate")
+            owner_state = owner_instance._load_state(
+                "mission-routine-small-gate", owner_paths
+            )
+            gated_mission = dict(
+                mission,
+                mission_id="mission-routine-small-gate",
+                owner_gate_flag="architecture_change",
+            )
+            owner_instance._bind_mission_goal(owner_state, gated_mission, owner_paths)
+            owner_signals = owner_instance._route_signals(owner_state)
+            self.assertEqual(["architecture_change"], owner_signals["flags"])
+            self.assertEqual(
+                "owner_approval_required",
+                coordinator.flow_contract.choose_delivery_route(
+                    owner_instance.policy, owner_signals
+                )["status"],
+            )
+
+    def test_routine_small_on_deploy_profile_keeps_deploy_mode(self):
+        """routine_small on a deploy-capable profile keeps deploy; never skipped."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = deploy_profile(root)
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-small-deploy")
+            state = instance._load_state("mission-routine-small-deploy", paths)
+            mission = {
+                "mission_id": "mission-routine-small-deploy",
+                "goal": "Fix typo only in src/config.py",
+                "delivery_mode": "deploy",
+                "execution_class": "routine_small",
+                "expected_changed_files": 1,
+                "expected_changed_paths": ["src/config.py"],
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertEqual("deploy", state["delivery_mode"])
+            self.assertEqual("deploy", instance._effective_delivery_mode(state))
+            self.assertEqual("routine_small", state["execution_class"])
+
+            # Effective mode is durable across restart.
+            recovered = instance._load_state("mission-routine-small-deploy", paths)
+            self.assertEqual("deploy", recovered["delivery_mode"])
+            instance._bind_mission_goal(recovered, mission, paths)
+            self.assertEqual("deploy", recovered["delivery_mode"])
+
+    def test_routine_small_invalid_candidate_uses_bounded_retry_then_exhaustion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(
+                allowed_path_prefixes=["."],
+                max_changed_files=60,
+                delivery_mode="none",
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            paths = instance._paths("mission-routine-small-exhaust")
+            state = instance._load_state("mission-routine-small-exhaust", paths)
+            mission = {
+                "mission_id": "mission-routine-small-exhaust",
+                "goal": "Fix typo only in src/config.py",
+                "delivery_mode": "none",
+                "execution_class": "routine_small",
+                "expected_changed_files": 1,
+                "expected_changed_paths": ["src/config.py"],
+            }
+            instance._bind_mission_goal(state, mission, paths)
+            self.assertEqual(1, instance._correction_budget(state))
+
+            # An out-of-scope candidate is rejected by the exact-file confinement.
+            with self.assertRaisesRegex(coordinator.DeliveryError, "routine small"):
+                instance._validate_execution_scope(
+                    state, {"src/config.py", "extra.txt"}
+                )
+
+            # First invalid candidate within the budget retries (bounded retry).
+            state["review_cycle"] = 1
+            instance._record_author_check_failure(
+                state, paths,
+                coordinator.DeliveryError("author candidate scope rejected"),
+            )
+            self.assertEqual("needs_fix", state["phase"])
+            self.assertEqual(2, state["review_cycle"])
+            self.assertEqual(1, state["prior_author_failures"])
+
+            # Second invalid candidate exceeds the one-correction budget.
+            instance._record_author_check_failure(
+                state, paths,
+                coordinator.DeliveryError("author candidate scope rejected"),
+            )
+            self.assertEqual("author_checks_failed", state["phase"])
+            self.assertEqual("author_checks", state["failure_kind"])
+
+    def test_routine_small_rejects_forbidden_and_invalid_paths(self):
+        """Coordinator rejects forbidden-surface and malformed paths at bind time."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            approved = reusable_profile(root)
+            approved.update(
+                allowed_path_prefixes=["."],
+                max_changed_files=60,
+                delivery_mode="none",
+            )
+            instance = coordinator.DeliveryCoordinator(
+                approved, FakeClient(), FakeBackend(), root / "state"
+            )
+            # Every forbidden prefix, forbidden root file, and malformed path
+            # must be rejected at the _bind_mission_goal boundary.
+            forbidden_paths = [
+                # --- forbidden prefixes ---
+                ".github/workflows/ci.yml",
+                ".github/actions/setup/action.yml",
+                ".git/hooks/pre-commit.sample",
+                ".agents/profile.json",
+                "clusters/prod/infra/foo.yaml",
+                "infra/terraform/main.tf",
+                "tests/static/test_foo.py",
+                "tools/hermes-mission/runtime.py",
+                "tools/hermes-workspace/server.py",
+                "tools/swarm/delivery_coordinator.py",
+                "tools/swarm/flow_contract.py",
+                # --- forbidden prefixes: autonomous agent config ---
+                ".claude/settings.json",
+                ".claude/commands/deploy.md",
+                ".codex/config.yaml",
+                ".qwen/settings.json",
+                ".cursor/rules.json",
+                # --- case-insensitive prefix matching ---
+                ".GitHub/workflows/ci.yml",
+                ".GITHUB/workflows/ci.yml",
+                ".Claude/settings.json",
+                ".AGENTS/profile.json",
+                "Clusters/prod/foo.yaml",
+                "TESTS/test_foo.py",
+                # --- forbidden basenames at root: repo-config / security ---
+                ".gitattributes",
+                ".gitignore",
+                ".gitlab-ci.yml",
+                ".gitleaks.toml",
+                ".ragignore",
+                ".sops.yaml",
+                # --- forbidden basenames at root: dependency manifests ---
+                "requirements.txt",
+                "requirements-dev.txt",
+                # --- forbidden basenames at root: build/dependency manifests and locks ---
+                "Cargo.toml",
+                "Cargo.lock",
+                "Dockerfile",
+                "Makefile",
+                "go.mod",
+                "go.sum",
+                "package.json",
+                "package-lock.json",
+                "pnpm-lock.yaml",
+                "poetry.lock",
+                "pyproject.toml",
+                "setup.cfg",
+                "setup.py",
+                "tox.ini",
+                "uv.lock",
+                "yarn.lock",
+                # --- forbidden basenames at ANY depth (nested) ---
+                "sub/pyproject.toml",
+                "service/Dockerfile.dev",
+                "service/Dockerfile.prod",
+                "app/package-lock.json",
+                "lib/Cargo.lock",
+                "lib/Cargo.toml",
+                "svc/requirements.txt",
+                "svc/requirements-prod.txt",
+                "deep/nested/go.mod",
+                "web/package.json",
+                "build/Makefile",
+                "build/makefile",
+                "ci/.gitlab-ci.yml",
+                "sub/.gitignore",
+                "sub/.gitleaks.toml",
+                "sub/setup.py",
+                "sub/tox.ini",
+                # --- case-insensitive basename matching ---
+                "REQUIREMENTS.TXT",
+                "Requirements.txt",
+                "PYPROJECT.TOML",
+                "DOCKERFILE",
+                "MAKEFILE",
+                "sub/REQUIREMENTS.TXT",
+                "sub/PYPROJECT.TOML",
+            ]
+            malformed_paths = [
+                "1.2.3",                # version token, no alpha extension
+                "v2.0",                 # version token
+                "../a.toml",            # traversal
+                "a\\b.toml",            # backslash
+                " leading.toml",        # leading whitespace
+                "trailing.toml ",       # trailing whitespace
+                "a" * 257 + ".toml",    # overlong
+                "noext",                # no extension
+                "dir/.",                # dot-only segment
+                "/etc/hosts",           # absolute POSIX
+                "user@example.com",     # email, not a file
+            ]
+            for index, bad_path in enumerate(forbidden_paths + malformed_paths):
+                paths = instance._paths(f"mission-forbidden-{index}")
+                state = instance._load_state(f"mission-forbidden-{index}", paths)
+                mission = {
+                    "mission_id": f"mission-forbidden-{index}",
+                    "goal": f"Fix typo only in {bad_path}",
+                    "delivery_mode": "none",
+                    "execution_class": "routine_small",
+                    "expected_changed_files": 1,
+                    "expected_changed_paths": [bad_path],
+                }
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "execution class is invalid",
+                    msg=f"accepted forbidden/malformed path: {bad_path!r}",
+                ):
+                    instance._bind_mission_goal(state, mission, paths)
+
+            # Mixed safe+forbidden 2-file payloads are also rejected.
+            mixed_payloads = [
+                ["README.md", ".github/workflows/ci.yml"],
+                ["docs/note.md", "pyproject.toml"],
+                ["src/config.py", "requirements.txt"],
+                ["README.md", "tests/test_foo.py"],
+                ["README.md", ".claude/settings.json"],
+                ["src/main.py", "sub/pyproject.toml"],
+                ["README.md", "service/Dockerfile.dev"],
+                ["docs/note.md", ".GitHub/workflows/ci.yml"],
+                ["README.md", "REQUIREMENTS.TXT"],
+                ["src/config.py", "lib/Cargo.lock"],
+            ]
+            for index, mixed in enumerate(mixed_payloads):
+                paths = instance._paths(f"mission-mixed-{index}")
+                state = instance._load_state(f"mission-mixed-{index}", paths)
+                mission = {
+                    "mission_id": f"mission-mixed-{index}",
+                    "goal": "Fix typo only in two files",
+                    "delivery_mode": "none",
+                    "execution_class": "routine_small",
+                    "expected_changed_files": 2,
+                    "expected_changed_paths": sorted(mixed),
+                }
+                with self.assertRaisesRegex(
+                    coordinator.DeliveryError,
+                    "execution class is invalid",
+                    msg=f"accepted mixed forbidden payload: {mixed!r}",
+                ):
+                    instance._bind_mission_goal(state, mission, paths)
+
+            # Ordinary eligible paths are still accepted.
+            for index, good_path in enumerate(["README.md", "docs/note.md", "src/config.py"]):
+                paths = instance._paths(f"mission-eligible-{index}")
+                state = instance._load_state(f"mission-eligible-{index}", paths)
+                mission = {
+                    "mission_id": f"mission-eligible-{index}",
+                    "goal": f"Fix typo only in {good_path}",
+                    "delivery_mode": "none",
+                    "execution_class": "routine_small",
+                    "expected_changed_files": 1,
+                    "expected_changed_paths": [good_path],
+                }
+                instance._bind_mission_goal(state, mission, paths)
+                self.assertEqual("routine_small", state["execution_class"])
+                self.assertEqual([good_path], state["expected_changed_paths"])
+
+    def test_routine_small_policy_aligned_with_runtime(self):
+        """Coordinator policy constants must match runtime policy exactly."""
+        import importlib.util
+        runtime_path = (
+            pathlib.Path(__file__).resolve().parents[2]
+            / "tools" / "hermes-mission" / "runtime.py"
+        )
+        spec = importlib.util.spec_from_file_location("runtime", runtime_path)
+        runtime = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime)
+        self.assertEqual(
+            runtime._ROUTINE_SMALL_FORBIDDEN_PREFIXES,
+            coordinator._ROUTINE_SMALL_FORBIDDEN_PREFIXES,
+        )
+        self.assertEqual(
+            runtime._ROUTINE_SMALL_FORBIDDEN_BASENAMES,
+            coordinator._ROUTINE_SMALL_FORBIDDEN_BASENAMES,
+        )
+        # closed_repo_path equivalence on a shared corpus.
+        corpus = [
+            "README.md", "docs/note.md", "src/config.py", "path/to/file.ext",
+            "123.md", "1.2.3", "v2.0", "../a.toml", "/etc/hosts",
+            "a\\b.toml", " leading.toml", "trailing.toml ", "noext",
+            "user@example.com", "dir/.", "a" * 257 + ".toml",
+            ".github/workflows/ci.yml", "requirements.txt", "pyproject.toml",
+            "tools/swarm/flow_contract.py", "infra/main.tf",
+            # adversarial: agent config, case-insensitive, nested, variants
+            ".claude/settings.json", ".codex/config.yaml",
+            ".qwen/settings.json", ".cursor/rules.json",
+            ".GitHub/workflows/ci.yml", ".GITHUB/CODEOWNERS",
+            "REQUIREMENTS.TXT", "PYPROJECT.TOML", "DOCKERFILE", "MAKEFILE",
+            "sub/pyproject.toml", "service/Dockerfile.dev",
+            "app/package-lock.json", "lib/Cargo.lock",
+            "svc/requirements.txt", "svc/requirements-prod.txt",
+            "build/makefile", "ci/.gitlab-ci.yml",
+            "sub/.gitignore", "sub/.gitleaks.toml",
+            "sub/REQUIREMENTS.TXT", "sub/PYPROJECT.TOML",
+        ]
+        for value in corpus:
+            self.assertEqual(
+                runtime.closed_repo_path(value),
+                coordinator._closed_repo_path(value),
+                f"closed_repo_path mismatch for {value!r}",
+            )
+        # _routine_small_path_allowed equivalence on the same corpus.
+        for value in corpus:
+            self.assertEqual(
+                runtime._routine_small_path_allowed(value),
+                coordinator._routine_small_path_allowed(value),
+                f"_routine_small_path_allowed mismatch for {value!r}",
+            )
+
     def test_routine_docs_on_deploy_profile_gets_effective_none_mode(self):
         """routine_docs on a deploy-capable profile must derive effective mode none."""
         with tempfile.TemporaryDirectory() as directory:

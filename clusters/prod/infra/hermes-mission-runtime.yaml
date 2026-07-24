@@ -1750,7 +1750,8 @@ data:
         "mission.accepted": {
             "goal", "project_id", "project_label", "project_repository",
             "dispatch_profile", "delivery_mode", "parent_mission_id",
-            "capability", "execution_class", "expected_changed_files", "owner_gate_flag",
+            "capability", "execution_class", "expected_changed_files",
+            "expected_changed_paths", "owner_gate_flag",
             "input_platform", "input_source_key_sha256", "input_source_message_sha256",
             "source_request", "source_required",
         },
@@ -2071,6 +2072,107 @@ data:
         r"(?:implement|modify|change|code|реализ\w*|измен\w*|добав\w*)\b",
         re.IGNORECASE,
     )
+    # routine_small admits only an explicit one/two exact repo-relative file edit.
+    # The owner must name the file(s) and scope them with an explicit limiter; the
+    # classifier below stays fail-closed on any ambiguity.
+    _ROUTINE_SMALL_LIMITER = re.compile(r"\b(?:only|только|лишь)\b", re.IGNORECASE)
+    _ROUTINE_SMALL_OPERATION = re.compile(
+        r"\b(?:typo|typos|spelling|wording|reword|rephrase|text|comment|comments|"
+        r"version|changelog|metadata|one[- ]line|single[- ]line|bump)\b|"
+        r"\b(?:опечатк\w*|орфограф\w*|формулиров\w*|текст\w*|комментари\w*|"
+        r"верси\w*|метаданн\w*|одну\s+строку|одна\s+строка|в\s+одну\s+строку)\b",
+        re.IGNORECASE,
+    )
+    # The final extension must contain a letter so dotted version tokens such as
+    # "1.2.3" or "v2.0" are never bound as paths, while ordinary files like "123.md"
+    # still match. The "@" boundary keeps email/user "@host" fragments from yielding
+    # the host as a path.  The dotfile alternative carries an optional trailing
+    # extension so ".gitleaks.toml" and ".sops.yaml" are captured whole instead of
+    # being truncated to ".gitleaks" / ".sops".
+    _ROUTINE_SMALL_PATH = re.compile(
+        r"(?<![\w./\\@-])"
+        r"((?:\.?[A-Za-z0-9_-][A-Za-z0-9._-]*/)*"
+        r"(?:\.[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*(?:\.[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*)?|"
+        r"[A-Za-z0-9_-][A-Za-z0-9._-]*\.[A-Za-z0-9_-]*[A-Za-z][A-Za-z0-9_-]*))"
+        r"(?![\w/\\@-])"
+    )
+    _ROUTINE_SMALL_REJECT = re.compile(
+        r"://"                              # URL scheme
+        r"|\bwww\."                         # bare URL host
+        r"|[;|&<>`]"                        # shell operators
+        r"|\$\(|\$\{"                       # shell expansion
+        r"|[*?\[\]]"                        # glob wildcards
+        r"|[A-Za-z]:[\\/]"                  # Windows absolute drive
+        r"|(?:^|[\s(])/[A-Za-z0-9._-]"      # POSIX absolute path
+        r"|[/\\]\.\.(?:[/\\]|$)"            # traversal mid/end of path
+        r"|(?:^|[\s(])\.\.[/\\]"            # traversal at start of path
+    )
+    # Closed non-routine surfaces: workflow/CI/action/dependency/security/repo-config/
+    # infra-control paths are never admitted as routine_small, even for a typo fix.
+    # Conservative boundary: every prefix that controls CI, infra, tests, or UAP
+    # orchestration is forbidden; every dependency/build/security/control basename
+    # is forbidden at ANY directory depth.  Matching is case-insensitive for
+    # classification; the original path is preserved for confinement.
+    # Ordinary docs/source paths remain eligible.
+    _ROUTINE_SMALL_FORBIDDEN_PREFIXES = (
+        ".agents/",               # UAP orchestration / agent config
+        ".claude/",               # autonomous agent config
+        ".codex/",                # autonomous agent config
+        ".cursor/",               # autonomous agent config
+        ".git/",                  # git internals / hooks
+        ".github/",               # workflows, actions, and all repo-config
+        ".qwen/",                 # autonomous agent config
+        "clusters/",              # k3s/Flux infra control
+        "infra/",                 # infrastructure-as-code
+        "tests/",                 # test suite
+        "tools/hermes-mission/",  # mission runtime / classifier
+        "tools/hermes-workspace/",  # workspace tooling
+        "tools/swarm/",           # delivery coordinator / swarm
+    )
+    # All entries are lowercase; matched against the casefolded basename at any depth.
+    _ROUTINE_SMALL_FORBIDDEN_BASENAMES = frozenset({
+        # repo-config / security
+        ".gitattributes",
+        ".gitignore",
+        ".gitlab-ci.yml",
+        ".gitleaks.toml",
+        ".ragignore",
+        ".sops.yaml",
+        # build/dependency manifests and locks
+        "cargo.lock",
+        "cargo.toml",
+        "dockerfile",
+        "go.mod",
+        "go.sum",
+        "makefile",
+        "package-lock.json",
+        "package.json",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "pyproject.toml",
+        "setup.cfg",
+        "setup.py",
+        "tox.ini",
+        "uv.lock",
+        "yarn.lock",
+    })
+
+
+    def _routine_small_path_allowed(path: str) -> bool:
+        """Return False for paths in closed non-routine surfaces."""
+        lowered = path.casefold()
+        if any(lowered.startswith(prefix) for prefix in _ROUTINE_SMALL_FORBIDDEN_PREFIXES):
+            return False
+        basename = lowered.rsplit("/", 1)[-1]
+        if basename in _ROUTINE_SMALL_FORBIDDEN_BASENAMES:
+            return False
+        if basename.startswith("dockerfile."):
+            return False
+        if basename.startswith("requirements") and basename.endswith(".txt"):
+            return False
+        return True
+
+
     _COMPLETION_GATES = {"tests", "review", "ci", "post-verify", "cleanup"}
     _COMPLETION_DELIVERIES = {
         "pull_request": "merged",
@@ -2364,6 +2466,101 @@ data:
         if _ROUTINE_PLAN_ONLY.search(normalized) and not _PLAN_AND_IMPLEMENT.search(normalized):
             return 1
         return None
+
+
+    def closed_repo_path(value: object) -> str | None:
+        """Return the value only if it is one exact, bounded repo-relative file path."""
+        if not isinstance(value, str):
+            return None
+        candidate = value.strip()
+        if not candidate or len(candidate) > 256 or candidate != value:
+            return None
+        if "\\" in candidate or candidate.startswith("/"):
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*", candidate):
+            return None
+        segments = candidate.split("/")
+        if any(not segment or set(segment) <= {"."} for segment in segments):
+            return None
+        if "." not in segments[-1]:
+            return None
+        # The final extension must contain a letter so dotted version tokens such as
+        # "1.2.3" or "v2.0" are rejected while ordinary files like "123.md" pass.
+        extension = segments[-1].rsplit(".", 1)[-1]
+        if not any(character.isalpha() for character in extension):
+            return None
+        return candidate
+
+
+    def routine_small_expected_paths(text: object) -> tuple[str, ...] | None:
+        """Return exact requested paths only for an explicit one/two-file tiny edit.
+
+        Admission is deterministic and fail-closed: the owner must scope the goal with
+        an explicit limiter, name a narrow one-line operation, and reference one or two
+        exact repo-relative files. Any risk flag, URL, wildcard, shell syntax, absolute
+        or traversing path, or unbounded filename keeps the mission in the normal class.
+        """
+        if not isinstance(text, str):
+            return None
+        normalized = " ".join(text.split())
+        if not is_execution_goal(normalized):
+            return None
+        if task_owner_gate_flags(normalized):
+            return None
+        if _ROUTINE_SMALL_REJECT.search(normalized):
+            return None
+        if not _ROUTINE_SMALL_LIMITER.search(normalized):
+            return None
+        if not _ROUTINE_SMALL_OPERATION.search(normalized):
+            return None
+        paths: list[str] = []
+        for match in _ROUTINE_SMALL_PATH.finditer(normalized):
+            candidate = closed_repo_path(match.group(1))
+            if candidate is None or not _routine_small_path_allowed(candidate):
+                return None
+            if candidate not in paths:
+                paths.append(candidate)
+        if not paths or len(paths) > 2:
+            return None
+        return tuple(sorted(paths))
+
+
+    def _normalize_execution_class(
+        execution_class: object,
+        expected_changed_files: object,
+        expected_changed_paths: object,
+    ) -> tuple[str | None, int | None, tuple[str, ...] | None]:
+        """Validate the closed execution-class triple and return its canonical form."""
+        if (execution_class, expected_changed_files) == (None, None):
+            if expected_changed_paths not in (None, (), []):
+                raise MissionError("invalid mission execution class")
+            return None, None, None
+        if (
+            execution_class not in {"routine_docs", "routine_small"}
+            or not isinstance(expected_changed_files, int)
+            or isinstance(expected_changed_files, bool)
+            or not 1 <= expected_changed_files <= 2
+        ):
+            raise MissionError("invalid mission execution class")
+        if execution_class == "routine_docs":
+            if expected_changed_paths not in (None, (), []):
+                raise MissionError("invalid mission execution class")
+            return "routine_docs", expected_changed_files, None
+        if not isinstance(expected_changed_paths, (list, tuple)) or isinstance(
+            expected_changed_paths, (str, bytes)
+        ):
+            raise MissionError("invalid mission execution class")
+        candidates = list(expected_changed_paths)
+        if (
+            len(candidates) != expected_changed_files
+            or len(set(candidates)) != len(candidates)
+            or any(
+                closed_repo_path(item) != item or not _routine_small_path_allowed(item)
+                for item in candidates
+            )
+        ):
+            raise MissionError("invalid mission execution class")
+        return "routine_small", expected_changed_files, tuple(sorted(candidates))
 
 
     def task_owner_gate_flags(text: object) -> tuple[str, ...]:
@@ -2884,6 +3081,22 @@ data:
                 ):
                     raise MissionError("invalid payload.expected_changed_files")
                 continue
+            if name == "expected_changed_paths":
+                if (
+                    not isinstance(value, list)
+                    or not value
+                    or len(value) > 2
+                    or any(
+                        not isinstance(item, str)
+                        or closed_repo_path(item) != item
+                        or not _routine_small_path_allowed(item)
+                        for item in value
+                    )
+                    or len(set(value)) != len(value)
+                    or value != sorted(value)
+                ):
+                    raise MissionError("invalid payload.expected_changed_paths")
+                continue
             if name == "source_request":
                 validate_source_request(value)
                 continue
@@ -2964,15 +3177,11 @@ data:
             if payload.get("owner_gate_flag") != "architecture_change":
                 raise MissionError("invalid mission owner gate flag")
         if event_type == "mission.accepted":
-            execution_class = payload.get("execution_class")
-            expected_changed_files = payload.get("expected_changed_files")
-            if (execution_class, expected_changed_files) != (None, None) and (
-                execution_class != "routine_docs"
-                or not isinstance(expected_changed_files, int)
-                or isinstance(expected_changed_files, bool)
-                or not 1 <= expected_changed_files <= 2
-            ):
-                raise MissionError("invalid mission execution class")
+            _normalize_execution_class(
+                payload.get("execution_class"),
+                payload.get("expected_changed_files"),
+                payload.get("expected_changed_paths"),
+            )
         if event_type == "mission.accepted" and "capability" in payload:
             if payload.get("capability") != _MEDIA_CAPABILITY:
                 raise MissionError("invalid mission capability")
@@ -3118,6 +3327,7 @@ data:
             "delivery_mode": None,
             "execution_class": None,
             "expected_changed_files": None,
+            "expected_changed_paths": None,
             "owner_gate_flag": None,
             "parent_mission_id": None,
             "source_request": None,
@@ -3198,6 +3408,7 @@ data:
                     delivery_mode=payload.get("delivery_mode"),
                     execution_class=payload.get("execution_class"),
                     expected_changed_files=payload.get("expected_changed_files"),
+                    expected_changed_paths=payload.get("expected_changed_paths"),
                     owner_gate_flag=projected_owner_gate_flag,
                     parent_mission_id=payload.get("parent_mission_id"),
                     source_request=payload.get("source_request"),
@@ -5554,6 +5765,16 @@ data:
                     expected_changed_files=routine_limit,
                     delivery_mode="none",
                 )
+            else:
+                routine_small_paths = routine_small_expected_paths(goal)
+                if routine_small_paths is not None:
+                    # routine_small keeps the target's effective delivery mode; only
+                    # the exact requested file set and count are bound immutably.
+                    arguments.update(
+                        execution_class="routine_small",
+                        expected_changed_files=len(routine_small_paths),
+                        expected_changed_paths=list(routine_small_paths),
+                    )
             if owner_gate_flag is not None:
                 arguments["owner_gate_flag"] = owner_gate_flag
             try:
@@ -5584,6 +5805,7 @@ data:
             capability: str | None = None,
             execution_class: str | None = None,
             expected_changed_files: int | None = None,
+            expected_changed_paths: tuple[str, ...] | list[str] | None = None,
             owner_gate_flag: str | None = None,
             project_id: str | None = None,
             project_label: str | None = None,
@@ -5627,13 +5849,11 @@ data:
                 raise MissionError("invalid mission capability")
             if owner_gate_flag is not None and owner_gate_flag != "architecture_change":
                 raise MissionError("invalid mission owner gate flag")
-            if (execution_class, expected_changed_files) != (None, None) and (
-                execution_class != "routine_docs"
-                or not isinstance(expected_changed_files, int)
-                or isinstance(expected_changed_files, bool)
-                or not 1 <= expected_changed_files <= 2
-            ):
-                raise MissionError("invalid mission execution class")
+            execution_class, expected_changed_files, expected_changed_paths = (
+                _normalize_execution_class(
+                    execution_class, expected_changed_files, expected_changed_paths
+                )
+            )
             if execution_class == "routine_docs" and delivery_mode != "none":
                 raise MissionError("routine_docs missions require delivery mode none")
             if parent_mission_id is not None:
@@ -5702,6 +5922,11 @@ data:
                             and expected_changed_files is not None
                         )
                     )
+                    and first["payload"].get("expected_changed_paths") == (
+                        list(expected_changed_paths)
+                        if expected_changed_paths is not None
+                        else None
+                    )
                     and first["payload"].get("project_id") == project_id
                     and (
                         first["payload"].get("project_label") == project_label
@@ -5756,6 +5981,8 @@ data:
                     execution_class=execution_class,
                     expected_changed_files=expected_changed_files,
                 )
+                if expected_changed_paths is not None:
+                    payload["expected_changed_paths"] = list(expected_changed_paths)
             if parent_mission_id is not None:
                 payload["parent_mission_id"] = parent_mission_id
             if source_request is not None:
