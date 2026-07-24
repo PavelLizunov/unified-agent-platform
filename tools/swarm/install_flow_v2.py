@@ -17,6 +17,7 @@ CORE_FILES = {
     "flow_contract.py": pathlib.Path("swarm-bin/flow_contract.py"),
     "mission_adapter.py": pathlib.Path("swarm-bin/mission_adapter.py"),
     "delivery_coordinator.py": pathlib.Path("swarm-bin/delivery_coordinator.py"),
+    "source_preflight.py": pathlib.Path("swarm-bin/source_preflight.py"),
     "project_onboarding.py": pathlib.Path("swarm-bin/project_onboarding.py"),
     "../../infra/ops/uap-deploy-vpnctld.sh": pathlib.Path("bin/uap-deploy-vpnctld"),
     "systemd/hermes-delivery-coordinator@.service": pathlib.Path(

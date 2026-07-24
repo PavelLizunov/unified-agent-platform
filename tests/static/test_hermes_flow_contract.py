@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -1565,6 +1566,50 @@ class FlowContractTests(unittest.TestCase):
             installer._build1_overlay(
                 source, hermes_root, check=True, runner=lambda *args, **kwargs: incomplete
             )
+
+    def test_installer_copies_source_preflight(self):
+        source = ROOT / "tools" / "swarm"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            installer.install(source, home)
+            installed = home / "swarm-bin" / "source_preflight.py"
+            self.assertTrue(installed.is_file())
+            self.assertEqual(
+                (source / "source_preflight.py").read_bytes(), installed.read_bytes()
+            )
+            installer.check(source, home)
+
+    def test_installer_check_detects_source_preflight_drift(self):
+        source = ROOT / "tools" / "swarm"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            installer.install(source, home)
+            installed = home / "swarm-bin" / "source_preflight.py"
+            installed.unlink()
+            with self.assertRaisesRegex(SystemExit, "stale or missing"):
+                installer.check(source, home)
+            installer.install(source, home)
+            installed.write_text("tampered\n", encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "stale or missing"):
+                installer.check(source, home)
+
+    def test_installed_coordinator_import_succeeds(self):
+        source = ROOT / "tools" / "swarm"
+        with tempfile.TemporaryDirectory() as directory:
+            home = pathlib.Path(directory)
+            installer.install(source, home)
+            swarm_bin = str(home / "swarm-bin")
+            env = {**os.environ, "PYTHONPATH": swarm_bin}
+            result = subprocess.run(
+                [sys.executable, "-c", "import delivery_coordinator; print('ok')"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env,
+                cwd=directory,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("ok", result.stdout)
 
 
 if __name__ == "__main__":
