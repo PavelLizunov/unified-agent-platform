@@ -1,7 +1,20 @@
-# Hermes Agent v0.19.0 upgrade — controlled preparation
+# Hermes Agent v0.19.0 upgrade — deployed
 
-Status: **REBASED — v0.19.0 pin unit verified, awaiting PR + canary.**
+Status: **DEPLOYED — PR #457 merged; Flux and the live gateway verified.**
 Date: 2026-07-24.
+
+Live re-check on 2026-07-25:
+
+- Flux source and `uap-platform` Kustomization were Ready at `master@sha1:2ee6134d`;
+- the gateway image was pinned to
+  `sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a`;
+- `hermes --version` returned `Hermes Agent v0.19.0 (2026.7.20) · upstream 3ef6bbd2`;
+- the pod was Ready with zero restarts;
+- later Telegram topic-routing/final-delivery probes and the authenticated source-preflight probe exercised the
+  upgraded gateway/execution boundary successfully.
+
+Build-1 remains a separately pinned v0.18 execution plane by design. This completed central upgrade does not claim
+that build-1 was upgraded to v0.19.
 
 ## Verified provenance
 
