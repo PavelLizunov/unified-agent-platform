@@ -23,6 +23,19 @@ ordinary Workspace or Telegram goal is automatically split into parallel deliver
 
 ## Scenario
 
+The reproducible regression is committed as:
+
+```text
+tests/ops/check-hermes-kanban-dag.sh
+```
+
+On build-1 it is run with:
+
+```text
+HERMES_BIN=/home/uap/hermes-agent/.venv/bin/hermes \
+  sh tests/ops/check-hermes-kanban-dag.sh
+```
+
 The canary constructed one deterministic graph with:
 
 - one completed planning/root card;

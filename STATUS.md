@@ -4,6 +4,18 @@ Last updated: 2026-07-25
 
 ## Phase
 
+- **Hermes Agent v0.19.0 is deployed and live-verified (2026-07-25).** PR #457 moved the central gateway,
+  backup image, overlay source pin, runtime-compat fingerprints, restore selector and runbooks as one fail-closed
+  pin unit. Flux is Ready at `2ee6134d`; the live gateway reports `Hermes Agent v0.19.0 (2026.7.20)` from pinned
+  digest `f7b35053...`, and the post-upgrade Telegram/topic and source-preflight probes passed. Build-1 remains an
+  intentionally separate v0.18 execution pin; it was not silently included in the central runtime upgrade.
+
+- **Required-source authenticated fetch is live-proven (2026-07-25).** The installed build-1 coordinator fetched
+  a file from the private `PavelLizunov/hermes-flow-v2-pilot` repository through its existing `gh api` authority,
+  resolved `main` to immutable commit `325dd53e...`, bound only provenance/hash metadata, and re-fetched by the
+  immutable SHA with identical content. No model ran and no source content or credential was printed. Exact proof:
+  `docs/evidence/source-preflight-live-canary-2026-07-25.md`.
+
 - **Native Hermes Kanban DAG construction is live-proven on build-1 (2026-07-25).** Against the installed
   Hermes v0.18 binary, an isolated temporary board produced the exact five-card graph
   `root -> two parallel workers -> verifier -> synthesizer` with five persisted dependency edges. Only the
