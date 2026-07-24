@@ -3178,6 +3178,52 @@ class DeliveryCoordinatorTests(unittest.TestCase):
                 second["correlation"]["producer_event_id"],
             )
 
+    def test_gate_evidence_is_idempotent_and_shares_terminal_batch_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            client = FakeClient()
+            backend = FakeBackend()
+            backend.claim("task-1", ttl_seconds=28800)  # running claim -> run_id 7
+            instance = coordinator.DeliveryCoordinator(
+                profile(root), client, backend, root / "state"
+            )
+            state = {
+                "mission_id": "gate-evidence",
+                "root_task_id": "task-1",
+                "run_id": "7",
+                "phase": "ci_green",
+                "review_cycle": 1,
+            }
+
+            instance._publish_gate_evidence(state, "ci", "passed")
+            instance._publish_gate_evidence(state, "ci", "passed")
+
+            first, second = client.stages
+            self.assertEqual("gate.upsert", first["type"])
+            self.assertEqual({"gate_id": "ci", "status": "passed"}, first["payload"])
+            # Incremental evidence carries only task_id routing (no worker_id).
+            self.assertNotIn("worker_id", first["correlation"])
+            self.assertEqual("task-1", first["correlation"]["task_id"])
+            # Idempotent across a lost response / restart.
+            self.assertEqual(
+                first["correlation"]["producer_event_id"],
+                second["correlation"]["producer_event_id"],
+            )
+
+            # The terminal batch replay (correlation {task_id, worker_id}) shares
+            # the exact producer_event_id, so MissionStore reconciles, not collides.
+            terminal = coordinator.mission_adapter._producer_event(
+                "gate-evidence", "gate.upsert",
+                {"gate_id": "ci", "status": "passed"},
+                {"task_id": "task-1", "worker_id": "task-1:run:7"},
+            )
+            self.assertEqual(
+                first["correlation"]["producer_event_id"],
+                terminal["correlation"]["producer_event_id"],
+            )
+            self.assertEqual(first["payload"], terminal["payload"])
+            self.assertNotEqual(first["correlation"], terminal["correlation"])
+
     def test_zero_exit_truncated_reviewer_stream_is_quarantined(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
@@ -7156,6 +7202,15 @@ class DeliveryCoordinatorTests(unittest.TestCase):
             self.assertEqual(0, persisted["prior_ci_failures"])
             self.assertEqual("requested", persisted["ci_retry"]["status"])
             self.assertEqual(0, counters["authors"])
+            # A failed CI gate must never be published as passed.
+            ci_passed = [
+                event for event in client.stages
+                if isinstance(event, dict)
+                and event.get("type") == "gate.upsert"
+                and event.get("payload", {}).get("gate_id") == "ci"
+                and event.get("payload", {}).get("status") == "passed"
+            ]
+            self.assertEqual([], ci_passed)
 
     def test_final_ci_failure_preserves_pr_and_converges_to_terminal_failure(self):
         with tempfile.TemporaryDirectory() as directory:

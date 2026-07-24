@@ -5042,6 +5042,192 @@ def test_disk_space_notice_contract_through_runtime_validation_and_store() -> No
     asyncio.run(scenario())
 
 
+def _gate_event(
+    mission_id: str,
+    gate_id: str,
+    status: str,
+    producer_event_id: str,
+    *,
+    task_id: str = "task-1",
+    worker_id: str | None = None,
+) -> dict:
+    """Build a gate.upsert the way the build-1 flow does.
+
+    The incremental checkpoint publish carries correlation ``{task_id}``; the
+    terminal batch replay adds ``worker_id``. Both share ``producer_event_id``
+    because the adapter hashes only ``{type, payload, task_id}`` for worker events.
+    """
+    correlation: dict = {"task_id": task_id, "producer_event_id": producer_event_id}
+    if worker_id is not None:
+        correlation["worker_id"] = worker_id
+    return {
+        "schema_version": 1,
+        "mission_id": mission_id,
+        "type": "gate.upsert",
+        "source": "build1-flow",
+        "correlation": correlation,
+        "payload": {"gate_id": gate_id, "status": status},
+    }
+
+
+def test_incremental_gate_evidence_reconciles_with_terminal_batch() -> None:
+    """The critical finding: incremental and terminal gate events share one
+    producer_event_id but differ in correlation routing; they must reconcile."""
+    with tempfile.TemporaryDirectory() as temp:
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        mission_id = "mission-gate-reconcile"
+        store.accept("Deliver the change", mission_id=mission_id)
+        store.append_producer(mission_id, {
+            "schema_version": 1, "mission_id": mission_id,
+            "type": "task.upsert", "source": "build1-flow",
+            "correlation": {"task_id": "task-1", "producer_event_id": "reconcile:task"},
+            "payload": {"task_id": "task-1", "title": "Root", "status": "running"},
+        })
+
+        producer_id = "build1-flow:gate-tests-passed"
+        incremental = _gate_event(mission_id, "tests", "passed", producer_id)
+        terminal = _gate_event(
+            mission_id, "tests", "passed", producer_id, worker_id="task-1:run:7"
+        )
+        # Same identity, different routing metadata.
+        assert incremental["correlation"]["producer_event_id"] == terminal["correlation"]["producer_event_id"]
+        assert incremental["payload"] == terminal["payload"]
+        assert incremental["correlation"] != terminal["correlation"]
+
+        # Incremental first, terminal batch replay reconciles (no collision, no dup).
+        stored, created = store.append_producer(mission_id, incremental)
+        assert created
+        replayed, replay_created = store.append_producer(mission_id, terminal)
+        assert not replay_created
+        assert replayed["sequence"] == stored["sequence"]
+        tests_rows = [
+            gate for gate in store.projection(mission_id)["gates"]
+            if gate["gate_id"] == "tests"
+        ]
+        assert tests_rows == [{"gate_id": "tests", "status": "passed"}]
+        assert sum(
+            1 for event in store.events(mission_id)
+            if event["correlation"].get("producer_event_id") == producer_id
+        ) == 1
+
+        # Reverse order on a fresh gate also reconciles (terminal first).
+        review_id = "build1-flow:gate-review-passed"
+        terminal_review = _gate_event(
+            mission_id, "review", "passed", review_id, worker_id="task-1:run:7"
+        )
+        incremental_review = _gate_event(mission_id, "review", "passed", review_id)
+        first, first_created = store.append_producer(mission_id, terminal_review)
+        assert first_created
+        second, second_created = store.append_producer(mission_id, incremental_review)
+        assert not second_created and second["sequence"] == first["sequence"]
+
+        # A genuine forgery (same id, different payload) still fails closed.
+        forgery = _gate_event(mission_id, "tests", "failed", producer_id)
+        try:
+            store.append_producer(mission_id, forgery)
+            raise AssertionError("producer event id collision was accepted")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+
+        # Identity is still guarded: same id but a different task_id collides.
+        ci_id = "build1-flow:gate-ci-passed"
+        store.append_producer(mission_id, _gate_event(mission_id, "ci", "passed", ci_id))
+        try:
+            store.append_producer(
+                mission_id, _gate_event(mission_id, "ci", "passed", ci_id, task_id="task-2")
+            )
+            raise AssertionError("task_id identity mismatch was accepted")
+        except missions.MissionError as error:
+            assert "collision" in str(error)
+
+
+def test_incremental_gate_evidence_survives_restart_lost_response_and_retry() -> None:
+    """No collision, no semantic duplicate, no progress regression across a
+    restart, a lost response, and a discarded retry run."""
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "missions.sqlite3"
+        store = missions.MissionStore(path)
+        mission_id = "mission-gate-fault"
+        store.accept("Deliver the change", mission_id=mission_id)
+        store.append_producer(mission_id, {
+            "schema_version": 1, "mission_id": mission_id,
+            "type": "task.upsert", "source": "build1-flow",
+            "correlation": {"task_id": "task-1", "producer_event_id": "fault:task"},
+            "payload": {"task_id": "task-1", "title": "Root", "status": "running"},
+        })
+
+        def stage(progress: int, producer_id: str) -> None:
+            store.append_producer(mission_id, {
+                "schema_version": 1, "mission_id": mission_id,
+                "type": "mission.stage", "source": "build1-flow",
+                "correlation": {"task_id": "task-1", "producer_event_id": producer_id},
+                "payload": {"stage": "testing", "progress_percent": progress},
+            })
+
+        # Incremental gate evidence published during the first run (run:7).
+        for gate in ("tests", "review", "ci"):
+            store.append_producer(
+                mission_id, _gate_event(mission_id, gate, "passed", f"fault:gate:{gate}")
+            )
+        stage(50, "fault:stage:50")
+        stage(65, "fault:stage:65")
+
+        # Restart: reopen the store from disk.
+        reopened = missions.MissionStore(path)
+        before = reopened.projection(mission_id)
+        assert before["progress_percent"] == 65
+        assert {gate["gate_id"] for gate in before["gates"]} == {"tests", "review", "ci"}
+
+        # Terminal batch replays the same gates under the FINAL run (run:9, the
+        # discarded retry replaced run:7) -> correlation now carries worker_id.
+        for gate in ("tests", "review", "ci", "post-verify", "cleanup"):
+            _, created = reopened.append_producer(
+                mission_id,
+                _gate_event(
+                    mission_id, gate, "passed", f"fault:gate:{gate}",
+                    worker_id="task-1:run:9",
+                ),
+            )
+            # Replayed gates reconcile; only the two new gates are appended.
+            assert created == (gate in {"post-verify", "cleanup"})
+
+        after = reopened.projection(mission_id)
+        assert sorted(gate["gate_id"] for gate in after["gates"]) == [
+            "ci", "cleanup", "post-verify", "review", "tests",
+        ]
+        assert after["progress_percent"] == 65  # no progress regression
+        gate_ids = [
+            event["correlation"].get("producer_event_id")
+            for event in reopened.events(mission_id)
+            if event["type"] == "gate.upsert"
+        ]
+        assert len(gate_ids) == len(set(gate_ids)) == 5  # no semantic duplicate
+
+        # Lost response: the whole terminal batch is re-published -> idempotent.
+        snapshot = after["projection_id"]
+        for gate in ("tests", "review", "ci", "post-verify", "cleanup"):
+            _, created = reopened.append_producer(
+                mission_id,
+                _gate_event(
+                    mission_id, gate, "passed", f"fault:gate:{gate}",
+                    worker_id="task-1:run:9",
+                ),
+            )
+            assert not created
+        assert reopened.projection(mission_id)["projection_id"] == snapshot
+
+        # A genuinely lower progress stage with a NEW identity still fails closed.
+        try:
+            reopened.append_producer(mission_id, {
+                "schema_version": 1, "mission_id": mission_id,
+                "type": "mission.stage", "source": "build1-flow",
+                "correlation": {"task_id": "task-1", "producer_event_id": "fault:stage:regress"},
+                "payload": {"stage": "testing", "progress_percent": 40},
+            })
+            raise AssertionError("progress regression was accepted")
+        except missions.MissionError as error:
+            assert "progress decreased" in str(error)
+
 
 def main() -> None:
     test_research_only_goal_bypasses_coding_mission_intake()
@@ -5105,6 +5291,8 @@ def main() -> None:
     test_worker_upsert_schema_accepts_telemetry_fields()
     test_worker_upsert_schema_rejects_invalid_tokens()
     test_accepted_schema_project_label_repository()
+    test_incremental_gate_evidence_reconciles_with_terminal_batch()
+    test_incremental_gate_evidence_survives_restart_lost_response_and_retry()
     print("hermes mission runtime checks passed")
 
 
