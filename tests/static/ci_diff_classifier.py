@@ -36,7 +36,7 @@ SCOPE_PREFIXES = {
     "iac": ("clusters/", "infra/"),          # IaC static validation + kustomize build
     "healthcheck": ("infra/",),              # ops healthcheck parser self-test (infra/ops)
     "hermes": ("hermes/",),                  # hermes unit tests (hermes runtime/overlays)
-    "static": ("tests/", "tools/"),          # static fixture tests (validate_iac/secret_scan regressions)
+    "static": ("tests/", "tools/", "clusters/", "infra/"),  # contract guards also validate deployed IaC
     "tools": ("tools/",),                    # tools unit tests
 }
 

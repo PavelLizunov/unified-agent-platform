@@ -61,16 +61,16 @@ class ScopeTests(unittest.TestCase):
         self.assertEqual(set(clf.GROUPS), skipped(decision))
         self.assertEqual(set(), running(decision))
 
-    def test_clusters_change_runs_only_iac(self) -> None:
+    def test_clusters_change_runs_iac_and_contract_guards(self) -> None:
         decision = decide_pr(z("M\tclusters/prod/infra/hermes-mission-runtime.yaml"))
         self.assertFalse(decision.run_all)
-        self.assertEqual({"iac"}, running(decision))
+        self.assertEqual({"iac", "static"}, running(decision))
         # clusters/ is not infra/, so the ops healthcheck self-test stays skipped
         self.assertIn("healthcheck", skipped(decision))
 
-    def test_infra_change_runs_iac_and_healthcheck(self) -> None:
+    def test_infra_change_runs_iac_healthcheck_and_contract_guards(self) -> None:
         decision = decide_pr(z("M\tinfra/ops/uap-healthcheck.sh"))
-        self.assertEqual({"iac", "healthcheck"}, running(decision))
+        self.assertEqual({"iac", "healthcheck", "static"}, running(decision))
 
     def test_hermes_change_runs_only_hermes(self) -> None:
         decision = decide_pr(z("M\thermes/runtime/overlay.py"))
@@ -93,8 +93,8 @@ class ScopeTests(unittest.TestCase):
             )
         )
         self.assertFalse(decision.run_all)
-        self.assertEqual({"iac", "hermes"}, running(decision))
-        self.assertEqual({"healthcheck", "static", "tools"}, skipped(decision))
+        self.assertEqual({"iac", "hermes", "static"}, running(decision))
+        self.assertEqual({"healthcheck", "tools"}, skipped(decision))
 
     def test_added_file_is_classified_like_modify(self) -> None:
         decision = decide_pr(z("A\tdocs/brand-new.md"))
