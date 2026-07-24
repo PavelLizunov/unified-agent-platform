@@ -3279,6 +3279,26 @@ class DeliveryCoordinator:
         )
         self.client.publish(state["mission_id"], event)
 
+    def _publish_gate_evidence(
+        self, state: dict[str, Any], gate_id: str, status: str
+    ) -> None:
+        """Publish one idempotent gate checkpoint as soon as it durably passes.
+
+        This is incremental owner-facing evidence only: correlation carries just
+        ``task_id`` so the ``producer_event_id`` is identical to the terminal batch
+        replay (which adds ``worker_id``). MissionStore reconciles the re-publish
+        instead of colliding, and the terminal batch stays authoritative because
+        the gate projection is keyed by ``gate_id`` with an identical payload.
+        """
+        self._assert_claim(state)
+        event = mission_adapter._producer_event(
+            state["mission_id"],
+            "gate.upsert",
+            {"gate_id": gate_id, "status": status},
+            {"task_id": state["root_task_id"]},
+        )
+        self.client.publish(state["mission_id"], event)
+
     def _record_model_usage(
         self,
         state: dict[str, Any],
@@ -7010,6 +7030,7 @@ class DeliveryCoordinator:
                 self._assert_claim(state)
                 self._assert_candidate_branch(state)
                 self._require_draft_pr(state)
+                self._publish_gate_evidence(state, "tests", "passed")
                 disk_wait = self._disk_space_wait_result(state, mission_id, paths)
                 if disk_wait is not None:
                     return disk_wait
@@ -7042,6 +7063,7 @@ class DeliveryCoordinator:
             try:
                 if state["phase"] == "pr_open":
                     self._assert_claim(state)
+                    self._publish_gate_evidence(state, "review", "passed")
                     self._publish_progress_notice(
                         state,
                         f"Независимое ревью commit {state['candidate_sha'][:8]} "
@@ -7055,6 +7077,7 @@ class DeliveryCoordinator:
 
                 if state["phase"] == "ci_green":
                     self._assert_claim(state)
+                    self._publish_gate_evidence(state, "ci", "passed")
                     self._merge(state)
                     state["phase"] = "merged"
                     self._save(paths, state)
@@ -7092,6 +7115,7 @@ class DeliveryCoordinator:
 
             if state["phase"] == "verified":
                 self._assert_claim(state)
+                self._publish_gate_evidence(state, "post-verify", "passed")
                 if self._effective_delivery_mode(state) != "deploy":
                     state["phase"] = "cleanup_pending"
                     self._save(paths, state)
@@ -7131,6 +7155,7 @@ class DeliveryCoordinator:
 
             if state["phase"] == "deployed":
                 self._assert_claim(state)
+                self._publish_gate_evidence(state, "deployment", "passed")
                 state["phase"] = "cleanup_pending"
                 self._save(paths, state)
 
@@ -7142,6 +7167,7 @@ class DeliveryCoordinator:
             if state["phase"] == "cleaned":
                 if not self._recover_task_completion(state, paths):
                     self._assert_claim(state)
+                    self._publish_gate_evidence(state, "cleanup", "passed")
                     self.backend.complete(
                         state["root_task_id"],
                         result="success",

@@ -99,6 +99,17 @@ PAYLOAD_FIELDS = {
     },
 }
 CORRELATION_FIELDS = {"session_id", "run_id", "task_id", "worker_id", "producer_event_id"}
+# Correlation fields that route an event to a worker/run/session but are NOT part
+# of its producer identity. ``_producer_event`` (build-1 adapter) hashes only
+# ``{type, payload, task_id}`` for worker events — worker_id/run_id/session_id are
+# deliberately excluded from ``producer_event_id``. An incremental checkpoint
+# publish (correlation ``{task_id}``) and the terminal batch replay of the same
+# logical gate (correlation ``{task_id, worker_id}``) therefore share one
+# producer_event_id while their routing metadata differs; that is a re-publish of
+# the same event, not a forgery, and must reconcile instead of colliding.
+# Derived from the closed schema: identity-bearing fields are task_id (content
+# hash input) and producer_event_id (the hash itself); everything else routes.
+_CORRELATION_ROUTING_FIELDS = CORRELATION_FIELDS - {"task_id", "producer_event_id"}
 PRODUCER_TYPES = set(REQUIRED_PAYLOAD) - {
     "mission.accepted", "mission.answer", "artifact.upsert", *TERMINAL_TYPES,
 }
@@ -4795,8 +4806,25 @@ class MissionStore:
                 if duplicate is not None:
                     if any(
                         duplicate[key] != event[key]
-                        for key in ("type", "source", "correlation", "payload")
+                        for key in ("type", "source", "payload")
                     ):
+                        raise MissionError("producer event id collision")
+                    # Identity is the producer_event_id (content hash) plus the
+                    # identity-bearing correlation fields (task_id). Routing-only
+                    # fields (worker_id/run_id/session_id) may differ between an
+                    # incremental checkpoint publish and the terminal batch replay
+                    # of the same logical event; that reconciles, not collides.
+                    stored_identity = {
+                        key: value
+                        for key, value in duplicate["correlation"].items()
+                        if key not in _CORRELATION_ROUTING_FIELDS
+                    }
+                    event_identity = {
+                        key: value
+                        for key, value in event["correlation"].items()
+                        if key not in _CORRELATION_ROUTING_FIELDS
+                    }
+                    if stored_identity != event_identity:
                         raise MissionError("producer event id collision")
                     results.append((duplicate, False))
                     continue

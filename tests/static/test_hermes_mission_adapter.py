@@ -444,6 +444,114 @@ class MissionAdapterTests(unittest.TestCase):
                 "completed", store.projection("mission-delivery-none")["status"]
             )
 
+    def test_incremental_gate_evidence_shares_terminal_identity_and_reconciles(self):
+        """The naive incremental gate event (correlation {task_id}) and the
+        terminal batch replay (correlation {task_id, worker_id}) share one
+        producer_event_id; the store reconciles them instead of colliding."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            store = mission_runtime.MissionStore(root / "missions.sqlite3")
+            store.accept(
+                "Deliver without deployment",
+                mission_id="mission-gate-identity",
+                dispatch_profile="build1-registered",
+                delivery_mode="none",
+            )
+            task_id = "task-1"
+            worker_id = f"{task_id}:run:1"
+            payload = {"gate_id": "tests", "status": "passed"}
+
+            incremental = adapter._producer_event(
+                "mission-gate-identity", "gate.upsert", payload, {"task_id": task_id}
+            )
+            terminal = adapter._worker_metadata_events(
+                "mission-gate-identity", task_id, worker_id,
+                {"mission_events": [{"type": "gate.upsert", "payload": dict(payload)}]},
+            )[0]
+
+            # Same identity, different routing metadata.
+            self.assertEqual(
+                incremental["correlation"]["producer_event_id"],
+                terminal["correlation"]["producer_event_id"],
+            )
+            self.assertEqual(incremental["payload"], terminal["payload"])
+            self.assertNotEqual(incremental["correlation"], terminal["correlation"])
+            self.assertNotIn("worker_id", incremental["correlation"])
+            self.assertEqual(worker_id, terminal["correlation"]["worker_id"])
+
+            # Incremental publish lands first; terminal replay reconciles (no
+            # collision, no semantic duplicate).
+            _, created = store.append_producer("mission-gate-identity", incremental)
+            self.assertTrue(created)
+            replayed, replay_created = store.append_producer(
+                "mission-gate-identity", terminal
+            )
+            self.assertFalse(replay_created)
+            self.assertEqual(
+                [{"gate_id": "tests", "status": "passed"}],
+                store.projection("mission-gate-identity")["gates"],
+            )
+
+            # The full terminal batch still drives the exact one-task completion.
+            backend = FakeKanban()
+            state = adapter.accept_mission(
+                {
+                    "schema_version": 1,
+                    "mission_id": "mission-gate-identity",
+                    "sequence": 1,
+                    "type": "mission.accepted",
+                    "source": "central-hermes",
+                    "correlation": {},
+                    "payload": {"goal": "Deliver without deployment",
+                                "dispatch_profile": "build1-registered"},
+                },
+                root / "adapter", backend,
+            )
+            real_task = state["root_task_id"]
+            metadata = [
+                *(
+                    {"type": "gate.upsert", "payload": {"gate_id": gate, "status": "passed"}}
+                    for gate in ("tests", "review", "ci", "post-verify", "cleanup")
+                ),
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "pull_request", "status": "merged",
+                    "url": "https://example.invalid/pr/1",
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "default_branch", "status": "verified",
+                    "url": "https://example.invalid/commit/1",
+                }},
+                {"type": "delivery.upsert", "payload": {
+                    "kind": "delivery", "status": "not_applicable",
+                }},
+            ]
+            backend.tasks[real_task] = {
+                "task": {
+                    "id": real_task, "title": "Mission mission-gate-identity",
+                    "status": "done", "assignee": "coordinator",
+                    "created_by": "central-hermes", "tenant": "mission-gate-identity",
+                },
+                "runs": [{
+                    "id": 1, "profile": "coordinator", "status": "done",
+                    "outcome": "success", "metadata": {"mission_events": metadata},
+                }],
+            }
+            for event in adapter.sync_mission(
+                "mission-gate-identity", root / "adapter", backend
+            ):
+                store.append_producer("mission-gate-identity", event)
+            # The incrementally published "tests" gate reconciled with the batch.
+            tests_gates = [
+                gate for gate in store.projection("mission-gate-identity")["gates"]
+                if gate["gate_id"] == "tests"
+            ]
+            self.assertEqual([{"gate_id": "tests", "status": "passed"}], tests_gates)
+            completed = store.complete_if_ready("mission-gate-identity")
+            self.assertIsNotNone(completed)
+            self.assertEqual(
+                "completed", store.projection("mission-gate-identity")["status"]
+            )
+
     def test_real_backend_is_shell_free_idempotent_and_dispatch_gated(self):
         commands = []
         active_created = False
