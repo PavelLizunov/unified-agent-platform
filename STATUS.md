@@ -1,8 +1,17 @@
 # Current Status
 
-Last updated: 2026-07-23
+Last updated: 2026-07-25
 
 ## Phase
+
+- **Native Hermes Kanban DAG construction is live-proven on build-1 (2026-07-25).** Against the installed
+  Hermes v0.18 binary, an isolated temporary board produced the exact five-card graph
+  `root -> two parallel workers -> verifier -> synthesizer` with five persisted dependency edges. Only the
+  two workers were initially ready; verifier and synthesizer remained dependency-blocked. No worker/model was
+  launched, the production board was not touched, and the temporary database was removed. This proves the native
+  DAG primitive, not automatic decomposition of ordinary UAP delivery missions: the current delivery coordinator
+  still owns one Kanban root and represents author/review/CI/deploy as restart-safe phases inside it. Exact proof:
+  `docs/evidence/native-kanban-dag-construction-live-canary-2026-07-25.md`.
 
 - **Routine docs routing is implemented offline (2026-07-23; ADR-038).** Explicit docs-only ordinary goals now
   carry a durable Central `routine_docs` class and a two-file expectation. The coordinator maps only that closed
