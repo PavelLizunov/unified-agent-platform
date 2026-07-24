@@ -28,7 +28,7 @@ PATCHED_FILES = {
     "hermes_cli/main.py": "be64ed4ff2c3abcff3616cf8ae5e242fa4fc80a0871413a931e06fe2d33627cb",
     "gateway/run.py": "5377ee10307a7913e5b1e057052fe3b4a673f07efca73c5e91f78b3c77f25ef5",
     "gateway/platforms/api_server.py": "a37559cbaa226474683e089271034874c3b48094dd28fa10b63e36a66988cb17",  # gitleaks:allow -- pinned patched SHA-256
-    "plugins/platforms/telegram/adapter.py": "1b4864a3622b4d88dfdba8ec9b60b132bf4d0b1a06ab41a125157281f6dcbdca",
+    "plugins/platforms/telegram/adapter.py": "1de3833f45218ee6a408eebf199561578eb931db2fd2591343524ee2c3b350a6",
 }
 BUILD1_RUNTIME_FILES = (
     "hermes_cli/kanban.py",
@@ -606,6 +606,36 @@ def connect(
             "module exit propagation",
         )
     if relative == "plugins/platforms/telegram/adapter.py":
+        text = replace(
+            text,
+            '''        key = self._text_batch_key(event)
+        existing = self._pending_text_batches.get(key)
+        chunk_len = len(event.text or "")
+        if existing is None:''',
+            '''        key = self._text_batch_key(event)
+        chunk_len = len(event.text or "")
+        # The batcher exists only for Telegram's ~4096-character client
+        # splits. Ordinary short messages need their own source identity even
+        # when a reconnect delivers several together. Sender-scoped long keys
+        # still join a near-limit chunk to its short continuation.
+        sender = str(getattr(event.source, "user_id", "") or "")
+        split_key = f"{key}:sender:{sender}"
+        split = self._pending_text_batches.get(split_key)
+        if (
+            chunk_len >= self._SPLIT_THRESHOLD
+            or (
+                split is not None
+                and getattr(split, "_last_chunk_len", 0)
+                >= self._SPLIT_THRESHOLD
+            )
+        ):
+            key = split_key
+        else:
+            key = f"{split_key}:message:{event.message_id}"
+        existing = self._pending_text_batches.get(key)
+        if existing is None:''',
+            "independent Telegram short-message identities",
+        )
         text = replace(
             text,
             '''                file_obj = await msg.voice.get_file()

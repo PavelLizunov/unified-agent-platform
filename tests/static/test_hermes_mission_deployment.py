@@ -53,7 +53,7 @@ def main() -> None:
     )
     template = manifest["spec"]["template"]
     check(template["metadata"]["annotations"]["hermes-agent/config-rev"] == (
-        "v97-telegram-delivery-dedup"
+        "v98-telegram-intake-idempotency"
     ))
     research_mount = next(
         mount for mount in template["spec"]["containers"][0]["volumeMounts"]
