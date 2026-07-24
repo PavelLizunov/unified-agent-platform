@@ -34,7 +34,7 @@ data:
         "hermes_cli/kanban.py": "8e2ee10eaf89b769b7a232ea490e6fe6e909db4c8173e7d1447ba67e3bca1045",
         "hermes_cli/kanban_db.py": "482d53c69db8013afd52f431e00627579c5804262cc2a81bb3a3c2d21b0d7128",
         "hermes_cli/main.py": "be64ed4ff2c3abcff3616cf8ae5e242fa4fc80a0871413a931e06fe2d33627cb",
-        "gateway/run.py": "3e9dd8b01f9b6298ebc237f5db2029c5b9629a35e93f4dfe7b96295881cbb199",
+        "gateway/run.py": "5377ee10307a7913e5b1e057052fe3b4a673f07efca73c5e91f78b3c77f25ef5",
         "gateway/platforms/api_server.py": "a37559cbaa226474683e089271034874c3b48094dd28fa10b63e36a66988cb17",  # gitleaks:allow -- pinned patched SHA-256
         "plugins/platforms/telegram/adapter.py": "1b4864a3622b4d88dfdba8ec9b60b132bf4d0b1a06ab41a125157281f6dcbdca",
     }
@@ -820,7 +820,7 @@ data:
             if self._draining:''',
                 "ordinary Telegram mission intake marker",
             )
-            return replace(
+            text = replace(
                 text,
                 '''        # Build session context
             context = build_session_context(source, self.config, session_entry)''',
@@ -971,6 +971,150 @@ data:
             # Build session context
             context = build_session_context(source, self.config, session_entry)''',
                 "ordinary Telegram mission intake",
+            )
+            text = replace(
+                text,
+                '''        def _stream_confirmed_final_delivery(
+                consumer,
+                final_text: str,
+                *,
+                previewed: bool = False,
+            ) -> bool:
+                """Return True only when the actual final reply reached the user."""
+                if consumer is None:
+                    return False
+                if getattr(consumer, "final_response_sent", False):
+                    return True
+                if previewed:
+                    has_delivered_text = getattr(consumer, "has_delivered_text", None)
+                    if callable(has_delivered_text):
+                        try:
+                            return bool(has_delivered_text(final_text))
+                        except Exception:
+                            return False
+                return False
+
+            try:''',
+                '''        def _stream_confirmed_final_delivery(
+                consumer,
+                final_text: str,
+                *,
+                previewed: bool = False,
+            ) -> bool:
+                """Return True only when the actual final reply reached the user."""
+                if consumer is None:
+                    return False
+                if getattr(consumer, "final_response_sent", False):
+                    return True
+                if previewed:
+                    has_delivered_text = getattr(consumer, "has_delivered_text", None)
+                    if callable(has_delivered_text):
+                        try:
+                            return bool(has_delivered_text(final_text))
+                        except Exception:
+                            return False
+                return False
+
+            def _delivery_ledger_confirms_final_delivery(
+                session_key_value: str,
+                message_ref: str,
+                final_text: str,
+            ) -> bool:
+                """Return True when the exact normal final send was acknowledged."""
+                if not session_key_value or not message_ref or not final_text:
+                    return False
+                try:
+                    from gateway import delivery_ledger as _delivery_ledger
+
+                    if not _delivery_ledger.ledger_enabled():
+                        return False
+                    obligation_id = _delivery_ledger.compute_obligation_id(
+                        session_key_value, message_ref, final_text,
+                    )
+                    with (
+                        _delivery_ledger._DB_LOCK,
+                        _delivery_ledger._connect() as connection,
+                    ):
+                        row = connection.execute(
+                            "SELECT state FROM delivery_obligations "
+                            "WHERE obligation_id=?",
+                            (obligation_id,),
+                        ).fetchone()
+                    return bool(row and row[0] == "delivered")
+                except Exception:
+                    logger.debug(
+                        "delivery ledger confirmation lookup failed",
+                        exc_info=True,
+                    )
+                    return False
+
+            try:''',
+                "queued follow-up delivery confirmation helper",
+            )
+            text = replace(
+                text,
+                '''                    _already_streamed = _stream_confirmed_final_delivery(
+                            _sc,
+                            first_response,
+                            previewed=_previewed,
+                        )
+                        # Apply the same predicate as the normal completed-turn path.''',
+                '''                    _already_streamed = _stream_confirmed_final_delivery(
+                            _sc,
+                            first_response,
+                            previewed=_previewed,
+                        )
+                        _ledger_delivered = _delivery_ledger_confirms_final_delivery(
+                            session_key,
+                            str(getattr(event, "message_id", "") or ""),
+                            first_response,
+                        )
+                        # Apply the same predicate as the normal completed-turn path.''',
+                "queued follow-up delivery ledger lookup",
+            )
+            return replace(
+                text,
+                '''                    elif first_response and not _already_streamed:
+                            try:
+                                logger.info(
+                                    "Queued follow-up for session %s: final stream delivery not confirmed; sending first response before continuing.",
+                                    session_key or "?",
+                                )
+                                await adapter.send(
+                                    source.chat_id,
+                                    first_response,
+                                    metadata=_status_thread_metadata,
+                                )
+                            except Exception as e:
+                                logger.warning("Failed to send first response before queued message: %s", e)
+                        elif first_response:
+                            logger.info(
+                                "Queued follow-up for session %s: skipping resend because final streamed delivery was confirmed.",
+                                session_key or "?",
+                            )''',
+                '''                    elif first_response and not (
+                            _already_streamed or _ledger_delivered
+                        ):
+                            try:
+                                logger.info(
+                                    "Queued follow-up for session %s: final delivery not confirmed; sending first response before continuing.",
+                                    session_key or "?",
+                                )
+                                await adapter.send(
+                                    source.chat_id,
+                                    first_response,
+                                    metadata=_status_thread_metadata,
+                                )
+                            except Exception as e:
+                                logger.warning("Failed to send first response before queued message: %s", e)
+                        elif first_response:
+                            logger.info(
+                                "Queued follow-up for session %s: skipping resend because final delivery was confirmed (streamed=%s ledger=%s).",
+                                session_key or "?",
+                                _already_streamed,
+                                _ledger_delivered,
+                            )''',
+                "queued follow-up duplicate final suppression",
             )
         if relative == "gateway/platforms/api_server.py":
             text = replace(

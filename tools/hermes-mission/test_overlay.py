@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import os
 import pathlib
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import types
 from unittest import mock
 
 
@@ -153,6 +155,55 @@ def main() -> None:
         assert "Не удалось создать задачу" in gateway
         assert "Mission intake unavailable" not in gateway
         assert "voice transcription failed" not in gateway
+        assert "def _delivery_ledger_confirms_final_delivery(" in gateway
+        assert "_already_streamed or _ledger_delivered" in gateway
+        gateway_tree = ast.parse(gateway)
+        delivery_helper_node = next(
+            node for node in ast.walk(gateway_tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "_delivery_ledger_confirms_final_delivery"
+        )
+        delivery_helper_module = ast.fix_missing_locations(
+            ast.Module(body=[delivery_helper_node], type_ignores=[])
+        )
+        delivery_helper_namespace = {"logger": mock.Mock()}
+        exec(
+            compile(delivery_helper_module, "<delivery-helper>", "exec"),
+            delivery_helper_namespace,
+        )
+        delivery_helper = delivery_helper_namespace[
+            "_delivery_ledger_confirms_final_delivery"
+        ]
+        delivery_state = {"value": "delivered"}
+
+        class DeliveryConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, query, params):
+                assert "WHERE obligation_id=?" in query
+                assert params == ("expected-obligation",)
+                return self
+
+            def fetchone(self):
+                return (delivery_state["value"],)
+
+        fake_delivery_ledger = types.SimpleNamespace(
+            ledger_enabled=lambda: True,
+            compute_obligation_id=lambda *_args: "expected-obligation",
+            _DB_LOCK=mock.MagicMock(),
+            _connect=DeliveryConnection,
+        )
+        fake_gateway = types.ModuleType("gateway")
+        fake_gateway.delivery_ledger = fake_delivery_ledger
+        with mock.patch.dict(sys.modules, {"gateway": fake_gateway}):
+            assert delivery_helper("session", "message", "final") is True
+            delivery_state["value"] = "pending"
+            assert delivery_helper("session", "message", "final") is False
+            assert delivery_helper("", "message", "final") is False
         assert '_http_route_table' in api
         assert 'def _api_key_passes_startup_guard' in api
         assert 'def _port_is_available' not in api
