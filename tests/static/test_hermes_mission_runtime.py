@@ -1020,6 +1020,55 @@ def test_source_preflight_answer_binds_same_mission_idempotently() -> None:
         assert tg_answer["payload"]["source_platform"] == "telegram"
 
 
+def test_source_answer_replaces_only_the_unbound_intake_request() -> None:
+    catalog = json.dumps({
+        "schema_version": 2,
+        "projects": [{
+            "project_id": "suflyor", "label": "Suflyor",
+            "repository": "PavelLizunov/suflyor", "summary": "Prompter",
+            "aliases": ["suflyor"],
+            "dispatch_profile": "build1-suflyor-registered-v4",
+            "delivery_mode": "none", "platforms": ["workspace"],
+            "category": "active-maintained", "status": "ready",
+            "test_targets": ["uap-build-1"],
+        }],
+    })
+    sha = "a" * 40
+    question_id = "source-preflight:" + "f" * 24
+    with tempfile.TemporaryDirectory() as temp, mock.patch.dict(
+        os.environ, {"HERMES_MISSION_PROJECTS": catalog}, clear=True
+    ):
+        store = missions.MissionStore(Path(temp) / "missions.sqlite3")
+        accepted, _ = store.ingest_owner_turn(
+            "Implement per "
+            "https://github.com/PavelLizunov/suflyor/blob/missing/docs/spec.md",
+            platform="workspace", source_message_id="replace-unbound-source",
+            session_id="replace-unbound-source", project_id="suflyor",
+        )
+        mission_id = accepted["mission_id"]
+        assert accepted["payload"]["source_request"]["ref"] == "missing"
+        store.append_central(mission_id, {
+            "schema_version": missions.SCHEMA_VERSION,
+            "mission_id": mission_id,
+            "type": "mission.question",
+            "source": "central-hermes",
+            "correlation": {"producer_event_id": "central:q:replace-unbound-source"},
+            "payload": {"question_id": question_id, "text": "provide exact source"},
+        })
+        exact = (
+            "https://github.com/PavelLizunov/suflyor/blob/"
+            f"{sha}/docs/spec.md"
+        )
+        store.answer(mission_id, question_id, exact)
+        assert store.projection(mission_id)["source_request"] == {
+            "repo": "PavelLizunov/suflyor",
+            "ref": sha,
+            "path": "docs/spec.md",
+        }
+        events = store.events(mission_id)
+        assert sum(event["type"] == "source.request" for event in events) == 1
+
+
 def test_source_answer_atomicity_and_fault_regression() -> None:
     # P1-1/P1-2 fault regression: mission.answer + source.request commit atomically
     # (an injected failure between the two insertions rolls back BOTH); a missing
@@ -6009,6 +6058,7 @@ def main() -> None:
     test_legacy_pre_feature_accept_replays_without_collision()
     test_owner_visible_terminal_result_carries_source_provenance()
     test_source_preflight_answer_binds_same_mission_idempotently()
+    test_source_answer_replaces_only_the_unbound_intake_request()
     test_source_answer_atomicity_and_fault_regression()
     test_task_owner_gate_classifier_has_closed_ru_en_corpus()
     test_task_owner_gate_is_durable_or_rejected_before_mission_acceptance()

@@ -93,6 +93,15 @@ class ParseSourceRequestTests(unittest.TestCase):
             request,
         )
 
+    def test_sentence_punctuation_is_not_part_of_source_path(self):
+        for suffix in (":", ",", ".", ";"):
+            request = runtime.parse_source_request(
+                "Implement per "
+                "https://github.com/PavelLizunov/VPNRouter/blob/main/docs/spec.md"
+                + suffix
+            )
+            self.assertEqual("docs/spec.md", request["path"], suffix)
+
     def test_commit_sha_ref_is_parsed(self):
         sha = "c" * 40
         request = runtime.parse_source_request(
