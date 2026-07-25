@@ -161,6 +161,7 @@ spec:
               cp /opt/hermes/hermes_cli/kanban_db.py /mission-runtime/root/hermes_cli/kanban_db.py
               cp /opt/hermes/hermes_cli/main.py /mission-runtime/root/hermes_cli/main.py
               cp /opt/hermes/gateway/run.py /mission-runtime/root/gateway/run.py
+              cp /opt/hermes/gateway/delivery_ledger.py /mission-runtime/root/gateway/delivery_ledger.py
               cp /opt/hermes/gateway/platforms/api_server.py /mission-runtime/root/gateway/platforms/api_server.py
               cp /opt/hermes/plugins/platforms/telegram/adapter.py /mission-runtime/root/plugins/platforms/telegram/adapter.py
               /opt/hermes/.venv/bin/python /mission-overlay/apply_overlay.py /mission-runtime/root \
