@@ -737,7 +737,9 @@ def parse_source_request(text: object) -> dict[str, Any] | None:
         return validate_source_request({
             "repo": f"{match.group('owner')}/{match.group('repo')}",
             "ref": match.group("ref"),
-            "path": match.group("path"),
+            # Sentence punctuation immediately following a URL is prose, not a
+            # repository path component.
+            "path": match.group("path").rstrip(".,;:!?`'\""),
         })
     except MissionError:
         return None
@@ -1918,6 +1920,7 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
     deliveries: OrderedDict[str, dict[str, Any]] = OrderedDict()
     artifacts: OrderedDict[str, dict[str, Any]] = OrderedDict()
     terminal: list[dict[str, Any]] = []
+    answered_source_request: dict[str, Any] | None = None
     expected = 1
     terminal_chars = 0
     terminal_history = bool(events and events[-1].get("type") in TERMINAL_TYPES)
@@ -2041,9 +2044,12 @@ def project(events: list[dict[str, Any]]) -> dict[str, Any]:
                 "ref": payload["ref"],
                 "path": payload["path"],
             }
-            existing_request = view.get("source_request")
-            if existing_request is not None and existing_request != request:
+            if (
+                answered_source_request is not None
+                and answered_source_request != request
+            ):
                 raise MissionError("source request changed after it was answered")
+            answered_source_request = request
             view["source_request"] = request
             view["source_required"] = None
         elif kind == "mission.completed":
