@@ -122,6 +122,10 @@ def main() -> None:
         "/mission-runtime/root/plugins/platforms/telegram/adapter.py"
     ) in bootstrap_script)
     check((
+        "cp /opt/hermes/gateway/delivery_ledger.py "
+        "/mission-runtime/root/gateway/delivery_ledger.py"
+    ) in bootstrap_script)
+    check((
         "cp /mission-runtime/root/plugins/platforms/telegram/adapter.py "
         "/mission-runtime/telegram_adapter.py"
     ) in bootstrap_script)
